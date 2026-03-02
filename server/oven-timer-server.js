@@ -1,3 +1,6 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 /**
  * oven-timer-server.js — Lab_Assistant Oven Timer Bridge
  * ───────────────────────────────────────────────────────
@@ -24,6 +27,10 @@ const http = require('http');
 const fs   = require('fs');
 const path = require('path');
 const { URL } = require('url');
+
+// ── ItemPath/Kardex inventory integration ─────────────────────
+const itempath = require('./itempath-adapter');
+itempath.start();
 
 const PORT      = parseInt(process.env.PORT || '3002', 10);
 const DATA_FILE = path.join(__dirname, 'oven-runs.json');
@@ -368,6 +375,23 @@ const server = http.createServer(async (req, res) => {
     return json(res, { ok:true, ...( global.coatingLive || { live:[], timestamp:null } ) });
   }
 
+  // ── ItemPath/Kardex inventory endpoints ─────────────────────
+  if (req.method==='GET' && url.pathname==='/api/inventory') {
+    return json(res, itempath.getInventory());
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/picks') {
+    return json(res, itempath.getPicks());
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {
+    return json(res, itempath.getAlerts());
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/blank') {
+    const query = Object.fromEntries(url.searchParams);
+    return json(res, itempath.findBlank(query));
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/ai-context') {
+    return json(res, itempath.getAIContext());
+  }
 
   // Body: { title, content, sections, generatedBy, timestamp }
   // Returns: .docx binary stream
@@ -544,15 +568,19 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🌡  Oven Timer Server`);
+  console.log(`\n🌡  Lab_Assistant Server`);
   console.log(`   Local:   http://localhost:${PORT}`);
   console.log(`   Network: http://YOUR_IP:${PORT}`);
   console.log(`\n   📱 Phone status: http://YOUR_IP:${PORT}/status`);
   console.log(`\n   Endpoints:`);
-  console.log(`     GET  /status            ← Phone-friendly live status page`);
-  console.log(`     POST /api/oven-run      ← OvenTimer.html completed runs`);
-  console.log(`     POST /api/oven-live     ← Heartbeat (every 6s)`);
-  console.log(`     GET  /api/oven-runs     ← Dashboard history`);
-  console.log(`     GET  /api/oven-live     ← Dashboard live state`);
-  console.log(`     GET  /api/oven-stats    ← Dashboard KPIs\n`);
+  console.log(`     GET  /status               ← Phone-friendly live status page`);
+  console.log(`     POST /api/oven-run         ← OvenTimer.html completed runs`);
+  console.log(`     POST /api/oven-live        ← Heartbeat (every 6s)`);
+  console.log(`     GET  /api/oven-runs        ← Dashboard history`);
+  console.log(`     GET  /api/oven-live        ← Dashboard live state`);
+  console.log(`     GET  /api/oven-stats       ← Dashboard KPIs`);
+  console.log(`     GET  /api/inventory        ← Kardex lens blank inventory`);
+  console.log(`     GET  /api/inventory/picks  ← Active pick orders`);
+  console.log(`     GET  /api/inventory/alerts ← Low stock alerts`);
+  console.log(`     GET  /api/inventory/blank  ← Find blanks by Rx/coating\n`);
 });

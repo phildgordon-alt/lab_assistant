@@ -1,3 +1,6 @@
+// Load environment variables from .env file
+require('dotenv').config();
+
 /**
  * oven-timer-server.js — Lab_Assistant Oven Timer Bridge
  * ───────────────────────────────────────────────────────
