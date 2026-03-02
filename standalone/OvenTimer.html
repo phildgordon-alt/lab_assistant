@@ -1,0 +1,1159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Pair Eyewear — Oven Timer</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;500;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:      #070A0F; --surface: #0D1117; --card:   #111820;
+    --border:  #1C2733; --borderLt:#2A3A4A; --text:   #E8EDF2;
+    --dim:     #8899AA; --dimmer:  #445566;
+    --amber:   #F59E0B; --amberDk: #451A00;
+    --green:   #10B981; --greenDk: #052E1A;
+    --red:     #EF4444; --redDk:   #3F0A0A;
+    --blue:    #3B82F6; --blueDk:  #0A1F40;
+    --cyan:    #06B6D4;
+    --mono:'JetBrains Mono',monospace; --sans:'DM Sans',sans-serif; --display:'Bebas Neue',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;}
+  body.alarm-flash{animation:alarmBg .4s infinite alternate;}
+  @keyframes alarmBg{from{background:var(--bg);}to{background:#200808;}}
+
+  /* Header */
+  .header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;}
+  .logo{display:flex;align-items:center;gap:12px;}
+  .logo-mark{width:42px;height:42px;background:linear-gradient(135deg,#F59E0B,#B45309);border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800;font-size:15px;color:#000;box-shadow:0 0 20px #F59E0B30;flex-shrink:0;}
+  .logo-text{font-size:20px;font-weight:700;letter-spacing:-.5px;}
+  .logo-sub{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;margin-top:1px;}
+  .clock{font-family:var(--mono);font-size:17px;font-weight:700;color:var(--amber);letter-spacing:2px;}
+  .date-disp{font-family:var(--mono);font-size:9px;color:var(--dim);text-align:right;}
+
+  /* Oven nav tabs */
+  .oven-nav{display:flex;gap:2px;background:var(--surface);border-bottom:1px solid var(--border);padding:0 24px;overflow-x:auto;}
+  .oven-tab-btn{padding:10px 18px;cursor:pointer;font-weight:700;font-size:12px;border-bottom:3px solid transparent;color:var(--dim);white-space:nowrap;font-family:var(--sans);transition:all .2s;background:none;border-left:none;border-right:none;border-top:none;}
+  .oven-tab-btn:hover{color:var(--text);}
+  .oven-tab-btn.active{color:var(--amber);border-bottom-color:var(--amber);}
+  .oven-tab-btn.has-running{color:var(--green);}
+  .oven-tab-btn.has-alarm{color:var(--red);animation:pillPulse .5s infinite alternate;}
+
+  /* Page tabs (History / Analytics / Settings) */
+  .page-tab-btn{padding:10px 16px;cursor:pointer;font-weight:700;font-size:12px;border-bottom:3px solid transparent;color:var(--dimmer);white-space:nowrap;font-family:var(--sans);transition:all .2s;background:none;border-left:none;border-right:none;border-top:none;}
+  .page-tab-btn.active{color:var(--blue);border-bottom-color:var(--blue);}
+
+  /* Tab pages */
+  .tab-page{display:none;padding:18px 24px;}
+  .tab-page.active{display:block;}
+
+  /* Oven status bar */
+  .oven-status-bar{display:flex;gap:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;}
+  .osb-item{flex:1;padding:10px 14px;text-align:center;border-right:1px solid var(--border);}
+  .osb-item:last-child{border-right:none;}
+  .osb-val{font-family:var(--mono);font-size:18px;font-weight:800;}
+  .osb-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;margin-top:1px;}
+
+  /* Rack grid — 3 columns on desktop, responsive */
+  .rack-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;}
+  @media(max-width:900px){.rack-grid{grid-template-columns:repeat(2,1fr);}}
+  @media(max-width:560px){.rack-grid{grid-template-columns:1fr;}}
+
+  /* Rack card — same DNA as old machine-card */
+  .rack-card{background:var(--card);border:2px solid var(--border);border-radius:14px;overflow:hidden;transition:border-color .3s,box-shadow .3s;}
+  .rack-card.running{border-color:var(--green);box-shadow:0 0 22px #10B98118;}
+  .rack-card.paused {border-color:var(--amber); box-shadow:0 0 14px #F59E0B18;}
+  .rack-card.alarm  {border-color:var(--red);   box-shadow:0 0 32px #EF444440;animation:cardAlarm .4s infinite alternate;}
+  @keyframes cardAlarm{from{box-shadow:0 0 18px #EF444438;}to{box-shadow:0 0 48px #EF444460;}}
+
+  .rack-header{padding:11px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);}
+  .rack-name{font-family:var(--mono);font-size:14px;font-weight:800;display:flex;align-items:center;gap:8px;}
+  .coating-badge{font-family:var(--mono);font-size:8px;padding:2px 7px;border-radius:4px;background:var(--amberDk);color:var(--amber);font-weight:700;display:none;}
+
+  .status-pill{font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 9px;border-radius:20px;text-transform:uppercase;}
+  .s-idle   {background:#1C2733;color:var(--dimmer);}
+  .s-running{background:var(--greenDk);color:var(--green);}
+  .s-paused {background:var(--amberDk);color:var(--amber);}
+  .s-alarm  {background:var(--redDk);color:var(--red);animation:pillPulse .4s infinite alternate;}
+  @keyframes pillPulse{from{opacity:1;}to{opacity:.5;}}
+
+  .rack-body{padding:14px 16px;}
+
+  /* Timer display */
+  .timer-display{text-align:center;margin:8px 0 12px;padding:16px;background:var(--bg);border-radius:10px;border:1px solid var(--border);position:relative;overflow:hidden;}
+  .timer-display::before{content:"";position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--amber),transparent);opacity:0;transition:opacity .3s;}
+  .rack-card.running .timer-display::before{opacity:1;}
+  .timer-big{font-family:var(--display);font-size:68px;line-height:1;letter-spacing:4px;transition:color .3s;}
+  .tb-idle   {color:var(--dimmer);}
+  .tb-running{color:var(--green);}
+  .tb-paused {color:var(--amber);}
+  .tb-alarm  {color:var(--red);animation:colorFlash .4s infinite alternate;}
+  @keyframes colorFlash{from{color:var(--red);}to{color:#FF9999;}}
+  .timer-sub{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:4px;}
+  .timer-tgt{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:5px;min-height:18px;}
+  .overtime-badge{display:inline-block;background:var(--redDk);color:var(--red);font-family:var(--mono);font-size:9px;font-weight:800;padding:2px 7px;border-radius:4px;margin-left:5px;border:1px solid var(--red);animation:pillPulse .5s infinite alternate;}
+
+  .prog-bar{height:4px;background:var(--bg);border-radius:2px;overflow:hidden;margin:6px 0 10px;}
+  .prog-fill{height:100%;border-radius:2px;transition:width 1s linear,background .3s;}
+
+  /* Presets */
+  .presets-wrap{margin-bottom:10px;}
+  .preset-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;margin-bottom:5px;}
+  .presets-row{display:flex;gap:4px;flex-wrap:wrap;}
+  .preset-chip{font-family:var(--mono);font-size:9px;padding:4px 9px;border-radius:5px;border:1px solid var(--border);background:var(--bg);color:var(--dim);cursor:pointer;transition:all .15s;text-align:center;line-height:1.3;}
+  .preset-chip:hover{border-color:var(--amber);color:var(--amber);}
+  .preset-chip.active{border-color:var(--amber);color:var(--amber);background:var(--amberDk);}
+  .preset-chip.locked{border-color:var(--blueDk);color:var(--blue);}
+  .preset-chip.locked.active{background:var(--blueDk);}
+
+  /* Form */
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;}
+  .form-group{display:flex;flex-direction:column;gap:3px;}
+  .form-label{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;}
+  .form-input{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;color:var(--text);font-family:var(--mono);font-size:11px;outline:none;transition:border-color .2s;width:100%;}
+  .form-input:focus{border-color:var(--amber);}
+  .form-input:disabled{opacity:.35;cursor:not-allowed;}
+
+  /* Buttons */
+  .btn-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:10px;}
+  .btn{padding:10px 4px;border-radius:8px;border:2px solid;font-family:var(--mono);font-weight:800;font-size:12px;cursor:pointer;transition:all .15s;display:flex;align-items:center;justify-content:center;gap:4px;}
+  .btn:active{transform:scale(.97);}
+  .btn-start{background:var(--greenDk);border-color:var(--green);color:var(--green);}
+  .btn-start:hover{background:#0A4A30;box-shadow:0 0 14px #10B98128;}
+  .btn-pause{background:var(--amberDk);border-color:var(--amber);color:var(--amber);}
+  .btn-stop {background:var(--redDk);  border-color:var(--red);  color:var(--red);}
+  .btn:disabled{opacity:.25;cursor:not-allowed;transform:none;box-shadow:none;}
+
+  /* Rack daily summary */
+  .rack-sbar{display:none;padding:8px 12px;background:var(--bg);border-top:1px solid var(--border);gap:0;}
+  .sbar-cell{flex:1;text-align:center;}
+  .sbar-val{font-family:var(--mono);font-size:14px;font-weight:800;color:var(--amber);}
+  .sbar-lbl{font-family:var(--mono);font-size:7px;color:var(--dim);letter-spacing:1px;}
+
+  /* History / Analytics */
+  .filter-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+  .filt-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;color:var(--dim);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;}
+  .filt-btn.active{border-color:var(--amber);color:var(--amber);background:var(--amberDk);}
+  .export-btn{margin-left:auto;padding:5px 14px;background:transparent;border:1px solid var(--blue);border-radius:6px;color:var(--blue);font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;transition:all .15s;}
+  .export-btn:hover{background:var(--blueDk);}
+  .data-tbl{width:100%;border-collapse:collapse;}
+  .data-tbl th{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1.5px;text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);text-transform:uppercase;white-space:nowrap;}
+  .data-tbl td{font-family:var(--mono);font-size:10px;padding:8px 10px;border-bottom:1px solid var(--border);}
+  .data-tbl tr:hover td{background:var(--surface);}
+
+  /* Stats */
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:18px;}
+  .stat-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px;border-top:3px solid var(--amber);}
+  .stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1.5px;margin-bottom:3px;}
+  .stat-val{font-family:var(--mono);font-size:26px;font-weight:800;}
+  .stat-sub{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:2px;}
+
+  /* Settings */
+  .set-section{margin-bottom:24px;}
+  .set-title{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid var(--border);}
+  .set-row{display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap;}
+  .set-lbl{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:130px;}
+  .save-btn{padding:9px 20px;background:var(--amberDk);border:1px solid var(--amber);border-radius:7px;color:var(--amber);font-family:var(--mono);font-weight:800;font-size:11px;cursor:pointer;transition:all .2s;}
+  .save-btn:hover{background:#6B3000;box-shadow:0 0 10px #F59E0B25;}
+  .del-btn{padding:4px 9px;background:transparent;border:1px solid var(--redDk);border-radius:4px;color:var(--red);font-family:var(--mono);font-size:10px;cursor:pointer;transition:all .15s;}
+  .del-btn:hover{background:var(--redDk);}
+  .add-btn{padding:5px 12px;background:transparent;border:1px solid var(--greenDk);border-radius:5px;color:var(--green);font-family:var(--mono);font-size:10px;font-weight:700;cursor:pointer;transition:all .15s;}
+  .add-btn:hover{background:var(--greenDk);}
+
+  /* Alarm */
+  .alarm-overlay{display:none;position:fixed;inset:0;z-index:200;background:#00000099;align-items:center;justify-content:center;flex-direction:column;gap:20px;}
+  .alarm-overlay.show{display:flex;}
+  .alarm-box{background:var(--redDk);border:3px solid var(--red);border-radius:16px;padding:36px 52px;text-align:center;animation:alarmPulse .4s infinite alternate;max-width:92vw;}
+  @keyframes alarmPulse{from{box-shadow:0 0 28px #EF444440;}to{box-shadow:0 0 72px #EF444470;}}
+  .alarm-oven{font-family:var(--mono);font-size:11px;color:#FF9999;letter-spacing:2px;margin-bottom:3px;}
+  .alarm-rack{font-family:var(--display);font-size:48px;color:var(--red);letter-spacing:3px;}
+  .alarm-lbl{font-family:var(--mono);font-size:11px;color:#FF9999;letter-spacing:2px;margin-top:2px;}
+  .alarm-time{font-family:var(--display);font-size:68px;color:#fff;margin:12px 0 4px;letter-spacing:5px;}
+  .alarm-detail{font-family:var(--mono);font-size:10px;color:#FF9999;margin-bottom:18px;}
+  .alarm-dismiss{padding:12px 36px;background:var(--red);border:none;border-radius:8px;font-family:var(--mono);font-weight:800;font-size:13px;color:#fff;cursor:pointer;letter-spacing:1px;}
+  .alarm-dismiss:hover{opacity:.82;}
+
+  /* Toast */
+  .toast{position:fixed;bottom:20px;right:20px;z-index:1000;background:var(--card);border:1px solid var(--green);border-radius:9px;padding:11px 17px;font-family:var(--mono);font-size:11px;color:var(--green);box-shadow:0 0 20px #10B98128;opacity:0;transform:translateY(14px);transition:all .3s;pointer-events:none;}
+  .toast.show{opacity:1;transform:translateY(0);}
+  .toast.err{border-color:var(--red);color:var(--red);}
+
+  ::-webkit-scrollbar{width:4px;height:4px;}
+  ::-webkit-scrollbar-track{background:var(--bg);}
+  ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+  input::placeholder{color:var(--dimmer);}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="logo">
+    <div class="logo-mark">OT</div>
+    <div>
+      <div class="logo-text">Oven Timer</div>
+      <div class="logo-sub">Pair Eyewear — Lens Lab</div>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:14px;">
+    <!-- Mobile status link -->
+    <div id="mobileBtn" onclick="openMobileStatus()" style="display:flex;align-items:center;gap:6px;padding:5px 11px;background:var(--surface);border:1px solid var(--border);border-radius:7px;cursor:pointer;transition:border-color .2s;" title="Open phone status page">
+      <span style="font-size:14px;">📱</span>
+      <span style="font-family:var(--mono);font-size:9px;color:var(--dim);" id="mobileUrlTxt">Status Page</span>
+    </div>
+    <!-- Server dot -->
+    <div style="display:flex;align-items:center;gap:5px;padding:4px 10px;background:var(--surface);border:1px solid var(--border);border-radius:6px;" title="Server status">
+      <div id="serverDot" style="width:7px;height:7px;border-radius:50%;background:var(--dimmer);transition:all .3s;"></div>
+      <span id="serverLbl" style="font-family:var(--mono);font-size:9px;color:var(--dim);">SERVER</span>
+    </div>
+    <div style="text-align:right;">
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="date-disp" id="dateTxt">---</div>
+    </div>
+  </div>
+</div>
+
+<!-- Oven + page nav -->
+<div class="oven-nav" id="ovenNav"></div>
+
+<!-- All tab pages injected here, plus fixed ones -->
+<div id="tabWrap">
+
+  <div id="tab-history" class="tab-page">
+    <div class="filter-row" id="histFilterRow">
+      <button class="filt-btn active" onclick="setHistFilter('all',this)">All</button>
+      <button class="filt-btn" onclick="setHistFilter('today',this)">Today</button>
+      <div id="ovenFilterBtns" style="display:flex;gap:4px;"></div>
+      <button class="export-btn" onclick="exportCSV()">⬇ Export CSV</button>
+    </div>
+    <div style="overflow-x:auto;background:var(--card);border:1px solid var(--border);border-radius:10px;">
+      <table class="data-tbl">
+        <thead><tr>
+          <th>#</th><th>Oven</th><th>Rack</th><th>Batch</th><th>Preset</th>
+          <th>Coating</th><th>Started</th><th>Ended</th>
+          <th>Target</th><th>Actual</th><th>Variance</th><th>Operator</th>
+        </tr></thead>
+        <tbody id="histBody"></tbody>
+      </table>
+      <div id="histEmpty" style="text-align:center;padding:40px;font-family:var(--mono);font-size:11px;color:var(--dimmer);display:none;">No runs recorded yet</div>
+    </div>
+  </div>
+
+  <div id="tab-analytics" class="tab-page">
+    <div class="stat-grid" id="statsGrid"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;" id="analyticsCharts"></div>
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:18px;" id="coatingBreakdown"></div>
+  </div>
+
+  <div id="tab-settings" class="tab-page">
+    <div style="max-width:680px;">
+      <!-- Presets -->
+      <div class="set-section">
+        <div class="set-title">Coating Presets</div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-bottom:10px;line-height:1.6;">
+          Presets are <strong style="color:var(--amber);">additive</strong> — selecting multiple applies all of them to a rack (e.g. AR + Premium AR).<br>
+          <strong style="color:var(--blue);">Hard Coat</strong> is always pinned and cannot be removed. Add AR types or any custom preset below.
+        </div>
+        <div id="presetList"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap;">
+          <input id="newPresetName" class="form-input" style="width:180px" placeholder="Name (e.g. Premium AR)"/>
+          <input id="newPresetMins" class="form-input" type="number" style="width:72px;text-align:center" placeholder="Min"/>
+          <button class="add-btn" onclick="addPreset()">+ Add Preset</button>
+        </div>
+      </div>
+      <!-- Ovens -->
+      <div class="set-section">
+        <div class="set-title">Oven Configuration</div>
+        <div id="ovenSettingsList"></div>
+        <button class="add-btn" style="margin-top:8px;" onclick="addOven()">+ Add Oven</button>
+      </div>
+      <!-- Racks -->
+      <div class="set-section">
+        <div class="set-title">Racks per Oven</div>
+        <div class="set-row">
+          <span class="set-lbl">Racks per oven</span>
+          <input id="racksInput" class="form-input" type="number" min="1" max="12" style="width:70px;text-align:center;"/>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--dim);">(applied to all ovens)</span>
+        </div>
+      </div>
+      <!-- Server & Operator -->
+      <div class="set-section">
+        <div class="set-title">Server & Operator</div>
+        <div class="set-row">
+          <span class="set-lbl">Lab_Assistant server</span>
+          <input id="serverInput" class="form-input" style="flex:1;min-width:220px;" placeholder="http://192.168.x.x:3002"/>
+        </div>
+        <div class="set-row">
+          <span class="set-lbl">Operator name</span>
+          <input id="operatorInput" class="form-input" style="flex:1;min-width:220px;" placeholder="e.g. Mike S."/>
+        </div>
+        <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-top:4px;">
+          Phone status page will be at: <span id="mobileUrlFull" style="color:var(--cyan);">http://localhost:3002/status</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="save-btn" onclick="saveSettings()">💾 Save Settings</button>
+        <button class="save-btn" style="background:var(--blueDk);border-color:var(--blue);color:var(--blue);" onclick="pingServer(true)">🔗 Test Server</button>
+        <button class="save-btn" style="background:var(--redDk);border-color:var(--red);color:var(--red);" onclick="if(confirm('Clear ALL run history? Cannot be undone.'))clearHistory()">🗑 Clear History</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /tabWrap -->
+
+<!-- Alarm overlay -->
+<div class="alarm-overlay" id="alarmOverlay">
+  <div class="alarm-box">
+    <div class="alarm-oven" id="alarmOven"></div>
+    <div class="alarm-rack" id="alarmRack">RACK —</div>
+    <div class="alarm-lbl">⏰ TIME COMPLETE</div>
+    <div class="alarm-time" id="alarmTime">00:00</div>
+    <div class="alarm-detail" id="alarmDetail"></div>
+  </div>
+  <button class="alarm-dismiss" onclick="dismissAlarm()">✓ ACKNOWLEDGE</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+'use strict';
+
+// ══ Constants & Defaults ══════════════════════════════════════════════════════
+
+// Hard Coat is always locked in — never removed
+const LOCKED_PRESETS = [
+  { id:'hc', name:'Hard Coat', mins:20, locked:true }
+];
+
+const DEFAULT_CUSTOM_PRESETS = [
+  { id:'ar1', name:'AR Standard',  mins:25 },
+  { id:'ar2', name:'Premium AR',   mins:30 },
+  { id:'ar3', name:'Blue Cut AR',  mins:22 },
+];
+
+const DEFAULT_OVENS = [
+  { id:'oven1', name:'Oven 1', active:true },
+  { id:'oven2', name:'Oven 2', active:true },
+  { id:'oven3', name:'Oven 3', active:true },
+];
+
+const DEFAULT_RACKS = 6;
+
+// ══ State ═════════════════════════════════════════════════════════════════════
+
+let cfg      = loadCfg();
+let history  = loadHistory();
+let timers   = {};        // key: "oven1::rack2"
+let alarmQ   = [];        // pending alarm objects
+let histFltr = 'all';
+let curTab   = null;
+let serverUrl = cfg.serverUrl || 'http://localhost:3002';
+let heartbeatTm = null;
+
+// ══ Persistence ═══════════════════════════════════════════════════════════════
+
+function loadCfg()     { try{ return JSON.parse(localStorage.getItem('ot3_cfg')||'{}'); } catch{ return {}; } }
+function saveCfg()     { try{ localStorage.setItem('ot3_cfg', JSON.stringify(cfg)); } catch{} }
+function loadHistory() { try{ return JSON.parse(localStorage.getItem('ot3_hist')||'[]'); } catch{ return []; } }
+function saveHistory() { try{ localStorage.setItem('ot3_hist', JSON.stringify(history.slice(0,5000))); } catch{} }
+function clearHistory(){ history=[]; saveHistory(); renderHistory(); renderAnalytics(); toast('History cleared'); }
+
+function getOvens()        { return cfg.ovens         || DEFAULT_OVENS; }
+function getRacks()        { return cfg.racksPerOven  || DEFAULT_RACKS; }
+function getOperator()     { return cfg.operator       || ''; }
+function getCustomPresets(){ return cfg.customPresets  || DEFAULT_CUSTOM_PRESETS; }
+function getAllPresets()    { return [...LOCKED_PRESETS, ...getCustomPresets()]; }
+
+// ══ Key helpers ═══════════════════════════════════════════════════════════════
+
+const KEY  = (ovenId, rack) => `${ovenId}::${rack}`;
+const RACK = n => `rack${n}`;
+const RACK_LABEL = n => `Rack ${n}`;
+
+function getTimer(ovenId, rack) {
+  const k = KEY(ovenId, rack);
+  if (!timers[k]) timers[k] = {
+    ovenId, rack, state:'idle',
+    elapsed:0, target:0, startTs:null, pauseAccum:0,
+    batchId:'', coating:'', activePresets:[], operator:getOperator(),
+    notes:'', sessionStart:null, alarmFired:false, intervalId:null
+  };
+  return timers[k];
+}
+
+// ══ Clock ═════════════════════════════════════════════════════════════════════
+
+function tickClock() {
+  const n = new Date();
+  document.getElementById('clock').textContent = n.toLocaleTimeString('en-US',{hour12:false});
+  document.getElementById('dateTxt').textContent = n.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+}
+setInterval(tickClock, 1000); tickClock();
+
+// ══ Server ════════════════════════════════════════════════════════════════════
+
+async function pingServer(manual=false) {
+  const url = cfg.serverUrl || serverUrl;
+  try {
+    const r = await fetch(`${url}/health`, {signal:AbortSignal.timeout(2500)});
+    setServerDot(r.ok, url);
+    if (manual) toast(r.ok ? `✓ Connected to ${url}` : '✗ Server error', !r.ok);
+  } catch {
+    setServerDot(false, url);
+    if (manual) toast('✗ Server not reachable', true);
+  }
+}
+
+function setServerDot(ok, url) {
+  const dot = document.getElementById('serverDot');
+  const lbl = document.getElementById('serverLbl');
+  dot.style.background   = ok ? 'var(--green)' : 'var(--red)';
+  dot.style.boxShadow    = ok ? '0 0 6px var(--green)' : '0 0 6px var(--red)';
+  lbl.textContent        = ok ? 'LIVE' : 'OFFLINE';
+  lbl.style.color        = ok ? 'var(--green)' : 'var(--red)';
+  const mu = `${url}/status`;
+  const mt = document.getElementById('mobileUrlTxt');
+  const mf = document.getElementById('mobileUrlFull');
+  if (mt) mt.textContent = mu;
+  if (mf) mf.textContent = mu;
+}
+
+function openMobileStatus() {
+  window.open(`${cfg.serverUrl||serverUrl}/status`, '_blank');
+}
+
+async function postRun(run) {
+  try {
+    await fetch(`${serverUrl}/api/oven-run`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(run), signal:AbortSignal.timeout(4000)
+    });
+  } catch {}
+}
+
+function startHeartbeat() {
+  clearInterval(heartbeatTm);
+  heartbeatTm = setInterval(async () => {
+    const live = {};
+    Object.entries(timers).forEach(([k, t]) => {
+      if (t.state !== 'idle') {
+        const oven = getOvens().find(o => o.id === t.ovenId);
+        live[k] = {
+          ovenId:t.ovenId, ovenName:oven?.name||t.ovenId,
+          rack:t.rack, rackLabel:RACK_LABEL(t.rack.replace('rack','')),
+          state:t.state, elapsed:t.elapsed, target:t.target,
+          batchId:t.batchId, coating:t.coating, presets:t.activePresets
+        };
+      }
+    });
+    try {
+      await fetch(`${serverUrl}/api/oven-live`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(live), signal:AbortSignal.timeout(2000)
+      });
+    } catch {}
+  }, 6000);
+}
+
+// ══ Format ════════════════════════════════════════════════════════════════════
+
+function fmtS(s) {
+  const a=Math.abs(s), h=Math.floor(a/3600), m=Math.floor((a%3600)/60), sc=a%60;
+  const sign=s<0?'-':'';
+  return h>0 ? `${sign}${pad(h)}:${pad(m)}:${pad(sc)}` : `${sign}${pad(m)}:${pad(sc)}`;
+}
+const pad = n => String(n).padStart(2,'0');
+const fmtDT = ts => new Date(ts).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});
+const isToday = ts => new Date(ts).toDateString() === new Date().toDateString();
+
+// ══ Timer control ═════════════════════════════════════════════════════════════
+
+function startTimer(ovenId, rack) {
+  const t = getTimer(ovenId, rack);
+  const k = KEY(ovenId, rack);
+
+  if (t.state === 'idle') {
+    const bEl = document.getElementById(`batch-${k}`);
+    const nEl = document.getElementById(`notes-${k}`);
+    const tEl = document.getElementById(`target-${k}`);
+    const cEl = document.getElementById(`coating-${k}`);
+    t.batchId      = bEl?.value?.trim() || `${ovenId}-${rack}-${Date.now().toString().slice(-4)}`;
+    t.notes        = nEl?.value?.trim() || '';
+    t.target       = parseInt(tEl?.value||'0') * 60;
+    t.coating      = cEl?.value?.trim() || t.activePresets.join('+') || '';
+    t.operator     = getOperator();
+    t.elapsed = t.pauseAccum = 0;
+    t.sessionStart = t.startTs = Date.now();
+    t.alarmFired   = false;
+    if (bEl) bEl.disabled = true;
+    if (cEl) cEl.disabled = true;
+  } else if (t.state === 'paused') {
+    t.startTs = Date.now();
+  }
+
+  t.state = 'running';
+  t.intervalId = setInterval(() => tickTimer(ovenId, rack), 1000);
+  refreshRack(ovenId, rack);
+  updateOvenTab(ovenId);
+}
+
+function pauseTimer(ovenId, rack) {
+  const t = getTimer(ovenId, rack);
+  if (t.state !== 'running') return;
+  clearInterval(t.intervalId);
+  t.pauseAccum = t.elapsed;
+  t.state = 'paused';
+  refreshRack(ovenId, rack);
+  updateOvenTab(ovenId);
+}
+
+function stopTimer(ovenId, rack) {
+  const t = getTimer(ovenId, rack);
+  if (t.state === 'idle') return;
+  clearInterval(t.intervalId);
+
+  const oven = getOvens().find(o => o.id === ovenId);
+  const run = {
+    id:Date.now(), ovenId, rack,
+    ovenName:oven?.name||ovenId,
+    rackLabel:RACK_LABEL(rack.replace('rack','')),
+    batchId:t.batchId, coating:t.coating,
+    activePresets:t.activePresets, operator:t.operator, notes:t.notes,
+    startedAt:t.sessionStart, endedAt:Date.now(),
+    targetSecs:t.target, actualSecs:t.elapsed,
+    variance:t.target>0 ? t.elapsed-t.target : null,
+  };
+  history.unshift(run);
+  saveHistory();
+  postRun(run);
+
+  const k = KEY(ovenId, rack);
+  const bEl = document.getElementById(`batch-${k}`);
+  const cEl = document.getElementById(`coating-${k}`);
+  if (bEl) { bEl.disabled=false; bEl.value=''; }
+  if (cEl) { cEl.disabled=false; cEl.value=''; }
+
+  t.state='idle'; t.elapsed=0; t.startTs=null; t.pauseAccum=0;
+  t.batchId=''; t.coating=''; t.activePresets=[]; t.sessionStart=null; t.alarmFired=false;
+  refreshRack(ovenId, rack);
+  renderHistory(); renderAnalytics();
+  updateOvenTab(ovenId);
+  refreshOvenStatus(ovenId);
+  toast(`✓ ${oven?.name||ovenId} ${RACK_LABEL(rack.replace('rack',''))} logged — ${fmtS(run.actualSecs)}`);
+}
+
+function tickTimer(ovenId, rack) {
+  const t = getTimer(ovenId, rack);
+  t.elapsed = t.pauseAccum + Math.floor((Date.now()-t.startTs)/1000);
+  if (t.target>0 && t.elapsed>=t.target && !t.alarmFired) {
+    t.alarmFired = true;
+    const oven = getOvens().find(o=>o.id===ovenId);
+    alarmQ.push({ovenId,rack,ovenName:oven?.name||ovenId,rackLabel:RACK_LABEL(rack.replace('rack','')),elapsed:t.elapsed,batchId:t.batchId,coating:t.coating});
+    showNextAlarm();
+    playAlarm();
+  }
+  liveUpdateDisplay(ovenId, rack);
+  updateOvenTab(ovenId);
+}
+
+// Additive preset toggle
+function togglePreset(ovenId, rack, preset) {
+  const t = getTimer(ovenId, rack);
+  if (t.state !== 'idle') return; // locked while running
+  const k = KEY(ovenId, rack);
+
+  const idx = t.activePresets.indexOf(preset.name);
+  if (idx === -1) {
+    t.activePresets.push(preset.name);
+  } else {
+    t.activePresets.splice(idx, 1);
+  }
+
+  // Update coating field with combined presets
+  const cEl = document.getElementById(`coating-${k}`);
+  const tEl = document.getElementById(`target-${k}`);
+  if (cEl) cEl.value = t.activePresets.join(' + ');
+
+  // Combine target: take the max of active preset times
+  if (tEl && t.activePresets.length > 0) {
+    const allP = getAllPresets();
+    const maxMins = Math.max(...t.activePresets.map(name => {
+      const p = allP.find(p=>p.name===name);
+      return p ? p.mins : 0;
+    }));
+    tEl.value = maxMins;
+  } else if (tEl && t.activePresets.length === 0) {
+    tEl.value = '';
+  }
+
+  // Refresh chip states
+  const chipsWrap = document.getElementById(`chips-${k}`);
+  if (chipsWrap) {
+    chipsWrap.querySelectorAll('.preset-chip').forEach(chip => {
+      chip.classList.toggle('active', t.activePresets.includes(chip.dataset.name));
+    });
+  }
+}
+
+// ══ Alarm ═════════════════════════════════════════════════════════════════════
+
+function showNextAlarm() {
+  if (!alarmQ.length) return;
+  const a = alarmQ[0];
+  document.getElementById('alarmOven').textContent   = (a.ovenName||'Oven').toUpperCase();
+  document.getElementById('alarmRack').textContent   = a.rackLabel.toUpperCase();
+  document.getElementById('alarmTime').textContent   = fmtS(a.elapsed);
+  document.getElementById('alarmDetail').textContent = `Batch: ${a.batchId||'—'} · ${a.coating||'—'}`;
+  document.getElementById('alarmOverlay').classList.add('show');
+  document.body.classList.add('alarm-flash');
+}
+
+function dismissAlarm() {
+  alarmQ.shift();
+  document.getElementById('alarmOverlay').classList.remove('show');
+  document.body.classList.remove('alarm-flash');
+  if (alarmQ.length) setTimeout(showNextAlarm, 300);
+}
+
+function playAlarm() {
+  try {
+    const ctx = new (window.AudioContext||window.webkitAudioContext)();
+    [[880,.0,.15],[880,.22,.15],[880,.44,.15],[1100,.72,.28],[1100,1.1,.28]].forEach(([f,d,dur])=>{
+      const o=ctx.createOscillator(),g=ctx.createGain();
+      o.connect(g);g.connect(ctx.destination);
+      o.type='sine';o.frequency.value=f;
+      g.gain.setValueAtTime(.5,ctx.currentTime+d);
+      g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+d+dur);
+      o.start(ctx.currentTime+d);o.stop(ctx.currentTime+d+dur+.05);
+    });
+  } catch {}
+}
+
+// ══ DOM Updates ═══════════════════════════════════════════════════════════════
+
+function liveUpdateDisplay(ovenId, rack) {
+  const t = getTimer(ovenId, rack);
+  const k = KEY(ovenId, rack);
+  const big  = document.getElementById(`tbig-${k}`);
+  const sub  = document.getElementById(`tsub-${k}`);
+  const tgt  = document.getElementById(`ttgt-${k}`);
+  const prog = document.getElementById(`prog-${k}`);
+  const pill = document.getElementById(`pill-${k}`);
+  const card = document.getElementById(`rcard-${k}`);
+  if (!big) return;
+
+  const isOT = t.target>0 && t.elapsed>=t.target;
+  const cls  = isOT ? 'alarm' : t.state;
+
+  big.textContent = fmtS(t.elapsed);
+  big.className   = `timer-big tb-${cls}`;
+  if (sub) sub.textContent = t.state==='paused' ? '⏸ Paused' : '▶ Running…';
+  if (tgt && t.target>0) {
+    const rem = t.target - t.elapsed;
+    tgt.innerHTML = isOT
+      ? `Target: ${fmtS(t.target)} <span class="overtime-badge">+${fmtS(t.elapsed-t.target)} OVERTIME</span>`
+      : `Remaining: ${fmtS(Math.max(0,rem))} / Target: ${fmtS(t.target)}`;
+  }
+  if (prog && t.target>0) {
+    prog.style.width      = `${Math.min(100,(t.elapsed/t.target)*100)}%`;
+    prog.style.background = isOT?'var(--red)':t.state==='paused'?'var(--amber)':'var(--green)';
+  }
+  if (pill) {
+    pill.className  = `status-pill ${isOT?'s-alarm':'s-'+t.state}`;
+    pill.textContent= isOT?'OVERTIME':t.state.toUpperCase();
+  }
+  if (card) card.className = `rack-card ${cls}`;
+}
+
+function refreshRack(ovenId, rack) {
+  const t = getTimer(ovenId, rack);
+  const k = KEY(ovenId, rack);
+  const card= document.getElementById(`rcard-${k}`);
+  const big = document.getElementById(`tbig-${k}`);
+  const sub = document.getElementById(`tsub-${k}`);
+  const tgt = document.getElementById(`ttgt-${k}`);
+  const prog= document.getElementById(`prog-${k}`);
+  const pill= document.getElementById(`pill-${k}`);
+  const bdg = document.getElementById(`cbadge-${k}`);
+  const bs  = document.getElementById(`btn-start-${k}`);
+  const bp  = document.getElementById(`btn-pause-${k}`);
+  const bx  = document.getElementById(`btn-stop-${k}`);
+  if (!card) return;
+
+  card.className  = `rack-card ${t.state}`;
+  if (pill) { pill.className=`status-pill s-${t.state}`; pill.textContent=t.state.toUpperCase(); }
+  if (big)  { big.textContent=t.state==='idle'?'00:00':fmtS(t.elapsed); big.className=`timer-big tb-${t.state}`; }
+  if (sub)  sub.textContent = t.state==='idle'?'— Ready —':t.state==='paused'?'⏸ Paused':'▶ Running…';
+  if (tgt)  tgt.innerHTML   = '';
+  if (prog) { prog.style.width='0%'; prog.style.background='var(--green)'; }
+  if (bdg)  { bdg.textContent=t.coating||t.activePresets.join('+'); bdg.style.display=(t.coating||t.activePresets.length)?'':'none'; }
+  if (bs)   { bs.disabled=t.state==='running'; bs.textContent=t.state==='paused'?'▶ RESUME':'▶ START'; }
+  if (bp)   bp.disabled = t.state!=='running';
+  if (bx)   bx.disabled = t.state==='idle';
+  refreshSbar(ovenId, rack);
+}
+
+function refreshSbar(ovenId, rack) {
+  const k = KEY(ovenId, rack);
+  const sbar = document.getElementById(`sbar-${k}`);
+  if (!sbar) return;
+  const runs = history.filter(r=>r.ovenId===ovenId&&r.rack===rack&&isToday(r.startedAt));
+  sbar.style.display = runs.length ? 'flex' : 'none';
+  if (!runs.length) return;
+  const avg = runs.reduce((s,r)=>s+r.actualSecs,0)/runs.length;
+  sbar.innerHTML = `
+    <div class="sbar-cell"><div class="sbar-val">${runs.length}</div><div class="sbar-lbl">TODAY RUNS</div></div>
+    <div class="sbar-cell"><div class="sbar-val">${fmtS(Math.round(avg))}</div><div class="sbar-lbl">AVG TIME</div></div>
+    <div class="sbar-cell"><div class="sbar-val">${Math.round(runs.reduce((s,r)=>s+r.actualSecs,0)/60)}m</div><div class="sbar-lbl">TOTAL MINS</div></div>
+  `;
+}
+
+function refreshOvenStatus(ovenId) {
+  const n = getRacks();
+  let running=0, idle=0;
+  for(let i=1;i<=n;i++){
+    const t=getTimer(ovenId,RACK(i));
+    (t.state==='running'||t.state==='paused') ? running++ : idle++;
+  }
+  const done = history.filter(r=>r.ovenId===ovenId&&isToday(r.startedAt)).length;
+  const re=document.getElementById(`osb-run-${ovenId}`);
+  const ie=document.getElementById(`osb-idle-${ovenId}`);
+  const de=document.getElementById(`osb-done-${ovenId}`);
+  if(re){ re.textContent=running; re.style.color=running?'var(--green)':'var(--dimmer)'; }
+  if(ie) ie.textContent=idle;
+  if(de) de.textContent=done;
+}
+setInterval(()=>{ getOvens().filter(o=>o.active).forEach(o=>refreshOvenStatus(o.id)); },3000);
+
+function updateOvenTab(ovenId) {
+  const btn = document.getElementById(`oventab-${ovenId}`);
+  if (!btn) return;
+  const n = getRacks();
+  let alarm=false, running=false;
+  for(let i=1;i<=n;i++){
+    const t=getTimer(ovenId,RACK(i));
+    if(t.state==='running'&&t.target>0&&t.elapsed>=t.target) alarm=true;
+    else if(t.state==='running'||t.state==='paused') running=true;
+  }
+  btn.className=`oven-tab-btn${alarm?' has-alarm':running?' has-running':''}`;
+}
+
+// ══ Build UI ══════════════════════════════════════════════════════════════════
+
+function buildAll() {
+  const nav  = document.getElementById('ovenNav');
+  const wrap = document.getElementById('tabWrap');
+
+  // Remove old oven tab pages
+  wrap.querySelectorAll('.oven-tab-page').forEach(e=>e.remove());
+  nav.innerHTML = '';
+
+  const activeOvens = getOvens().filter(o=>o.active);
+
+  activeOvens.forEach((oven, oi) => {
+    // Nav button
+    const btn = document.createElement('button');
+    btn.id        = `oventab-${oven.id}`;
+    btn.className = `oven-tab-btn${oi===0?' active':''}`;
+    btn.textContent = oven.name;
+    btn.onclick   = () => showTab(oven.id);
+    nav.appendChild(btn);
+
+    // Tab page
+    const page = document.createElement('div');
+    page.id        = `tab-${oven.id}`;
+    page.className = `tab-page oven-tab-page${oi===0?' active':''}`;
+
+    // Oven status bar
+    page.innerHTML = `
+      <div class="oven-status-bar">
+        <div class="osb-item">
+          <div class="osb-val" id="osb-run-${oven.id}" style="color:var(--dimmer)">0</div>
+          <div class="osb-lbl">RUNNING</div>
+        </div>
+        <div class="osb-item">
+          <div class="osb-val" id="osb-idle-${oven.id}" style="color:var(--dim)">${getRacks()}</div>
+          <div class="osb-lbl">IDLE</div>
+        </div>
+        <div class="osb-item">
+          <div class="osb-val" id="osb-done-${oven.id}" style="color:var(--dim)">0</div>
+          <div class="osb-lbl">TODAY RUNS</div>
+        </div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:flex-end;padding:0 14px;">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--dimmer);letter-spacing:1px;">${oven.name.toUpperCase()} · ${getRacks()} RACKS</span>
+        </div>
+      </div>
+      <div class="rack-grid" id="rgrid-${oven.id}"></div>
+    `;
+
+    // Insert before history tab
+    wrap.insertBefore(page, document.getElementById('tab-history'));
+    buildRackCards(oven);
+  });
+
+  // Page tabs: History / Analytics / Settings
+  [['history','📋 History'],['analytics','📊 Analytics'],['settings','⚙ Settings']].forEach(([id,label])=>{
+    const btn=document.createElement('button');
+    btn.id=`oventab-${id}`; btn.className='page-tab-btn';
+    btn.textContent=label; btn.onclick=()=>showTab(id);
+    nav.appendChild(btn);
+  });
+
+  if (!activeOvens.length) showTab('history');
+}
+
+function buildRackCards(oven) {
+  const grid = document.getElementById(`rgrid-${oven.id}`);
+  if (!grid) return;
+  grid.innerHTML = '';
+  const n = getRacks();
+  const presets = getAllPresets();
+
+  for (let i=1; i<=n; i++) {
+    const rack = RACK(i);
+    const k    = KEY(oven.id, rack);
+
+    const chips = presets.map(p => `
+      <div class="preset-chip${p.locked?' locked':''}" data-name="${p.name}"
+           onclick="togglePreset('${oven.id}','${rack}',{name:'${p.name.replace(/'/g,"\\'")}',mins:${p.mins}})"
+           title="${p.name} — ${p.mins} min">
+        ${p.name}<br><span style="font-size:7px;opacity:.6">${p.mins}m</span>
+      </div>`).join('');
+
+    const card = document.createElement('div');
+    card.id        = `rcard-${k}`;
+    card.className = 'rack-card';
+    card.innerHTML = `
+      <div class="rack-header">
+        <div class="rack-name">
+          ${RACK_LABEL(i)}
+          <span class="coating-badge" id="cbadge-${k}"></span>
+        </div>
+        <div class="status-pill s-idle" id="pill-${k}">IDLE</div>
+      </div>
+      <div class="rack-body">
+        <div class="timer-display">
+          <div class="timer-big tb-idle" id="tbig-${k}">00:00</div>
+          <div class="timer-sub" id="tsub-${k}">— Ready —</div>
+          <div class="timer-tgt" id="ttgt-${k}"></div>
+        </div>
+        <div class="prog-bar"><div class="prog-fill" id="prog-${k}" style="width:0%;background:var(--green)"></div></div>
+
+        <div class="presets-wrap">
+          <div class="preset-lbl">Quick Presets <span style="color:var(--dimmer);font-size:7px;">(tap to combine)</span></div>
+          <div class="presets-row" id="chips-${k}">${chips}</div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Batch ID</label>
+            <input id="batch-${k}" class="form-input" placeholder="auto-generated"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Coating + Target min</label>
+            <div style="display:flex;gap:4px;">
+              <input id="coating-${k}" class="form-input" placeholder="coating" style="flex:1;min-width:0;"/>
+              <input id="target-${k}" class="form-input" type="number" min="1" placeholder="min" style="width:50px;text-align:center;"/>
+            </div>
+          </div>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-start" id="btn-start-${k}" onclick="startTimer('${oven.id}','${rack}')">▶ START</button>
+          <button class="btn btn-pause" id="btn-pause-${k}" onclick="pauseTimer('${oven.id}','${rack}')" disabled>⏸ PAUSE</button>
+          <button class="btn btn-stop"  id="btn-stop-${k}"  onclick="stopTimer('${oven.id}','${rack}')"  disabled>⏹ STOP</button>
+        </div>
+      </div>
+      <div class="rack-sbar" id="sbar-${k}" style="display:none;"></div>
+    `;
+    grid.appendChild(card);
+    refreshSbar(oven.id, rack);
+  }
+  refreshOvenStatus(oven.id);
+}
+
+// ══ Tab switching ═════════════════════════════════════════════════════════════
+
+function showTab(id) {
+  document.querySelectorAll('.tab-page').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.oven-tab-btn,.page-tab-btn').forEach(b=>b.classList.remove('active'));
+  const page = document.getElementById(`tab-${id}`);
+  const btn  = document.getElementById(`oventab-${id}`);
+  if (page) page.classList.add('active');
+  if (btn)  btn.classList.add('active');
+  curTab = id;
+  if (id==='history')   { renderHistory(); buildOvenFilterBtns(); }
+  if (id==='analytics') renderAnalytics();
+  if (id==='settings')  renderSettings();
+}
+
+// ══ History ═══════════════════════════════════════════════════════════════════
+
+function buildOvenFilterBtns() {
+  const wrap = document.getElementById('ovenFilterBtns');
+  if (!wrap || wrap.dataset.built) return;
+  wrap.dataset.built = '1';
+  getOvens().filter(o=>o.active).forEach(o=>{
+    const b=document.createElement('button');
+    b.className='filt-btn'; b.textContent=o.name;
+    b.onclick=()=>setHistFilter(o.id,b);
+    wrap.appendChild(b);
+  });
+}
+
+function setHistFilter(f, btn) {
+  histFltr = f;
+  document.querySelectorAll('.filt-btn').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  renderHistory();
+}
+
+function renderHistory() {
+  const body  = document.getElementById('histBody');
+  const empty = document.getElementById('histEmpty');
+  if (!body) return;
+  let rows = [...history];
+  if (histFltr==='today')                    rows=rows.filter(r=>isToday(r.startedAt));
+  else if (histFltr!=='all')                 rows=rows.filter(r=>r.ovenId===histFltr);
+  body.innerHTML = '';
+  if (!rows.length) { empty.style.display='block'; return; }
+  empty.style.display='none';
+  rows.forEach((r,i)=>{
+    const v=r.variance;
+    let vc='',vt='—';
+    if(v!==null){ vc=v>120?'style="color:var(--red);font-weight:700"':v<-120?'style="color:var(--green);font-weight:700"':'style="color:var(--dimmer)"'; vt=(v>0?'+':'')+fmtS(v); }
+    const tr=document.createElement('tr');
+    tr.innerHTML=`
+      <td style="color:var(--dimmer)">${rows.length-i}</td>
+      <td style="color:var(--amber);font-weight:700">${r.ovenName||r.ovenId}</td>
+      <td style="color:var(--cyan)">${r.rackLabel||r.rack}</td>
+      <td>${r.batchId}</td>
+      <td style="color:var(--dim)">${(r.activePresets||[]).join(' + ')||'—'}</td>
+      <td>${r.coating||'—'}</td>
+      <td>${fmtDT(r.startedAt)}</td>
+      <td>${fmtDT(r.endedAt)}</td>
+      <td style="color:var(--dim)">${r.targetSecs>0?fmtS(r.targetSecs):'—'}</td>
+      <td style="font-weight:700;">${fmtS(r.actualSecs)}</td>
+      <td ${vc}>${vt}</td>
+      <td style="color:var(--dim)">${r.operator||'—'}</td>
+    `;
+    body.appendChild(tr);
+  });
+}
+
+// ══ Analytics ════════════════════════════════════════════════════════════════
+
+function renderAnalytics() {
+  const today = history.filter(r=>isToday(r.startedAt));
+  const total = history.reduce((s,r)=>s+r.actualSecs,0);
+  const ot    = history.filter(r=>r.variance!==null&&r.variance>120);
+
+  document.getElementById('statsGrid').innerHTML=[
+    {l:'Total Runs',     v:history.length,               c:'var(--amber)', s:'all time'},
+    {l:"Today's Runs",   v:today.length,                 c:'var(--green)', s:'completed today'},
+    {l:'Total Oven Hrs', v:(total/3600).toFixed(1)+'h',  c:'var(--amber)', s:'cumulative dwell'},
+    {l:'Avg Dwell',      v:history.length?fmtS(Math.round(total/history.length)):'—', c:'var(--cyan)', s:'per rack run'},
+    {l:'Overtime Runs',  v:ot.length,                    c:'var(--red)',   s:'> 2 min over target'},
+    {l:"Today Hours",    v:(today.reduce((s,r)=>s+r.actualSecs,0)/3600).toFixed(1)+'h', c:'var(--amber)', s:'today total'},
+  ].map(s=>`<div class="stat-card" style="border-top-color:${s.c}"><div class="stat-lbl">${s.l.toUpperCase()}</div><div class="stat-val" style="color:${s.c}">${s.v}</div><div class="stat-sub">${s.s}</div></div>`).join('');
+
+  // Per-oven breakdowns
+  const charts = document.getElementById('analyticsCharts');
+  charts.innerHTML = '';
+  getOvens().filter(o=>o.active).forEach(oven=>{
+    const oRuns  = history.filter(r=>r.ovenId===oven.id);
+    const todayO = oRuns.filter(r=>isToday(r.startedAt));
+    const rackRows = [];
+    for(let i=1;i<=getRacks();i++){
+      const rk=RACK(i);
+      const rRuns=oRuns.filter(r=>r.rack===rk);
+      rackRows.push({n:i,count:rRuns.length,total:rRuns.reduce((s,r)=>s+r.actualSecs,0)});
+    }
+    const maxC = Math.max(...rackRows.map(r=>r.count),1);
+    const div=document.createElement('div');
+    div.style.cssText='background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px;';
+    div.innerHTML=`
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:2px;margin-bottom:10px;">${oven.name.toUpperCase()}</div>
+      <div style="display:flex;gap:16px;margin-bottom:10px;">
+        <div><div style="font-family:var(--mono);font-size:22px;font-weight:800;color:var(--amber)">${oRuns.length}</div><div style="font-family:var(--mono);font-size:8px;color:var(--dim)">TOTAL</div></div>
+        <div><div style="font-family:var(--mono);font-size:22px;font-weight:800;color:var(--green)">${todayO.length}</div><div style="font-family:var(--mono);font-size:8px;color:var(--dim)">TODAY</div></div>
+        <div><div style="font-family:var(--mono);font-size:22px;font-weight:800;color:var(--cyan)">${(oRuns.reduce((s,r)=>s+r.actualSecs,0)/3600).toFixed(1)}h</div><div style="font-family:var(--mono);font-size:8px;color:var(--dim)">HOURS</div></div>
+      </div>
+      ${rackRows.map(r=>{
+        const pct=Math.round(r.count/maxC*100);
+        return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;">
+          <span style="font-family:var(--mono);font-size:9px;color:var(--dim);min-width:44px">Rack ${r.n}</span>
+          <div style="flex:1;height:5px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--amber);border-radius:3px"></div></div>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--amber);min-width:20px;text-align:right">${r.count}</span>
+          <span style="font-family:var(--mono);font-size:9px;color:var(--dimmer)">${r.count?'('+fmtS(Math.round(r.total/r.count))+' avg)':''}</span>
+        </div>`;
+      }).join('')}
+    `;
+    charts.appendChild(div);
+  });
+
+  // Preset/coating usage
+  const byPreset={};
+  history.forEach(r=>{
+    const keys=(r.activePresets&&r.activePresets.length)?r.activePresets:[r.coating||'Unknown'];
+    keys.forEach(k=>{ if(!byPreset[k])byPreset[k]={count:0,total:0}; byPreset[k].count++; byPreset[k].total+=r.actualSecs; });
+  });
+  const maxP=Math.max(...Object.values(byPreset).map(d=>d.count),1);
+  document.getElementById('coatingBreakdown').innerHTML=`
+    <div style="font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:2px;margin-bottom:12px;">RUNS BY PRESET / COATING</div>
+    ${Object.entries(byPreset).sort((a,b)=>b[1].count-a[1].count).map(([k,d])=>`
+      <div style="margin-bottom:10px;">
+        <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+          <span style="font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text)">${k}</span>
+          <div style="display:flex;gap:14px;font-family:var(--mono);font-size:10px;">
+            <span style="color:var(--amber);font-weight:800">${d.count} runs</span>
+            <span style="color:var(--dim)">${fmtS(Math.round(d.total/d.count))} avg</span>
+          </div>
+        </div>
+        <div style="height:5px;background:var(--bg);border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(d.count/maxP*100)}%;background:var(--amber);border-radius:3px"></div></div>
+      </div>`).join('')||'<div style="font-family:var(--mono);font-size:11px;color:var(--dimmer);padding:20px 0">No data yet — complete some runs first</div>'}
+  `;
+}
+
+// ══ Export ════════════════════════════════════════════════════════════════════
+
+function exportCSV() {
+  const hdrs=['#','Oven','Rack','Batch ID','Presets','Coating','Operator','Started','Ended','Target(sec)','Actual(sec)','Variance(sec)'];
+  const rows=history.map((r,i)=>[
+    history.length-i, r.ovenName||r.ovenId, r.rackLabel||r.rack, r.batchId,
+    (r.activePresets||[]).join('+'), r.coating||'', r.operator||'',
+    new Date(r.startedAt).toISOString(), new Date(r.endedAt).toISOString(),
+    r.targetSecs, r.actualSecs, r.variance??''
+  ]);
+  const csv=[hdrs,...rows].map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download=`oven-runs-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  toast(`✓ Exported ${history.length} runs`);
+}
+
+// ══ Settings ═════════════════════════════════════════════════════════════════
+
+function renderSettings() {
+  // Presets
+  const custom = getCustomPresets();
+  document.getElementById('presetList').innerHTML = [
+    ...LOCKED_PRESETS.map(p=>`
+      <div class="set-row">
+        <span style="font-family:var(--mono);font-size:11px;color:var(--blue);font-weight:700">🔒 ${p.name}</span>
+        <span style="font-family:var(--mono);font-size:10px;color:var(--dim)">${p.mins} min — always available</span>
+      </div>`),
+    ...custom.map((p,i)=>`
+      <div class="set-row">
+        <input class="form-input" id="pname-${i}" value="${p.name}" style="width:190px" placeholder="Preset name"/>
+        <input class="form-input" id="pmins-${i}" type="number" value="${p.mins}" style="width:68px;text-align:center" placeholder="Min"/>
+        <button class="del-btn" onclick="delPreset(${i})">✕ Remove</button>
+      </div>`)
+  ].join('');
+
+  // Ovens
+  const ovens = getOvens();
+  document.getElementById('ovenSettingsList').innerHTML = ovens.map((o,i)=>`
+    <div class="set-row">
+      <input class="form-input" id="oname-${i}" value="${o.name}" style="width:165px"/>
+      <label style="display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:10px;color:var(--dim);cursor:pointer;">
+        <input type="checkbox" id="oactive-${i}" ${o.active?'checked':''} style="accent-color:var(--amber);"/> Active
+      </label>
+      ${ovens.length>1?`<button class="del-btn" onclick="delOven(${i})">✕</button>`:''}
+    </div>`).join('');
+
+  document.getElementById('racksInput').value       = getRacks();
+  document.getElementById('operatorInput').value    = getOperator();
+  document.getElementById('serverInput').value      = serverUrl;
+  document.getElementById('mobileUrlFull').textContent = `${serverUrl}/status`;
+}
+
+function addPreset() {
+  const name = document.getElementById('newPresetName').value.trim();
+  const mins = parseInt(document.getElementById('newPresetMins').value);
+  if (!name||!mins) { toast('Enter a name and minutes', true); return; }
+  const c=[...getCustomPresets()];
+  c.push({id:`cp${Date.now()}`,name,mins});
+  cfg.customPresets=c; saveCfg(); renderSettings();
+  document.getElementById('newPresetName').value='';
+  document.getElementById('newPresetMins').value='';
+  toast(`✓ Preset "${name}" added`);
+}
+
+function delPreset(i) {
+  const c=[...getCustomPresets()]; c.splice(i,1); cfg.customPresets=c; saveCfg(); renderSettings();
+}
+
+function addOven() {
+  const ovens=[...getOvens()];
+  ovens.push({id:`oven${Date.now()}`,name:`Oven ${ovens.length+1}`,active:true});
+  cfg.ovens=ovens; saveCfg(); renderSettings();
+}
+
+function delOven(i) {
+  const o=[...getOvens()]; o.splice(i,1); cfg.ovens=o; saveCfg(); renderSettings();
+}
+
+function saveSettings() {
+  // Save presets
+  const cp=getCustomPresets().map((_,i)=>({
+    id:getCustomPresets()[i].id||`cp${i}`,
+    name:document.getElementById(`pname-${i}`)?.value?.trim()||getCustomPresets()[i].name,
+    mins:parseInt(document.getElementById(`pmins-${i}`)?.value)||getCustomPresets()[i].mins,
+  }));
+  cfg.customPresets=cp;
+  // Save ovens
+  cfg.ovens=getOvens().map((o,i)=>({
+    ...o,
+    name:document.getElementById(`oname-${i}`)?.value?.trim()||o.name,
+    active:document.getElementById(`oactive-${i}`)?.checked??o.active,
+  }));
+  cfg.racksPerOven = parseInt(document.getElementById('racksInput').value)||6;
+  cfg.operator     = document.getElementById('operatorInput').value.trim();
+  cfg.serverUrl    = document.getElementById('serverInput').value.trim();
+  serverUrl        = cfg.serverUrl;
+  saveCfg();
+  buildAll();
+  startHeartbeat();
+  pingServer(false);
+  toast('✓ Settings saved — tabs rebuilt');
+}
+
+// ══ Toast ═════════════════════════════════════════════════════════════════════
+
+let toastTm;
+function toast(msg, err=false) {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className=`toast show${err?' err':''}`;
+  clearTimeout(toastTm); toastTm=setTimeout(()=>t.classList.remove('show'),3200);
+}
+
+// ══ BroadcastChannel for dashboard ═══════════════════════════════════════════
+
+const bc = new BroadcastChannel('oven-timer');
+bc.onmessage = e => {
+  if (e.data.type==='GET_HISTORY') bc.postMessage({type:'HISTORY',data:history,live:getLive()});
+};
+function getLive() {
+  const out={};
+  Object.entries(timers).forEach(([k,t])=>{
+    if(t.state!=='idle'){
+      const oven=getOvens().find(o=>o.id===t.ovenId);
+      out[k]={ovenName:oven?.name||t.ovenId,rackLabel:RACK_LABEL(t.rack.replace('rack','')),state:t.state,elapsed:t.elapsed,target:t.target,batchId:t.batchId,coating:t.coating,presets:t.activePresets};
+    }
+  });
+  return out;
+}
+setInterval(()=>bc.postMessage({type:'LIVE',live:getLive(),history}),5000);
+
+// ══ Init ══════════════════════════════════════════════════════════════════════
+
+buildAll();
+renderHistory();
+renderAnalytics();
+pingServer(false);
+startHeartbeat();
+</script>
+</body>
+</html>

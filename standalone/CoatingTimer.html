@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Coating Timer</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#070A0F; --surface:#0D1117; --card:#111820;
+  --border:#1C2733; --borderLt:#2A3A4A;
+  --text:#E8EDF2; --dim:#8899AA; --dimmer:#445566;
+  --amber:#F59E0B; --amberDk:#451A00;
+  --green:#10B981; --greenDk:#052E1A;
+  --red:#EF4444;  --redDk:#3F0A0A;
+  --purple:#8B5CF6; --purpleDk:#2D1B69;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'DM Sans',sans-serif;
+  --disp:'Bebas Neue',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;overflow:hidden;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);display:flex;flex-direction:column;}
+
+/* HEADER */
+.hdr{background:var(--surface);border-bottom:2px solid var(--border);
+  padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.hdr-left{display:flex;align-items:center;gap:12px;}
+.logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#8B5CF6,#5B21B6);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-weight:800;font-size:15px;color:#fff;flex-shrink:0;}
+.coater-name{font-family:var(--disp);font-size:30px;letter-spacing:1px;}
+.coater-sub{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;margin-top:1px;}
+.hdr-right{display:flex;align-items:center;gap:14px;}
+.clock{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--purple);letter-spacing:3px;}
+.srv-wrap{display:flex;align-items:center;gap:5px;cursor:pointer;}
+.srv-dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
+.srv-dot.ok{background:var(--green);box-shadow:0 0 10px var(--green);}
+.srv-dot.err{background:var(--red);}
+.srv-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);}
+.hdr-btn{background:transparent;border:1px solid var(--border);border-radius:8px;
+  padding:8px 14px;font-family:var(--mono);font-size:11px;color:var(--dim);cursor:pointer;
+  transition:all .15s;white-space:nowrap;}
+.hdr-btn:active{border-color:var(--purple);color:var(--purple);}
+.hdr-btn.accent{border-color:var(--purple);color:var(--purple);}
+
+/* MAIN */
+.main{flex:1;overflow-y:auto;overflow-x:hidden;padding:20px;
+  display:flex;flex-direction:column;gap:16px;}
+
+/* ── IDLE ── */
+.idle-card{background:var(--card);border:2px solid var(--border);border-radius:18px;
+  padding:24px;display:flex;flex-direction:column;gap:18px;}
+.sec-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:6px;}
+
+.coat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;}
+@media(min-width:600px){.coat-grid{grid-template-columns:repeat(4,1fr);}}
+@media(min-width:900px){.coat-grid{grid-template-columns:repeat(5,1fr);}}
+
+.coat-btn{position:relative;padding:16px 8px;border-radius:10px;border:2px solid var(--border);
+  font-family:var(--mono);font-size:11px;font-weight:700;cursor:pointer;
+  background:transparent;color:var(--dim);transition:all .15s;text-align:center;
+  -webkit-user-select:none;user-select:none;display:flex;flex-direction:column;
+  align-items:center;gap:3px;}
+.coat-btn:active{transform:scale(.96);}
+.coat-btn.sel{border-color:var(--purple);background:var(--purpleDk);color:var(--purple);}
+.coat-btn .target-hint{font-size:9px;opacity:.6;font-weight:400;}
+
+/* Add coating type tile */
+.add-coat-btn{padding:16px 8px;border-radius:10px;border:2px dashed var(--border);
+  font-family:var(--mono);font-size:20px;cursor:pointer;background:transparent;
+  color:var(--dimmer);transition:all .15s;display:flex;align-items:center;justify-content:center;}
+.add-coat-btn:active{border-color:var(--purple);color:var(--purple);}
+
+.input-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.inp-grp label{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;
+  display:block;margin-bottom:6px;}
+.big-inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:10px;
+  padding:16px;color:var(--text);font-family:var(--mono);font-size:24px;font-weight:700;
+  outline:none;text-align:center;-webkit-appearance:none;}
+.big-inp:focus{border-color:var(--purple);}
+.notes-inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:10px;
+  padding:13px 16px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;}
+.notes-inp:focus{border-color:var(--purple);}
+.notes-inp::placeholder{color:var(--dimmer);}
+
+.btn-start{width:100%;padding:24px;border-radius:14px;border:none;font-weight:800;
+  font-size:22px;cursor:pointer;font-family:var(--sans);background:var(--purple);
+  color:#fff;transition:all .15s;-webkit-user-select:none;}
+.btn-start:active{transform:scale(.98);background:#7C3AED;}
+.btn-start.off{background:var(--border);color:var(--dimmer);cursor:not-allowed;}
+
+/* ── RUNNING ── */
+.run-card{border:3px solid var(--purple);border-radius:18px;overflow:hidden;
+  display:flex;flex-direction:column;transition:border-color .3s,box-shadow .3s;
+  box-shadow:0 0 40px #8B5CF618;}
+.run-card.s-warn{border-color:var(--amber);box-shadow:0 0 40px #F59E0B22;}
+.run-card.s-over{border-color:var(--red);box-shadow:0 0 60px #EF444438;
+  animation:cardPulse .5s infinite alternate;}
+@keyframes cardPulse{from{box-shadow:0 0 30px #EF444430;}to{box-shadow:0 0 70px #EF444455;}}
+.run-hdr{background:var(--surface);padding:16px 24px;
+  display:flex;align-items:center;justify-content:space-between;
+  border-bottom:1px solid var(--border);}
+.run-coat{font-family:var(--disp);font-size:26px;letter-spacing:1px;}
+.run-meta{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:2px;}
+.pill{font-family:var(--mono);font-size:10px;font-weight:700;padding:6px 16px;
+  border-radius:20px;text-transform:uppercase;letter-spacing:.5px;}
+.p-run{background:var(--purpleDk);color:var(--purple);}
+.p-warn{background:var(--amberDk);color:var(--amber);}
+.p-over{background:var(--redDk);color:var(--red);animation:pp .4s infinite alternate;}
+.p-paus{background:var(--border);color:var(--dim);}
+@keyframes pp{from{opacity:1;}to{opacity:.4;}}
+.run-body{padding:28px 24px;display:flex;flex-direction:column;align-items:center;gap:16px;}
+.timer-giant{font-family:var(--disp);line-height:1;letter-spacing:4px;color:var(--purple);
+  transition:color .3s;text-align:center;font-size:clamp(80px,20vw,180px);}
+.timer-giant.c-amber{color:var(--amber);}
+.timer-giant.c-red{color:var(--red);}
+.prog-wrap{width:100%;height:10px;background:var(--border);border-radius:5px;overflow:hidden;}
+.prog-bar{height:100%;border-radius:5px;transition:width .5s,background .3s;}
+.target-txt{font-family:var(--mono);font-size:13px;color:var(--dim);text-align:center;}
+.run-stats{display:flex;gap:32px;justify-content:center;flex-wrap:wrap;}
+.run-stat{text-align:center;}
+.run-stat-val{font-family:var(--mono);font-size:20px;font-weight:700;}
+.run-stat-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;margin-top:2px;}
+.run-btns{display:grid;grid-template-columns:1fr 1fr;gap:10px;width:100%;}
+.run-btn{padding:20px;border-radius:12px;border:2px solid;font-weight:700;font-size:17px;
+  cursor:pointer;font-family:var(--sans);transition:all .15s;-webkit-user-select:none;}
+.run-btn:active{transform:scale(.98);}
+.btn-pause{background:var(--amberDk);border-color:var(--amber);color:var(--amber);}
+.btn-resume{background:var(--purpleDk);border-color:var(--purple);color:var(--purple);}
+.btn-done{background:var(--green);border-color:var(--green);color:#000;}
+.btn-abort{background:transparent;border-color:var(--border);color:var(--dimmer);
+  font-size:13px;padding:13px;width:100%;margin-top:2px;
+  border-radius:10px;border-width:1px;cursor:pointer;font-family:var(--sans);}
+
+/* ── LOG ── */
+.log-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
+.log-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.log-ttl{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:1px;font-weight:700;}
+.log-clr{font-family:var(--mono);font-size:9px;color:var(--dimmer);cursor:pointer;
+  background:transparent;border:none;padding:4px 8px;}
+.log-list{max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;}
+.log-row{display:flex;align-items:center;gap:10px;padding:8px 10px;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;}
+.log-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.log-coat{font-family:var(--mono);font-size:11px;color:var(--purple);font-weight:700;min-width:88px;}
+.log-trays{font-family:var(--mono);font-size:11px;color:var(--dim);min-width:40px;}
+.log-dur{font-family:var(--mono);font-size:11px;color:var(--green);min-width:60px;}
+.log-note{font-family:var(--mono);font-size:10px;color:var(--dimmer);font-style:italic;
+  flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.log-time{font-family:var(--mono);font-size:9px;color:var(--dimmer);flex-shrink:0;}
+.log-empty{font-family:var(--mono);font-size:11px;color:var(--dimmer);text-align:center;padding:16px;}
+
+/* ── MANAGE TYPES PANEL ── */
+.manage-panel{background:var(--card);border:2px solid var(--purple);border-radius:18px;
+  padding:20px;display:flex;flex-direction:column;gap:14px;}
+.manage-title{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--purple);
+  letter-spacing:2px;display:flex;align-items:center;justify-content:space-between;}
+.type-list{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto;}
+.type-row{display:flex;align-items:center;gap:10px;background:var(--surface);
+  border:1px solid var(--border);border-radius:10px;padding:10px 14px;}
+.type-color-swatch{width:18px;height:18px;border-radius:4px;flex-shrink:0;}
+.type-row-name{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);flex:1;}
+.type-row-target{font-family:var(--mono);font-size:11px;color:var(--dim);min-width:48px;text-align:right;}
+.type-row-btns{display:flex;gap:6px;flex-shrink:0;}
+.icon-btn{background:transparent;border:1px solid var(--border);border-radius:6px;
+  padding:5px 10px;cursor:pointer;font-size:12px;color:var(--dim);transition:all .15s;}
+.icon-btn:active{transform:scale(.95);}
+.icon-btn.edit:active{border-color:var(--amber);color:var(--amber);}
+.icon-btn.del:active{border-color:var(--red);color:var(--red);}
+.icon-btn.del:hover{border-color:var(--red);color:var(--red);}
+
+/* ── MODAL ── */
+.modal-bg{position:fixed;inset:0;background:#00000090;z-index:200;
+  display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal{background:var(--surface);border:1px solid var(--borderLt);border-radius:18px;
+  padding:26px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;}
+.modal h3{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);letter-spacing:1px;}
+.m-field label{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;
+  display:block;margin-bottom:6px;}
+.m-inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:8px;
+  padding:12px 14px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;
+  -webkit-appearance:none;}
+.m-inp:focus{border-color:var(--purple);}
+.m-inp[type="color"]{padding:6px 8px;height:44px;cursor:pointer;}
+.m-btns{display:flex;gap:8px;margin-top:4px;}
+.m-btns button{flex:1;padding:13px;border-radius:10px;border:none;
+  font-weight:700;font-size:14px;cursor:pointer;font-family:var(--sans);}
+.color-presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;}
+.color-dot{width:28px;height:28px;border-radius:6px;border:2px solid transparent;
+  cursor:pointer;transition:all .15s;flex-shrink:0;}
+.color-dot.active{border-color:#fff;transform:scale(1.1);}
+.color-dot:active{transform:scale(.9);}
+
+/* TOAST */
+.toast-wrap{position:fixed;bottom:28px;left:50%;transform:translateX(-50%);z-index:300;pointer-events:none;}
+.toast{background:#1A2540;border:1px solid var(--borderLt);border-radius:10px;
+  padding:11px 22px;font-family:var(--mono);font-size:13px;color:var(--text);
+  box-shadow:0 4px 24px #00000060;white-space:nowrap;}
+.toast.ok{border-color:var(--green);color:var(--green);}
+.toast.warn{border-color:var(--amber);color:var(--amber);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-left">
+    <div class="logo" id="logoMark">CT</div>
+    <div>
+      <div class="coater-name" id="hdrName">COATING TIMER</div>
+      <div class="coater-sub">LAB_ASSISTANT · PAIR EYEWEAR</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="srv-wrap" onclick="pingServer(true)">
+      <div class="srv-dot" id="srvDot"></div>
+      <span class="srv-lbl" id="srvLbl">SERVER</span>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+    <button class="hdr-btn accent" onclick="toggleManage()" id="manageBtn">⚗ COATING TYPES</button>
+    <button class="hdr-btn" onclick="openSetup()">⚙ SETUP</button>
+  </div>
+</div>
+
+<div class="main" id="main"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- MODAL -->
+<div class="modal-bg" id="modal" style="display:none">
+  <div class="modal">
+    <h3 id="mTitle"></h3>
+    <div id="mBody"></div>
+    <div class="m-btns" id="mBtns"></div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────
+// DEFAULT COATING TYPES
+// ─────────────────────────────────────────────────
+const DEFAULT_COATS = [
+  {id:'AR',  label:'AR',          color:'#8B5CF6', target:90},
+  {id:'BC',  label:'Blue Cut',    color:'#3B82F6', target:75},
+  {id:'HC',  label:'Hard Coat',   color:'#10B981', target:60},
+  {id:'MIR', label:'Mirror',      color:'#06B6D4', target:45},
+  {id:'POL', label:'Polarized',   color:'#F59E0B', target:120},
+  {id:'TR',  label:'Transitions', color:'#EF4444', target:105},
+  {id:'PRM', label:'Premium AR',  color:'#EC4899', target:120},
+  {id:'CLR', label:'Clear',       color:'#64748B', target:50},
+];
+
+const COLOR_PRESETS = [
+  '#8B5CF6','#3B82F6','#10B981','#06B6D4','#F59E0B',
+  '#EF4444','#EC4899','#64748B','#F97316','#22C55E',
+  '#A78BFA','#60A5FA','#34D399','#FBBF24','#F87171',
+];
+
+const COATER_LIST = [
+  {id:'C1', label:'Coater 1'},
+  {id:'C2', label:'Coater 2'},
+  {id:'C3', label:'Coater 3 (Large)'},
+];
+
+// ─────────────────────────────────────────────────
+// PERSISTENCE
+// ─────────────────────────────────────────────────
+const K = {CFG:'ct_cfg', RUN:'ct_run', LOG:'ct_log', COATS:'ct_coats'};
+function lsGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch{return d;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
+
+// Load state
+let cfg        = lsGet(K.CFG,{});
+let run        = lsGet(K.RUN,null);
+let log        = lsGet(K.LOG,[]);
+let coats      = lsGet(K.COATS, DEFAULT_COATS);
+
+// Ensure IDs exist on loaded coats
+coats = coats.map(c=>({...c, id:c.id||('C_'+Date.now()+'_'+Math.random().toString(36).slice(2))}));
+
+let coaterId    = cfg.coaterId    || '';
+let coaterLabel = cfg.coaterLabel || '';
+let operator    = cfg.operator    || '';
+let serverUrl   = cfg.serverUrl   || 'http://localhost:3002';
+
+let selCoatId   = null;   // selected type id while idle
+let manageOpen  = false;  // manage panel visible
+let serverOk    = false;
+
+function persistCfg(){lsSet(K.CFG,{coaterId,coaterLabel,operator,serverUrl});}
+function persistRun(){lsSet(K.RUN,run);}
+function persistLog(){lsSet(K.LOG,log.slice(0,400));}
+function persistCoats(){lsSet(K.COATS,coats);}
+
+// ─────────────────────────────────────────────────
+// CLOCK
+// ─────────────────────────────────────────────────
+function tickClock(){
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+}
+setInterval(tickClock,1000); tickClock();
+
+// ─────────────────────────────────────────────────
+// SERVER
+// ─────────────────────────────────────────────────
+async function pingServer(manual=false){
+  try{const r=await fetch(`${serverUrl}/health`,{signal:AbortSignal.timeout(2500)});serverOk=r.ok;}
+  catch{serverOk=false;}
+  const dot=document.getElementById('srvDot');
+  const lbl=document.getElementById('srvLbl');
+  dot.className='srv-dot '+(serverOk?'ok':'err');
+  lbl.textContent=serverOk?serverUrl.replace(/https?:\/\//,'').split('/')[0].slice(0,22):'OFFLINE';
+  if(manual)toast(serverOk?'Server connected ✓':'Server unreachable',serverOk?'ok':'warn');
+}
+setInterval(pingServer,30000); pingServer();
+
+async function reportCompleted(entry){
+  if(!serverOk)return;
+  try{await fetch(`${serverUrl}/api/coating-run`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({coater:coaterId,coaterName:coaterLabel,
+      coatingType:entry.coatingType,coatingLabel:entry.coatingLabel,
+      trays:entry.trays,targetMin:entry.targetMin,durationSec:entry.durationSec,
+      onTime:entry.onTime,operator,notes:entry.notes||'',
+      completedAt:new Date().toISOString()})
+  });}catch(e){console.warn('report failed',e);}
+}
+
+async function sendHeartbeat(){
+  if(!serverOk||!run||run.state==='idle')return;
+  const coat=coats.find(c=>c.id===run.coatingType)||{};
+  try{await fetch(`${serverUrl}/api/coating-live`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({live:[{coater:coaterId,coaterName:coaterLabel,
+      coatingType:run.coatingType,coatingLabel:coat.label||'',
+      trays:run.trays,targetMin:run.targetMin,
+      elapsedSec:Math.round(elapsed()),state:run.state,operator,notes:run.notes||''}],
+      timestamp:new Date().toISOString()})
+  });}catch{}
+}
+setInterval(sendHeartbeat,8000);
+
+// ─────────────────────────────────────────────────
+// ELAPSED
+// ─────────────────────────────────────────────────
+function elapsed(){
+  if(!run)return 0;
+  let e=(Date.now()-run.startMs)/1000-(run.pausedMs||0)/1000;
+  if(run.state==='paused'&&run.pauseStartMs)e-=(Date.now()-run.pauseStartMs)/1000;
+  return Math.max(0,e);
+}
+
+// ─────────────────────────────────────────────────
+// RUN ACTIONS
+// ─────────────────────────────────────────────────
+function startRun(){
+  if(!selCoatId){toast('Select a coating type first','warn');return;}
+  const trays=parseInt(document.getElementById('inp-trays')?.value||'0')||0;
+  if(!trays){toast('Enter tray count','warn');return;}
+  const coat=coats.find(c=>c.id===selCoatId);
+  const targetMin=parseInt(document.getElementById('inp-target')?.value||'0')||coat?.target||90;
+  const notes=document.getElementById('inp-notes')?.value.trim()||'';
+  run={coatingType:selCoatId,trays,targetMin,notes,
+    startMs:Date.now(),pausedMs:0,pauseStartMs:null,state:'running'};
+  persistRun(); selCoatId=null; manageOpen=false;
+  render(); toast(`${coat?.label} started · ${trays} trays · ${targetMin}min`,'ok');
+}
+
+function pauseRun(){
+  if(!run||run.state!=='running')return;
+  run={...run,state:'paused',pauseStartMs:Date.now()};
+  persistRun(); render(); toast('Paused');
+}
+
+function resumeRun(){
+  if(!run||run.state!=='paused')return;
+  const add=run.pauseStartMs?Date.now()-run.pauseStartMs:0;
+  run={...run,state:'running',pausedMs:(run.pausedMs||0)+add,pauseStartMs:null};
+  persistRun(); render(); toast('Resumed','ok');
+}
+
+function completeRun(){
+  if(!run)return;
+  const dur=Math.round(elapsed());
+  const coat=coats.find(c=>c.id===run.coatingType)||{label:run.coatingType};
+  const entry={id:Date.now(),coatingType:run.coatingType,coatingLabel:coat.label,
+    trays:run.trays,targetMin:run.targetMin,durationSec:dur,
+    onTime:dur<=run.targetMin*60,operator,notes:run.notes||'',completedAt:new Date()};
+  log.unshift(entry); persistLog();
+  reportCompleted(entry);
+  run=null; persistRun();
+  render();
+  toast(`Complete · ${fmtS(dur)} · ${entry.onTime?'✓ ON TIME':'⚠ OVER TARGET'}`,entry.onTime?'ok':'warn');
+}
+
+function abortRun(){
+  if(!confirm('Abandon this run? Data will not be saved.'))return;
+  run=null; persistRun(); selCoatId=null; render(); toast('Run abandoned');
+}
+
+// ─────────────────────────────────────────────────
+// FORMAT
+// ─────────────────────────────────────────────────
+function fmtS(s){
+  s=Math.max(0,Math.round(s));
+  const h=Math.floor(s/3600),m=Math.floor((s%3600)/60),ss=s%60;
+  if(h>0)return`${pad(h)}:${pad(m)}:${pad(ss)}`;
+  return`${pad(m)}:${pad(ss)}`;
+}
+function pad(n){return String(n).padStart(2,'0');}
+function fmtTime(dt){return new Date(dt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});}
+
+// ─────────────────────────────────────────────────
+// HEADER
+// ─────────────────────────────────────────────────
+function updateHeader(){
+  document.getElementById('logoMark').textContent = coaterId||'CT';
+  document.getElementById('hdrName').textContent  = (coaterLabel||'COATING TIMER').toUpperCase();
+  const mb = document.getElementById('manageBtn');
+  if(mb) mb.style.borderColor = manageOpen ? '#8B5CF6':'';
+}
+
+// ─────────────────────────────────────────────────
+// MANAGE COATING TYPES PANEL
+// ─────────────────────────────────────────────────
+function toggleManage(){
+  manageOpen = !manageOpen;
+  render();
+}
+
+function renderManagePanel(){
+  const rows = coats.map(c=>`
+    <div class="type-row">
+      <div class="type-color-swatch" style="background:${c.color}"></div>
+      <div class="type-row-name">${escHtml(c.label)}</div>
+      <div class="type-row-target">${c.target}min</div>
+      <div class="type-row-btns">
+        <button class="icon-btn edit" onclick="editCoatType('${c.id}')">✏</button>
+        <button class="icon-btn del"  onclick="deleteCoatType('${c.id}')">✕</button>
+      </div>
+    </div>`).join('');
+
+  return`
+  <div class="manage-panel">
+    <div class="manage-title">
+      <span>⚗ COATING TYPES (${coats.length})</span>
+      <button class="hdr-btn" onclick="addCoatType()" style="border-color:var(--green);color:var(--green);">+ ADD TYPE</button>
+    </div>
+    <div class="type-list">${rows||'<div class="log-empty">No coating types — add one above</div>'}</div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);text-align:center;padding-top:4px;">
+      Changes take effect immediately · Swipe down to close
+    </div>
+  </div>`;
+}
+
+function addCoatType(){
+  openCoatModal(null);
+}
+
+function editCoatType(id){
+  const coat = coats.find(c=>c.id===id);
+  if(!coat)return;
+  openCoatModal(coat);
+}
+
+function deleteCoatType(id){
+  const coat = coats.find(c=>c.id===id);
+  if(!coat)return;
+  if(run && run.coatingType===id){
+    toast('Cannot delete — this type is currently running','warn');
+    return;
+  }
+  if(!confirm(`Delete "${coat.label}"? This cannot be undone.`))return;
+  coats = coats.filter(c=>c.id!==id);
+  if(selCoatId===id) selCoatId=null;
+  persistCoats(); render();
+  toast(`Deleted "${coat.label}"`,'warn');
+}
+
+function openCoatModal(existing){
+  const isNew = !existing;
+  let pickedColor = existing?.color || COLOR_PRESETS[0];
+
+  const presetDots = COLOR_PRESETS.map(c=>`
+    <div class="color-dot${pickedColor===c?' active':''}"
+      style="background:${c}"
+      onclick="pickPreset('${c}',this)"
+      data-color="${c}"></div>`).join('');
+
+  document.getElementById('mTitle').textContent = isNew ? 'ADD COATING TYPE' : 'EDIT COATING TYPE';
+  document.getElementById('mBody').innerHTML = `
+    <div class="m-field">
+      <label>TYPE NAME</label>
+      <input class="m-inp" id="mc-label" placeholder="e.g. UV Blocker" value="${escHtml(existing?.label||'')}"/>
+    </div>
+    <div class="m-field">
+      <label>DEFAULT TARGET TIME (MINUTES)</label>
+      <input class="m-inp" id="mc-target" type="number" min="1" max="480" inputmode="numeric"
+        placeholder="e.g. 90" value="${existing?.target||''}"/>
+    </div>
+    <div class="m-field">
+      <label>COLOR</label>
+      <div class="color-presets" id="colorPresets">${presetDots}</div>
+      <input class="m-inp" id="mc-color" type="color" value="${existing?.color||pickedColor}"
+        oninput="syncColorFromPicker(this.value)"/>
+    </div>`;
+
+  // Preview swatch updates live
+  document.getElementById('mBtns').innerHTML = `
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
+    <button style="background:var(--purple);color:#fff;" onclick="saveCoatType('${isNew?'':existing.id}')">
+      ${isNew?'Add Type':'Save Changes'}
+    </button>`;
+
+  document.getElementById('modal').style.display='flex';
+  setTimeout(()=>document.getElementById('mc-label')?.focus(),60);
+}
+
+function pickPreset(color, el){
+  document.querySelectorAll('.color-dot').forEach(d=>d.classList.remove('active'));
+  el.classList.add('active');
+  const picker = document.getElementById('mc-color');
+  if(picker) picker.value = color;
+}
+
+function syncColorFromPicker(value){
+  document.querySelectorAll('.color-dot').forEach(d=>{
+    d.classList.toggle('active', d.dataset.color===value);
+  });
+}
+
+function saveCoatType(existingId){
+  const label  = document.getElementById('mc-label')?.value.trim();
+  const target = parseInt(document.getElementById('mc-target')?.value||'0')||0;
+  const color  = document.getElementById('mc-color')?.value||'#8B5CF6';
+
+  if(!label){toast('Enter a type name','warn');return;}
+  if(!target||target<1||target>480){toast('Target must be 1–480 minutes','warn');return;}
+
+  if(!existingId){
+    // Add new
+    const newId = 'C_'+Date.now();
+    coats.push({id:newId, label, color, target});
+    toast(`Added "${label}"`,'ok');
+  } else {
+    // Edit existing
+    coats = coats.map(c=>c.id===existingId ? {...c,label,color,target} : c);
+    toast(`Updated "${label}"`,'ok');
+  }
+  persistCoats();
+  closeModal();
+  render();
+}
+
+// ─────────────────────────────────────────────────
+// RENDER — IDLE
+// ─────────────────────────────────────────────────
+function renderIdle(){
+  const coat = coats.find(c=>c.id===selCoatId);
+  const coatBtns = coats.map(c=>`
+    <div class="coat-btn${selCoatId===c.id?' sel':''}"
+      style="${selCoatId===c.id?`border-color:${c.color};background:${c.color}18;color:${c.color}`:''}"
+      onclick="pickCoat('${c.id}')">
+      ${escHtml(c.label)}
+      <span class="target-hint">${c.target}min</span>
+    </div>`).join('');
+
+  const addBtn = `<div class="add-coat-btn" onclick="addCoatType()">+</div>`;
+
+  return`
+  <div class="idle-card">
+    <div>
+      <div class="sec-lbl">COATING TYPE</div>
+      <div class="coat-grid">${coatBtns}${addBtn}</div>
+    </div>
+    <div class="input-row">
+      <div class="inp-grp">
+        <label>TRAY COUNT</label>
+        <input class="big-inp" id="inp-trays" type="number" min="1" max="999"
+          inputmode="numeric" placeholder="—"/>
+      </div>
+      <div class="inp-grp">
+        <label>TARGET (MIN)</label>
+        <input class="big-inp" id="inp-target" type="number" min="1" max="480"
+          inputmode="numeric" placeholder="${coat?.target||'—'}" value="${coat?.target||''}"/>
+      </div>
+    </div>
+    <div>
+      <div class="sec-lbl">NOTES / BATCH ID</div>
+      <input class="notes-inp" id="inp-notes"
+        placeholder="Batch ID, chemist notes, special instructions…"/>
+    </div>
+    <button class="btn-start${selCoatId?'':' off'}" onclick="startRun()">
+      ▶ START RUN${coat?' — '+coat.label.toUpperCase():''}
+    </button>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────────
+// RENDER — RUNNING
+// ─────────────────────────────────────────────────
+function renderRunning(){
+  const e   = elapsed();
+  const tSec= (run.targetMin||90)*60;
+  const pct = Math.min(100,(e/tSec)*100);
+  const coat= coats.find(c=>c.id===run.coatingType)||{label:run.coatingType,color:'#8B5CF6'};
+  const isPaused=run.state==='paused';
+  const over=e>tSec*1.15, warn=e>tSec*0.9;
+  const state=isPaused?'paused':over?'over':warn?'warn':'run';
+  const barClr=over?'var(--red)':warn?'var(--amber)':coat.color;
+  const timerCls=over?'c-red':warn||isPaused?'c-amber':'';
+  const pillCls=isPaused?'p-paus':over?'p-over':warn?'p-warn':'p-run';
+  const pillTxt=isPaused?'PAUSED':over?'OVERDUE':warn?'NEAR TARGET':'RUNNING';
+  const cardCls=over?'s-over':warn?'s-warn':'';
+  const rem=tSec-e;
+  const targetTxt=isPaused?`PAUSED · Target ${run.targetMin}min`:
+    over?`⚠ ${fmtS(e-tSec)} over target`:
+    `${fmtS(rem)} remaining · Target ${run.targetMin}min`;
+  const btns=isPaused
+    ?`<button class="run-btn btn-resume" onclick="resumeRun()">▶ RESUME</button>
+      <button class="run-btn btn-done"   onclick="completeRun()">✓ COMPLETE</button>`
+    :`<button class="run-btn btn-pause"  onclick="pauseRun()">⏸ PAUSE</button>
+      <button class="run-btn btn-done"   onclick="completeRun()">✓ COMPLETE</button>`;
+
+  return`
+  <div class="run-card ${cardCls}" id="runCard">
+    <div class="run-hdr">
+      <div>
+        <div class="run-coat" style="color:${coat.color}">${escHtml(coat.label)}</div>
+        <div class="run-meta">${run.trays} trays · Started ${fmtTime(run.startMs)}${operator?' · '+operator:''}</div>
+      </div>
+      <div class="pill ${pillCls}">${pillTxt}</div>
+    </div>
+    <div class="run-body">
+      <div class="timer-giant ${timerCls}" id="timerEl">${fmtS(e)}</div>
+      <div class="prog-wrap">
+        <div class="prog-bar" id="progEl" style="width:${pct}%;background:${barClr}"></div>
+      </div>
+      <div class="target-txt" id="targetEl">${targetTxt}</div>
+      <div class="run-stats">
+        <div class="run-stat">
+          <div class="run-stat-val">${run.trays}</div>
+          <div class="run-stat-lbl">TRAYS</div>
+        </div>
+        <div class="run-stat">
+          <div class="run-stat-val">${run.targetMin}m</div>
+          <div class="run-stat-lbl">TARGET</div>
+        </div>
+        <div class="run-stat">
+          <div class="run-stat-val">${Math.round(pct)}%</div>
+          <div class="run-stat-lbl">PROGRESS</div>
+        </div>
+        ${run.notes?`<div class="run-stat">
+          <div class="run-stat-val" style="font-size:12px;color:var(--dim)">📝 ${escHtml(run.notes)}</div>
+          <div class="run-stat-lbl">NOTES</div></div>`:''}
+      </div>
+      <div class="run-btns">${btns}</div>
+      <button class="btn-abort" onclick="abortRun()">ABANDON RUN</button>
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────────
+// RENDER — LOG
+// ─────────────────────────────────────────────────
+function renderLog(){
+  return`
+  <div class="log-card">
+    <div class="log-top">
+      <div class="log-ttl">TODAY'S RUNS${coaterLabel?' — '+coaterLabel.toUpperCase():''}</div>
+      ${log.length?`<button class="log-clr" onclick="clearLog()">CLEAR</button>`:''}
+    </div>
+    ${log.length===0
+      ?`<div class="log-empty">No completed runs yet</div>`
+      :`<div class="log-list">
+        ${log.slice(0,40).map(e=>`
+          <div class="log-row">
+            <div class="log-dot" style="background:${e.onTime?'var(--green)':'var(--amber)'}"></div>
+            <div class="log-coat">${escHtml(e.coatingLabel)}</div>
+            <div class="log-trays">${e.trays}T</div>
+            <div class="log-dur">${fmtS(e.durationSec)}</div>
+            <div class="log-note">${escHtml(e.notes||'')}</div>
+            <div class="log-time">${fmtTime(e.completedAt)}</div>
+          </div>`).join('')}
+      </div>`}
+  </div>`;
+}
+
+// ─────────────────────────────────────────────────
+// FULL RENDER
+// ─────────────────────────────────────────────────
+function render(){
+  updateHeader();
+  const sections = [];
+  if(manageOpen) sections.push(renderManagePanel());
+  sections.push(run ? renderRunning() : renderIdle());
+  sections.push(renderLog());
+  document.getElementById('main').innerHTML = sections.join('');
+}
+
+// ─────────────────────────────────────────────────
+// LIVE TICK
+// ─────────────────────────────────────────────────
+function tick(){
+  if(!run||run.state!=='running')return;
+  const e   = elapsed();
+  const tSec= (run.targetMin||90)*60;
+  const pct = Math.min(100,(e/tSec)*100);
+  const over=e>tSec*1.15,warn=e>tSec*0.9;
+  const coat= coats.find(c=>c.id===run.coatingType)||{color:'#8B5CF6'};
+  const barClr=over?'var(--red)':warn?'var(--amber)':coat.color;
+
+  const te=document.getElementById('timerEl');
+  const pe=document.getElementById('progEl');
+  const tge=document.getElementById('targetEl');
+  const card=document.getElementById('runCard');
+  if(!te){render();return;}
+
+  te.textContent=fmtS(e);
+  te.className=`timer-giant ${over?'c-red':warn?'c-amber':''}`;
+  pe.style.width=pct+'%'; pe.style.background=barClr;
+  card.className=`run-card ${over?'s-over':warn?'s-warn':''}`;
+  const pill=card?.querySelector('.pill');
+  if(pill){pill.className=`pill ${over?'p-over':warn?'p-warn':'p-run'}`;
+    pill.textContent=over?'OVERDUE':warn?'NEAR TARGET':'RUNNING';}
+  const rem=tSec-e;
+  tge.textContent=over?`⚠ ${fmtS(e-tSec)} over target`:`${fmtS(rem)} remaining · Target ${run.targetMin}min`;
+}
+setInterval(tick,1000);
+
+// ─────────────────────────────────────────────────
+// COAT PICK
+// ─────────────────────────────────────────────────
+function pickCoat(id){
+  selCoatId=id;
+  if(!run) render();
+}
+
+// ─────────────────────────────────────────────────
+// SETUP MODAL
+// ─────────────────────────────────────────────────
+function openSetup(){
+  const opts=COATER_LIST.map(c=>`<option value="${c.id}" ${coaterId===c.id?'selected':''}>${c.label}</option>`).join('');
+  document.getElementById('mTitle').textContent='TABLET SETUP';
+  document.getElementById('mBody').innerHTML=`
+    <div class="m-field">
+      <label>THIS TABLET IS</label>
+      <select class="m-inp" id="mCoater">${opts}</select>
+    </div>
+    <div class="m-field">
+      <label>OPERATOR NAME</label>
+      <input class="m-inp" id="mOp" value="${escHtml(operator)}" placeholder="e.g. Maria"/>
+    </div>
+    <div class="m-field">
+      <label>LAB_ASSISTANT SERVER</label>
+      <input class="m-inp" id="mSrv" value="${escHtml(serverUrl)}" placeholder="http://192.168.x.x:3002"/>
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
+    <button style="background:var(--purple);color:#fff;" onclick="saveSetup()">Save</button>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+function saveSetup(){
+  const found=COATER_LIST.find(c=>c.id===document.getElementById('mCoater')?.value)||COATER_LIST[0];
+  coaterId=found.id; coaterLabel=found.label;
+  operator=document.getElementById('mOp')?.value.trim()||'';
+  const srv=document.getElementById('mSrv')?.value.trim();
+  if(srv)serverUrl=srv;
+  persistCfg(); closeModal(); render(); pingServer();
+  toast('Setup saved','ok');
+}
+
+function closeModal(){document.getElementById('modal').style.display='none';}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+
+// ─────────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────────
+function clearLog(){if(confirm('Clear run history?')){log=[];persistLog();render();}}
+
+function escHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function toast(msg,type=''){
+  const wrap=document.getElementById('toastWrap');
+  const el=document.createElement('div');
+  el.className=`toast ${type}`; el.textContent=msg;
+  wrap.innerHTML=''; wrap.appendChild(el);
+  setTimeout(()=>el.style.opacity='0',2800);
+  setTimeout(()=>el.remove(),3100);
+}
+
+// ─────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────
+if(!cfg.coaterId) setTimeout(()=>openSetup(),300);
+render();
+</script>
+</body>
+</html>

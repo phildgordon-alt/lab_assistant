@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Put Wall 2 — Position QR Codes</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  
+  @media print {
+    @page { size: letter; margin: 0.4in; }
+    body { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+    .no-print { display: none !important; }
+    .page-break { page-break-before: always; }
+  }
+
+  body {
+    font-family: Arial, sans-serif;
+    background: #fff;
+    padding: 20px;
+  }
+
+  /* ── Cover header ── */
+  .header {
+    background: #1E3A5F;
+    color: #fff;
+    padding: 20px 28px;
+    border-radius: 8px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 { font-size: 26px; font-weight: 800; letter-spacing: 1px; }
+  .header .meta { font-size: 13px; color: #94A3B8; margin-top: 4px; }
+  .header .badge {
+    background: #3B82F6;
+    color: #fff;
+    font-size: 36px;
+    font-weight: 900;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-family: monospace;
+  }
+
+  /* ── Instructions ── */
+  .instructions {
+    background: #F0FDF4;
+    border: 2px solid #10B981;
+    border-radius: 8px;
+    padding: 14px 20px;
+    margin-bottom: 24px;
+    font-size: 13px;
+    color: #065F46;
+    line-height: 1.6;
+  }
+  .instructions strong { font-size: 14px; }
+
+  /* ── Grid ── */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 8px;
+  }
+
+  .cell {
+    border: 1.5px solid #CBD5E1;
+    border-radius: 6px;
+    padding: 6px 4px 4px;
+    text-align: center;
+    background: #fff;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .cell:hover { border-color: #3B82F6; background: #EFF6FF; }
+
+  .qr {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .qr svg {
+    width: 100% !important;
+    height: auto !important;
+    max-width: 90px;
+  }
+
+  .pos-label {
+    font-size: 16px;
+    font-weight: 900;
+    color: #1E3A5F;
+    font-family: 'Courier New', monospace;
+    margin-top: 3px;
+    letter-spacing: 1px;
+  }
+
+  .code-label {
+    font-size: 9px;
+    color: #94A3B8;
+    font-family: 'Courier New', monospace;
+    margin-top: 1px;
+  }
+
+  /* ── Cut guides section ── */
+  .cut-section {
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 2px dashed #CBD5E1;
+  }
+  .cut-header {
+    font-size: 13px;
+    color: #6B7280;
+    margin-bottom: 16px;
+    text-align: center;
+  }
+  .label-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+  }
+  .label-cell {
+    border: 1px dashed #94A3B8;
+    border-radius: 4px;
+    padding: 4px;
+    text-align: center;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .label-cell .qr svg {
+    max-width: 60px;
+  }
+  .label-cell .pos-label { font-size: 12px; }
+  .label-cell .code-label { font-size: 7px; }
+
+  /* ── Print button ── */
+  .no-print {
+    margin-top: 24px;
+    text-align: center;
+  }
+  .print-btn {
+    background: #1E3A5F;
+    color: #fff;
+    border: none;
+    padding: 14px 40px;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-right: 12px;
+  }
+  .print-btn:hover { background: #2E5FA3; }
+  .secondary-btn {
+    background: transparent;
+    color: #6B7280;
+    border: 1px solid #CBD5E1;
+    padding: 14px 24px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+
+  .footer {
+    margin-top: 24px;
+    font-size: 11px;
+    color: #9CA3AF;
+    text-align: center;
+    font-family: monospace;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <div class="meta">Pair Eyewear — Lab_Assistant</div>
+    <h1>PUT WALL 2 — POSITION QR CODES</h1>
+    <div class="meta">75 positions · Scan to bind job → location · Generated March 1, 2026</div>
+  </div>
+  <div class="badge">WALL 2</div>
+</div>
+
+<div class="instructions">
+  <strong>📋 Setup Instructions:</strong><br>
+  1. Print this sheet (Letter, portrait, scale to fit)<br>
+  2. Cut out each QR label and laminate if possible<br>
+  3. Affix each label to its numbered position on Put Wall 2<br>
+  4. <strong>To bind:</strong> Scan the printed thermal job label → scan the position QR → Lab_Assistant records the binding automatically
+</div>
+
+<div class="grid">
+  
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h1m3 0h7M1 2.5h1m5 0h1m2 0h3m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h5m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m2 0h3m2 0h5M3 10.5h1m1 0h2m1 0h1m3 0h4m2 0h1m2 0h1M2 11.5h4m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2M5 12.5h2m3 0h1m1 0h4m5 0h1M1 13.5h1m1 0h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h2m1 0h1M1 21.5h7m1 0h2m2 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P01</div>
+        <div class="code-label">W2-P01</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h3m2 0h7M1 2.5h1m5 0h1m2 0h4m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h3m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3M1 9.5h1m1 0h5m2 0h3m2 0h5M1 10.5h1m1 0h2m3 0h2m1 0h5m2 0h1m2 0h1M3 11.5h1m1 0h1m1 0h3m1 0h1m1 0h1m1 0h2M1 12.5h2m2 0h2m2 0h1m2 0h4m5 0h1M1 13.5h4m2 0h1m1 0h1m3 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h1m1 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h6m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m2 0h7m4 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P02</div>
+        <div class="code-label">W2-P02</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h3m2 0h7M1 2.5h1m5 0h1m1 0h5m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h2m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h1m2 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h3M1 9.5h1m1 0h1m1 0h1m1 0h1m4 0h1m4 0h1m2 0h1M1 10.5h1m2 0h3m1 0h2m5 0h1m3 0h3M1 11.5h1m1 0h1m3 0h4m2 0h1m3 0h1m3 0h1M5 12.5h1m2 0h1m2 0h1m3 0h1m2 0h4M2 13.5h1m1 0h1m2 0h3m1 0h1m1 0h1m1 0h1m1 0h3M9 14.5h1m1 0h2m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h3m1 0h3m2 0h3M1 16.5h1m5 0h1m4 0h3m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h3m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m2 0h2m3 0h2m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h1m1 0h1m1 0h1M1 20.5h1m5 0h1m3 0h1m3 0h2m2 0h3M1 21.5h7m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P03</div>
+        <div class="code-label">W2-P03</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h2m1 0h7M1 2.5h1m5 0h1m3 0h3m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m4 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m2 0h3m2 0h5M2 10.5h1m1 0h1m1 0h1m1 0h2m1 0h5m2 0h1m2 0h1M1 11.5h1m1 0h2m2 0h1m2 0h2m1 0h1m1 0h2M5 12.5h1m3 0h1m2 0h4m5 0h1M1 13.5h10m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2M1 20.5h1m5 0h1m4 0h5m2 0h1m1 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P04</div>
+        <div class="code-label">W2-P04</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h3m1 0h7M1 2.5h1m5 0h1m3 0h1m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m2 0h3m2 0h5M1 10.5h1m1 0h4m2 0h1m2 0h4m2 0h1m2 0h1M7 11.5h1m1 0h3m1 0h1m1 0h2M5 12.5h1m5 0h5m5 0h1M2 13.5h2m2 0h2m5 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h1m1 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h2m1 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P05</div>
+        <div class="code-label">W2-P05</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h2m1 0h2m1 0h7M1 2.5h1m5 0h1m2 0h2m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h1m1 0h1M1 9.5h1m1 0h1m3 0h2m1 0h1m5 0h1m2 0h1m1 0h1M1 10.5h1m1 0h2m5 0h3m1 0h3m1 0h2m1 0h1M3 11.5h5m2 0h1m1 0h3m1 0h3m1 0h2M2 12.5h1m1 0h2m3 0h1m1 0h2m1 0h3m2 0h1m1 0h1M2 13.5h1m1 0h1m1 0h4m2 0h6m1 0h2M9 14.5h1m1 0h1m6 0h3M1 15.5h7m1 0h2m4 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m2 0h1m2 0h1m3 0h1m2 0h2M1 17.5h1m1 0h3m1 0h1m3 0h1m3 0h1m2 0h4M1 18.5h1m1 0h3m1 0h1m2 0h3m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h2m1 0h3M1 20.5h1m5 0h1m3 0h2m1 0h2m3 0h1m1 0h1M1 21.5h7m1 0h13"/></svg>
+</div>
+        <div class="pos-label">P06</div>
+        <div class="code-label">W2-P06</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h2m2 0h1m1 0h7M1 2.5h1m5 0h1m2 0h3m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m1 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m2 0h2M1 9.5h1m3 0h1m1 0h3m1 0h2m1 0h5m2 0h1M1 10.5h1m1 0h3m3 0h2m1 0h2m2 0h1m1 0h1m1 0h1M2 11.5h2m1 0h4m1 0h1m1 0h1m2 0h5M2 12.5h1m3 0h1m3 0h2m2 0h2m1 0h3m1 0h1M1 13.5h2m1 0h1m2 0h1m3 0h1m1 0h3m2 0h3M9 14.5h1m1 0h1m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m3 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m4 0h2m2 0h1m1 0h1m1 0h2M1 17.5h1m1 0h3m1 0h1m1 0h4m2 0h3m1 0h3M1 18.5h1m1 0h3m1 0h1m3 0h3m5 0h3M1 19.5h1m1 0h3m1 0h1m4 0h1m2 0h3M1 20.5h1m5 0h1m6 0h4m1 0h1m1 0h1M1 21.5h7m1 0h3m1 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P07</div>
+        <div class="code-label">W2-P07</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h2m1 0h7M1 2.5h1m5 0h1m2 0h1m2 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h5m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m2 0h3m2 0h5M6 10.5h1m1 0h2m1 0h5m2 0h1m2 0h1M1 11.5h4m1 0h2m1 0h2m2 0h1m1 0h2M1 12.5h1m1 0h1m1 0h2m1 0h2m2 0h4m5 0h1M2 13.5h3m2 0h2m1 0h2m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h2m2 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2M1 20.5h1m5 0h1m4 0h5m2 0h1m1 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P08</div>
+        <div class="code-label">W2-P08</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h3m1 0h7M1 2.5h1m5 0h1m1 0h1m3 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h3m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2m1 0h2M1 9.5h1m1 0h2m1 0h3m3 0h2m1 0h1m2 0h1m1 0h2M1 10.5h3m1 0h2m2 0h1m2 0h4m2 0h1m2 0h1M1 11.5h4m2 0h1m1 0h1m2 0h1m5 0h2m1 0h1M2 12.5h3m1 0h1m3 0h1m1 0h1m2 0h3m1 0h3M1 13.5h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m2 0h1m2 0h1m3 0h3M1 15.5h7m1 0h2m1 0h2m2 0h1M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m2 0h2m1 0h6m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2M1 20.5h1m5 0h1m6 0h1M1 21.5h7m1 0h1m4 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P09</div>
+        <div class="code-label">W2-P09</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m5 0h1m1 0h7M1 2.5h1m5 0h1m2 0h3m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M2 10.5h3m3 0h1m1 0h6m2 0h1m2 0h1M1 11.5h11m1 0h1m1 0h2M2 12.5h1m1 0h3m1 0h3m1 0h4m5 0h1M1 13.5h2m4 0h2m4 0h1m2 0h1m1 0h2m1 0h1M9 14.5h2m2 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h1M1 20.5h1m5 0h1m2 0h7m1 0h2m1 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P10</div>
+        <div class="code-label">W2-P10</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h3m1 0h1m1 0h7M1 2.5h1m5 0h1m3 0h2m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h2m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M13 8.5h1M1 9.5h1m1 0h1m3 0h2m1 0h2m4 0h1m2 0h1m1 0h1M2 10.5h5m1 0h2m2 0h1m1 0h3m1 0h2m1 0h1M1 11.5h2m4 0h2m1 0h1m1 0h3m1 0h3m1 0h2M5 12.5h2m1 0h1m1 0h1m1 0h1m1 0h3m2 0h1m1 0h1M1 13.5h4m2 0h1m1 0h1m2 0h6m1 0h2M9 14.5h1m8 0h3M1 15.5h7m1 0h1m1 0h1m3 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m5 0h1m3 0h1m2 0h2M1 17.5h1m1 0h3m1 0h1m2 0h1m4 0h1m2 0h4M1 18.5h1m1 0h3m1 0h1m2 0h3m1 0h2m3 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h2m2 0h2M1 20.5h1m5 0h1m4 0h1m1 0h2m3 0h1m1 0h1M1 21.5h7m1 0h2m1 0h10"/></svg>
+</div>
+        <div class="pos-label">P11</div>
+        <div class="code-label">W2-P11</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m3 0h1m1 0h7M1 2.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h1m2 0h1M1 9.5h1m1 0h1m3 0h2m1 0h2m4 0h1m2 0h1m1 0h1M1 10.5h1m2 0h1m1 0h1m2 0h1m1 0h2m1 0h3m1 0h2m1 0h1M2 11.5h3m2 0h4m1 0h3m1 0h3m1 0h2M5 12.5h2m1 0h5m1 0h3m2 0h1m1 0h1M2 13.5h2m1 0h1m1 0h2m1 0h1m1 0h6m1 0h2M9 14.5h1m8 0h3M1 15.5h7m1 0h3m3 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m3 0h1m1 0h1m3 0h1m2 0h2M1 17.5h1m1 0h3m1 0h1m2 0h2m3 0h1m2 0h4M1 18.5h1m1 0h3m1 0h1m3 0h2m1 0h2m3 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h2m2 0h2M1 20.5h1m5 0h1m2 0h1m1 0h1m1 0h2m2 0h2m1 0h1M1 21.5h7m1 0h1m1 0h11"/></svg>
+</div>
+        <div class="pos-label">P12</div>
+        <div class="code-label">W2-P12</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h2m2 0h7M1 2.5h1m5 0h1m1 0h1m3 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m3 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h4m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2m1 0h2M1 9.5h1m1 0h2m1 0h3m1 0h4m1 0h1m2 0h1m1 0h2M1 10.5h1m7 0h1m2 0h4m2 0h1m2 0h1M3 11.5h1m1 0h1m1 0h1m2 0h3m5 0h2m1 0h1M4 12.5h2m3 0h1m1 0h2m2 0h3m1 0h3M2 13.5h1m1 0h1m1 0h2m2 0h2m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m2 0h1m2 0h1m3 0h3M1 15.5h7m1 0h1m2 0h2m2 0h1M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m2 0h2m1 0h6m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h4m2 0h1m1 0h4M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m3 0h1m2 0h1m3 0h1M1 21.5h7m1 0h2m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P13</div>
+        <div class="code-label">W2-P13</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h1m2 0h7M1 2.5h1m5 0h1m2 0h1m2 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m4 0h1m2 0h5M2 10.5h2m1 0h1m2 0h2m1 0h5m2 0h1m2 0h1M3 11.5h1m1 0h3m3 0h1m1 0h1m1 0h2M1 12.5h2m5 0h1m1 0h6m5 0h1M1 13.5h2m2 0h5m1 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h2m2 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m3 0h6m1 0h2m1 0h1M1 21.5h7m1 0h2m2 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P14</div>
+        <div class="code-label">W2-P14</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h2m3 0h7M1 2.5h1m5 0h1m1 0h2m1 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h3M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h3m4 0h1m2 0h1M3 10.5h2m10 0h1m3 0h3M2 11.5h1m3 0h5m2 0h1m3 0h1m3 0h1M1 12.5h2m3 0h1m2 0h1m1 0h1m3 0h1m2 0h4M1 13.5h1m1 0h1m1 0h1m1 0h2m1 0h2m1 0h1m1 0h1m1 0h3M9 14.5h2m1 0h1m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h3m1 0h3m2 0h3M1 16.5h1m5 0h1m4 0h3m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h3m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m3 0h1m3 0h2m2 0h2M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h1m1 0h1m1 0h1M1 20.5h1m5 0h1m7 0h2m1 0h4M1 21.5h7m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P15</div>
+        <div class="code-label">W2-P15</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h1m3 0h7M1 2.5h1m5 0h1m4 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2m1 0h2M1 9.5h1m3 0h1m1 0h4m1 0h1m1 0h5m2 0h1M2 10.5h2m1 0h2m1 0h6m2 0h1m1 0h1m1 0h1M2 11.5h1m4 0h3m2 0h1m2 0h5M1 12.5h1m3 0h2m1 0h1m2 0h1m2 0h2m1 0h3m1 0h1M2 13.5h4m1 0h3m3 0h3m2 0h3M9 14.5h1m3 0h3m2 0h1m2 0h1M1 15.5h7m1 0h3m1 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m4 0h2m2 0h1m1 0h1m1 0h2M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h3m1 0h3M1 18.5h1m1 0h3m1 0h1m3 0h3m4 0h1m1 0h2M1 19.5h1m1 0h3m1 0h1m4 0h1m2 0h4M1 20.5h1m5 0h1m2 0h2m2 0h4m1 0h1m1 0h1M1 21.5h7m1 0h1m1 0h1m1 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P16</div>
+        <div class="code-label">W2-P16</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h1m1 0h1m1 0h7M1 2.5h1m5 0h1m7 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m4 0h1m2 0h5M4 10.5h1m3 0h1m3 0h4m2 0h1m2 0h1M1 11.5h3m2 0h2m1 0h3m1 0h1m1 0h2M1 12.5h2m3 0h1m1 0h2m1 0h5m5 0h1M1 13.5h1m2 0h4m1 0h2m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h1m1 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2M1 20.5h1m5 0h1m2 0h7m2 0h1m1 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P17</div>
+        <div class="code-label">W2-P17</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h1m1 0h1m1 0h7M1 2.5h1m5 0h1m1 0h1m5 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m5 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m5 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h1m1 0h2M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h3m4 0h1m2 0h1M3 10.5h4m1 0h1m2 0h1m3 0h1m3 0h3M2 11.5h2m1 0h3m1 0h1m3 0h1m3 0h1m3 0h1M15 12.5h1m2 0h4M3 13.5h9m1 0h1m1 0h1m1 0h3M9 14.5h1m2 0h1m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h3m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h1m1 0h3m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h3m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m2 0h1m4 0h2m2 0h2M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h3m1 0h1M1 20.5h1m5 0h1m3 0h1m3 0h2m3 0h2M1 21.5h7m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P18</div>
+        <div class="code-label">W2-P18</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m2 0h2m1 0h7M1 2.5h1m5 0h1m1 0h2m2 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m4 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h5M1 9.5h1m1 0h2m1 0h3m1 0h4m1 0h1m2 0h1m1 0h2M2 10.5h2m2 0h1m2 0h1m2 0h4m2 0h1m2 0h1M1 11.5h1m1 0h2m2 0h3m1 0h2m5 0h2m1 0h1M1 12.5h2m1 0h3m2 0h1m1 0h2m2 0h3m1 0h3M2 13.5h1m1 0h2m1 0h2m2 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h2m1 0h1m2 0h1m3 0h3M1 15.5h7m1 0h2m1 0h2m2 0h1M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m2 0h2m1 0h6m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h4M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2M1 20.5h1m5 0h1m2 0h1m3 0h1m3 0h2M1 21.5h7m1 0h1m1 0h1m2 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P19</div>
+        <div class="code-label">W2-P19</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h1m2 0h7M1 2.5h1m5 0h1m2 0h2m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3M1 9.5h1m1 0h5m3 0h2m2 0h5M2 10.5h3m3 0h1m1 0h6m2 0h1m2 0h1M2 11.5h2m3 0h1m2 0h2m1 0h1m1 0h2M2 12.5h2m1 0h2m2 0h7m5 0h1M2 13.5h1m1 0h1m1 0h2m5 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h1m1 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2M1 20.5h1m5 0h1m2 0h7m4 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P20</div>
+        <div class="code-label">W2-P20</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h2m2 0h7M1 2.5h1m5 0h1m2 0h3m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m3 0h2m2 0h5M1 10.5h1m2 0h2m4 0h1m1 0h4m2 0h1m2 0h1M1 11.5h2m1 0h1m2 0h1m1 0h3m1 0h1m1 0h2M2 12.5h2m1 0h2m3 0h1m1 0h4m5 0h1M1 13.5h2m2 0h6m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2M1 20.5h1m5 0h1m3 0h6m1 0h1m2 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P21</div>
+        <div class="code-label">W2-P21</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h4m1 0h7M1 2.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m3 0h2m2 0h5M1 10.5h1m2 0h1m1 0h1m1 0h1m1 0h6m2 0h1m2 0h1M1 11.5h5m1 0h3m1 0h1m1 0h1m1 0h2M1 12.5h1m1 0h1m1 0h1m3 0h7m5 0h1M2 13.5h1m1 0h2m1 0h2m1 0h1m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h2m2 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h6m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h1M1 20.5h1m5 0h1m4 0h5m2 0h1m1 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P22</div>
+        <div class="code-label">W2-P22</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h1m1 0h1m1 0h7M1 2.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h2m3 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h1M1 9.5h1m2 0h6m2 0h1m1 0h1m2 0h1m1 0h3M2 10.5h1m3 0h1m2 0h1m1 0h4m1 0h3M2 11.5h2m1 0h5m1 0h3m2 0h1m1 0h1m2 0h1M1 12.5h1m1 0h2m1 0h1m4 0h1m1 0h6m2 0h1M1 13.5h1m1 0h1m1 0h4m2 0h7m1 0h2M9 14.5h1m3 0h3m2 0h1m2 0h1M1 15.5h7m1 0h4m6 0h1M1 16.5h1m5 0h1m1 0h2m4 0h1m3 0h2M1 17.5h1m1 0h3m1 0h1m1 0h3m2 0h2m1 0h1m1 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m3 0h3m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m2 0h5m1 0h2m2 0h2M1 20.5h1m5 0h1m4 0h2m4 0h3M1 21.5h7m1 0h1m1 0h1m1 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P23</div>
+        <div class="code-label">W2-P23</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m2 0h1m1 0h7M1 2.5h1m5 0h1m3 0h3m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3M1 9.5h1m1 0h5m3 0h2m2 0h5M1 10.5h3m5 0h7m2 0h1m2 0h1M4 11.5h2m1 0h1m3 0h1m1 0h1m1 0h2M2 12.5h2m1 0h1m3 0h1m2 0h4m5 0h1M1 13.5h1m2 0h4m1 0h1m1 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h2m2 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h1M1 20.5h1m5 0h1m2 0h7m4 0h1M1 21.5h7m1 0h2m2 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P24</div>
+        <div class="code-label">W2-P24</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m2 0h2m1 0h7M1 2.5h1m5 0h1m1 0h3m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m5 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h1m4 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h2M1 9.5h1m2 0h6m2 0h1m1 0h1m2 0h1m1 0h3M3 10.5h2m3 0h1m2 0h4m1 0h3M1 11.5h1m3 0h3m3 0h3m2 0h1m1 0h1m2 0h1M2 12.5h3m1 0h1m3 0h1m2 0h6m2 0h1M2 13.5h2m1 0h1m1 0h1m1 0h2m1 0h6m1 0h2M9 14.5h1m3 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m2 0h1m6 0h1M1 16.5h1m5 0h1m1 0h1m5 0h1m3 0h2M1 17.5h1m1 0h3m1 0h1m1 0h3m2 0h2m1 0h1m1 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m2 0h5m1 0h2m2 0h2M1 20.5h1m5 0h1m2 0h4m4 0h1m1 0h1M1 21.5h7m1 0h1m3 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P25</div>
+        <div class="code-label">W2-P25</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m5 0h1m1 0h7M1 2.5h1m5 0h1m2 0h2m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h5m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M1 10.5h1m6 0h3m1 0h4m2 0h1m2 0h1M1 11.5h3m1 0h1m1 0h3m3 0h1m1 0h2M1 12.5h2m6 0h2m1 0h4m5 0h1M1 13.5h1m1 0h2m1 0h2m1 0h3m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h6M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m2 0h7m2 0h1m1 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P26</div>
+        <div class="code-label">W2-P26</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h2m1 0h1m1 0h7M1 2.5h1m5 0h1m2 0h4m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m5 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M2 10.5h2m1 0h1m3 0h7m2 0h1m2 0h1M2 11.5h1m1 0h2m1 0h2m4 0h1m1 0h2M1 12.5h2m7 0h6m5 0h1M3 13.5h1m1 0h4m2 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h8M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m3 0h6m1 0h2m1 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P27</div>
+        <div class="code-label">W2-P27</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h3m1 0h7M1 2.5h1m5 0h1m2 0h3m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M1 10.5h4m1 0h1m3 0h1m1 0h4m2 0h1m2 0h1M5 11.5h1m1 0h1m5 0h1m1 0h2M9 12.5h1m1 0h5m5 0h1M2 13.5h3m2 0h2m4 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h1m1 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m4 0h5m4 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P28</div>
+        <div class="code-label">W2-P28</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h2m1 0h7M1 2.5h1m5 0h1m2 0h2m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M4 10.5h3m1 0h1m1 0h6m2 0h1m2 0h1M1 11.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h2M12 12.5h4m5 0h1M1 13.5h3m1 0h1m1 0h1m1 0h2m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h1m2 0h1M1 21.5h7m1 0h2m2 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P29</div>
+        <div class="code-label">W2-P29</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h3m1 0h7M1 2.5h1m5 0h1m7 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m1 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h5m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h3M1 9.5h1m3 0h1m1 0h3m1 0h2m1 0h5m2 0h1M3 10.5h4m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m1 0h1M1 11.5h1m1 0h7m1 0h2m2 0h5M4 12.5h1m3 0h1m1 0h2m2 0h2m1 0h3m1 0h1M2 13.5h2m3 0h2m2 0h1m1 0h3m2 0h3M9 14.5h2m2 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m3 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m2 0h4m2 0h1m1 0h1m1 0h2M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h3m2 0h2M1 18.5h1m1 0h3m1 0h1m2 0h4m5 0h3M1 19.5h1m1 0h3m1 0h1m2 0h3m2 0h3M1 20.5h1m5 0h1m6 0h4m1 0h1m1 0h1M1 21.5h7m1 0h1m1 0h1m1 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P30</div>
+        <div class="code-label">W2-P30</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m2 0h1m1 0h7M1 2.5h1m5 0h1m1 0h1m1 0h1m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m4 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h2m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h4M1 9.5h1m1 0h1m1 0h1m1 0h1m4 0h1m4 0h1m2 0h1M2 10.5h1m3 0h1m1 0h1m2 0h1m3 0h1m3 0h3M4 11.5h4m1 0h2m2 0h1m3 0h1m3 0h1M3 12.5h4m1 0h2m5 0h1m2 0h4M1 13.5h5m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3M9 14.5h1m1 0h2m1 0h1m1 0h1m2 0h1M1 15.5h7m4 0h1m1 0h3m2 0h3M1 16.5h1m5 0h1m4 0h3m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h3m4 0h1M1 18.5h1m1 0h3m1 0h1m2 0h1m4 0h2m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m3 0h1m3 0h1M1 20.5h1m5 0h1m7 0h2m1 0h1m1 0h2M1 21.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P31</div>
+        <div class="code-label">W2-P31</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m2 0h1m1 0h7M1 2.5h1m5 0h1m3 0h1m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m5 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m2 0h3m2 0h5M2 10.5h2m1 0h1m2 0h1m3 0h4m2 0h1m2 0h1M1 11.5h1m2 0h1m1 0h2m1 0h1m1 0h1m1 0h1m1 0h2M1 12.5h5m5 0h5m5 0h1M2 13.5h1m1 0h2m1 0h3m1 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h2m1 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P32</div>
+        <div class="code-label">W2-P32</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h4m1 0h7M1 2.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m4 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h1m2 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h1m1 0h2M1 9.5h1m1 0h1m1 0h1m1 0h1m4 0h1m4 0h1m2 0h1M3 10.5h2m4 0h1m1 0h1m3 0h1m3 0h3M1 11.5h8m1 0h1m2 0h1m3 0h1m3 0h1M1 12.5h6m1 0h4m3 0h1m2 0h4M3 13.5h6m1 0h2m1 0h1m1 0h1m1 0h3M9 14.5h1m1 0h2m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h3m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h1m1 0h3m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h3m4 0h1M1 18.5h1m1 0h3m1 0h1m2 0h2m3 0h2m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m3 0h1m3 0h1M1 20.5h1m5 0h1m2 0h2m3 0h2m1 0h4M1 21.5h7m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P33</div>
+        <div class="code-label">W2-P33</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h3m1 0h7M1 2.5h1m5 0h1m2 0h3m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h3M1 9.5h1m3 0h1m1 0h3m1 0h2m1 0h5m2 0h1M2 10.5h2m1 0h2m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m1 0h1M1 11.5h5m1 0h2m3 0h1m2 0h5M1 12.5h1m1 0h2m1 0h1m3 0h2m2 0h2m1 0h3m1 0h1M1 13.5h3m1 0h5m3 0h3m2 0h3M9 14.5h3m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h3m1 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m2 0h1m1 0h2m2 0h1m1 0h1m1 0h2M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h3m2 0h2M1 18.5h1m1 0h3m1 0h1m2 0h4m5 0h3M1 19.5h1m1 0h3m1 0h1m2 0h3m2 0h5M1 20.5h1m5 0h1m6 0h4m1 0h1m1 0h1M1 21.5h7m1 0h2m2 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P34</div>
+        <div class="code-label">W2-P34</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h1m2 0h7M1 2.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h4M1 9.5h1m1 0h1m1 0h1m1 0h1m4 0h1m4 0h1m2 0h1M1 10.5h2m1 0h1m1 0h1m2 0h1m1 0h1m3 0h1m3 0h3M2 11.5h2m2 0h2m1 0h1m3 0h1m3 0h1m3 0h1M3 12.5h3m2 0h4m3 0h1m2 0h4M3 13.5h2m2 0h1m3 0h1m1 0h1m1 0h1m1 0h3M9 14.5h4m1 0h1m1 0h1m2 0h1M1 15.5h7m3 0h2m1 0h3m2 0h3M1 16.5h1m5 0h1m3 0h4m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h3m4 0h1M1 18.5h1m1 0h3m1 0h1m2 0h1m4 0h2m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m3 0h2m2 0h1M1 20.5h1m5 0h1m7 0h2m1 0h1m1 0h2M1 21.5h7m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P35</div>
+        <div class="code-label">W2-P35</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h1m2 0h7M1 2.5h1m5 0h1m2 0h3m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m2 0h3m2 0h5M1 10.5h5m3 0h1m2 0h4m2 0h1m2 0h1M1 11.5h3m1 0h3m1 0h3m1 0h1m1 0h2M1 12.5h6m3 0h1m1 0h4m5 0h1M1 13.5h1m2 0h1m2 0h2m4 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h1M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h2m1 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P36</div>
+        <div class="code-label">W2-P36</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h2m4 0h7M1 2.5h1m5 0h1m3 0h3m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m1 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h5M1 9.5h1m3 0h1m1 0h3m1 0h2m1 0h5m2 0h1M4 10.5h1m1 0h1m1 0h6m2 0h1m1 0h1m1 0h1M3 11.5h2m2 0h4m1 0h1m2 0h5M1 12.5h1m1 0h2m4 0h1m1 0h1m2 0h2m1 0h3m1 0h1M1 13.5h1m1 0h5m1 0h3m1 0h3m2 0h3M9 14.5h1m1 0h1m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m3 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m2 0h1m1 0h2m2 0h1m1 0h1m1 0h2M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h3m2 0h2M1 18.5h1m1 0h3m1 0h1m3 0h3m5 0h3M1 19.5h1m1 0h3m1 0h1m2 0h3m2 0h3m1 0h1M1 20.5h1m5 0h1m2 0h1m3 0h6m1 0h1M1 21.5h7m1 0h3m1 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P37</div>
+        <div class="code-label">W2-P37</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h2m1 0h1m2 0h7M1 2.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h1m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h1m1 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h1m2 0h1M1 9.5h1m1 0h1m3 0h2m1 0h1m5 0h1m2 0h1m1 0h1M4 10.5h3m1 0h1m1 0h1m1 0h1m1 0h3m1 0h2m1 0h1M2 11.5h2m3 0h1m1 0h2m1 0h3m1 0h3m1 0h2M1 12.5h1m1 0h1m1 0h2m3 0h3m1 0h3m2 0h1m1 0h1M3 13.5h3m1 0h2m1 0h1m1 0h6m1 0h2M9 14.5h1m1 0h1m6 0h3M1 15.5h7m1 0h2m4 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m5 0h1m3 0h1m2 0h2M1 17.5h1m1 0h3m1 0h1m2 0h1m4 0h1m2 0h1m1 0h2M1 18.5h1m1 0h3m1 0h1m2 0h3m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h6m1 0h2m2 0h2M1 20.5h1m5 0h1m2 0h3m1 0h2m2 0h2m1 0h1M1 21.5h7m1 0h13"/></svg>
+</div>
+        <div class="pos-label">P38</div>
+        <div class="code-label">W2-P38</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m5 0h1m1 0h7M1 2.5h1m5 0h1m1 0h2m2 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m4 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m5 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M12 8.5h2M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h1m1 0h1m4 0h1m2 0h1M1 10.5h2m2 0h2m3 0h2m3 0h1m3 0h3M1 11.5h1m1 0h2m1 0h3m1 0h1m2 0h1m3 0h1m3 0h1M1 12.5h1m1 0h1m2 0h1m1 0h1m1 0h1m4 0h1m2 0h4M3 13.5h5m1 0h1m3 0h1m1 0h1m1 0h3M9 14.5h4m1 0h1m1 0h1m2 0h1M1 15.5h7m3 0h2m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h5m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h3m4 0h1M1 18.5h1m1 0h3m1 0h1m2 0h1m4 0h2m3 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m3 0h1m1 0h1m1 0h1M1 20.5h1m5 0h1m2 0h1m4 0h2m1 0h1m1 0h2M1 21.5h7m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P39</div>
+        <div class="code-label">W2-P39</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m2 0h2m1 0h7M1 2.5h1m5 0h1m3 0h2m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m3 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m2 0h2M1 9.5h1m3 0h1m1 0h4m1 0h1m1 0h5m2 0h1M1 10.5h3m2 0h1m1 0h1m1 0h1m1 0h2m2 0h1m1 0h1m1 0h1M1 11.5h1m1 0h3m1 0h1m3 0h2m2 0h5M4 12.5h3m2 0h1m4 0h2m1 0h3m1 0h1M2 13.5h1m1 0h4m5 0h3m2 0h3M9 14.5h1m1 0h1m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h3m1 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m3 0h3m2 0h1m1 0h1m1 0h2M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h3m2 0h2M1 18.5h1m1 0h3m1 0h1m4 0h2m4 0h1m1 0h2M1 19.5h1m1 0h3m1 0h1m2 0h3m2 0h3M1 20.5h1m5 0h1m2 0h1m3 0h5m2 0h1M1 21.5h7m1 0h3m1 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P40</div>
+        <div class="code-label">W2-P40</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m3 0h1m1 0h7M1 2.5h1m5 0h1m1 0h1m1 0h1m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m7 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h1M1 9.5h1m2 0h6m1 0h2m1 0h1m2 0h1m1 0h3M2 10.5h1m3 0h1m1 0h1m1 0h1m1 0h3m1 0h3M1 11.5h1m1 0h1m3 0h1m4 0h2m2 0h1m1 0h1m2 0h1M1 12.5h1m3 0h2m3 0h2m1 0h6m2 0h1M1 13.5h2m1 0h2m1 0h3m1 0h7m1 0h2M9 14.5h1m1 0h1m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m1 0h2m6 0h1M1 16.5h1m5 0h1m1 0h2m4 0h1m3 0h2M1 17.5h1m1 0h3m1 0h1m1 0h2m3 0h2m1 0h2m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h3m1 0h3m1 0h1M1 19.5h1m1 0h3m1 0h1m2 0h5m1 0h2m1 0h3M1 20.5h1m5 0h1m2 0h4m4 0h3M1 21.5h7m1 0h3m1 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P41</div>
+        <div class="code-label">W2-P41</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h2m1 0h1m1 0h7M1 2.5h1m5 0h1m2 0h2m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m4 0h1m2 0h5M1 10.5h3m4 0h1m3 0h4m2 0h1m2 0h1M1 11.5h2m1 0h1m1 0h4m3 0h1m1 0h2M2 12.5h1m1 0h1m4 0h2m1 0h4m5 0h1M1 13.5h3m1 0h1m1 0h1m3 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h2m5 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h8m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h2M1 20.5h1m5 0h1m4 0h5m4 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P42</div>
+        <div class="code-label">W2-P42</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m5 0h1m1 0h7M1 2.5h1m5 0h1m2 0h4m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m4 0h1m2 0h5M5 10.5h1m5 0h5m2 0h1m2 0h1M2 11.5h2m2 0h3m4 0h1m1 0h2M2 12.5h1m1 0h1m5 0h6m5 0h1M2 13.5h3m2 0h5m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h6m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h2M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h1m2 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P43</div>
+        <div class="code-label">W2-P43</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h2m1 0h7M1 2.5h1m5 0h1m7 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m4 0h1m2 0h5M1 10.5h2m3 0h1m2 0h1m2 0h4m2 0h1m2 0h1M2 11.5h3m2 0h1m1 0h1m1 0h1m1 0h1m1 0h2M3 12.5h2m1 0h1m1 0h2m1 0h5m5 0h1M1 13.5h1m1 0h1m3 0h2m1 0h2m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h2m2 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2M1 20.5h1m5 0h1m2 0h7m2 0h1m1 0h1M1 21.5h7m1 0h2m2 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P44</div>
+        <div class="code-label">W2-P44</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h5m1 0h7M1 2.5h1m5 0h1m2 0h1m1 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h5m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2m1 0h2M1 9.5h1m3 0h1m1 0h4m1 0h1m1 0h5m2 0h1M2 10.5h1m1 0h3m3 0h4m2 0h1m1 0h1m1 0h1M2 11.5h1m2 0h3m4 0h1m2 0h5M1 12.5h1m1 0h3m2 0h1m2 0h1m2 0h2m1 0h3m1 0h1M2 13.5h1m2 0h1m1 0h2m1 0h2m1 0h3m2 0h3M9 14.5h1m3 0h3m2 0h1m2 0h1M1 15.5h7m1 0h2m2 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m3 0h3m2 0h1m1 0h1m1 0h2M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h3m2 0h2M1 18.5h1m1 0h3m1 0h1m2 0h1m1 0h2m4 0h1m1 0h2M1 19.5h1m1 0h3m1 0h1m2 0h3m2 0h5M1 20.5h1m5 0h1m6 0h4m3 0h1M1 21.5h7m1 0h3m1 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P45</div>
+        <div class="code-label">W2-P45</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h2m1 0h2m1 0h7M1 2.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h2m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m7 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h1M1 9.5h1m2 0h6m1 0h2m1 0h1m2 0h1m1 0h3M1 10.5h1m3 0h1m2 0h7m1 0h3M1 11.5h1m1 0h2m1 0h4m1 0h3m2 0h1m1 0h1m2 0h1M1 12.5h3m1 0h1m2 0h2m1 0h1m1 0h6m2 0h1M5 13.5h1m1 0h2m2 0h7m1 0h2M9 14.5h1m3 0h3m2 0h1m2 0h1M1 15.5h7m1 0h4m6 0h1M1 16.5h1m5 0h1m1 0h1m5 0h1m3 0h2M1 17.5h1m1 0h3m1 0h1m1 0h3m2 0h2m1 0h2m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m3 0h3m1 0h1M1 19.5h1m1 0h3m1 0h1m2 0h5m1 0h3m1 0h2M1 20.5h1m5 0h1m2 0h1m1 0h2m6 0h1M1 21.5h7m1 0h2m2 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P46</div>
+        <div class="code-label">W2-P46</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h3m1 0h7M1 2.5h1m5 0h1m1 0h2m2 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h1m4 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M1 9.5h1m2 0h6m1 0h2m1 0h1m2 0h1m1 0h3M2 10.5h2m5 0h2m1 0h3m1 0h3M6 11.5h3m2 0h3m2 0h1m1 0h1m2 0h1M1 12.5h3m1 0h1m2 0h1m4 0h6m2 0h1M1 13.5h1m2 0h1m2 0h1m1 0h9m1 0h2M9 14.5h1m3 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m1 0h2m6 0h1M1 16.5h1m5 0h1m1 0h1m1 0h1m3 0h1m3 0h2M1 17.5h1m1 0h3m1 0h1m1 0h2m3 0h2m1 0h2m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m2 0h3m1 0h1M1 19.5h1m1 0h3m1 0h1m2 0h5m1 0h3m1 0h2M1 20.5h1m5 0h1m4 0h2m4 0h1m1 0h1M1 21.5h7m1 0h1m1 0h1m1 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P47</div>
+        <div class="code-label">W2-P47</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m4 0h7M1 2.5h1m5 0h1m2 0h1m1 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m4 0h1m2 0h5M2 10.5h1m1 0h1m1 0h1m1 0h1m3 0h4m2 0h1m2 0h1M5 11.5h1m1 0h1m1 0h3m1 0h1m1 0h2M3 12.5h2m3 0h3m1 0h4m5 0h1M2 13.5h2m1 0h1m1 0h4m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h2m1 0h1M1 20.5h1m5 0h1m2 0h7m2 0h1m1 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P48</div>
+        <div class="code-label">W2-P48</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m2 0h1m2 0h7M1 2.5h1m5 0h1m7 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h3m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m3 0h3m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h1m1 0h1M1 9.5h1m1 0h1m3 0h2m2 0h1m4 0h1m2 0h1m1 0h1M3 10.5h1m1 0h2m3 0h3m1 0h3m1 0h2m1 0h1M1 11.5h2m1 0h1m1 0h5m1 0h3m1 0h3m1 0h2M1 12.5h1m1 0h1m4 0h1m2 0h2m1 0h3m2 0h1m1 0h1M1 13.5h1m2 0h6m1 0h7m1 0h2M9 14.5h2m7 0h3M1 15.5h7m1 0h3m3 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m2 0h2m1 0h1m3 0h1m2 0h2M1 17.5h1m1 0h3m1 0h1m2 0h2m3 0h1m2 0h1m1 0h2M1 18.5h1m1 0h3m1 0h1m2 0h1m1 0h1m1 0h2m2 0h2M1 19.5h1m1 0h3m1 0h1m1 0h6m1 0h2m2 0h2M1 20.5h1m5 0h1m2 0h3m1 0h2m2 0h1m2 0h1M1 21.5h7m1 0h2m1 0h10"/></svg>
+</div>
+        <div class="pos-label">P49</div>
+        <div class="code-label">W2-P49</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h4m1 0h7M1 2.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h2m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h4M1 9.5h1m1 0h1m1 0h1m1 0h1m3 0h2m4 0h1m2 0h1M3 10.5h1m1 0h1m4 0h2m3 0h1m3 0h3M1 11.5h1m1 0h2m2 0h2m4 0h1m3 0h1m3 0h1M2 12.5h1m1 0h1m5 0h2m3 0h1m2 0h4M1 13.5h1m1 0h1m2 0h2m1 0h2m2 0h1m1 0h1m1 0h3M9 14.5h4m1 0h1m1 0h1m2 0h1M1 15.5h7m4 0h1m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h1m1 0h3m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h3m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m3 0h1m3 0h2m1 0h3M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h1m1 0h1m1 0h1M1 20.5h1m5 0h1m3 0h1m3 0h2m3 0h2M1 21.5h7m1 0h2m2 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P50</div>
+        <div class="code-label">W2-P50</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m2 0h1m1 0h7M1 2.5h1m5 0h1m7 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M2 10.5h3m3 0h3m1 0h4m2 0h1m2 0h1M1 11.5h2m1 0h2m1 0h1m1 0h3m1 0h1m1 0h2M2 12.5h1m1 0h1m1 0h1m1 0h2m1 0h5m5 0h1M1 13.5h2m4 0h1m5 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h1m1 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m2 0h2M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m4 0h5m4 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P51</div>
+        <div class="code-label">W2-P51</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h1m1 0h1m1 0h7M1 2.5h1m5 0h1m4 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M1 10.5h1m2 0h2m3 0h7m2 0h1m2 0h1M2 11.5h2m1 0h1m1 0h1m2 0h2m1 0h1m1 0h2M2 12.5h1m1 0h1m1 0h1m1 0h1m3 0h4m5 0h1M2 13.5h1m1 0h2m1 0h4m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m2 0h2M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h1m2 0h1M1 21.5h7m1 0h1m3 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P52</div>
+        <div class="code-label">W2-P52</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m7 0h7M1 2.5h1m5 0h1m1 0h2m1 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h3M1 9.5h1m1 0h1m1 0h1m1 0h1m3 0h2m4 0h1m2 0h1M2 10.5h1m1 0h1m4 0h2m4 0h1m3 0h3M2 11.5h4m1 0h4m2 0h1m3 0h1m3 0h1M2 12.5h1m1 0h1m1 0h1m2 0h1m1 0h1m3 0h1m2 0h4M1 13.5h4m1 0h4m1 0h1m1 0h1m1 0h1m1 0h3M9 14.5h1m1 0h2m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h3m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h1m1 0h3m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h3m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m2 0h2m3 0h2m1 0h3M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h3m1 0h1M1 20.5h1m5 0h1m2 0h2m3 0h2m1 0h1m1 0h2M1 21.5h7m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P53</div>
+        <div class="code-label">W2-P53</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h2m3 0h7M1 2.5h1m5 0h1m1 0h2m4 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h2m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h4M1 9.5h1m1 0h1m1 0h1m1 0h1m3 0h2m4 0h1m2 0h1M1 10.5h1m1 0h3m2 0h4m3 0h1m3 0h3M1 11.5h2m2 0h1m1 0h2m1 0h1m2 0h1m3 0h1m3 0h1M2 12.5h1m1 0h1m1 0h1m8 0h1m2 0h4M2 13.5h2m1 0h3m2 0h2m1 0h1m1 0h1m1 0h3M9 14.5h1m1 0h2m1 0h1m1 0h1m2 0h1M1 15.5h7m3 0h2m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h5m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h3m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m3 0h1m3 0h2m1 0h3M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h3m1 0h1M1 20.5h1m5 0h1m3 0h1m3 0h2m3 0h2M1 21.5h7m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P54</div>
+        <div class="code-label">W2-P54</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m1 0h1m2 0h7M1 2.5h1m5 0h1m2 0h1m1 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h3m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m2 0h1m1 0h1m2 0h5M1 10.5h3m6 0h1m1 0h4m2 0h1m2 0h1M1 11.5h1m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h2M2 12.5h1m1 0h1m3 0h3m1 0h4m5 0h1M5 13.5h1m1 0h1m1 0h1m1 0h1m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h2m1 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m2 0h2M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h2m1 0h2M1 20.5h1m5 0h1m4 0h5m4 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P55</div>
+        <div class="code-label">W2-P55</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m5 0h7M1 2.5h1m5 0h1m7 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h3m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h1m1 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M13 8.5h1M1 9.5h1m1 0h1m3 0h2m1 0h2m4 0h1m2 0h1m1 0h1M1 10.5h1m2 0h2m2 0h1m2 0h2m1 0h3m1 0h2m1 0h1M2 11.5h8m2 0h3m1 0h3m1 0h2M1 12.5h2m5 0h1m2 0h2m1 0h3m2 0h1m1 0h1M1 13.5h7m1 0h2m1 0h6m1 0h2M9 14.5h3m6 0h3M1 15.5h7m1 0h1m5 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m2 0h2m1 0h1m3 0h1m2 0h2M1 17.5h1m1 0h3m1 0h1m3 0h1m3 0h1m4 0h2M1 18.5h1m1 0h3m1 0h1m2 0h1m1 0h1m1 0h2m3 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h2m1 0h3M1 20.5h1m5 0h1m4 0h1m1 0h2m2 0h2m1 0h1M1 21.5h7m1 0h13"/></svg>
+</div>
+        <div class="pos-label">P56</div>
+        <div class="code-label">W2-P56</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m7 0h7M1 2.5h1m5 0h1m1 0h1m1 0h1m1 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h2m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h1m2 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h3M1 9.5h1m1 0h1m1 0h1m1 0h1m3 0h2m4 0h1m2 0h1M9 10.5h2m4 0h1m3 0h3M3 11.5h6m1 0h2m1 0h1m3 0h1m3 0h1M1 12.5h4m3 0h2m1 0h1m3 0h1m2 0h4M2 13.5h4m1 0h2m4 0h1m1 0h1m1 0h3M9 14.5h1m2 0h1m1 0h1m1 0h1m2 0h1M1 15.5h7m4 0h1m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h5m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h3m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m2 0h2m3 0h2m1 0h3M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h1m3 0h1M1 20.5h1m5 0h1m2 0h2m3 0h2m1 0h1m1 0h2M1 21.5h7m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P57</div>
+        <div class="code-label">W2-P57</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h2m2 0h7M1 2.5h1m5 0h1m2 0h2m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m3 0h3m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h2m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h1m1 0h1M1 9.5h1m1 0h1m3 0h2m1 0h2m4 0h1m2 0h1m1 0h1M1 10.5h1m1 0h4m2 0h1m1 0h2m1 0h3m1 0h2m1 0h1M1 11.5h2m1 0h2m1 0h1m1 0h1m1 0h4m1 0h3m1 0h2M1 12.5h1m1 0h1m2 0h1m3 0h1m1 0h1m1 0h3m2 0h1m1 0h1M1 13.5h1m1 0h2m1 0h4m2 0h6m1 0h2M9 14.5h2m7 0h3M1 15.5h7m1 0h1m5 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m5 0h1m3 0h1m2 0h2M1 17.5h1m1 0h3m1 0h1m3 0h1m3 0h1m4 0h2M1 18.5h1m1 0h3m1 0h1m2 0h3m1 0h2m3 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m2 0h3m1 0h3m1 0h2M1 20.5h1m5 0h1m2 0h3m1 0h2m2 0h1m2 0h1M1 21.5h7m1 0h1m1 0h11"/></svg>
+</div>
+        <div class="pos-label">P58</div>
+        <div class="code-label">W2-P58</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h2m2 0h7M1 2.5h1m5 0h1m1 0h1m1 0h3m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m3 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h1m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h2m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M12 8.5h2M1 9.5h1m1 0h1m1 0h1m1 0h1m3 0h2m4 0h1m2 0h1M2 10.5h3m1 0h1m1 0h1m1 0h1m4 0h1m3 0h3M1 11.5h2m1 0h4m1 0h3m1 0h1m3 0h1m3 0h1M3 12.5h2m3 0h3m4 0h1m2 0h4M1 13.5h1m1 0h5m1 0h3m1 0h1m1 0h1m1 0h3M9 14.5h1m2 0h1m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h3m1 0h3m2 0h3M1 16.5h1m5 0h1m3 0h4m1 0h3m2 0h1M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h3m1 0h1m2 0h1M1 18.5h1m1 0h3m1 0h1m2 0h1m4 0h2m1 0h3M1 19.5h1m1 0h3m1 0h1m1 0h2m2 0h1m3 0h1m3 0h1M1 20.5h1m5 0h1m7 0h2m1 0h4M1 21.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P59</div>
+        <div class="code-label">W2-P59</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m1 0h1m1 0h1m1 0h7M1 2.5h1m5 0h1m1 0h1m1 0h1m3 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m2 0h2m3 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h1M1 9.5h1m2 0h7m1 0h1m1 0h1m2 0h1m1 0h3M3 10.5h3m2 0h2m2 0h3m1 0h3M1 11.5h1m1 0h3m1 0h1m1 0h1m1 0h3m2 0h1m1 0h1m2 0h1M2 12.5h4m4 0h2m1 0h6m2 0h1M2 13.5h2m1 0h1m1 0h2m3 0h6m1 0h2M9 14.5h3m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m2 0h1m6 0h1M1 16.5h1m5 0h1m1 0h1m1 0h1m3 0h1m2 0h3M1 17.5h1m1 0h3m1 0h1m1 0h3m2 0h2m1 0h3m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h3m1 0h3M1 19.5h1m1 0h3m1 0h1m3 0h4m1 0h2m2 0h2M1 20.5h1m5 0h1m3 0h3m6 0h1M1 21.5h7m1 0h3m1 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P60</div>
+        <div class="code-label">W2-P60</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h4m1 0h7M1 2.5h1m5 0h1m2 0h4m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h5m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m2 0h3m2 0h5M1 10.5h3m1 0h1m4 0h1m1 0h4m2 0h1m2 0h1M3 11.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h2M2 12.5h2m2 0h1m2 0h1m1 0h5m5 0h1M1 13.5h1m2 0h5m1 0h2m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h6M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h2m1 0h1M1 20.5h1m5 0h1m3 0h6m1 0h1m2 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P61</div>
+        <div class="code-label">W2-P61</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m4 0h1m2 0h7M1 2.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m5 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h3M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h1m1 0h1m4 0h1m2 0h1M1 10.5h1m1 0h1m1 0h1m2 0h1m2 0h1m3 0h1m3 0h3M1 11.5h1m2 0h1m1 0h2m1 0h1m3 0h1m3 0h1m3 0h1M1 12.5h6m1 0h3m4 0h1m2 0h4M1 13.5h4m1 0h3m4 0h1m1 0h1m1 0h3M9 14.5h1m1 0h2m1 0h1m1 0h1m2 0h1M1 15.5h7m3 0h2m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h1m1 0h3m1 0h2m3 0h1M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m1 0h3m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m2 0h2m3 0h2m3 0h1M1 19.5h1m1 0h3m1 0h1m1 0h3m1 0h1m3 0h1m1 0h1m1 0h1M1 20.5h1m5 0h1m2 0h1m4 0h2m1 0h1m1 0h2M1 21.5h7m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P62</div>
+        <div class="code-label">W2-P62</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h2m1 0h1m2 0h7M1 2.5h1m5 0h1m4 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m1 0h2m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2m1 0h2M1 9.5h1m3 0h1m1 0h6m1 0h5m2 0h1M1 10.5h4m1 0h1m2 0h2m1 0h2m2 0h1m1 0h1m1 0h1M1 11.5h1m2 0h1m2 0h1m1 0h2m1 0h1m2 0h5M1 12.5h1m1 0h2m1 0h1m3 0h1m3 0h2m1 0h3m1 0h1M3 13.5h1m2 0h6m1 0h3m2 0h3M9 14.5h3m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m1 0h1m1 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m2 0h1m1 0h2m2 0h1m3 0h2M1 17.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h3m1 0h3M1 18.5h1m1 0h3m1 0h1m2 0h4m4 0h4M1 19.5h1m1 0h3m1 0h1m3 0h2m2 0h4M1 20.5h1m5 0h1m3 0h1m2 0h4m3 0h1M1 21.5h7m1 0h1m1 0h1m1 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P63</div>
+        <div class="code-label">W2-P63</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m4 0h7M1 2.5h1m5 0h1m2 0h1m1 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m2 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1M1 9.5h1m1 0h5m3 0h2m2 0h5M4 10.5h2m2 0h2m1 0h5m2 0h1m2 0h1M2 11.5h1m2 0h7m1 0h1m1 0h2M1 12.5h5m3 0h1m1 0h5m5 0h1M5 13.5h1m1 0h1m5 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h6M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m3 0h6m4 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P64</div>
+        <div class="code-label">W2-P64</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h1m3 0h7M1 2.5h1m5 0h1m2 0h1m4 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h4m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h2M1 9.5h1m1 0h5m3 0h2m2 0h5M1 10.5h4m4 0h1m2 0h4m2 0h1m2 0h1M1 11.5h8m1 0h2m1 0h1m1 0h2M1 12.5h5m6 0h4m5 0h1M1 13.5h1m2 0h1m2 0h4m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m1 0h1m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m2 0h3m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m1 0h1m4 0h6M1 17.5h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m1 0h2M1 19.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m2 0h7m1 0h1m2 0h1M1 21.5h7m1 0h2m2 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P65</div>
+        <div class="code-label">W2-P65</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h2m1 0h2m1 0h7M1 2.5h1m5 0h1m1 0h2m1 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h1m3 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h2M1 9.5h1m2 0h6m2 0h1m1 0h1m2 0h1m1 0h3M1 10.5h2m3 0h1m1 0h1m1 0h1m1 0h3m1 0h3M1 11.5h4m2 0h1m1 0h1m1 0h3m2 0h1m1 0h1m2 0h1M3 12.5h1m5 0h2m2 0h6m2 0h1M2 13.5h2m1 0h1m1 0h1m1 0h9m1 0h2M9 14.5h1m1 0h1m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h2m1 0h1m6 0h1M1 16.5h1m5 0h1m1 0h1m5 0h1m2 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h2m1 0h3m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m3 0h3m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m3 0h4m1 0h2m1 0h3M1 20.5h1m5 0h1m4 0h2m5 0h2M1 21.5h7m1 0h3m1 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P66</div>
+        <div class="code-label">W2-P66</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h2m1 0h1m1 0h7M1 2.5h1m5 0h1m1 0h1m2 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h2m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m5 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h4M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h1m1 0h1m4 0h1m2 0h1M1 10.5h2m1 0h1m3 0h2m5 0h1m3 0h3M2 11.5h1m1 0h4m2 0h1m2 0h1m3 0h1m3 0h1M1 12.5h5m2 0h1m6 0h1m2 0h4M1 13.5h1m1 0h1m2 0h2m2 0h2m1 0h1m1 0h1m1 0h3M9 14.5h4m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h1m1 0h1m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h1m1 0h3m1 0h2m3 0h1M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h3m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m3 0h1m3 0h2m3 0h1M1 19.5h1m1 0h3m1 0h1m1 0h3m1 0h1m3 0h3m1 0h1M1 20.5h1m5 0h1m7 0h2m3 0h2M1 21.5h7m1 0h2m2 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P67</div>
+        <div class="code-label">W2-P67</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h3m1 0h1m1 0h7M1 2.5h1m5 0h1m1 0h2m2 0h1m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m5 0h1m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m7 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M10 8.5h1M1 9.5h1m2 0h6m2 0h1m1 0h1m2 0h1m1 0h3M1 10.5h1m1 0h2m4 0h2m1 0h3m1 0h3M4 11.5h1m2 0h2m2 0h3m2 0h1m1 0h1m2 0h1M1 12.5h3m5 0h1m1 0h1m1 0h6m2 0h1M1 13.5h1m1 0h1m1 0h4m3 0h6m1 0h2M9 14.5h1m1 0h1m1 0h3m2 0h1m2 0h1M1 15.5h7m1 0h1m1 0h2m6 0h1M1 16.5h1m5 0h1m1 0h2m4 0h1m2 0h3M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h1m2 0h2m1 0h3m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1m1 0h1M1 19.5h1m1 0h3m1 0h1m3 0h4m1 0h2m1 0h3M1 20.5h1m5 0h1m2 0h4m6 0h1M1 21.5h7m1 0h2m2 0h2m1 0h2m1 0h2"/></svg>
+</div>
+        <div class="pos-label">P68</div>
+        <div class="code-label">W2-P68</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h1m3 0h1m1 0h7M1 2.5h1m5 0h1m2 0h1m1 0h2m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m3 0h3m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h4m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h5m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M13 8.5h1M1 9.5h1m1 0h1m3 0h2m7 0h1m2 0h1m1 0h1M1 10.5h4m3 0h1m1 0h1m1 0h1m1 0h3m1 0h2m1 0h1M1 11.5h3m1 0h1m1 0h1m1 0h1m2 0h3m1 0h3m1 0h2M2 12.5h2m1 0h2m4 0h2m1 0h3m2 0h1m1 0h1M3 13.5h2m1 0h2m1 0h2m1 0h6m1 0h2M9 14.5h1m1 0h1m6 0h3M1 15.5h7m1 0h3m3 0h1m2 0h2m1 0h1M1 16.5h1m5 0h1m2 0h1m2 0h1m3 0h2m1 0h2M1 17.5h1m1 0h3m1 0h1m3 0h1m3 0h1m2 0h4M1 18.5h1m1 0h3m1 0h1m2 0h1m1 0h1m1 0h2m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m1 0h4m1 0h2m1 0h3M1 20.5h1m5 0h1m3 0h2m1 0h2m2 0h2m1 0h1M1 21.5h7m1 0h1m1 0h11"/></svg>
+</div>
+        <div class="pos-label">P69</div>
+        <div class="code-label">W2-P69</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m4 0h1m2 0h7M1 2.5h1m5 0h1m4 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m1 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h3M1 9.5h1m1 0h5m4 0h1m2 0h5M3 10.5h4m1 0h1m1 0h6m2 0h1m2 0h1M7 11.5h1m2 0h2m1 0h1m1 0h2M1 12.5h1m1 0h1m1 0h2m1 0h8m5 0h1M3 13.5h2m1 0h2m1 0h2m2 0h1m2 0h1m1 0h2m1 0h1M9 14.5h1m3 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h3m4 0h6M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m1 0h1m2 0h5m1 0h1M1 19.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h2M1 20.5h1m5 0h1m2 0h1m1 0h5m1 0h1m2 0h1M1 21.5h7m1 0h3m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P70</div>
+        <div class="code-label">W2-P70</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h3m1 0h7M1 2.5h1m5 0h1m1 0h2m1 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h2m1 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m4 0h2m1 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m5 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M12 8.5h2M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h3m4 0h1m2 0h1M1 10.5h4m1 0h1m1 0h1m1 0h1m4 0h1m3 0h3M4 11.5h1m2 0h4m2 0h1m3 0h1m3 0h1M1 12.5h1m1 0h1m1 0h2m3 0h1m4 0h1m2 0h4M1 13.5h1m2 0h2m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3M9 14.5h2m1 0h1m1 0h1m1 0h1m2 0h1M1 15.5h7m2 0h3m1 0h3m2 0h3M1 16.5h1m5 0h1m3 0h4m1 0h2m3 0h1M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h3m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m2 0h2m3 0h2m2 0h2M1 19.5h1m1 0h3m1 0h1m1 0h3m1 0h1m3 0h2m2 0h1M1 20.5h1m5 0h1m2 0h2m3 0h2m1 0h1m1 0h2M1 21.5h7m1 0h1m3 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P71</div>
+        <div class="code-label">W2-P71</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m1 0h5m1 0h7M1 2.5h1m5 0h1m4 0h1m2 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m3 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h5M1 9.5h1m3 0h1m1 0h4m1 0h1m1 0h5m2 0h1M1 10.5h1m1 0h1m1 0h1m3 0h1m1 0h3m2 0h1m1 0h1m1 0h1M4 11.5h1m1 0h4m2 0h1m2 0h5M1 12.5h3m2 0h1m1 0h3m3 0h2m1 0h3m1 0h1M2 13.5h1m2 0h1m1 0h1m2 0h1m2 0h3m2 0h3M9 14.5h1m3 0h3m2 0h1m2 0h1M1 15.5h7m1 0h3m1 0h2m3 0h1m1 0h1M1 16.5h1m5 0h1m3 0h3m2 0h1m3 0h2M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m2 0h3m1 0h3M1 18.5h1m1 0h3m1 0h1m2 0h4m4 0h1m1 0h2M1 19.5h1m1 0h3m1 0h1m3 0h2m2 0h3m1 0h1M1 20.5h1m5 0h1m6 0h4m3 0h1M1 21.5h7m1 0h2m2 0h3m3 0h3"/></svg>
+</div>
+        <div class="pos-label">P72</div>
+        <div class="code-label">W2-P72</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m5 0h1m1 0h7M1 2.5h1m5 0h1m1 0h2m4 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m3 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m2 0h1m4 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h1m1 0h1m1 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M11 8.5h3M1 9.5h1m1 0h1m1 0h1m1 0h1m2 0h3m4 0h1m2 0h1M1 10.5h1m7 0h2m4 0h1m3 0h3M1 11.5h4m2 0h1m2 0h1m2 0h1m3 0h1m3 0h1M2 12.5h2m1 0h2m4 0h1m3 0h1m2 0h4M2 13.5h1m1 0h5m1 0h1m2 0h1m1 0h1m1 0h3M9 14.5h2m1 0h1m1 0h1m1 0h1m2 0h1M1 15.5h7m4 0h1m1 0h3m2 0h3M1 16.5h1m5 0h1m2 0h5m1 0h2m3 0h1M1 17.5h1m1 0h3m1 0h1m1 0h1m1 0h2m1 0h3m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m2 0h1m4 0h2m2 0h2M1 19.5h1m1 0h3m1 0h1m1 0h3m1 0h1m3 0h2m2 0h1M1 20.5h1m5 0h1m7 0h2m1 0h4M1 21.5h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1"/></svg>
+</div>
+        <div class="pos-label">P73</div>
+        <div class="code-label">W2-P73</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m3 0h3m1 0h7M1 2.5h1m5 0h1m1 0h1m5 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h3m1 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m2 0h1m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m3 0h2m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m5 0h1m1 0h1m2 0h1m1 0h2m2 0h3M1 10.5h1m2 0h1m1 0h1m5 0h3m1 0h3M2 11.5h4m1 0h1m3 0h1m1 0h1m1 0h2M1 12.5h1m1 0h3m2 0h3m1 0h5m4 0h1M1 13.5h1m2 0h1m2 0h4m1 0h6m1 0h2M9 14.5h1m3 0h1m4 0h1m1 0h1M1 15.5h7m3 0h2m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m3 0h1m3 0h1m2 0h3M1 17.5h1m1 0h3m1 0h1m2 0h3m1 0h1m2 0h1m1 0h1M1 18.5h1m1 0h3m1 0h1m2 0h1m1 0h4m2 0h1M1 19.5h1m1 0h3m1 0h1m3 0h4m1 0h2m2 0h2M1 20.5h1m5 0h1m4 0h4m2 0h1m2 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P74</div>
+        <div class="code-label">W2-P74</div>
+      </div>
+    
+      <div class="cell">
+        <div class="qr"><svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 23 23" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h23v23H0z"/><path stroke="#000000" d="M1 1.5h7m2 0h1m2 0h1m1 0h7M1 2.5h1m5 0h1m2 0h4m1 0h1m5 0h1M1 3.5h1m1 0h3m1 0h1m1 0h1m1 0h1m3 0h1m1 0h3m1 0h1M1 4.5h1m1 0h3m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1M1 5.5h1m1 0h3m1 0h1m1 0h2m2 0h1m1 0h1m1 0h3m1 0h1M1 6.5h1m5 0h1m1 0h1m2 0h1m2 0h1m5 0h1M1 7.5h7m1 0h1m1 0h1m1 0h1m1 0h7M9 8.5h1m1 0h1M1 9.5h1m1 0h5m2 0h3m2 0h5M2 10.5h2m1 0h2m1 0h1m1 0h6m2 0h1m2 0h1M1 11.5h2m1 0h2m1 0h2m1 0h1m2 0h1m1 0h2M3 12.5h3m2 0h3m1 0h4m5 0h1M3 13.5h1m1 0h4m1 0h2m1 0h1m2 0h1m1 0h2m1 0h1M9 14.5h3m1 0h1m2 0h1m1 0h1m1 0h1M1 15.5h7m4 0h1m1 0h1m2 0h1m1 0h2M1 16.5h1m5 0h1m1 0h1m6 0h6M1 17.5h1m1 0h3m1 0h1m1 0h4m1 0h1m2 0h3M1 18.5h1m1 0h3m1 0h1m1 0h2m1 0h5m2 0h1M1 19.5h1m1 0h3m1 0h1m1 0h3m1 0h1m1 0h2m2 0h1M1 20.5h1m5 0h1m2 0h1m1 0h5m2 0h1m1 0h1M1 21.5h7m1 0h1m1 0h1m1 0h1m2 0h1m2 0h1"/></svg>
+</div>
+        <div class="pos-label">P75</div>
+        <div class="code-label">W2-P75</div>
+      </div>
+    
+</div>
+
+<div class="footer">
+  Put Wall 2 · 75 positions · Lab_Assistant v2.1 · Pair Eyewear Internal
+</div>
+
+<div class="no-print">
+  <button class="print-btn" onclick="window.print()">🖨 Print Wall 2 QR Codes</button>
+  <button class="secondary-btn" onclick="window.history.back()">← Back</button>
+  <p style="margin-top:12px;font-size:12px;color:#9CA3AF">
+    Recommended: Print on label stock or cardstock, laminate, affix to wall positions.<br>
+    Each QR encodes the position ID (e.g. <code>W2-P01</code>) for direct scan into Lab_Assistant.
+  </p>
+</div>
+
+</body>
+</html>

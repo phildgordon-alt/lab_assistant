@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Assembly Dashboard — Pair Eyewear</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#070A0F; --surface:#0D1117; --card:#111820;
+  --border:#1C2733; --borderLt:#2A3A4A;
+  --text:#E8EDF2; --dim:#8899AA; --dimmer:#445566;
+  --blue:#3B82F6; --blueDk:#1E3A5F; --blue2:#2E5FA3;
+  --green:#10B981; --greenDk:#052E1A;
+  --amber:#F59E0B; --amberDk:#451A00;
+  --red:#EF4444;   --redDk:#3F0A0A;
+  --purple:#8B5CF6; --purpleDk:#2D1B69;
+  --teal:#06B6D4;
+  --gold:#F59E0B; --silver:#94A3B8; --bronze:#B45309;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'DM Sans',sans-serif;
+  --disp:'Bebas Neue',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);}
+body{display:flex;flex-direction:column;overflow:hidden;}
+
+/* HEADER */
+.hdr{background:var(--surface);border-bottom:2px solid var(--border);
+  padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.hdr-brand{display:flex;align-items:center;gap:12px;}
+.logo{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,#10B981,#059669);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-weight:800;font-size:13px;color:#fff;}
+.brand-name{font-family:var(--disp);font-size:28px;letter-spacing:1px;}
+.brand-sub{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:2px;}
+.hdr-right{display:flex;align-items:center;gap:16px;}
+.date-badge{font-family:var(--mono);font-size:11px;color:var(--dim);}
+.clock{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--green);letter-spacing:3px;}
+.srv-wrap{display:flex;align-items:center;gap:5px;cursor:pointer;}
+.srv-dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
+.srv-dot.ok{background:var(--green);box-shadow:0 0 8px var(--green);}
+.srv-dot.mock{background:var(--amber);}
+.srv-dot.err{background:var(--red);}
+.srv-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;}
+.hdr-btn{background:transparent;border:1px solid var(--border);border-radius:7px;
+  padding:7px 12px;font-family:var(--mono);font-size:10px;color:var(--dim);cursor:pointer;}
+.hdr-btn:active{border-color:var(--green);color:var(--green);}
+
+/* TABS */
+.tab-bar{background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;gap:0;padding:0 20px;flex-shrink:0;}
+.tab{padding:12px 20px;font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--dim);cursor:pointer;border-bottom:3px solid transparent;
+  transition:all .15s;letter-spacing:.5px;-webkit-user-select:none;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--green);border-bottom-color:var(--green);}
+
+/* MAIN */
+.main{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;display:flex;flex-direction:column;gap:14px;}
+
+/* KPI ROW */
+.kpi-row{display:grid;gap:10px;grid-template-columns:repeat(7,1fr);}
+@media(max-width:1100px){.kpi-row{grid-template-columns:repeat(4,1fr);}}
+@media(max-width:700px){.kpi-row{grid-template-columns:repeat(2,1fr);}}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:14px 16px;display:flex;flex-direction:column;gap:4px;}
+.kpi-val{font-family:var(--mono);font-size:30px;font-weight:800;line-height:1;}
+.kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;}
+.kpi-sub{font-family:var(--mono);font-size:10px;color:var(--dimmer);margin-top:2px;}
+
+/* GRID LAYOUTS */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+@media(max-width:900px){.two-col,.three-col{grid-template-columns:1fr;}}
+
+/* CARD */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
+.card-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--dim);
+  letter-spacing:2px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;}
+.card-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 8px;
+  border-radius:10px;background:var(--border);color:var(--dim);}
+
+/* STATION GRID */
+.station-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+@media(min-width:1200px){.station-grid{grid-template-columns:repeat(4,1fr);}}
+.station-card{background:var(--surface);border:2px solid var(--border);border-radius:12px;
+  padding:14px;display:flex;flex-direction:column;gap:8px;cursor:pointer;
+  transition:border-color .15s;}
+.station-card:hover{border-color:var(--borderLt);}
+.station-card.busy{border-color:var(--green);}
+.station-card.idle{border-color:var(--border);opacity:.7;}
+.station-card.break{border-color:var(--amber);}
+.station-card.hold{border-color:var(--red);}
+.stn-top{display:flex;align-items:center;justify-content:space-between;}
+.stn-id{font-family:var(--mono);font-size:10px;color:var(--dim);font-weight:700;}
+.stn-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.s-busy{background:var(--green);box-shadow:0 0 8px var(--green);}
+.s-idle{background:var(--dimmer);}
+.s-break{background:var(--amber);}
+.s-hold{background:var(--red);}
+.stn-op{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);}
+.stn-job{font-family:var(--mono);font-size:10px;color:var(--blue);margin-top:2px;}
+.stn-stats{display:flex;gap:12px;}
+.stn-stat{text-align:center;}
+.stn-stat-val{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--green);}
+.stn-stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;}
+.stn-bar-wrap{width:100%;height:4px;background:var(--border);border-radius:2px;overflow:hidden;}
+.stn-bar{height:100%;border-radius:2px;background:var(--green);transition:width .5s;}
+.stn-bar.b-amber{background:var(--amber);}
+.stn-bar.b-red{background:var(--red);}
+.assign-btn{width:100%;padding:9px;border-radius:8px;border:1px dashed var(--border);
+  background:transparent;color:var(--dimmer);font-family:var(--mono);font-size:10px;
+  cursor:pointer;transition:all .15s;}
+.assign-btn:active{border-color:var(--green);color:var(--green);}
+
+/* LEADERBOARD */
+.lb-list{display:flex;flex-direction:column;gap:6px;}
+.lb-row{display:flex;align-items:center;gap:12px;padding:10px 14px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  transition:all .15s;}
+.lb-row.rank-1{border-color:var(--gold);background:#2A2200;}
+.lb-row.rank-2{border-color:var(--silver);background:#1A1F2A;}
+.lb-row.rank-3{border-color:var(--bronze);background:#2A1500;}
+.lb-rank{font-family:var(--disp);font-size:28px;width:36px;text-align:center;flex-shrink:0;}
+.lb-medal{font-size:22px;width:36px;text-align:center;flex-shrink:0;}
+.lb-avatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-family:var(--mono);font-weight:800;font-size:14px;
+  flex-shrink:0;color:#fff;}
+.lb-info{flex:1;}
+.lb-name{font-family:var(--sans);font-size:15px;font-weight:700;color:var(--text);}
+.lb-station{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:1px;}
+.lb-bars{flex:1;display:flex;flex-direction:column;gap:3px;}
+.lb-bar-row{display:flex;align-items:center;gap:6px;}
+.lb-bar-wrap{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden;}
+.lb-bar{height:100%;border-radius:3px;transition:width .8s cubic-bezier(.34,1.56,.64,1);}
+.lb-bar-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);width:28px;text-align:right;}
+.lb-score{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--green);min-width:48px;text-align:right;}
+.lb-score-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);text-align:right;margin-top:1px;}
+
+/* JOB QUEUE */
+.queue-list{display:flex;flex-direction:column;gap:5px;max-height:320px;overflow-y:auto;}
+.queue-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;}
+.q-job{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blue);min-width:72px;}
+.q-rx{font-family:var(--mono);font-size:10px;color:var(--dim);flex:1;}
+.q-status{font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 8px;
+  border-radius:10px;white-space:nowrap;}
+.qs-wait{background:#1A2030;color:var(--dim);}
+.qs-active{background:var(--greenDk);color:var(--green);}
+.qs-hold{background:var(--redDk);color:var(--red);}
+.qs-done{background:#0A1A0A;color:#2D7A3A;}
+.q-op{font-family:var(--mono);font-size:10px;color:var(--purple);min-width:72px;text-align:right;}
+.q-time{font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:40px;text-align:right;}
+.q-rush{font-size:11px;}
+
+/* OPERATOR DETAIL PANEL */
+.op-panel{background:var(--surface);border:2px solid var(--purple);border-radius:14px;padding:16px;}
+.op-panel-header{display:flex;align-items:center;gap:12px;margin-bottom:14px;}
+.op-big-avatar{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-family:var(--mono);font-weight:800;font-size:18px;color:#fff;}
+.op-name{font-family:var(--sans);font-size:20px;font-weight:700;}
+.op-station{font-family:var(--mono);font-size:10px;color:var(--dim);}
+.op-stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.op-stat{background:var(--card);border:1px solid var(--border);border-radius:8px;
+  padding:10px;text-align:center;}
+.op-stat-val{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--purple);}
+.op-stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:#00000090;z-index:200;
+  display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal{background:var(--surface);border:1px solid var(--borderLt);border-radius:16px;
+  padding:24px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;}
+.modal h3{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);letter-spacing:1px;}
+.m-field label{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;
+  display:block;margin-bottom:6px;}
+.m-inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:8px;
+  padding:11px 14px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;
+  -webkit-appearance:none;}
+.m-inp:focus{border-color:var(--green);}
+.m-sel{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:8px;
+  padding:11px 14px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;
+  -webkit-appearance:none;}
+.m-sel:focus{border-color:var(--green);}
+.m-btns{display:flex;gap:8px;}
+.m-btns button{flex:1;padding:12px;border-radius:8px;border:none;
+  font-weight:700;font-size:14px;cursor:pointer;font-family:var(--sans);}
+
+/* TOAST */
+.toast-wrap{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:300;pointer-events:none;}
+.toast{background:#1A2540;border:1px solid var(--borderLt);border-radius:10px;
+  padding:10px 20px;font-family:var(--mono);font-size:13px;color:var(--text);
+  box-shadow:0 4px 24px #00000060;white-space:nowrap;}
+.toast.ok{border-color:var(--green);color:var(--green);}
+.toast.warn{border-color:var(--amber);color:var(--amber);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-brand">
+    <div class="logo">ASY</div>
+    <div>
+      <div class="brand-name">ASSEMBLY DASHBOARD</div>
+      <div class="brand-sub">LAB_ASSISTANT · PAIR EYEWEAR · POWERED BY DVI</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="date-badge" id="dateBadge"></div>
+    <div class="srv-wrap" onclick="manualSync()" title="Click to refresh DVI data">
+      <div class="srv-dot" id="srvDot"></div>
+      <span class="srv-lbl" id="srvLbl">DVI</span>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+    <button class="hdr-btn" onclick="openSetup()">⚙ SETUP</button>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tab-bar">
+  <div class="tab active" id="tab-live"    onclick="switchTab('live')">⚡ LIVE FLOOR</div>
+  <div class="tab"        id="tab-leaders" onclick="switchTab('leaders')">🏆 LEADERBOARD</div>
+  <div class="tab"        id="tab-queue"   onclick="switchTab('queue')">📋 JOB QUEUE</div>
+  <div class="tab"        id="tab-ops"     onclick="switchTab('ops')">👤 OPERATORS</div>
+</div>
+
+<div class="main" id="main"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal-bg" id="modal" style="display:none">
+  <div class="modal">
+    <h3 id="mTitle"></h3>
+    <div id="mBody"></div>
+    <div class="m-btns" id="mBtns"></div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────
+// CONFIG & STATE
+// ─────────────────────────────────────────────────────────────────
+let cfg = JSON.parse(localStorage.getItem('asy_cfg') || '{}');
+let serverUrl  = cfg.serverUrl  || 'http://localhost:3002';
+let dviApiKey  = cfg.dviApiKey  || '';
+let dviUrl     = cfg.dviUrl     || '';
+let shiftStart = cfg.shiftStart || '07:00';
+
+const STATIONS = [
+  {id:'STN-01', name:'Station 1', bench:'A'},
+  {id:'STN-02', name:'Station 2', bench:'A'},
+  {id:'STN-03', name:'Station 3', bench:'A'},
+  {id:'STN-04', name:'Station 4', bench:'B'},
+  {id:'STN-05', name:'Station 5', bench:'B'},
+  {id:'STN-06', name:'Station 6', bench:'B'},
+  {id:'STN-07', name:'Station 7', bench:'C'},
+  {id:'STN-08', name:'Station 8', bench:'C'},
+];
+
+const AVATAR_COLORS = [
+  '#8B5CF6','#3B82F6','#10B981','#F59E0B','#EF4444',
+  '#EC4899','#06B6D4','#84CC16','#F97316','#A78BFA',
+];
+
+// Station assignments — persisted
+let assignments = JSON.parse(localStorage.getItem('asy_assignments') || '{}');
+// { 'STN-01': { operatorName, color, status: 'busy'|'idle'|'break'|'hold', startTime } }
+
+// Operators — derived from assignments + DVI data
+let operators = JSON.parse(localStorage.getItem('asy_operators') || '{}');
+// { 'Maria': { color, todayJobs, todayHours, accuracy, speed } }
+
+// Job data from DVI
+let jobs = [];
+let dataMode = 'mock';
+let lastSync = null;
+
+let activeTab = 'live';
+let selectedOp = null;
+
+// ─────────────────────────────────────────────────────────────────
+// CLOCK + DATE
+// ─────────────────────────────────────────────────────────────────
+function tickClock(){
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  document.getElementById('dateBadge').textContent = now.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}).toUpperCase();
+}
+setInterval(tickClock,1000); tickClock();
+
+// ─────────────────────────────────────────────────────────────────
+// DVI DATA FETCH
+// ─────────────────────────────────────────────────────────────────
+async function fetchDVI(){
+  // If we have DVI credentials + Lab_Assistant server, go live
+  // Otherwise use mock data
+  if(dviUrl && dviApiKey){
+    try{
+      const resp = await fetch(`${serverUrl}/api/dvi/jobs`, {
+        headers:{'X-API-Key': dviApiKey},
+        signal: AbortSignal.timeout(5000)
+      });
+      if(resp.ok){
+        const data = await resp.json();
+        jobs = normalizeDVI(data);
+        dataMode = 'live';
+        lastSync = new Date();
+        updateSrvDot('ok','DVI LIVE');
+        reconcileOperatorStats();
+        return;
+      }
+    } catch(e){ console.warn('DVI fetch failed:', e.message); }
+  }
+  // Fallback mock
+  jobs = generateMockJobs();
+  dataMode = 'mock';
+  lastSync = new Date();
+  updateSrvDot('mock','DVI MOCK');
+  reconcileOperatorStats();
+}
+
+function normalizeDVI(data){
+  return (data.jobs || data || []).map(j=>({
+    id:          j.job_id || j.id || j.order_number,
+    rx:          j.rx_spec || j.prescription || j.patient_rx || '',
+    lensType:    j.lens_type || j.product || '',
+    coating:     j.coating_type || j.coating || '',
+    status:      normalizeStatus(j.status),
+    operator:    j.operator || j.assembled_by || null,
+    stationId:   j.station || j.station_id || null,
+    startedAt:   j.started_at || j.assembly_start || null,
+    completedAt: j.completed_at || j.assembly_end || null,
+    isRush:      j.rush || j.priority === 'rush' || j.priority === 'RUSH' || false,
+    patient:     j.patient_name || j.patient || null,
+    minutesAtStation: j.minutes_at_station || null,
+  }));
+}
+
+function normalizeStatus(s){
+  if(!s) return 'waiting';
+  const sl = String(s).toLowerCase();
+  if(sl.includes('complet') || sl.includes('done') || sl === 'assembled') return 'completed';
+  if(sl.includes('active') || sl.includes('progress') || sl === 'assembling') return 'active';
+  if(sl.includes('hold') || sl.includes('qc') || sl === 'on_hold') return 'hold';
+  return 'waiting';
+}
+
+function generateMockJobs(){
+  const ops = Object.keys(assignments).map(sid=>assignments[sid]?.operatorName).filter(Boolean);
+  const opList = ops.length > 0 ? ops : ['Maria','James','Sofia','Diego','Aisha','Liam'];
+  const coatings = ['AR','Blue Cut','Hard Coat','Polarized','Mirror','Transitions'];
+  const statuses = ['active','active','active','waiting','waiting','completed','completed','hold'];
+  const now = Date.now();
+  const shiftMs = shiftHours() * 3600000 || 28800000; // default 8h shift
+  return Array.from({length:60},(_, i)=>{
+    const status = statuses[i%statuses.length];
+    // Spread jobs received across the shift — older jobs higher index
+    const receivedMsAgo = Math.min(i * (shiftMs/60) * 0.9, shiftMs * 0.95);
+    const startedMsAgo  = status==='active' ? Math.max(i * 180000, 60000) : null;
+    const completedMsAgo= (status==='completed') ? Math.max(i * 60000, 30000) : null;
+    const shippedMsAgo  = (status==='completed' && i%2===0) ? Math.max(i * 40000, 20000) : null;
+    return {
+      id: `J${21600+i}`,
+      rx: `${['-1.00','-2.50','+0.75','-3.25','+1.50','0.00'][i%6]} / ${['-0.25','-0.50','0.00','-0.75'][i%4]}`,
+      lensType: ['1.67 Hi-Index','1.56 Standard','1.50 Standard','1.74 Ultra-Thin'][i%4],
+      coating: coatings[i%coatings.length],
+      status,
+      operator: opList[i%opList.length],
+      stationId: `STN-0${(i%8)+1}`,
+      receivedAt:   new Date(now - receivedMsAgo).toISOString(),
+      startedAt:    startedMsAgo  ? new Date(now - startedMsAgo).toISOString()   : null,
+      completedAt:  completedMsAgo? new Date(now - completedMsAgo).toISOString() : null,
+      shippedAt:    shippedMsAgo  ? new Date(now - shippedMsAgo).toISOString()   : null,
+      isRush: i%7===0,
+      patient: null,
+      minutesAtStation: Math.round(12 + Math.random()*18),
+    };
+  });
+}
+
+async function manualSync(){
+  updateSrvDot('pending','SYNCING...');
+  await fetchDVI();
+  render();
+  toast('DVI data refreshed','ok');
+}
+
+function updateSrvDot(state, label){
+  const dot = document.getElementById('srvDot');
+  const lbl = document.getElementById('srvLbl');
+  dot.className = 'srv-dot ' + (state==='ok'?'ok':state==='mock'?'mock':'err');
+  lbl.textContent = label;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// OPERATOR STATS — derived from DVI job data
+// ─────────────────────────────────────────────────────────────────
+function reconcileOperatorStats(){
+  const completedToday = jobs.filter(j=>j.status==='completed' && isToday(j.completedAt));
+  const grouped = {};
+  completedToday.forEach(j=>{
+    if(!j.operator) return;
+    if(!grouped[j.operator]) grouped[j.operator]={jobs:0,totalMin:0,rush:0};
+    grouped[j.operator].jobs++;
+    grouped[j.operator].totalMin += j.minutesAtStation || 14;
+    if(j.isRush) grouped[j.operator].rush++;
+  });
+
+  // Build / update operators — preserve existing entries
+  Object.entries(grouped).forEach(([name,stats])=>{
+    if(!operators[name]) operators[name]={color:pickColor(name),name};
+    operators[name].todayJobs  = stats.jobs;
+    operators[name].avgMinutes = stats.totalMin / Math.max(1,stats.jobs);
+    operators[name].rushJobs   = stats.rush;
+    // Speed score: jobs per hour vs shift average, normalized 0–100
+    const shiftH = shiftHours();
+    operators[name].jobsPerHour = shiftH>0 ? (stats.jobs/shiftH) : 0;
+  });
+
+  // Also ensure operators from assignments exist
+  Object.values(assignments).forEach(a=>{
+    if(a?.operatorName && !operators[a.operatorName]){
+      operators[a.operatorName] = {color:a.color||pickColor(a.operatorName),name:a.operatorName,todayJobs:0,avgMinutes:0,rushJobs:0,jobsPerHour:0};
+    }
+  });
+
+  localStorage.setItem('asy_operators', JSON.stringify(operators));
+}
+
+function isToday(iso){
+  if(!iso) return false;
+  const d = new Date(iso);
+  const now = new Date();
+  return d.getDate()===now.getDate() && d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+}
+
+function shiftHours(){
+  const [h,m] = shiftStart.split(':').map(Number);
+  const start = new Date();
+  start.setHours(h,m,0,0);
+  return Math.max(0,(Date.now()-start)/3600000);
+}
+
+function pickColor(name){
+  let hash = 0;
+  for(const c of name) hash = (hash*31 + c.charCodeAt(0)) & 0xFFFFFF;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function initials(name){
+  return name.split(' ').map(p=>p[0]).join('').toUpperCase().slice(0,2);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// TAB SWITCH
+// ─────────────────────────────────────────────────────────────────
+function switchTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tab)?.classList.add('active');
+  render();
+}
+
+// ─────────────────────────────────────────────────────────────────
+// RENDER
+// ─────────────────────────────────────────────────────────────────
+function render(){
+  const main = document.getElementById('main');
+  if(activeTab==='live')     main.innerHTML = renderLive();
+  if(activeTab==='leaders')  main.innerHTML = renderLeaderboard();
+  if(activeTab==='queue')    main.innerHTML = renderQueue();
+  if(activeTab==='ops')      main.innerHTML = renderOperators();
+}
+
+// ─── LIVE FLOOR ──────────────────────────────────────────────────
+function renderLive(){
+  const totalStations  = STATIONS.length;
+  const busyStations   = STATIONS.filter(s=>assignments[s.id]?.status==='busy').length;
+  const totalTodayJobs = jobs.filter(j=>j.status==='completed' && isToday(j.completedAt)).length;
+  const incomingToday  = jobs.filter(j=>isToday(j.receivedAt)).length;
+  const shippedToday   = jobs.filter(j=>j.shippedAt && isToday(j.shippedAt)).length;
+  const activeJobs     = jobs.filter(j=>j.status==='active').length;
+  const holdJobs       = jobs.filter(j=>j.status==='hold').length;
+  const rushActive     = jobs.filter(j=>j.isRush && j.status==='active').length;
+  const wipCount       = jobs.filter(j=>j.status!=='completed').length;
+  const shiftH         = shiftHours();
+
+  const kpis = `
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--green)">${busyStations}<span style="font-size:16px;color:var(--dim)">/${totalStations}</span></div>
+      <div class="kpi-lbl">STATIONS ACTIVE</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--teal)">${incomingToday}</div>
+      <div class="kpi-lbl">INCOMING TODAY</div>
+      <div class="kpi-sub">${shiftH>0?(incomingToday/shiftH).toFixed(1)+'/hr':''}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--blue)">${shippedToday}</div>
+      <div class="kpi-lbl">SHIPPED TODAY</div>
+      <div class="kpi-sub">${shiftH>0?(shippedToday/shiftH).toFixed(1)+'/hr':''}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--purple)">${totalTodayJobs}</div>
+      <div class="kpi-lbl">ASSEMBLED TODAY</div>
+      <div class="kpi-sub">${shiftH>0?(totalTodayJobs/shiftH).toFixed(1)+'/hr avg':''}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--dimmer)">${wipCount}</div>
+      <div class="kpi-lbl">TOTAL WIP</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--amber)">${holdJobs}</div>
+      <div class="kpi-lbl">ON HOLD</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--red)">${rushActive}</div>
+      <div class="kpi-lbl">RUSH ACTIVE</div>
+    </div>
+  </div>`;
+
+  const stationCards = STATIONS.map(stn=>{
+    const a = assignments[stn.id];
+    if(!a || !a.operatorName){
+      return `<div class="station-card idle" onclick="assignStation('${stn.id}')">
+        <div class="stn-top"><span class="stn-id">${stn.id} · BENCH ${stn.bench}</span><span class="stn-status-dot s-idle"></span></div>
+        <div style="color:var(--dimmer);font-family:var(--mono);font-size:11px;text-align:center;padding:8px 0">UNASSIGNED</div>
+        <button class="assign-btn">+ ASSIGN OPERATOR</button>
+      </div>`;
+    }
+    const op = operators[a.operatorName] || {};
+    const stJobs = jobs.filter(j=>j.operator===a.operatorName && j.status==='completed' && isToday(j.completedAt));
+    const activeJob = jobs.find(j=>j.operator===a.operatorName && j.status==='active');
+    const statusClass = a.status||'busy';
+    const dotClass = {busy:'s-busy',idle:'s-idle',break:'s-break',hold:'s-hold'}[statusClass]||'s-busy';
+    const pct = Math.min(100,(stJobs.length / Math.max(1, (shiftHours()||1) * 3.5)) * 100);
+    const barClass = pct>80?'b-green':pct>50?'b-amber':'b-red';
+    return `<div class="station-card ${statusClass}" onclick="showStationMenu('${stn.id}')">
+      <div class="stn-top">
+        <span class="stn-id">${stn.id} · BENCH ${stn.bench}</span>
+        <span class="stn-status-dot ${dotClass}"></span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:${a.color||'#8B5CF6'};display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800;font-size:10px;color:#fff;flex-shrink:0;">${initials(a.operatorName)}</div>
+        <div>
+          <div class="stn-op">${a.operatorName}</div>
+          <div style="font-family:var(--mono);font-size:8px;color:var(--dim);text-transform:uppercase;">${statusClass}</div>
+        </div>
+      </div>
+      ${activeJob?`<div class="stn-job">▶ ${activeJob.id}${activeJob.isRush?' 🚨':''} · ${activeJob.coating||''}</div>`:'<div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);">— waiting —</div>'}
+      <div class="stn-stats">
+        <div class="stn-stat"><div class="stn-stat-val">${stJobs.length}</div><div class="stn-stat-lbl">TODAY</div></div>
+        <div class="stn-stat"><div class="stn-stat-val">${(op.jobsPerHour||0).toFixed(1)}</div><div class="stn-stat-lbl">J/HR</div></div>
+        <div class="stn-stat"><div class="stn-stat-val">${Math.round(op.avgMinutes||0)}</div><div class="stn-stat-lbl">AVG MIN</div></div>
+      </div>
+      <div class="stn-bar-wrap"><div class="stn-bar ${barClass}" style="width:${pct}%"></div></div>
+    </div>`;
+  }).join('');
+
+  const lastSyncStr = lastSync ? `Last sync: ${lastSync.toLocaleTimeString()}` : 'Not synced';
+
+  return `
+  ${kpis}
+  <div class="card">
+    <div class="card-title">
+      ASSEMBLY FLOOR — ${busyStations} OF ${totalStations} STATIONS OCCUPIED
+      <span style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">Tap station to manage · ${lastSyncStr} · ${dataMode.toUpperCase()}</span>
+    </div>
+    <div class="station-grid">${stationCards}</div>
+  </div>`;
+}
+
+// ─── LEADERBOARD ─────────────────────────────────────────────────
+function renderLeaderboard(){
+  const maxJobs = Math.max(1, ...Object.values(operators).map(o=>o.todayJobs||0));
+  const maxRate = Math.max(1, ...Object.values(operators).map(o=>o.jobsPerHour||0));
+
+  const ranked = Object.values(operators)
+    .filter(o=>o.name)
+    .sort((a,b)=>(b.todayJobs||0)-(a.todayJobs||0));
+
+  const medals = ['🥇','🥈','🥉'];
+  const rankColors = ['var(--gold)','var(--silver)','var(--bronze)'];
+
+  const shiftH = shiftHours();
+  const shiftAvgJobs = shiftH>0 ? (jobs.filter(j=>j.status==='completed'&&isToday(j.completedAt)).length / Math.max(1,Object.keys(operators).length)) : 0;
+
+  const rows = ranked.map((op,i)=>{
+    const jobPct  = Math.round(((op.todayJobs||0)/maxJobs)*100);
+    const ratePct = Math.round(((op.jobsPerHour||0)/maxRate)*100);
+    const rankNum = i+1;
+    const isTop3  = rankNum<=3;
+    const stationEntry = Object.entries(assignments).find(([,a])=>a?.operatorName===op.name);
+    const stationLabel = stationEntry ? stationEntry[0] : '—';
+    const aboveAvg = (op.todayJobs||0) > shiftAvgJobs;
+
+    return `
+    <div class="lb-row ${rankNum<=3?'rank-'+rankNum:''}" style="cursor:pointer" onclick="focusOp('${esc(op.name)}')">
+      <div class="lb-medal">${medals[i]||''}</div>
+      <div class="lb-avatar" style="background:${op.color||'#8B5CF6'}">${initials(op.name)}</div>
+      <div class="lb-info">
+        <div class="lb-name">${esc(op.name)} ${aboveAvg?'<span style="font-size:11px;color:var(--green)">↑</span>':''}</div>
+        <div class="lb-station">${stationLabel} · ${op.rushJobs||0} rush completed</div>
+      </div>
+      <div class="lb-bars">
+        <div class="lb-bar-row">
+          <div class="lb-bar-lbl">JOBS</div>
+          <div class="lb-bar-wrap"><div class="lb-bar" style="width:${jobPct}%;background:${isTop3?rankColors[i]:'var(--blue)'}"></div></div>
+        </div>
+        <div class="lb-bar-row">
+          <div class="lb-bar-lbl">RATE</div>
+          <div class="lb-bar-wrap"><div class="lb-bar" style="width:${ratePct}%;background:var(--purple)"></div></div>
+        </div>
+      </div>
+      <div>
+        <div class="lb-score" style="color:${isTop3?rankColors[i]:'var(--green)'}">${op.todayJobs||0}</div>
+        <div class="lb-score-lbl">TODAY</div>
+      </div>
+    </div>`;
+  }).join('') || '<div style="text-align:center;padding:40px;font-family:var(--mono);color:var(--dimmer);">Assign operators to stations to see leaderboard</div>';
+
+  const winner = ranked[0];
+  const bannerHtml = winner && winner.todayJobs>0 ? `
+  <div style="background:linear-gradient(135deg,#2A2200,#1A1000);border:2px solid var(--gold);border-radius:14px;padding:16px;display:flex;align-items:center;gap:16px;">
+    <div style="font-size:44px">🏆</div>
+    <div>
+      <div style="font-family:var(--disp);font-size:32px;color:var(--gold);letter-spacing:1px;">${esc(winner.name)}</div>
+      <div style="font-family:var(--mono);font-size:11px;color:var(--amber);">TODAY'S LEADER · ${winner.todayJobs} JOBS · ${(winner.jobsPerHour||0).toFixed(1)}/HR</div>
+    </div>
+    <div style="margin-left:auto;text-align:right;">
+      <div style="font-family:var(--mono);font-size:40px;font-weight:800;color:var(--gold);">${winner.todayJobs}</div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--amber);">JOBS COMPLETED</div>
+    </div>
+  </div>` : '';
+
+  return `
+  ${bannerHtml}
+  <div class="card">
+    <div class="card-title">
+      TODAY'S LEADERBOARD
+      <span class="card-badge">${ranked.length} OPERATORS · SHIFT ${shiftH.toFixed(1)}H</span>
+    </div>
+    <div class="lb-list">${rows}</div>
+  </div>
+  <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);text-align:center;padding:8px;">
+    Tap any row to see operator detail · Data from DVI · Resets at shift start (${shiftStart})
+  </div>`;
+}
+
+// ─── JOB QUEUE ───────────────────────────────────────────────────
+function renderQueue(){
+  const waiting   = jobs.filter(j=>j.status==='waiting');
+  const active    = jobs.filter(j=>j.status==='active');
+  const onHold    = jobs.filter(j=>j.status==='hold');
+  const completed = jobs.filter(j=>j.status==='completed' && isToday(j.completedAt));
+
+  const qRow = (j,sc,slabel)=>`
+  <div class="queue-row">
+    <div class="q-job">${j.isRush?'<span class="q-rush">🚨</span> ':''}${esc(j.id)}</div>
+    <div class="q-rx">${esc(j.coating||'')} · ${esc(j.lensType||'')}</div>
+    <div class="q-status ${sc}">${slabel}</div>
+    <div class="q-op">${esc(j.operator||'—')}</div>
+    <div class="q-time">${j.minutesAtStation?j.minutesAtStation+'m':fmtAgo(j.startedAt)}</div>
+  </div>`;
+
+  return `
+  <div class="card">
+    <div class="card-title">ACTIVE <span class="card-badge">${active.length}</span></div>
+    <div class="queue-list">${active.map(j=>qRow(j,'qs-active','IN PROGRESS')).join('')||'<div style="padding:12px;text-align:center;font-family:var(--mono);color:var(--dimmer);">No jobs in progress</div>'}</div>
+  </div>
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">WAITING <span class="card-badge">${waiting.length}</span></div>
+      <div class="queue-list">${waiting.slice(0,20).map(j=>qRow(j,'qs-wait','WAITING')).join('')||'<div style="padding:12px;text-align:center;font-family:var(--mono);color:var(--dimmer);">Queue empty</div>'}</div>
+    </div>
+    <div class="card">
+      <div class="card-title">ON HOLD <span class="card-badge" style="background:var(--redDk);color:var(--red);">${onHold.length}</span></div>
+      <div class="queue-list">${onHold.map(j=>qRow(j,'qs-hold','ON HOLD')).join('')||'<div style="padding:12px;text-align:center;font-family:var(--mono);color:var(--dimmer);">No holds</div>'}</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">COMPLETED TODAY <span class="card-badge" style="background:var(--greenDk);color:var(--green);">${completed.length}</span></div>
+    <div class="queue-list">${completed.slice(0,15).map(j=>qRow(j,'qs-done','DONE')).join('')}</div>
+  </div>`;
+}
+
+// ─── OPERATORS ───────────────────────────────────────────────────
+function renderOperators(){
+  const opList = Object.values(operators).filter(o=>o.name).sort((a,b)=>(b.todayJobs||0)-(a.todayJobs||0));
+  const maxJobs = Math.max(1,...opList.map(o=>o.todayJobs||0));
+
+  const cards = opList.map(op=>{
+    const stationEntry = Object.entries(assignments).find(([,a])=>a?.operatorName===op.name);
+    const stationId = stationEntry?.[0] || '—';
+    const status = stationEntry?.[1]?.status || 'idle';
+    const pct = Math.round(((op.todayJobs||0)/maxJobs)*100);
+    return `
+    <div class="card" style="cursor:pointer;${selectedOp===op.name?'border-color:var(--purple);':''}" onclick="toggleOp('${esc(op.name)}')">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+        <div class="op-big-avatar" style="background:${op.color||'#8B5CF6'}">${initials(op.name)}</div>
+        <div style="flex:1">
+          <div style="font-family:var(--sans);font-size:16px;font-weight:700;">${esc(op.name)}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--dim);">${stationId} · ${status.toUpperCase()}</div>
+        </div>
+        <button onclick="event.stopPropagation();editOperator('${esc(op.name)}')" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;color:var(--dim);">✏</button>
+      </div>
+      <div class="op-stat-grid">
+        <div class="op-stat"><div class="op-stat-val">${op.todayJobs||0}</div><div class="op-stat-lbl">TODAY</div></div>
+        <div class="op-stat"><div class="op-stat-val">${(op.jobsPerHour||0).toFixed(1)}</div><div class="op-stat-lbl">J/HOUR</div></div>
+        <div class="op-stat"><div class="op-stat-val">${Math.round(op.avgMinutes||0)}</div><div class="op-stat-lbl">AVG MIN</div></div>
+        <div class="op-stat"><div class="op-stat-val">${op.rushJobs||0}</div><div class="op-stat-lbl">RUSH</div></div>
+      </div>
+      <div style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-bottom:4px;">
+          <span>DAILY PROGRESS</span><span>${pct}%</span>
+        </div>
+        <div class="stn-bar-wrap"><div class="stn-bar" style="width:${pct}%;background:${op.color||'var(--purple)'}"></div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+    <div style="font-family:var(--mono);font-size:10px;color:var(--dim);">${opList.length} OPERATORS THIS SHIFT</div>
+    <button onclick="addOperator()" style="background:var(--greenDk);border:1px solid var(--green);border-radius:8px;padding:8px 16px;color:var(--green);font-family:var(--mono);font-size:10px;cursor:pointer;font-weight:700;">+ ADD OPERATOR</button>
+  </div>
+  <div class="three-col">${cards||'<div style="grid-column:span 3;text-align:center;padding:40px;font-family:var(--mono);color:var(--dimmer);">No operators added yet — assign operators to stations</div>'}</div>`;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// STATION ACTIONS
+// ─────────────────────────────────────────────────────────────────
+function assignStation(stnId){
+  const stn = STATIONS.find(s=>s.id===stnId);
+  const opNames = Object.values(operators).filter(o=>o.name).map(o=>o.name);
+  const opts = opNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+
+  document.getElementById('mTitle').textContent = `ASSIGN — ${stnId}`;
+  document.getElementById('mBody').innerHTML = `
+    <div class="m-field">
+      <label>OPERATOR</label>
+      <select class="m-sel" id="ma-op">${opts||'<option value="">No operators yet</option>'}</select>
+    </div>
+    ${!opNames.length?'<div style="font-family:var(--mono);font-size:11px;color:var(--amber);">Add operators first from the Operators tab.</div>':''}
+    <div class="m-field">
+      <label>STATUS</label>
+      <select class="m-sel" id="ma-status">
+        <option value="busy">BUSY — Active on jobs</option>
+        <option value="idle">IDLE — At station, no job</option>
+        <option value="break">BREAK — On break</option>
+      </select>
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
+    <button style="background:var(--green);color:#000;" onclick="saveAssignment('${stnId}')">Assign</button>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+function showStationMenu(stnId){
+  const a = assignments[stnId];
+  if(!a?.operatorName){ assignStation(stnId); return; }
+  const stn = STATIONS.find(s=>s.id===stnId);
+  document.getElementById('mTitle').textContent = `${stnId} — ${a.operatorName}`;
+  document.getElementById('mBody').innerHTML = `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      ${['busy','idle','break','hold'].map(s=>`<button onclick="setStationStatus('${stnId}','${s}')" style="flex:1;padding:12px 8px;border-radius:8px;border:2px solid ${a.status===s?'var(--green)':'var(--border)'};background:${a.status===s?'var(--greenDk)':'transparent'};color:${a.status===s?'var(--green)':'var(--dim)'};font-family:var(--mono);font-size:11px;cursor:pointer;font-weight:700;text-transform:uppercase;">${s}</button>`).join('')}
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--redDk);color:var(--red);border:1px solid var(--red);" onclick="clearStation('${stnId}')">Unassign</button>
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Close</button>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+function saveAssignment(stnId){
+  const opName = document.getElementById('ma-op')?.value;
+  const status = document.getElementById('ma-status')?.value||'busy';
+  if(!opName){toast('Select an operator','warn');return;}
+  const op = operators[opName];
+  assignments[stnId] = {operatorName:opName,color:op?.color||pickColor(opName),status,assignedAt:new Date().toISOString()};
+  localStorage.setItem('asy_assignments',JSON.stringify(assignments));
+  closeModal(); render(); toast(`${opName} assigned to ${stnId}`,'ok');
+}
+
+function setStationStatus(stnId, status){
+  if(assignments[stnId]) assignments[stnId].status = status;
+  localStorage.setItem('asy_assignments',JSON.stringify(assignments));
+  closeModal(); render(); toast(`${stnId} → ${status.toUpperCase()}`);
+}
+
+function clearStation(stnId){
+  delete assignments[stnId];
+  localStorage.setItem('asy_assignments',JSON.stringify(assignments));
+  closeModal(); render(); toast(`${stnId} cleared`);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// OPERATOR ACTIONS
+// ─────────────────────────────────────────────────────────────────
+function addOperator(){
+  document.getElementById('mTitle').textContent = 'ADD OPERATOR';
+  document.getElementById('mBody').innerHTML = `
+    <div class="m-field">
+      <label>FULL NAME</label>
+      <input class="m-inp" id="ao-name" placeholder="e.g. Maria Rodriguez"/>
+    </div>
+    <div class="m-field">
+      <label>COLOR</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${AVATAR_COLORS.map(c=>`<div onclick="selectColor('${c}')" style="width:30px;height:30px;border-radius:6px;background:${c};cursor:pointer;border:2px solid transparent;transition:all .15s;" id="coloropt-${c.slice(1)}" class="coloropt"></div>`).join('')}
+      </div>
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
+    <button style="background:var(--green);color:#000;" onclick="saveOperator()">Add Operator</button>`;
+  window._pickedColor = AVATAR_COLORS[0];
+  selectColor(AVATAR_COLORS[0]);
+  document.getElementById('modal').style.display='flex';
+  setTimeout(()=>document.getElementById('ao-name')?.focus(),60);
+}
+
+function selectColor(c){
+  window._pickedColor = c;
+  document.querySelectorAll('.coloropt').forEach(el=>el.style.borderColor='transparent');
+  const target = document.getElementById('coloropt-'+c.slice(1));
+  if(target) target.style.borderColor='#fff';
+}
+
+function saveOperator(){
+  const name = document.getElementById('ao-name')?.value.trim();
+  if(!name){toast('Enter a name','warn');return;}
+  operators[name] = {name,color:window._pickedColor||AVATAR_COLORS[0],todayJobs:0,avgMinutes:0,rushJobs:0,jobsPerHour:0};
+  localStorage.setItem('asy_operators',JSON.stringify(operators));
+  closeModal(); render(); toast(`Operator ${name} added`,'ok');
+}
+
+function editOperator(name){
+  const op = operators[name];
+  if(!op) return;
+  document.getElementById('mTitle').textContent = `EDIT — ${name}`;
+  document.getElementById('mBody').innerHTML = `
+    <div class="m-field">
+      <label>COLOR</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${AVATAR_COLORS.map(c=>`<div onclick="selectColor('${c}')" style="width:30px;height:30px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c===op.color?'#fff':'transparent'};transition:all .15s;" id="coloropt-${c.slice(1)}" class="coloropt"></div>`).join('')}
+      </div>
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--redDk);color:var(--red);border:1px solid var(--red);" onclick="removeOperator('${esc(name)}')">Remove</button>
+    <button style="background:var(--green);color:#000;" onclick="saveOpEdit('${esc(name)}')">Save</button>`;
+  window._pickedColor = op.color;
+  document.getElementById('modal').style.display='flex';
+}
+
+function saveOpEdit(name){
+  if(operators[name]) operators[name].color = window._pickedColor||operators[name].color;
+  // Also update assignment color
+  Object.values(assignments).forEach(a=>{ if(a.operatorName===name) a.color=window._pickedColor; });
+  localStorage.setItem('asy_operators',JSON.stringify(operators));
+  localStorage.setItem('asy_assignments',JSON.stringify(assignments));
+  closeModal(); render(); toast('Updated','ok');
+}
+
+function removeOperator(name){
+  if(!confirm(`Remove ${name}?`)) return;
+  delete operators[name];
+  Object.entries(assignments).forEach(([sid,a])=>{ if(a?.operatorName===name) delete assignments[sid]; });
+  localStorage.setItem('asy_operators',JSON.stringify(operators));
+  localStorage.setItem('asy_assignments',JSON.stringify(assignments));
+  closeModal(); render(); toast(`${name} removed`,'warn');
+}
+
+function focusOp(name){ switchTab('ops'); selectedOp=name; render(); }
+function toggleOp(name){ selectedOp = selectedOp===name?null:name; render(); }
+
+// ─────────────────────────────────────────────────────────────────
+// SETUP MODAL
+// ─────────────────────────────────────────────────────────────────
+function openSetup(){
+  document.getElementById('mTitle').textContent = 'DASHBOARD SETUP';
+  document.getElementById('mBody').innerHTML = `
+    <div class="m-field">
+      <label>LAB_ASSISTANT SERVER URL</label>
+      <input class="m-inp" id="s-srv" value="${esc(serverUrl)}" placeholder="http://192.168.x.x:3002"/>
+    </div>
+    <div class="m-field">
+      <label>DVI API URL (when live)</label>
+      <input class="m-inp" id="s-dvi" value="${esc(dviUrl)}" placeholder="https://your-dvi-instance.com"/>
+    </div>
+    <div class="m-field">
+      <label>DVI API KEY</label>
+      <input class="m-inp" id="s-key" type="password" value="${esc(dviApiKey)}" placeholder="••••••••••••"/>
+    </div>
+    <div class="m-field">
+      <label>SHIFT START TIME</label>
+      <input class="m-inp" id="s-shift" type="time" value="${esc(shiftStart)}"/>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);padding:6px 0;">
+      Without DVI credentials, dashboard runs in mock mode with realistic sample data. All assignments and operators are saved locally.
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
+    <button style="background:var(--green);color:#000;" onclick="saveSetup()">Save</button>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+function saveSetup(){
+  serverUrl  = document.getElementById('s-srv')?.value.trim() || serverUrl;
+  dviUrl     = document.getElementById('s-dvi')?.value.trim() || '';
+  dviApiKey  = document.getElementById('s-key')?.value.trim() || '';
+  shiftStart = document.getElementById('s-shift')?.value || shiftStart;
+  cfg = {serverUrl, dviUrl, dviApiKey, shiftStart};
+  localStorage.setItem('asy_cfg', JSON.stringify(cfg));
+  closeModal(); fetchDVI().then(render); toast('Settings saved — refreshing data','ok');
+}
+
+
+function closeModal(){document.getElementById('modal').style.display='none';}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function fmtAgo(iso){
+  if(!iso) return '—';
+  const m = Math.round((Date.now()-new Date(iso))/60000);
+  if(m<1) return 'just now';
+  if(m<60) return m+'m ago';
+  return Math.round(m/60)+'h ago';
+}
+
+function toast(msg,type=''){
+  const wrap=document.getElementById('toastWrap');
+  const el=document.createElement('div');
+  el.className=`toast ${type}`; el.textContent=msg;
+  wrap.innerHTML=''; wrap.appendChild(el);
+  setTimeout(()=>el.style.opacity='0',2800);
+  setTimeout(()=>el.remove(),3100);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────────
+fetchDVI().then(()=>{ render(); });
+// Auto-refresh DVI every 2 minutes
+setInterval(()=>fetchDVI().then(render), 120000);
+</script>
+</body>
+</html>
