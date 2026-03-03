@@ -970,16 +970,26 @@ function DataImportPanel({settings}){
   );
 }
 
-const KPICard = ({label,value,sub,trend,accent,onRemove,editable})=>(
-  <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 22px",flex:"1 1 0",minWidth:160,borderTop:`4px solid ${accent||T.blue}`,position:'relative'}}>
+const KPICard = ({label,value,sub,trend,accent,onRemove,editable,onClick,clickable})=>(
+  <div
+    onClick={clickable&&onClick?onClick:undefined}
+    style={{
+      background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 22px",flex:"1 1 0",minWidth:160,borderTop:`4px solid ${accent||T.blue}`,position:'relative',
+      cursor:clickable?'pointer':'default',
+      transition:'all 0.15s ease',
+    }}
+    onMouseEnter={e=>{if(clickable){e.currentTarget.style.transform='translateY(-2px)';e.currentTarget.style.boxShadow=`0 4px 12px ${accent||T.blue}30`;}}}
+    onMouseLeave={e=>{if(clickable){e.currentTarget.style.transform='none';e.currentTarget.style.boxShadow='none';}}}
+  >
     {editable&&onRemove&&(
-      <button onClick={onRemove} style={{position:'absolute',top:6,right:6,background:'transparent',border:'none',color:T.textDim,fontSize:14,cursor:'pointer',opacity:0.5,padding:2}} title="Remove KPI">×</button>
+      <button onClick={e=>{e.stopPropagation();onRemove();}} style={{position:'absolute',top:6,right:6,background:'transparent',border:'none',color:T.textDim,fontSize:14,cursor:'pointer',opacity:0.5,padding:2}} title="Remove KPI">×</button>
     )}
     <div style={{fontSize:12,color:T.textDim,textTransform:"uppercase",letterSpacing:1.5,fontFamily:mono}}>{label}</div>
     <div style={{fontSize:36,fontWeight:800,color:T.text,marginTop:4,fontFamily:mono}}>{value}</div>
     <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
       {trend!=null&&<span style={{fontSize:13,color:trend>0?T.green:T.red,fontFamily:mono}}>{trend>0?"▲":"▼"}{Math.abs(trend)}%</span>}
       {sub&&<span style={{fontSize:12,color:T.textDim}}>{sub}</span>}
+      {clickable&&<span style={{fontSize:10,color:accent||T.blue,marginLeft:'auto'}}>Click to view →</span>}
     </div>
   </div>
 );
@@ -1008,11 +1018,60 @@ const KPI_METRICS = {
 // Default KPI configuration (user's requested defaults)
 const DEFAULT_KPIS = ['incoming_jobs', 'total_wip', 'shipped_jobs', 'coating_wip', 'cutting_wip', 'assembly_wip', 'breakage'];
 
+// KPI to AI Agent mapping
+const KPI_AGENTS = {
+  incoming_jobs: 'ShiftReportAgent',
+  total_wip: 'ShiftReportAgent',
+  shipped_jobs: 'ShiftReportAgent',
+  coating_wip: 'CoatingAgent',
+  cutting_wip: 'CuttingAgent',
+  assembly_wip: 'AssemblyAgent',
+  surfacing_wip: 'SurfacingAgent',
+  qc_wip: 'QCAgent',
+  breakage: 'QCAgent',
+  rush_jobs: 'ShiftReportAgent',
+  qc_holds: 'QCAgent',
+  active_trays: 'ShiftReportAgent',
+  avg_batch_fill: 'CoatingAgent',
+  pm_compliance: 'MaintenanceAgent',
+  open_work_orders: 'MaintenanceAgent',
+  equipment_uptime: 'MaintenanceAgent',
+};
+
 // Configurable KPI Row Component
 function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
   const [editing,setEditing]=useState(false);
   const [selectedKpis,setSelectedKpis]=useState(cardConfig?.kpis || DEFAULT_KPIS);
+  const [modalKpi,setModalKpi]=useState(null); // Which KPI's job list to show
+  const [modalSearch,setModalSearch]=useState('');
+  const [aiQuery,setAiQuery]=useState('');
+  const [aiResponse,setAiResponse]=useState('');
+  const [aiLoading,setAiLoading]=useState(false);
   const mono="'JetBrains Mono',monospace";
+
+  // Get jobs for a specific KPI
+  const getJobsForKPI=(kpiId)=>{
+    const {trays=[],batches=[],dviJobs=[],breakage=[]}=data||{};
+    const byStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||j.station||'').toLowerCase().includes(stage.toLowerCase()));
+
+    switch(kpiId){
+      case 'incoming_jobs': return dviJobs.filter(j=>{
+        const station=(j.station||'').toUpperCase();
+        return station.includes('INITIATE')||station.includes('NEW WORK')||station.includes('RECEIVED');
+      });
+      case 'total_wip': return dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED');
+      case 'shipped_jobs': return dviJobs.filter(j=>(j.status==='SHIPPED'||j.stage==='SHIP'));
+      case 'coating_wip': return byStage('COAT').concat(byStage('CCL')).concat(byStage('CCP'));
+      case 'cutting_wip': return byStage('CUT').concat(byStage('EDGER')).concat(byStage('LCU'));
+      case 'assembly_wip': return byStage('ASSEMBL');
+      case 'surfacing_wip': return byStage('SURF').concat(byStage('GENERATOR'));
+      case 'qc_wip': return byStage('QC');
+      case 'breakage': return dviJobs.filter(j=>(j.station||'').toUpperCase().includes('BREAKAGE'));
+      case 'rush_jobs': return dviJobs.filter(j=>j.rush==='Y'||j.Rush==='Y'||j.priority==='RUSH');
+      case 'qc_holds': return dviJobs.filter(j=>(j.station||'').toUpperCase().includes('QC_HOLD')||(j.status||'').includes('HOLD'));
+      default: return [];
+    }
+  };
 
   // Compute KPI values from data
   const getKPIValue=(kpiId)=>{
@@ -1020,15 +1079,15 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     const dviByStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||'').toLowerCase().includes(stage.toLowerCase())).length;
 
     switch(kpiId){
-      case 'incoming_jobs': return {value:dviJobs.filter(j=>j.created_at&&new Date(j.created_at)>new Date(Date.now()-48*60*60*1000)).length,sub:"yesterday"};
+      case 'incoming_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('INITIATE')||s.includes('NEW WORK');}).length,sub:"incoming"};
       case 'total_wip': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"in queues"};
       case 'shipped_jobs': return {value:dviJobs.filter(j=>(j.status==='SHIPPED'||j.stage==='SHIP')).length,sub:"today"};
-      case 'coating_wip': return {value:dviByStage('COAT'),sub:"in coating"};
-      case 'cutting_wip': return {value:dviByStage('CUT'),sub:"in cutting"};
+      case 'coating_wip': return {value:dviByStage('COAT')+dviJobs.filter(j=>(j.station||'').includes('CCL')||(j.station||'').includes('CCP')).length,sub:"in coating"};
+      case 'cutting_wip': return {value:dviByStage('CUT')+dviJobs.filter(j=>(j.station||'').includes('EDGER')||(j.station||'').includes('LCU')).length,sub:"in cutting"};
       case 'assembly_wip': return {value:dviByStage('ASSEMBL'),sub:"in assembly"};
-      case 'surfacing_wip': return {value:dviByStage('SURF'),sub:"in surfacing"};
+      case 'surfacing_wip': return {value:dviByStage('SURF')+dviJobs.filter(j=>(j.station||'').includes('GENERATOR')).length,sub:"in surfacing"};
       case 'qc_wip': return {value:dviByStage('QC'),sub:"in QC"};
-      case 'breakage': return {value:breakage.filter(b=>new Date(b.timestamp)>new Date(Date.now()-24*60*60*1000)).length,sub:"today",accent:T.red};
+      case 'breakage': return {value:dviJobs.filter(j=>(j.station||'').toUpperCase().includes('BREAKAGE')).length,sub:"today",accent:T.red};
       case 'rush_jobs': return {value:dviJobs.filter(j=>j.rush==='Y'||j.Rush==='Y'||j.priority==='RUSH').length,sub:"in system"};
       case 'qc_holds': return {value:trays.filter(t=>t.state==='QC_HOLD').length,sub:"held"};
       case 'active_trays': return {value:trays.filter(t=>t.state!=='IDLE').length,sub:`of ${trays.length}`};
@@ -1037,6 +1096,29 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
       case 'open_work_orders': return {value:maintenance.stats?.openWorkOrders||0,sub:"open"};
       case 'equipment_uptime': return {value:maintenance.stats?.uptimePercent!=null?`${maintenance.stats.uptimePercent}%`:'—',sub:"availability"};
       default: return {value:'—',sub:''};
+    }
+  };
+
+  // Ask AI agent about this KPI's jobs
+  const askAgent=async()=>{
+    if(!aiQuery.trim()||!modalKpi)return;
+    setAiLoading(true);
+    setAiResponse('');
+    try{
+      const agent=KPI_AGENTS[modalKpi]||'ShiftReportAgent';
+      const jobs=getJobsForKPI(modalKpi);
+      const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nJobs count: ${jobs.length}\nSample jobs: ${JSON.stringify(jobs.slice(0,10))}`;
+      const res=await fetch('http://localhost:3001/web/ask-sync',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({question:aiQuery,agent,userId:'kpi-modal',context})
+      });
+      const data=await res.json();
+      setAiResponse(data.response||data.error||'No response');
+    }catch(err){
+      setAiResponse('Error: '+err.message);
+    }finally{
+      setAiLoading(false);
     }
   };
 
@@ -1057,6 +1139,20 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
   const availableKpis=Object.keys(KPI_METRICS).filter(k=>!selectedKpis.includes(k));
   const categories=[...new Set(Object.values(KPI_METRICS).map(m=>m.category))];
 
+  // Get filtered modal jobs
+  const modalJobs=useMemo(()=>{
+    if(!modalKpi)return[];
+    const jobs=getJobsForKPI(modalKpi);
+    if(!modalSearch)return jobs;
+    const q=modalSearch.toLowerCase();
+    return jobs.filter(j=>
+      (j.job_id||'').toLowerCase().includes(q)||
+      (j.station||'').toLowerCase().includes(q)||
+      (j.invoice||'').toLowerCase().includes(q)||
+      (j.date||'').toLowerCase().includes(q)
+    );
+  },[modalKpi,modalSearch,data]);
+
   return(
     <div>
       {/* KPI Cards */}
@@ -1065,8 +1161,20 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
           const metric=KPI_METRICS[kpiId];
           if(!metric)return null;
           const val=getKPIValue(kpiId);
+          const hasJobs=['incoming_jobs','total_wip','shipped_jobs','coating_wip','cutting_wip','assembly_wip','surfacing_wip','qc_wip','breakage','rush_jobs'].includes(kpiId);
           return(
-            <KPICard key={kpiId} label={metric.label} value={val.value} sub={val.sub} trend={val.trend} accent={val.accent||metric.accent} editable={editing} onRemove={()=>removeKPI(kpiId)}/>
+            <KPICard
+              key={kpiId}
+              label={metric.label}
+              value={val.value}
+              sub={val.sub}
+              trend={val.trend}
+              accent={val.accent||metric.accent}
+              editable={editing}
+              onRemove={()=>removeKPI(kpiId)}
+              clickable={hasJobs&&!editing}
+              onClick={()=>{setModalKpi(kpiId);setModalSearch('');setAiQuery('');setAiResponse('');}}
+            />
           );
         })}
         {editing&&(
@@ -1111,6 +1219,136 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Job List Modal */}
+      {modalKpi&&(
+        <div style={{position:'fixed',top:0,left:0,right:0,bottom:0,background:'rgba(0,0,0,0.8)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',padding:20}} onClick={()=>setModalKpi(null)}>
+          <div style={{background:T.surface,borderRadius:16,width:'100%',maxWidth:1200,maxHeight:'90vh',display:'flex',overflow:'hidden',border:`1px solid ${T.border}`}} onClick={e=>e.stopPropagation()}>
+            {/* Job List Panel */}
+            <div style={{flex:2,display:'flex',flexDirection:'column',borderRight:`1px solid ${T.border}`}}>
+              {/* Header */}
+              <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.border}`,display:'flex',alignItems:'center',gap:12}}>
+                <div style={{width:12,height:12,borderRadius:3,background:KPI_METRICS[modalKpi]?.accent||T.blue}}></div>
+                <div>
+                  <h3 style={{margin:0,fontSize:18,fontWeight:700,color:T.text}}>{KPI_METRICS[modalKpi]?.label}</h3>
+                  <p style={{margin:0,fontSize:12,color:T.textMuted}}>{modalJobs.length} jobs • {KPI_METRICS[modalKpi]?.desc}</p>
+                </div>
+                <button onClick={()=>setModalKpi(null)} style={{marginLeft:'auto',background:'transparent',border:'none',color:T.textDim,fontSize:20,cursor:'pointer',padding:4}}>×</button>
+              </div>
+
+              {/* Search */}
+              <div style={{padding:'12px 20px',borderBottom:`1px solid ${T.border}`}}>
+                <input
+                  type="text"
+                  placeholder="Search jobs by ID, station, date..."
+                  value={modalSearch}
+                  onChange={e=>setModalSearch(e.target.value)}
+                  style={{width:'100%',padding:'10px 14px',background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:mono}}
+                />
+              </div>
+
+              {/* Job List */}
+              <div style={{flex:1,overflowY:'auto',padding:0}}>
+                {modalJobs.length>0?(
+                  <table style={{width:'100%',borderCollapse:'collapse'}}>
+                    <thead style={{position:'sticky',top:0,background:T.surface}}>
+                      <tr>
+                        <th style={{padding:'10px 20px',textAlign:'left',fontSize:10,color:T.textDim,fontFamily:mono,borderBottom:`1px solid ${T.border}`}}>JOB ID</th>
+                        <th style={{padding:'10px 12px',textAlign:'left',fontSize:10,color:T.textDim,fontFamily:mono,borderBottom:`1px solid ${T.border}`}}>STATION</th>
+                        <th style={{padding:'10px 12px',textAlign:'left',fontSize:10,color:T.textDim,fontFamily:mono,borderBottom:`1px solid ${T.border}`}}>DATE</th>
+                        <th style={{padding:'10px 12px',textAlign:'left',fontSize:10,color:T.textDim,fontFamily:mono,borderBottom:`1px solid ${T.border}`}}>STATUS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {modalJobs.slice(0,100).map((j,i)=>(
+                        <tr key={j.job_id||i} style={{borderBottom:`1px solid ${T.border}22`}}>
+                          <td style={{padding:'10px 20px',fontFamily:mono,fontSize:12,fontWeight:600,color:T.text}}>{j.job_id||j.invoice||'—'}</td>
+                          <td style={{padding:'10px 12px',fontFamily:mono,fontSize:11,color:T.textMuted}}>{j.station||j.stage||'—'}</td>
+                          <td style={{padding:'10px 12px',fontFamily:mono,fontSize:11,color:T.textMuted}}>{j.date||'—'}</td>
+                          <td style={{padding:'10px 12px'}}><Pill color={j.status==='SHIPPED'?T.green:T.blue}>{j.status||'WIP'}</Pill></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ):(
+                  <div style={{padding:40,textAlign:'center',color:T.textDim}}>No jobs found</div>
+                )}
+              </div>
+            </div>
+
+            {/* AI Agent Sidebar */}
+            <div style={{flex:1,minWidth:320,display:'flex',flexDirection:'column',background:T.bg}}>
+              {/* Agent Header */}
+              <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.border}`}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  <span style={{fontSize:18}}>🤖</span>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text}}>{KPI_AGENTS[modalKpi]||'ShiftReportAgent'}</div>
+                    <div style={{fontSize:10,color:T.textMuted}}>AI Assistant for {KPI_METRICS[modalKpi]?.label}</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick Prompts */}
+              <div style={{padding:'12px 16px',borderBottom:`1px solid ${T.border}`}}>
+                <div style={{fontSize:10,color:T.textDim,marginBottom:8,fontFamily:mono}}>QUICK PROMPTS</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {[
+                    `Summarize ${KPI_METRICS[modalKpi]?.label} status`,
+                    'Any issues or concerns?',
+                    'What needs attention?',
+                    'Trend analysis'
+                  ].map((prompt,i)=>(
+                    <button key={i} onClick={()=>setAiQuery(prompt)} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:6,padding:'6px 10px',fontSize:10,color:T.text,cursor:'pointer'}}>
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* AI Response */}
+              <div style={{flex:1,padding:16,overflowY:'auto'}}>
+                {aiResponse?(
+                  <div style={{background:T.card,borderRadius:8,padding:14}}>
+                    <div style={{fontSize:10,color:T.textDim,marginBottom:8,fontFamily:mono}}>AI RESPONSE</div>
+                    <div style={{fontSize:13,color:T.text,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{aiResponse}</div>
+                  </div>
+                ):aiLoading?(
+                  <div style={{textAlign:'center',color:T.textMuted,padding:20}}>
+                    <div style={{fontSize:24,marginBottom:8}}>⏳</div>
+                    Thinking...
+                  </div>
+                ):(
+                  <div style={{textAlign:'center',color:T.textDim,padding:20,fontSize:12}}>
+                    Ask a question about these {modalJobs.length} jobs
+                  </div>
+                )}
+              </div>
+
+              {/* Input */}
+              <div style={{padding:16,borderTop:`1px solid ${T.border}`}}>
+                <div style={{display:'flex',gap:8}}>
+                  <input
+                    type="text"
+                    placeholder="Ask the AI agent..."
+                    value={aiQuery}
+                    onChange={e=>setAiQuery(e.target.value)}
+                    onKeyDown={e=>{if(e.key==='Enter')askAgent();}}
+                    style={{flex:1,padding:'10px 14px',background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:12}}
+                  />
+                  <button
+                    onClick={askAgent}
+                    disabled={aiLoading||!aiQuery.trim()}
+                    style={{padding:'10px 16px',background:aiLoading||!aiQuery.trim()?T.border:T.blue,border:'none',borderRadius:8,color:'#fff',fontSize:12,fontWeight:600,cursor:aiLoading?'wait':'pointer'}}
+                  >
+                    Ask
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -1597,8 +1835,8 @@ function useSlackConfig(onIncoming, setMessages){
         setProxyConnected(true);
         const data=await r.json();
         // Include ALL messages (including bot) for display
-        // Filter out AI queries (/ai, @ai, ai:, /lab) - those are for lab use, not dashboard display
-        const allMsgs=(data.messages||[]).filter(m=>m.type==="message"&&m.text&&!m.text.match(/^(?:\/ai|@ai|ai:|\/lab\b)/i));
+        // Keep /lab commands visible, filter out only generic AI queries
+        const allMsgs=(data.messages||[]).filter(m=>m.type==="message"&&m.text&&!m.text.match(/^(?:\/ai|@ai|ai:)\b/i));
 
         // On first successful load, replace demo messages with real Slack messages
         if(!initialLoad.current && allMsgs.length>0 && setMessages){
@@ -2875,7 +3113,7 @@ function OvenHistoryView({serverUrl}){
   );
 }
 
-function CoatingTab({batches,trays,inspections,onBatchControl,ovenServerUrl,settings}){
+function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenServerUrl,settings}){
   const [subView,setSubView]=useState("predictive");
   // Get coater machines from settings
   const coaterMachines=useMemo(()=>{
@@ -2883,18 +3121,25 @@ function CoatingTab({batches,trays,inspections,onBatchControl,ovenServerUrl,sett
     return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
   },[settings?.equipment]);
 
-  // Context for embedded AI
-  const coatingJobs=trays.filter(t=>t.department==="COATING");
-  const stagedJobs=coatingJobs.filter(t=>t.state==="COATING_STAGED");
-  const inProcess=coatingJobs.filter(t=>t.state==="COATING_IN_PROCESS");
-  const rushJobs=coatingJobs.filter(t=>t.rush);
+  // Filter DVI jobs in coating (CCL, CCP, Coating stations)
+  const coatingJobs=useMemo(()=>{
+    return dviJobs.filter(j=>{
+      const stage=(j.stage||j.Stage||'').toUpperCase();
+      const station=(j.station||'').toUpperCase();
+      return stage==='COATING'||station.includes('CCL')||station.includes('CCP')||station.includes('COATING')||station.includes('RECEIVED COAT');
+    });
+  },[dviJobs]);
+
+  const inProcess=coatingJobs.filter(j=>j.status==='In Progress');
+  const rushJobs=coatingJobs.filter(j=>j.rush==='Y'||j.Rush==='Y');
   const contextData={
     jobs:coatingJobs,
-    stagedCount:stagedJobs.length,
+    stagedCount:coatingJobs.length,
     inProcessCount:inProcess.length,
     rushCount:rushJobs.length,
     batches:batches,
     machines:coaterMachines,
+    dviJobCount:coatingJobs.length,
   };
 
   return(
@@ -3489,22 +3734,39 @@ function ProductionStageTab({ domain, children, contextData, serverUrl, settings
 // ══════════════════════════════════════════════════════════════
 // ── Surfacing Tab ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function SurfacingTab({ trays, ovenServerUrl, settings }) {
+function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [search,setSearch]=useState('');
 
-  // Filter trays in surfacing department
-  const surfacingJobs = useMemo(() => trays.filter(t => t.department === "SURFACING"), [trays]);
-  const queueJobs = surfacingJobs.filter(t => t.state === "BOUND" || t.state === "ACTIVE");
-  const inProcess = surfacingJobs.filter(t => t.state === "IN_PROCESS" || t.state === "COATING_STAGED");
-  const rushJobs = surfacingJobs.filter(t => t.rush);
-  const holdJobs = surfacingJobs.filter(t => t.state === "QC_HOLD");
+  // Filter DVI jobs in surfacing (GENERATOR, AUTO BLKER, DIGITAL CALC stations)
+  const surfacingJobs = useMemo(() => {
+    return dviJobs.filter(j => {
+      const stage = (j.stage || j.Stage || '').toUpperCase();
+      const station = (j.station || '').toUpperCase();
+      return stage === 'SURFACING' || station.includes('GENERATOR') || station.includes('AUTO BLKER') || station.includes('DIGITAL CALC');
+    });
+  }, [dviJobs]);
+
+  // Search filter
+  const filteredJobs = useMemo(() => {
+    if (!search) return surfacingJobs;
+    const q = search.toLowerCase();
+    return surfacingJobs.filter(j =>
+      (j.job_id||'').toLowerCase().includes(q) ||
+      (j.station||'').toLowerCase().includes(q) ||
+      (j.invoice||'').toLowerCase().includes(q)
+    );
+  }, [surfacingJobs, search]);
+
+  const rushJobs = surfacingJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
+  const inProcess = surfacingJobs.filter(j => j.status === 'In Progress');
 
   const contextData = {
     jobs: surfacingJobs,
-    queueCount: queueJobs.length,
+    queueCount: surfacingJobs.length,
     inProcessCount: inProcess.length,
     rushCount: rushJobs.length,
-    holdCount: holdJobs.length,
+    holdCount: 0,
   };
 
   return (
@@ -3513,12 +3775,12 @@ function SurfacingTab({ trays, ovenServerUrl, settings }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>🌀 Surfacing</h2>
-          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Lens surfacing and grinding operations</p>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Lens surfacing and grinding operations • {surfacingJobs.length} jobs from DVI</p>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>QUEUE</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{queueJobs.length}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TOTAL WIP</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{surfacingJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN PROCESS</div>
@@ -3531,59 +3793,51 @@ function SurfacingTab({ trays, ovenServerUrl, settings }) {
         </div>
       </div>
 
+      {/* Search */}
+      <div style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search jobs by ID, station, invoice..."
+          value={search}
+          onChange={e=>setSearch(e.target.value)}
+          style={{ width: '100%', maxWidth: 400, padding: '10px 14px', background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }}
+        />
+      </div>
+
       {/* WIP Queue */}
       <Card style={{ marginBottom: 20 }}>
-        <SectionHeader right={`${surfacingJobs.length} total`}>WIP Queue</SectionHeader>
-        {surfacingJobs.length > 0 ? (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: T.bg }}>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
-                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>TIME IN STAGE</th>
-              </tr>
-            </thead>
-            <tbody>
-              {surfacingJobs.slice(0, 20).map(t => {
-                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
-                return (
-                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+        <SectionHeader right={`${filteredJobs.length} jobs`}>WIP Queue</SectionHeader>
+        {filteredJobs.length > 0 ? (
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead style={{ position: 'sticky', top: 0, background: T.surface }}>
+                <tr style={{ background: T.bg }}>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB ID</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATION</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredJobs.slice(0, 50).map((j,i) => (
+                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : "transparent" }}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
-                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                      {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
-                    <td style={{ padding: "10px 12px" }}><Pill color={t.state === "QC_HOLD" ? T.red : T.blue}>{t.state}</Pill></td>
-                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 60 ? T.amber : T.textDim, textAlign: "right" }}>{mins}m</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><Pill color={j.status==='SHIPPED'?T.green:T.blue}>{j.status||'WIP'}</Pill></td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs in surfacing</div>
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file at /api/dvi/upload or check DVI SOAP connection.' : 'No jobs in surfacing'}
+          </div>
         )}
       </Card>
-
-      {/* Hold Queue */}
-      {holdJobs.length > 0 && (
-        <Card>
-          <SectionHeader right={`${holdJobs.length} on hold`}>QC Holds</SectionHeader>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {holdJobs.map(t => (
-              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: `${T.red}10`, borderRadius: 6, borderLeft: `4px solid ${T.red}` }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: mono, fontSize: 12, fontWeight: 600, color: T.text }}>{t.job}</div>
-                  <div style={{ fontSize: 11, color: T.textDim }}>Tray: {t.id}</div>
-                </div>
-                <Pill color={T.red}>HOLD</Pill>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </ProductionStageTab>
   );
 }
@@ -3591,24 +3845,42 @@ function SurfacingTab({ trays, ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 // ── Cutting Tab ───────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function CuttingTab({ trays, breakage, ovenServerUrl, settings }) {
+function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [search,setSearch]=useState('');
 
-  const cuttingJobs = useMemo(() => trays.filter(t => t.department === "CUTTING"), [trays]);
-  const queueJobs = cuttingJobs.filter(t => t.state === "BOUND" || t.state === "ACTIVE");
-  const inProcess = cuttingJobs.filter(t => t.state === "IN_PROCESS");
-  const rushJobs = cuttingJobs.filter(t => t.rush);
-  const holdJobs = cuttingJobs.filter(t => t.state === "QC_HOLD");
+  // Filter DVI jobs in cutting (EDGER, LCU stations)
+  const cuttingJobs = useMemo(() => {
+    return dviJobs.filter(j => {
+      const stage = (j.stage || j.Stage || '').toUpperCase();
+      const station = (j.station || '').toUpperCase();
+      return stage === 'CUTTING' || station.includes('EDGER') || station.includes('LCU');
+    });
+  }, [dviJobs]);
+
+  // Search filter
+  const filteredJobs = useMemo(() => {
+    if (!search) return cuttingJobs;
+    const q = search.toLowerCase();
+    return cuttingJobs.filter(j =>
+      (j.job_id||'').toLowerCase().includes(q) ||
+      (j.station||'').toLowerCase().includes(q) ||
+      (j.invoice||'').toLowerCase().includes(q)
+    );
+  }, [cuttingJobs, search]);
+
+  const rushJobs = cuttingJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
+  const inProcess = cuttingJobs.filter(j => j.status === 'In Progress');
 
   // Recent breaks in cutting
   const cuttingBreaks = (breakage || []).filter(b => b.dept === "CUTTING").slice(0, 10);
 
   const contextData = {
     jobs: cuttingJobs,
-    queueCount: queueJobs.length,
+    queueCount: cuttingJobs.length,
     inProcessCount: inProcess.length,
     rushCount: rushJobs.length,
-    holdCount: holdJobs.length,
+    holdCount: 0,
     recentBreaks: cuttingBreaks,
   };
 
@@ -3618,12 +3890,12 @@ function CuttingTab({ trays, breakage, ovenServerUrl, settings }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>✂️ Cutting / Edging</h2>
-          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Lens cutting and edging operations</p>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Lens cutting and edging operations • {cuttingJobs.length} jobs from DVI</p>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>QUEUE</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{queueJobs.length}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TOTAL WIP</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{cuttingJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN PROCESS</div>
@@ -3640,39 +3912,49 @@ function CuttingTab({ trays, breakage, ovenServerUrl, settings }) {
         </div>
       </div>
 
+      {/* Search */}
+      <div style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search jobs by ID, station, invoice..."
+          value={search}
+          onChange={e=>setSearch(e.target.value)}
+          style={{ width: '100%', maxWidth: 400, padding: '10px 14px', background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }}
+        />
+      </div>
+
       {/* WIP Queue */}
       <Card style={{ marginBottom: 20 }}>
-        <SectionHeader right={`${cuttingJobs.length} total`}>WIP Queue</SectionHeader>
-        {cuttingJobs.length > 0 ? (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: T.bg }}>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
-                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>TIME</th>
-              </tr>
-            </thead>
-            <tbody>
-              {cuttingJobs.slice(0, 20).map(t => {
-                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
-                return (
-                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+        <SectionHeader right={`${filteredJobs.length} jobs`}>WIP Queue</SectionHeader>
+        {filteredJobs.length > 0 ? (
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead style={{ position: 'sticky', top: 0, background: T.surface }}>
+                <tr style={{ background: T.bg }}>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB ID</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATION</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredJobs.slice(0, 50).map((j,i) => (
+                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : "transparent" }}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
-                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                      {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
-                    <td style={{ padding: "10px 12px" }}><Pill color={t.state === "QC_HOLD" ? T.red : T.blue}>{t.state}</Pill></td>
-                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 60 ? T.amber : T.textDim, textAlign: "right" }}>{mins}m</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><Pill color={j.status==='SHIPPED'?T.green:T.blue}>{j.status||'WIP'}</Pill></td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs in cutting</div>
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI SOAP connection.' : 'No jobs in cutting'}
+          </div>
         )}
       </Card>
 
@@ -3700,24 +3982,41 @@ function CuttingTab({ trays, breakage, ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 // ── Assembly Tab ──────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function AssemblyTab({ trays, ovenServerUrl, settings }) {
+function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [search,setSearch]=useState('');
 
-  const assemblyJobs = useMemo(() => trays.filter(t => t.department === "ASSEMBLY"), [trays]);
-  const queueJobs = assemblyJobs.filter(t => t.state === "BOUND" || t.state === "ACTIVE");
-  const inProcess = assemblyJobs.filter(t => t.state === "IN_PROCESS");
-  const rushJobs = assemblyJobs.filter(t => t.rush);
-  const holdJobs = assemblyJobs.filter(t => t.state === "QC_HOLD");
-  const completedToday = trays.filter(t => t.state === "COMPLETE" && t.updatedAt && (Date.now() - t.updatedAt) < 86400000).length;
+  // Filter DVI jobs in assembly (ASSEMBLY stations)
+  const assemblyJobs = useMemo(() => {
+    return dviJobs.filter(j => {
+      const stage = (j.stage || j.Stage || '').toUpperCase();
+      const station = (j.station || '').toUpperCase();
+      return stage === 'ASSEMBLY' || station.includes('ASSEMBLY');
+    });
+  }, [dviJobs]);
+
+  // Search filter
+  const filteredJobs = useMemo(() => {
+    if (!search) return assemblyJobs;
+    const q = search.toLowerCase();
+    return assemblyJobs.filter(j =>
+      (j.job_id||'').toLowerCase().includes(q) ||
+      (j.station||'').toLowerCase().includes(q) ||
+      (j.invoice||'').toLowerCase().includes(q)
+    );
+  }, [assemblyJobs, search]);
+
+  const rushJobs = assemblyJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
+  const passJobs = assemblyJobs.filter(j => (j.station||'').includes('PASS'));
+  const failJobs = assemblyJobs.filter(j => (j.station||'').includes('FAIL'));
 
   const contextData = {
     jobs: assemblyJobs,
-    queueCount: queueJobs.length,
-    inProcessCount: inProcess.length,
+    queueCount: assemblyJobs.length,
+    inProcessCount: assemblyJobs.length - passJobs.length - failJobs.length,
     rushCount: rushJobs.length,
-    holdCount: holdJobs.length,
-    completedToday,
-    qcReturns: holdJobs.map(t => ({ job: t.job, reason: "QC Hold" })),
+    holdCount: failJobs.length,
+    completedToday: passJobs.length,
   };
 
   return (
@@ -3726,20 +4025,20 @@ function AssemblyTab({ trays, ovenServerUrl, settings }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>🔧 Assembly</h2>
-          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Frame assembly and final inspection</p>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Frame assembly and final inspection • {assemblyJobs.length} jobs from DVI</p>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>QUEUE</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{queueJobs.length}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TOTAL WIP</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{assemblyJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN PROCESS</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inProcess.length}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>PASSED</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{passJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>COMPLETED</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{completedToday}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>FAILED</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: failJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{failJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
@@ -3748,59 +4047,55 @@ function AssemblyTab({ trays, ovenServerUrl, settings }) {
         </div>
       </div>
 
+      {/* Search */}
+      <div style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search jobs by ID, station, invoice..."
+          value={search}
+          onChange={e=>setSearch(e.target.value)}
+          style={{ width: '100%', maxWidth: 400, padding: '10px 14px', background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }}
+        />
+      </div>
+
       {/* WIP Queue */}
       <Card style={{ marginBottom: 20 }}>
-        <SectionHeader right={`${assemblyJobs.length} total`}>WIP Queue</SectionHeader>
-        {assemblyJobs.length > 0 ? (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: T.bg }}>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
-                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>TIME</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assemblyJobs.slice(0, 20).map(t => {
-                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
-                return (
-                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+        <SectionHeader right={`${filteredJobs.length} jobs`}>WIP Queue</SectionHeader>
+        {filteredJobs.length > 0 ? (
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead style={{ position: 'sticky', top: 0, background: T.surface }}>
+                <tr style={{ background: T.bg }}>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB ID</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATION</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredJobs.slice(0, 50).map((j,i) => (
+                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : (j.station||'').includes('FAIL') ? `${T.amber}08` : "transparent" }}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
-                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                      {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
-                    <td style={{ padding: "10px 12px" }}><Pill color={t.state === "QC_HOLD" ? T.red : T.blue}>{t.state}</Pill></td>
-                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 60 ? T.amber : T.textDim, textAlign: "right" }}>{mins}m</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px" }}>
+                      <Pill color={(j.station||'').includes('PASS')?T.green:(j.station||'').includes('FAIL')?T.red:T.blue}>
+                        {(j.station||'').includes('PASS')?'PASS':(j.station||'').includes('FAIL')?'FAIL':'WIP'}
+                      </Pill>
+                    </td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs in assembly</div>
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI SOAP connection.' : 'No jobs in assembly'}
+          </div>
         )}
       </Card>
-
-      {/* QC Returns */}
-      {holdJobs.length > 0 && (
-        <Card>
-          <SectionHeader right={`${holdJobs.length} returns`}>QC Returns</SectionHeader>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {holdJobs.map(t => (
-              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: `${T.amber}10`, borderRadius: 6, borderLeft: `4px solid ${T.amber}` }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontFamily: mono, fontSize: 12, fontWeight: 600, color: T.text }}>{t.job}</div>
-                  <div style={{ fontSize: 11, color: T.textDim }}>Tray: {t.id}</div>
-                </div>
-                <Pill color={T.amber}>QC RETURN</Pill>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
     </ProductionStageTab>
   );
 }
@@ -3808,26 +4103,41 @@ function AssemblyTab({ trays, ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 // ── Shipping Tab ──────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function ShippingTab({ trays, ovenServerUrl, settings }) {
+function ShippingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [search,setSearch]=useState('');
 
-  const shippingJobs = useMemo(() => trays.filter(t => t.department === "SHIPPING"), [trays]);
-  const readyToShip = shippingJobs.filter(t => t.state === "COMPLETE");
-  const inProcess = shippingJobs.filter(t => t.state !== "COMPLETE");
-  const rushJobs = shippingJobs.filter(t => t.rush);
+  // Filter DVI jobs in shipping (SH CONVEY stations)
+  const shippingJobs = useMemo(() => {
+    return dviJobs.filter(j => {
+      const stage = (j.stage || j.Stage || '').toUpperCase();
+      const station = (j.station || '').toUpperCase();
+      return stage === 'SHIPPING' || station.includes('SH CONVEY') || j.status === 'SHIPPED';
+    });
+  }, [dviJobs]);
 
-  // Simulate overdue (jobs in shipping > 2 hours)
-  const overdueJobs = shippingJobs.filter(t => t.updatedAt && (Date.now() - t.updatedAt) > 2 * 3600000);
-  const shippedToday = trays.filter(t => t.state === "SHIPPED" || (t.department === "SHIPPING" && t.state === "COMPLETE")).length;
+  // Search filter
+  const filteredJobs = useMemo(() => {
+    if (!search) return shippingJobs;
+    const q = search.toLowerCase();
+    return shippingJobs.filter(j =>
+      (j.job_id||'').toLowerCase().includes(q) ||
+      (j.station||'').toLowerCase().includes(q) ||
+      (j.invoice||'').toLowerCase().includes(q)
+    );
+  }, [shippingJobs, search]);
+
+  const rushJobs = shippingJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
+  const shippedJobs = shippingJobs.filter(j => j.status === 'SHIPPED');
+  const inProcessJobs = shippingJobs.filter(j => j.status !== 'SHIPPED');
 
   const contextData = {
     jobs: shippingJobs,
-    readyCount: readyToShip.length,
-    inProcessCount: inProcess.length,
+    readyCount: inProcessJobs.length,
+    inProcessCount: inProcessJobs.length,
     rushCount: rushJobs.length,
-    overdueCount: overdueJobs.length,
-    shippedToday,
-    overdue: overdueJobs.map(t => ({ job: t.job, dueDate: "Today", reason: "Delayed" })),
+    overdueCount: 0,
+    shippedToday: shippedJobs.length,
   };
 
   return (
@@ -3836,20 +4146,16 @@ function ShippingTab({ trays, ovenServerUrl, settings }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
           <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>📤 Shipping</h2>
-          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Final QC and shipment processing</p>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Final QC and shipment processing • {shippingJobs.length} jobs from DVI</p>
         </div>
         <div style={{ display: "flex", gap: 16 }}>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>READY</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{readyToShip.length}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN QUEUE</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inProcessJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SHIPPED TODAY</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{shippedToday}</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>OVERDUE</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: overdueJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{overdueJobs.length}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SHIPPED</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{shippedJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
@@ -3858,60 +4164,51 @@ function ShippingTab({ trays, ovenServerUrl, settings }) {
         </div>
       </div>
 
-      {/* Ready to Ship */}
+      {/* Search */}
+      <div style={{ marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="Search jobs by ID, station, invoice..."
+          value={search}
+          onChange={e=>setSearch(e.target.value)}
+          style={{ width: '100%', maxWidth: 400, padding: '10px 14px', background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }}
+        />
+      </div>
+
+      {/* Jobs Queue */}
       <Card style={{ marginBottom: 20 }}>
-        <SectionHeader right={`${readyToShip.length} ready`}>Ready to Ship</SectionHeader>
-        {readyToShip.length > 0 ? (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: T.bg }}>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
-                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
-                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>WAIT TIME</th>
-              </tr>
-            </thead>
-            <tbody>
-              {readyToShip.slice(0, 20).map(t => {
-                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
-                return (
-                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+        <SectionHeader right={`${filteredJobs.length} jobs`}>Shipping Queue</SectionHeader>
+        {filteredJobs.length > 0 ? (
+          <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead style={{ position: 'sticky', top: 0, background: T.surface }}>
+                <tr style={{ background: T.bg }}>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB ID</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATION</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredJobs.slice(0, 50).map((j,i) => (
+                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : "transparent" }}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
-                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                      {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
-                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 120 ? T.red : T.textDim, textAlign: "right" }}>{mins}m</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><Pill color={j.status==='SHIPPED'?T.green:T.blue}>{j.status||'WIP'}</Pill></td>
                   </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : (
-          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs ready to ship</div>
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI SOAP connection.' : 'No jobs in shipping'}
+          </div>
         )}
       </Card>
-
-      {/* Overdue */}
-      {overdueJobs.length > 0 && (
-        <Card>
-          <SectionHeader right={`${overdueJobs.length} overdue`}>Overdue Shipments</SectionHeader>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {overdueJobs.map(t => {
-              const hrs = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 3600000) : 0;
-              return (
-                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: `${T.red}10`, borderRadius: 6, borderLeft: `4px solid ${T.red}` }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: mono, fontSize: 12, fontWeight: 600, color: T.text }}>{t.job}</div>
-                    <div style={{ fontSize: 11, color: T.textDim }}>Waiting {hrs}+ hours</div>
-                  </div>
-                  <Pill color={T.red}>OVERDUE</Pill>
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
     </ProductionStageTab>
   );
 }
@@ -8571,11 +8868,11 @@ export default function LabAssistantV2(){
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
         {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events}/>}
-        {view==="coating"&&<CoatingTab batches={batches} trays={trays} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="surfacing"&&<SurfacingTab trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="cutting"&&<CuttingTab trays={trays} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="assembly"&&<AssemblyTab trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="shipping"&&<ShippingTab trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="coating"&&<CoatingTab batches={batches} trays={trays} dviJobs={dviJobs} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={dviJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="cutting"&&<CuttingTab trays={trays} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="assembly"&&<AssemblyTab trays={trays} dviJobs={dviJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="shipping"&&<ShippingTab trays={trays} dviJobs={dviJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="inventory"&&<InventoryTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}

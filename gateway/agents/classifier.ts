@@ -40,6 +40,11 @@ const AGENT_KEYWORDS: Record<string, string[]> = {
     'assembly', 'assemble', 'frame', 'mounting', 'finishing', 'finish',
     'mount', 'final', 'station', 'assembler', 'bench',
   ],
+  QCAgent: [
+    'qc', 'quality', 'inspection', 'inspect', 'hold', 'holds', 'reject',
+    'defect', 'fail', 'failure', 'pass rate', 'breakage', 'broken',
+    'rework', 'scrap', 'verification', 'verify', 'qa',
+  ],
   MaintenanceAgent: [
     'maintenance', 'machine down', 'down', 'fault', 'repair', 'uptime',
     'equipment', 'broken', 'fix', 'pm', 'preventive', 'mtbf', 'mttr',
