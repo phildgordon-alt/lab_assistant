@@ -162,7 +162,7 @@ const DEPT_COLOR = { POLY: C.amber, HIRES: C.blue, PLASTIC: C.green };
 const PICK_LABEL = { S: "STOCK", F: "FINISH", N: "NONE", C: "CUT" };
 
 function JobTable({ jobs }) {
-  const [sort, setSort] = useState({ key: "entryDate", dir: 1 });
+  const [sort, setSort] = useState({ key: "daysInLab", dir: -1 }); // Default: highest days first
   const [filter, setFilter] = useState("");
 
   const sorted = useMemo(() => {
@@ -179,9 +179,16 @@ function JobTable({ jobs }) {
     }
     return [...rows].sort((a, b) => {
       let av = a[sort.key], bv = b[sort.key];
-      if (sort.key === "daysInLab") { av = +av; bv = +bv; }
-      if (sort.key === "entryDate") {
-        av = new Date(av); bv = new Date(bv);
+      // Numeric sort for daysInLab
+      if (sort.key === "daysInLab") {
+        av = parseInt(av) || 0;
+        bv = parseInt(bv) || 0;
+      }
+      // Date sort for date columns
+      if (sort.key === "entryDate" || sort.key === "shipDate") {
+        // Parse YYYY-MM-DD format
+        av = av ? new Date(av).getTime() : 0;
+        bv = bv ? new Date(bv).getTime() : 0;
       }
       if (av < bv) return -sort.dir;
       if (av > bv) return sort.dir;
