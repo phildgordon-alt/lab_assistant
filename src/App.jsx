@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import WIPFeed from "./components/WIPFeed";
 
 const T = {
   bg: "#080C18", surface: "#0F1629", card: "#141B2D", cardHover: "#1A2340",
@@ -8877,6 +8878,7 @@ export default function LabAssistantV2(){
     {id:"separator3",  type:"separator"},
     {id:"analytics",   label:"Analytics",   icon:"📊", group:"analytics"},
     {id:"qc",          label:"QC",          icon:"✓",  group:"analytics"},
+    {id:"wip",         label:"WIP Feed",    icon:"📋", group:"analytics"},
     {id:"ai",          label:"AI Assistant",icon:"🤖", group:"analytics"},
     // Settings (separator before)
     {id:"separator4",  type:"separator"},
@@ -8949,6 +8951,7 @@ export default function LabAssistantV2(){
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="qc"&&<QCTab trays={trays} breakage={breakage} setBreakage={setBreakage}/>}
+        {view==="wip"&&<WIPFeed/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} settings={settings}/>}
         {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl}/>}
