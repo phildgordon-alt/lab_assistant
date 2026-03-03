@@ -1040,6 +1040,42 @@ let dviDataStore: {
   archive: DVIUpload[];  // Historical uploads for tracking
 } = { current: null, archive: [] };
 
+// DVI Data persistence
+const DVI_DATA_FILE = join(__dirname, '..', 'data', 'dvi-jobs.json');
+
+function saveDviData(): void {
+  try {
+    // Ensure data directory exists
+    const dataDir = dirname(DVI_DATA_FILE);
+    if (!existsSync(dataDir)) {
+      const { mkdirSync } = require('fs');
+      mkdirSync(dataDir, { recursive: true });
+    }
+    writeFileSync(DVI_DATA_FILE, JSON.stringify(dviDataStore, null, 2));
+    log.info(`[DVI] Saved ${dviDataStore.current?.rowCount || 0} jobs to disk`);
+  } catch (e) {
+    log.error('[DVI] Failed to save data to disk:', e);
+  }
+}
+
+function loadDviData(): void {
+  try {
+    if (existsSync(DVI_DATA_FILE)) {
+      const data = readFileSync(DVI_DATA_FILE, 'utf-8');
+      const parsed = JSON.parse(data);
+      dviDataStore = parsed;
+      log.info(`[DVI] Loaded ${dviDataStore.current?.rowCount || 0} jobs from disk (uploaded: ${dviDataStore.current?.uploadedAt || 'never'})`);
+    } else {
+      log.info('[DVI] No persisted data file found, starting fresh');
+    }
+  } catch (e) {
+    log.error('[DVI] Failed to load data from disk:', e);
+  }
+}
+
+// Load DVI data on startup
+loadDviData();
+
 // DVI MegaTransfer XML parser - extracts RxOrder records with nested data
 function parseXMLToJobs(xmlContent: string): { jobs: Record<string, any>[], columns: string[] } {
   const jobs: Record<string, any>[] = [];
@@ -1332,6 +1368,9 @@ app.post('/api/dvi/upload', express.text({ limit: '50mb', type: '*/*' }), (req: 
 
     // Store as current
     dviDataStore.current = newUpload;
+
+    // Persist to disk
+    saveDviData();
 
     log.info(`DVI Upload complete: ${jobs.length} jobs stored, data date: ${dataDate || 'unknown'}, format: ${isXML ? 'XML' : 'CSV'}`);
     res.json({
@@ -1633,6 +1672,7 @@ app.delete('/api/dvi/data', (_req: Request, res: Response) => {
     dviDataStore.archive.push(dviDataStore.current);
   }
   dviDataStore.current = null;
+  saveDviData();
   log.info(`DVI current data cleared (was ${previousCount} jobs), archive has ${dviDataStore.archive.length} uploads`);
   res.json({ success: true, message: `Cleared ${previousCount} jobs`, archiveCount: dviDataStore.archive.length });
 });
@@ -1642,6 +1682,7 @@ app.delete('/api/dvi/all', (_req: Request, res: Response) => {
   const currentCount = dviDataStore.current?.rowCount || 0;
   const archiveCount = dviDataStore.archive.length;
   dviDataStore = { current: null, archive: [] };
+  saveDviData();
   log.info(`DVI data fully cleared: ${currentCount} current jobs, ${archiveCount} archived uploads`);
   res.json({ success: true, message: `Cleared all data (${currentCount} current, ${archiveCount} archived)` });
 });

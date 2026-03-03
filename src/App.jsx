@@ -1834,9 +1834,15 @@ function useSlackConfig(onIncoming, setMessages){
         if(!r.ok){setProxyConnected(false);return;}
         setProxyConnected(true);
         const data=await r.json();
-        // Include ALL messages (including bot) for display
-        // Keep /lab commands visible, filter out only generic AI queries
-        const allMsgs=(data.messages||[]).filter(m=>m.type==="message"&&m.text&&!m.text.match(/^(?:\/ai|@ai|ai:)\b/i));
+        // Filter out AI/agent queries and bot responses
+        // Show regular team messages only (no /ai, @ai, /lab, or bot responses)
+        const allMsgs=(data.messages||[]).filter(m=>
+          m.type==="message" &&
+          m.text &&
+          !m.bot_id && // Exclude bot responses
+          !m.text.match(/^(?:\/ai|@ai|ai:|\/lab)\b/i) && // Exclude AI commands
+          !m.text.match(/<@U[A-Z0-9]+>/i) // Exclude @mentions of bots
+        );
 
         // On first successful load, replace demo messages with real Slack messages
         if(!initialLoad.current && allMsgs.length>0 && setMessages){
