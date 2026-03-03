@@ -125,7 +125,7 @@ async function handleSlackQuery(
   let agentHint: string | undefined;
   let question = text;
 
-  const possibleHints = ['coding', 'picking', 'surfacing', 'cutting', 'assembly', 'maintenance', 'shift'];
+  const possibleHints = ['lab', 'coding', 'picking', 'surfacing', 'cutting', 'assembly', 'maintenance', 'shift', 'devops', 'qc'];
   if (parts.length > 1 && possibleHints.includes(parts[0].toLowerCase())) {
     agentHint = parts[0].toLowerCase();
     question = parts.slice(1).join(' ');

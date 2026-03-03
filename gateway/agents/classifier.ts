@@ -6,6 +6,12 @@
 // Keyword-based classification (v1)
 // Will be replaced with LLM classification in v2
 const AGENT_KEYWORDS: Record<string, string[]> = {
+  LabAgent: [
+    'lab', 'wip', 'jobs', 'job', 'production', 'how many', 'what', 'show',
+    'tell me', 'give me', 'list', 'count', 'total', 'all', 'everything',
+    'status', 'current', 'now', 'latest', 'update', 'rush', 'oldest',
+    'aging', 'stage', 'stages', 'department', 'departments',
+  ],
   DevOpsAgent: [
     'api', 'gateway', 'connection', 'server', 'config', 'environment',
     'env', 'startup', 'port', 'mock', 'database', 'postgres', 'slack',
@@ -57,8 +63,8 @@ const AGENT_KEYWORDS: Record<string, string[]> = {
   ],
 };
 
-// Default agent when no match is found
-const DEFAULT_AGENT = 'ShiftReportAgent';
+// Default agent when no match is found - LabAgent can answer ANY lab question
+const DEFAULT_AGENT = 'LabAgent';
 
 /**
  * Classify a user's question and return the appropriate agent name
