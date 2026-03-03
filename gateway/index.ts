@@ -1664,6 +1664,108 @@ app.get('/api/dvi/stats', (req: Request, res: Response) => {
   });
 });
 
+// WIP Summary endpoint - returns aggregated stats + limited job list to avoid token limits
+app.get('/api/wip/summary', (_req: Request, res: Response) => {
+  const current = dviDataStore.current;
+  if (!current) {
+    return res.json({
+      totalJobs: 0,
+      byStage: {},
+      rushJobs: 0,
+      oldestJobs: [],
+      recentJobs: [],
+      message: 'No DVI data uploaded'
+    });
+  }
+
+  const jobs = current.jobs || [];
+
+  // Compute stats
+  const byStage: Record<string, number> = {};
+  let rushCount = 0;
+
+  jobs.forEach((job: any) => {
+    const stage = (job.stage || job.Stage || job.station || 'UNKNOWN').toUpperCase();
+    // Skip CANCELED and SHIPPED for WIP
+    if (stage === 'CANCELED' || stage === 'SHIPPED' || job.status === 'CANCELED' || job.status === 'SHIPPED') return;
+    byStage[stage] = (byStage[stage] || 0) + 1;
+    if (job.rush === 'Y' || job.Rush === 'Y') rushCount++;
+  });
+
+  // Get oldest jobs (by daysInLab)
+  const activeJobs = jobs.filter((j: any) => {
+    const stage = (j.stage || j.Stage || j.station || '').toUpperCase();
+    return stage !== 'CANCELED' && stage !== 'SHIPPED' && j.status !== 'CANCELED' && j.status !== 'SHIPPED';
+  });
+
+  const sortedByAge = [...activeJobs].sort((a: any, b: any) => {
+    const daysA = parseInt(a.daysInLab) || 0;
+    const daysB = parseInt(b.daysInLab) || 0;
+    return daysB - daysA;
+  });
+
+  // Return limited data to avoid token limits
+  res.json({
+    totalWIP: activeJobs.length,
+    byStage,
+    rushJobs: rushCount,
+    dataDate: current.dataDate,
+    uploadedAt: current.uploadedAt,
+    // Only return top 20 oldest jobs with essential fields
+    oldestJobs: sortedByAge.slice(0, 20).map((j: any) => ({
+      invoice: j.invoice,
+      tray: j.tray,
+      stage: j.stage || j.Stage || j.station,
+      daysInLab: j.daysInLab,
+      entryDate: j.entryDate,
+      shipDate: j.shipDate,
+      rush: j.rush || j.Rush,
+      coatR: j.coatR,
+      coatL: j.coatL
+    })),
+    // Stage breakdown for context
+    stageSummary: Object.entries(byStage)
+      .sort(([,a], [,b]) => (b as number) - (a as number))
+      .slice(0, 10)
+      .map(([stage, count]) => `${stage}: ${count}`)
+      .join(', ')
+  });
+});
+
+// Production status endpoint - quick summary for agents
+app.get('/api/production/status', (_req: Request, res: Response) => {
+  const current = dviDataStore.current;
+  if (!current) {
+    return res.json({ status: 'no_data', message: 'No DVI data uploaded' });
+  }
+
+  const jobs = current.jobs || [];
+  const stages = ['SURFACING', 'CUTTING', 'COATING', 'ASSEMBLY', 'SHIPPING'];
+
+  const status: Record<string, { count: number; rush: number }> = {};
+  stages.forEach(s => status[s] = { count: 0, rush: 0 });
+
+  jobs.forEach((job: any) => {
+    const stage = (job.stage || job.Stage || job.station || '').toUpperCase();
+    if (stage === 'CANCELED' || job.status === 'CANCELED') return;
+
+    for (const s of stages) {
+      if (stage.includes(s) || (job.station || '').toUpperCase().includes(s)) {
+        status[s].count++;
+        if (job.rush === 'Y' || job.Rush === 'Y') status[s].rush++;
+        break;
+      }
+    }
+  });
+
+  res.json({
+    status: 'ok',
+    dataDate: current.dataDate,
+    totalActive: jobs.filter((j: any) => j.status !== 'CANCELED' && j.status !== 'SHIPPED').length,
+    stages: status
+  });
+});
+
 // Clear uploaded DVI data (reset to empty state, keeps archive)
 app.delete('/api/dvi/data', (_req: Request, res: Response) => {
   const previousCount = dviDataStore.current?.rowCount || 0;

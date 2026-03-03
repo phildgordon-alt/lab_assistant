@@ -3182,9 +3182,11 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
     return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
   },[settings?.equipment]);
 
-  // Filter DVI jobs in coating (CCL, CCP, Coating stations)
+  // Filter DVI jobs in coating (CCL, CCP, Coating stations) - exclude shipped
   const coatingJobs=useMemo(()=>{
     return dviJobs.filter(j=>{
+      // Exclude shipped jobs
+      if (j.status === 'SHIPPED' || j.stage === 'SHIP' || (j.station||'').toUpperCase().includes('SHIP')) return false;
       const stage=(j.stage||j.Stage||'').toUpperCase();
       const station=(j.station||'').toUpperCase();
       return stage==='COATING'||station.includes('CCL')||station.includes('CCP')||station.includes('COATING')||station.includes('RECEIVED COAT');
@@ -3793,15 +3795,269 @@ function ProductionStageTab({ domain, children, contextData, serverUrl, settings
 }
 
 // ══════════════════════════════════════════════════════════════
+// ── Job Detail Panel (reusable across production tabs) ───────
+// ══════════════════════════════════════════════════════════════
+function JobDetailPanel({ job, onClose }) {
+  const mono = "'JetBrains Mono',monospace";
+  if (!job) return null;
+
+  // Group fields for display
+  const orderFields = ['invoice', 'tray', 'reference', 'rxNumber', 'operator', 'jobOrigin'];
+  const dateFields = ['entryDate', 'entryTime', 'shipDate', 'shipTime', 'daysInLab'];
+  const lensFields = ['matR', 'matL', 'styleR', 'typeR', 'pickR', 'pickL', 'coatR', 'coatL'];
+  const frameFields = ['frameName', 'frameColor'];
+  const statusFields = ['department', 'station', 'stage', 'status', 'inCoatingQueue', 'coatingWaitDays'];
+
+  const renderField = (key, value) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'boolean') value = value ? 'Yes' : 'No';
+    if (typeof value === 'object') value = JSON.stringify(value);
+    return (
+      <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${T.border}22` }}>
+        <span style={{ color: T.textDim, fontSize: 11, fontFamily: mono }}>{key}</span>
+        <span style={{ color: T.text, fontSize: 12, fontFamily: mono, fontWeight: 600, maxWidth: '60%', textAlign: 'right', wordBreak: 'break-word' }}>{String(value)}</span>
+      </div>
+    );
+  };
+
+  const renderSection = (title, fields) => {
+    const items = fields.map(f => renderField(f, job[f])).filter(Boolean);
+    if (items.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>{title}</div>
+        {items}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, background: T.surface, borderLeft: `1px solid ${T.border}`, zIndex: 1000, display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px #00000040' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{job.invoice || job.job_id || 'Job Details'}</div>
+          <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono }}>{job.frameName || job.station || ''}</div>
+        </div>
+        <button onClick={onClose} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, cursor: 'pointer', fontSize: 12 }}>✕ Close</button>
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        {renderSection('Order Info', orderFields)}
+        {renderSection('Dates', dateFields)}
+        {renderSection('Lens', lensFields)}
+        {renderSection('Frame', frameFields)}
+        {renderSection('Status', statusFields)}
+
+        {/* Breakage info if present */}
+        {job.hasBreakage && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: T.red, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>⚠ BREAKAGE ({job.breakageCount})</div>
+            {job.breakageItems?.map((b, i) => (
+              <div key={i} style={{ background: `${T.red}11`, border: `1px solid ${T.red}33`, borderRadius: 6, padding: 10, marginBottom: 8, fontSize: 11, fontFamily: mono }}>
+                <div style={{ color: T.text }}>{b.date} {b.time} — {b.dept}</div>
+                <div style={{ color: T.textMuted }}>Reason: {b.reason} | Part: {b.part} | Inspector: {b.inspector || '—'}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* All other fields */}
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>All Fields</div>
+          {Object.entries(job).filter(([k]) => !['breakageItems'].includes(k)).map(([k, v]) => renderField(k, v))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Item Image Component (handles Limble image format) ────────
+// ══════════════════════════════════════════════════════════════
+function ItemImage({ item }) {
+  const [imgState, setImgState] = useState('loading'); // loading, loaded, error, none
+
+  // Extract image URL from various formats
+  let imageUrl = null;
+  if (Array.isArray(item.image) && item.image.length > 0) {
+    // Limble format: [{fileName: "...", link: "https://..."}]
+    imageUrl = item.image[0]?.link || item.image[0]?.url || item.image[0];
+  } else if (typeof item.image === 'string' && item.image) {
+    imageUrl = item.image;
+  } else if (item.imageUrl) {
+    imageUrl = item.imageUrl;
+  } else if (item.imageURL) {
+    imageUrl = item.imageURL;
+  } else if (item.photo) {
+    imageUrl = Array.isArray(item.photo) ? (item.photo[0]?.link || item.photo[0]) : item.photo;
+  } else if (item.thumbnail) {
+    imageUrl = item.thumbnail;
+  } else if (item.images && Array.isArray(item.images) && item.images.length > 0) {
+    imageUrl = item.images[0]?.link || item.images[0]?.url || item.images[0];
+  }
+
+  // Also check for Limble-style fields
+  if (!imageUrl && item.partImages && Array.isArray(item.partImages) && item.partImages.length > 0) {
+    imageUrl = item.partImages[0]?.link || item.partImages[0];
+  }
+
+  useEffect(() => {
+    if (!imageUrl) {
+      setImgState('none');
+    } else {
+      setImgState('loading');
+    }
+  }, [imageUrl]);
+
+  if (!imageUrl) return null;
+
+  return (
+    <div style={{ marginBottom: 20, textAlign: 'center' }}>
+      {imgState === 'loading' && (
+        <div style={{ padding: 20, background: T.card, borderRadius: 8, border: `1px solid ${T.border}`, color: T.textDim, fontSize: 12 }}>
+          Loading image...
+        </div>
+      )}
+      {imgState === 'error' && imageUrl && (
+        <div style={{ padding: 16, background: `${T.card}`, borderRadius: 8, border: `1px solid ${T.border}`, textAlign: 'center' }}>
+          <div style={{ color: T.textDim, fontSize: 11, marginBottom: 10 }}>Image blocked by browser (CORS)</div>
+          <a
+            href={imageUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              display: 'inline-block',
+              padding: '8px 16px',
+              background: T.blue,
+              color: '#fff',
+              borderRadius: 6,
+              textDecoration: 'none',
+              fontSize: 12,
+              fontWeight: 600
+            }}
+          >
+            🖼️ View Image in New Tab
+          </a>
+        </div>
+      )}
+      <img
+        src={imageUrl}
+        alt={item.name || item.sku || 'Part image'}
+        style={{
+          maxWidth: '100%',
+          maxHeight: 200,
+          borderRadius: 8,
+          border: `1px solid ${T.border}`,
+          objectFit: 'contain',
+          background: T.bg,
+          display: imgState === 'loaded' ? 'inline-block' : 'none'
+        }}
+        onLoad={() => setImgState('loaded')}
+        onError={() => setImgState('error')}
+      />
+    </div>
+  );
+}
+
+// ── Inventory Detail Panel (reusable for inventory/parts) ─────
+// ══════════════════════════════════════════════════════════════
+function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
+  const mono = "'JetBrains Mono',monospace";
+  if (!item) return null;
+
+  // Group fields for display
+  const identFields = ['sku', 'id', 'name', 'description', 'barcode', 'partNumber'];
+  const stockFields = ['qty', 'qtyAvailable', 'qtyReserved', 'reorderPoint', 'minQty', 'maxQty', 'safetyStock'];
+  const locationFields = ['location', 'warehouse', 'bin', 'zone', 'aisle', 'shelf', 'vlm', 'carousel'];
+  const categoryFields = ['coatingType', 'index', 'material', 'category', 'type', 'class', 'group'];
+  const supplierFields = ['supplier', 'vendor', 'leadTime', 'cost', 'price', 'lastPurchase'];
+  const physicalFields = ['diameter', 'thickness', 'weight', 'dimensions', 'uom', 'unit'];
+
+  const renderField = (key, value) => {
+    if (value === null || value === undefined || value === '') return null;
+    if (typeof value === 'boolean') value = value ? 'Yes' : 'No';
+    if (typeof value === 'object') value = JSON.stringify(value);
+    return (
+      <div key={key} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: `1px solid ${T.border}22` }}>
+        <span style={{ color: T.textDim, fontSize: 11, fontFamily: mono }}>{key}</span>
+        <span style={{ color: T.text, fontSize: 12, fontFamily: mono, fontWeight: 600, maxWidth: '60%', textAlign: 'right', wordBreak: 'break-word' }}>{String(value)}</span>
+      </div>
+    );
+  };
+
+  const renderSection = (sectionTitle, fields) => {
+    const items = fields.map(f => renderField(f, item[f])).filter(Boolean);
+    if (items.length === 0) return null;
+    return (
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>{sectionTitle}</div>
+        {items}
+      </div>
+    );
+  };
+
+  // Determine stock status
+  const isOutOfStock = item.qty === 0;
+  const isLowStock = item.qty > 0 && item.qty <= (item.reorderPoint || 10);
+  const stockColor = isOutOfStock ? T.red : isLowStock ? T.amber : T.green;
+  const stockLabel = isOutOfStock ? 'OUT OF STOCK' : isLowStock ? 'LOW STOCK' : 'IN STOCK';
+
+  return (
+    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, background: T.surface, borderLeft: `1px solid ${T.border}`, zIndex: 1000, display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px #00000040' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{item.sku || item.name || title}</div>
+          <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono, marginTop: 2 }}>{item.name?.slice(0, 50) || item.description?.slice(0, 50) || ''}</div>
+        </div>
+        <button onClick={onClose} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, cursor: 'pointer', fontSize: 12 }}>✕ Close</button>
+      </div>
+
+      {/* Stock Status Banner */}
+      <div style={{ padding: '12px 20px', background: `${stockColor}15`, borderBottom: `1px solid ${stockColor}40`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ width: 12, height: 12, borderRadius: '50%', background: stockColor }} />
+          <span style={{ fontSize: 12, fontWeight: 700, color: stockColor, fontFamily: mono }}>{stockLabel}</span>
+        </div>
+        <div style={{ fontSize: 28, fontWeight: 900, color: stockColor, fontFamily: mono }}>{item.qty ?? '—'}</div>
+      </div>
+
+      {/* Content */}
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        {/* Item Image */}
+        <ItemImage item={item} />
+
+        {renderSection('Identification', identFields)}
+        {renderSection('Stock Levels', stockFields)}
+        {renderSection('Location', locationFields)}
+        {renderSection('Category', categoryFields)}
+        {renderSection('Physical', physicalFields)}
+        {renderSection('Supplier', supplierFields)}
+
+        {/* All other fields */}
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>All Fields</div>
+          {Object.entries(item).map(([k, v]) => renderField(k, v))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // ── Surfacing Tab ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
 
-  // Filter DVI jobs in surfacing (GENERATOR, AUTO BLKER, DIGITAL CALC stations)
+  // Filter DVI jobs in surfacing (GENERATOR, AUTO BLKER, DIGITAL CALC stations) - exclude shipped
   const surfacingJobs = useMemo(() => {
     return dviJobs.filter(j => {
+      // Exclude shipped jobs
+      if (j.status === 'SHIPPED' || j.stage === 'SHIP' || (j.station||'').toUpperCase().includes('SHIP')) return false;
       const stage = (j.stage || j.Stage || '').toUpperCase();
       const station = (j.station || '').toUpperCase();
       return stage === 'SURFACING' || station.includes('GENERATOR') || station.includes('AUTO BLKER') || station.includes('DIGITAL CALC');
@@ -3881,12 +4137,12 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
               </thead>
               <tbody>
                 {filteredJobs.slice(0, 50).map((j,i) => (
-                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : "transparent" }}>
+                  <tr key={j.job_id||j.invoice||i} onClick={()=>setSelectedJob(j)} style={{ borderBottom: `1px solid ${T.border}`, background: selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : "transparent", cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e=>e.currentTarget.style.background=`${T.blue}10`} onMouseLeave={e=>e.currentTarget.style.background=selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : 'transparent'}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
                       {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || j.entryDate || "—"}</td>
                     <td style={{ padding: "10px 12px" }}><Pill color={j.status==='SHIPPED'?T.green:T.blue}>{j.status||'WIP'}</Pill></td>
                   </tr>
                 ))}
@@ -3899,6 +4155,9 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         )}
       </Card>
+
+      {/* Job Detail Panel */}
+      {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
     </ProductionStageTab>
   );
 }
@@ -3908,11 +4167,14 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
 
-  // Filter DVI jobs in cutting (EDGER, LCU stations)
+  // Filter DVI jobs in cutting (EDGER, LCU stations) - exclude shipped
   const cuttingJobs = useMemo(() => {
     return dviJobs.filter(j => {
+      // Exclude shipped jobs
+      if (j.status === 'SHIPPED' || j.stage === 'SHIP' || (j.station||'').toUpperCase().includes('SHIP')) return false;
       const stage = (j.stage || j.Stage || '').toUpperCase();
       const station = (j.station || '').toUpperCase();
       return stage === 'CUTTING' || station.includes('EDGER') || station.includes('LCU');
@@ -4000,12 +4262,12 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
               </thead>
               <tbody>
                 {filteredJobs.slice(0, 50).map((j,i) => (
-                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : "transparent" }}>
+                  <tr key={j.job_id||j.invoice||i} onClick={()=>setSelectedJob(j)} style={{ borderBottom: `1px solid ${T.border}`, background: selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : "transparent", cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e=>e.currentTarget.style.background=`${T.blue}10`} onMouseLeave={e=>e.currentTarget.style.background=selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : 'transparent'}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
                       {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || j.entryDate || "—"}</td>
                     <td style={{ padding: "10px 12px" }}><Pill color={j.status==='SHIPPED'?T.green:T.blue}>{j.status||'WIP'}</Pill></td>
                   </tr>
                 ))}
@@ -4018,6 +4280,9 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
           </div>
         )}
       </Card>
+
+      {/* Job Detail Panel */}
+      {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
 
       {/* Recent Breaks */}
       {cuttingBreaks.length > 0 && (
@@ -4045,11 +4310,14 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
 
-  // Filter DVI jobs in assembly (ASSEMBLY stations)
+  // Filter DVI jobs in assembly (ASSEMBLY stations) - exclude shipped
   const assemblyJobs = useMemo(() => {
     return dviJobs.filter(j => {
+      // Exclude shipped jobs
+      if (j.status === 'SHIPPED' || j.stage === 'SHIP' || (j.station||'').toUpperCase().includes('SHIP')) return false;
       const stage = (j.stage || j.Stage || '').toUpperCase();
       const station = (j.station || '').toUpperCase();
       return stage === 'ASSEMBLY' || station.includes('ASSEMBLY');
@@ -4135,12 +4403,12 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
               </thead>
               <tbody>
                 {filteredJobs.slice(0, 50).map((j,i) => (
-                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : (j.station||'').includes('FAIL') ? `${T.amber}08` : "transparent" }}>
+                  <tr key={j.job_id||j.invoice||i} onClick={()=>setSelectedJob(j)} style={{ borderBottom: `1px solid ${T.border}`, background: selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : (j.station||'').includes('FAIL') ? `${T.amber}08` : "transparent", cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e=>e.currentTarget.style.background=`${T.blue}10`} onMouseLeave={e=>e.currentTarget.style.background=selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : (j.station||'').includes('FAIL') ? `${T.amber}08` : 'transparent'}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
                       {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || j.entryDate || "—"}</td>
                     <td style={{ padding: "10px 12px" }}>
                       <Pill color={(j.station||'').includes('PASS')?T.green:(j.station||'').includes('FAIL')?T.red:T.blue}>
                         {(j.station||'').includes('PASS')?'PASS':(j.station||'').includes('FAIL')?'FAIL':'WIP'}
@@ -4157,6 +4425,9 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         )}
       </Card>
+
+      {/* Job Detail Panel */}
+      {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
     </ProductionStageTab>
   );
 }
@@ -4166,6 +4437,7 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 function ShippingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
 
   // Filter DVI jobs in shipping (SH CONVEY stations)
@@ -4252,12 +4524,12 @@ function ShippingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
               </thead>
               <tbody>
                 {filteredJobs.slice(0, 50).map((j,i) => (
-                  <tr key={j.job_id||i} style={{ borderBottom: `1px solid ${T.border}`, background: (j.rush==='Y') ? `${T.red}08` : "transparent" }}>
+                  <tr key={j.job_id||j.invoice||i} onClick={()=>setSelectedJob(j)} style={{ borderBottom: `1px solid ${T.border}`, background: selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : "transparent", cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e=>e.currentTarget.style.background=`${T.blue}10`} onMouseLeave={e=>e.currentTarget.style.background=selectedJob?.invoice===j.invoice ? `${T.blue}15` : (j.rush==='Y') ? `${T.red}08` : 'transparent'}>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
                       {j.job_id || j.invoice || "—"} {(j.rush==='Y') && <span style={{ color: T.red }}>🔴</span>}
                     </td>
                     <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
-                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || j.entryDate || "—"}</td>
                     <td style={{ padding: "10px 12px" }}><Pill color={j.status==='SHIPPED'?T.green:T.blue}>{j.status||'WIP'}</Pill></td>
                   </tr>
                 ))}
@@ -4270,6 +4542,9 @@ function ShippingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         )}
       </Card>
+
+      {/* Job Detail Panel */}
+      {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
     </ProductionStageTab>
   );
 }
@@ -7326,6 +7601,7 @@ function InventoryTab({ovenServerUrl,settings}){
   const [filterCoating,setFilterCoating]=useState("All");
   const [sortCol,setSortCol]=useState("qty");
   const [sortDir,setSortDir]=useState("asc");
+  const [selectedItem,setSelectedItem]=useState(null);
 
   // Fetch all inventory data
   useEffect(()=>{
@@ -7482,8 +7758,9 @@ function InventoryTab({ovenServerUrl,settings}){
                 {filteredMaterials.slice(0,100).map(m=>{
                   const isLow=m.qty<=(m.reorderPoint||10);
                   const isOut=m.qty===0;
+                  const isSelected=selectedItem?.sku===m.sku;
                   return(
-                    <tr key={m.id||m.sku} style={{borderBottom:`1px solid ${T.border}`,background:isOut?`${T.red}08`:isLow?`${T.amber}08`:"transparent"}}>
+                    <tr key={m.id||m.sku} onClick={()=>setSelectedItem(m)} style={{borderBottom:`1px solid ${T.border}`,background:isSelected?`${T.blue}15`:isOut?`${T.red}08`:isLow?`${T.amber}08`:"transparent",cursor:'pointer',transition:'background 0.15s'}} onMouseEnter={e=>e.currentTarget.style.background=`${T.blue}10`} onMouseLeave={e=>e.currentTarget.style.background=isSelected?`${T.blue}15`:isOut?`${T.red}08`:isLow?`${T.amber}08`:'transparent'}>
                       <td style={{padding:"10px 12px",fontFamily:mono,fontSize:11,color:T.text,fontWeight:600}}>{m.sku}</td>
                       <td style={{padding:"10px 12px",fontSize:12,color:T.textMuted,maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.name}</td>
                       <td style={{padding:"10px 12px"}}>
@@ -7815,8 +8092,9 @@ function InventoryTab({ovenServerUrl,settings}){
               <div style={{display:"flex",flexDirection:"column",gap:8}}>
                 {alerts.alerts.map((a,i)=>{
                   const sevColor={CRITICAL:T.red,HIGH:T.amber,LOW:T.blue}[a.severity]||T.textDim;
+                  const isSelected=selectedItem?.sku===a.sku;
                   return(
-                    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:12,background:T.bg,borderRadius:6,borderLeft:`4px solid ${sevColor}`}}>
+                    <div key={i} onClick={()=>setSelectedItem(a)} style={{display:"flex",alignItems:"center",gap:12,padding:12,background:isSelected?`${T.blue}15`:T.bg,borderRadius:6,borderLeft:`4px solid ${sevColor}`,cursor:'pointer',transition:'background 0.15s'}} onMouseEnter={e=>e.currentTarget.style.background=`${T.blue}10`} onMouseLeave={e=>e.currentTarget.style.background=isSelected?`${T.blue}15`:T.bg}>
                       <div style={{flex:1}}>
                         <div style={{fontFamily:mono,fontSize:12,fontWeight:600,color:T.text}}>{a.name}</div>
                         <div style={{fontSize:11,color:T.textDim}}>{a.sku} • {a.location||"No location"}</div>
@@ -7889,6 +8167,9 @@ function InventoryTab({ovenServerUrl,settings}){
         </div>
         <span style={{fontSize:10,color:T.textDim}}>Auto-refresh every 30s</span>
       </div>
+
+      {/* Item Detail Panel */}
+      {selectedItem && <InventoryDetailPanel item={selectedItem} onClose={()=>setSelectedItem(null)} title="Lens Blank Details" />}
     </div>
     </ProductionStageTab>
   );
@@ -7901,6 +8182,7 @@ function MaintenanceTab({ovenServerUrl,settings}){
   const [maintenance,setMaintenance]=useState({assets:[],tasks:[],downtime:[],parts:[],stats:{},lastSync:null,status:'pending'});
   const [loading,setLoading]=useState(true);
   const [selectedTask,setSelectedTask]=useState(null);  // For work order detail modal
+  const [selectedPart,setSelectedPart]=useState(null);  // For spare part detail panel
 
   // Fetch maintenance data from server
   useEffect(()=>{
@@ -8318,8 +8600,10 @@ function MaintenanceTab({ovenServerUrl,settings}){
                   </tr>
                 </thead>
                 <tbody>
-                  {maintenance.parts?.map(p=>(
-                    <tr key={p.id} style={{borderBottom:`1px solid ${T.border}`,background:p.lowStock?`${T.red}08`:''}}>
+                  {maintenance.parts?.map(p=>{
+                    const isSelected=selectedPart?.id===p.id;
+                    return(
+                    <tr key={p.id} onClick={()=>setSelectedPart(p)} style={{borderBottom:`1px solid ${T.border}`,background:isSelected?`${T.blue}15`:p.lowStock?`${T.red}08`:'',cursor:'pointer',transition:'background 0.15s'}} onMouseEnter={e=>e.currentTarget.style.background=`${T.blue}10`} onMouseLeave={e=>e.currentTarget.style.background=isSelected?`${T.blue}15`:p.lowStock?`${T.red}08`:''}>
                       <td style={{padding:"8px 12px",fontSize:12,color:T.text,fontWeight:600}}>{p.name}</td>
                       <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:T.textDim}}>{p.partNum||'—'}</td>
                       <td style={{padding:"8px 12px",fontFamily:mono,fontSize:13,fontWeight:800,color:p.lowStock?T.red:T.text,textAlign:"right"}}>{p.qty}</td>
@@ -8328,7 +8612,8 @@ function MaintenanceTab({ovenServerUrl,settings}){
                       <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:T.textMuted}}>{p.vendor||'—'}</td>
                       <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.textDim,textAlign:"right"}}>{p.cost?`$${p.cost.toFixed(2)}`:'—'}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -8459,6 +8744,9 @@ function MaintenanceTab({ovenServerUrl,settings}){
           </div>
         </div>
       )}
+
+      {/* Spare Part Detail Panel */}
+      {selectedPart && <InventoryDetailPanel item={selectedPart} onClose={()=>setSelectedPart(null)} title="Spare Part Details" />}
     </div>
     </ProductionStageTab>
   );
