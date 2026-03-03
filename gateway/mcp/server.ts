@@ -5,7 +5,9 @@
 
 import { log } from '../logger.js';
 
-const LAB_ASSISTANT_URL = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:3002';
+// Gateway has all API endpoints agents need (inventory, maintenance, DVI, WIP)
+// Lab server (3002) also has some, but gateway is the unified API layer
+const LAB_ASSISTANT_URL = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:3001';
 const LAB_ASSISTANT_KEY = process.env.LAB_ASSISTANT_API_KEY;
 
 // ─────────────────────────────────────────────────────────────────────────────
