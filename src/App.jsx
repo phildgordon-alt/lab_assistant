@@ -1044,6 +1044,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
   const [selectedKpis,setSelectedKpis]=useState(cardConfig?.kpis || DEFAULT_KPIS);
   const [modalKpi,setModalKpi]=useState(null); // Which KPI's job list to show
   const [modalSearch,setModalSearch]=useState('');
+  const [selectedJob,setSelectedJob]=useState(null); // Selected job for detail view
   const [aiQuery,setAiQuery]=useState('');
   const [aiResponse,setAiResponse]=useState('');
   const [aiLoading,setAiLoading]=useState(false);
@@ -1263,7 +1264,17 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
                     </thead>
                     <tbody>
                       {modalJobs.slice(0,100).map((j,i)=>(
-                        <tr key={j.job_id||i} style={{borderBottom:`1px solid ${T.border}22`}}>
+                        <tr
+                          key={j.job_id||i}
+                          onClick={()=>setSelectedJob(j)}
+                          style={{
+                            borderBottom:`1px solid ${T.border}22`,
+                            cursor:'pointer',
+                            background:selectedJob?.job_id===j.job_id?`${KPI_METRICS[modalKpi]?.accent||T.blue}15`:'transparent',
+                          }}
+                          onMouseEnter={e=>{if(selectedJob?.job_id!==j.job_id)e.currentTarget.style.background=`${T.blue}08`;}}
+                          onMouseLeave={e=>{if(selectedJob?.job_id!==j.job_id)e.currentTarget.style.background='transparent';}}
+                        >
                           <td style={{padding:'10px 20px',fontFamily:mono,fontSize:12,fontWeight:600,color:T.text}}>{j.job_id||j.invoice||'—'}</td>
                           <td style={{padding:'10px 12px',fontFamily:mono,fontSize:11,color:T.textMuted}}>{j.station||j.stage||'—'}</td>
                           <td style={{padding:'10px 12px',fontFamily:mono,fontSize:11,color:T.textMuted}}>{j.date||'—'}</td>
@@ -1278,75 +1289,130 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
               </div>
             </div>
 
-            {/* AI Agent Sidebar */}
-            <div style={{flex:1,minWidth:320,display:'flex',flexDirection:'column',background:T.bg}}>
-              {/* Agent Header */}
-              <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.border}`}}>
-                <div style={{display:'flex',alignItems:'center',gap:8}}>
-                  <span style={{fontSize:18}}>🤖</span>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:700,color:T.text}}>{KPI_AGENTS[modalKpi]||'ShiftReportAgent'}</div>
-                    <div style={{fontSize:10,color:T.textMuted}}>AI Assistant for {KPI_METRICS[modalKpi]?.label}</div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Quick Prompts */}
-              <div style={{padding:'12px 16px',borderBottom:`1px solid ${T.border}`}}>
-                <div style={{fontSize:10,color:T.textDim,marginBottom:8,fontFamily:mono}}>QUICK PROMPTS</div>
-                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-                  {[
-                    `Summarize ${KPI_METRICS[modalKpi]?.label} status`,
-                    'Any issues or concerns?',
-                    'What needs attention?',
-                    'Trend analysis'
-                  ].map((prompt,i)=>(
-                    <button key={i} onClick={()=>setAiQuery(prompt)} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:6,padding:'6px 10px',fontSize:10,color:T.text,cursor:'pointer'}}>
-                      {prompt}
+            {/* Sidebar - Job Details or AI Agent */}
+            <div style={{flex:1,minWidth:360,display:'flex',flexDirection:'column',background:T.bg}}>
+              {selectedJob ? (
+                /* Job Detail View */
+                <>
+                  {/* Header */}
+                  <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.border}`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                    <div>
+                      <div style={{fontSize:16,fontWeight:700,color:T.text,fontFamily:mono}}>{selectedJob.job_id||selectedJob.invoice||'Job Details'}</div>
+                      <div style={{fontSize:11,color:T.textMuted}}>{selectedJob.station||selectedJob.stage||'—'}</div>
+                    </div>
+                    <button onClick={()=>setSelectedJob(null)} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:6,padding:'6px 12px',fontSize:11,color:T.text,cursor:'pointer'}}>
+                      ← Back
                     </button>
-                  ))}
-                </div>
-              </div>
+                  </div>
 
-              {/* AI Response */}
-              <div style={{flex:1,padding:16,overflowY:'auto'}}>
-                {aiResponse?(
-                  <div style={{background:T.card,borderRadius:8,padding:14}}>
-                    <div style={{fontSize:10,color:T.textDim,marginBottom:8,fontFamily:mono}}>AI RESPONSE</div>
-                    <div style={{fontSize:13,color:T.text,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{aiResponse}</div>
+                  {/* Job Fields */}
+                  <div style={{flex:1,padding:16,overflowY:'auto'}}>
+                    <div style={{display:'grid',gap:12}}>
+                      {Object.entries(selectedJob).filter(([k,v])=>v&&k!=='rawXml'&&typeof v!=='object').map(([key,value])=>(
+                        <div key={key} style={{background:T.card,borderRadius:8,padding:'10px 14px'}}>
+                          <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,marginBottom:4}}>{key.toUpperCase().replace(/_/g,' ')}</div>
+                          <div style={{fontSize:13,color:T.text,fontFamily:mono,wordBreak:'break-all'}}>{String(value)}</div>
+                        </div>
+                      ))}
+                      {/* Nested objects like rightEye, leftEye, frame */}
+                      {Object.entries(selectedJob).filter(([k,v])=>v&&typeof v==='object'&&!Array.isArray(v)).map(([key,obj])=>(
+                        <div key={key} style={{background:T.card,borderRadius:8,padding:'10px 14px'}}>
+                          <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,marginBottom:8}}>{key.toUpperCase().replace(/_/g,' ')}</div>
+                          <div style={{display:'grid',gridTemplateColumns:'repeat(2,1fr)',gap:8}}>
+                            {Object.entries(obj).map(([subKey,subVal])=>(
+                              <div key={subKey}>
+                                <div style={{fontSize:8,color:T.textDim,fontFamily:mono}}>{subKey}</div>
+                                <div style={{fontSize:12,color:T.text,fontFamily:mono}}>{String(subVal)}</div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ):aiLoading?(
-                  <div style={{textAlign:'center',color:T.textMuted,padding:20}}>
-                    <div style={{fontSize:24,marginBottom:8}}>⏳</div>
-                    Thinking...
-                  </div>
-                ):(
-                  <div style={{textAlign:'center',color:T.textDim,padding:20,fontSize:12}}>
-                    Ask a question about these {modalJobs.length} jobs
-                  </div>
-                )}
-              </div>
 
-              {/* Input */}
-              <div style={{padding:16,borderTop:`1px solid ${T.border}`}}>
-                <div style={{display:'flex',gap:8}}>
-                  <input
-                    type="text"
-                    placeholder="Ask the AI agent..."
-                    value={aiQuery}
-                    onChange={e=>setAiQuery(e.target.value)}
-                    onKeyDown={e=>{if(e.key==='Enter')askAgent();}}
-                    style={{flex:1,padding:'10px 14px',background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:12}}
-                  />
-                  <button
-                    onClick={askAgent}
-                    disabled={aiLoading||!aiQuery.trim()}
-                    style={{padding:'10px 16px',background:aiLoading||!aiQuery.trim()?T.border:T.blue,border:'none',borderRadius:8,color:'#fff',fontSize:12,fontWeight:600,cursor:aiLoading?'wait':'pointer'}}
-                  >
-                    Ask
-                  </button>
-                </div>
-              </div>
+                  {/* Ask AI about this job */}
+                  <div style={{padding:16,borderTop:`1px solid ${T.border}`}}>
+                    <button
+                      onClick={()=>{setAiQuery(`Tell me about job ${selectedJob.job_id||selectedJob.invoice}`);setSelectedJob(null);}}
+                      style={{width:'100%',padding:'10px 16px',background:T.blue,border:'none',borderRadius:8,color:'#fff',fontSize:12,fontWeight:600,cursor:'pointer'}}
+                    >
+                      🤖 Ask AI about this job
+                    </button>
+                  </div>
+                </>
+              ) : (
+                /* AI Agent View */
+                <>
+                  {/* Agent Header */}
+                  <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.border}`}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontSize:18}}>🤖</span>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700,color:T.text}}>{KPI_AGENTS[modalKpi]||'ShiftReportAgent'}</div>
+                        <div style={{fontSize:10,color:T.textMuted}}>AI Assistant for {KPI_METRICS[modalKpi]?.label}</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Quick Prompts */}
+                  <div style={{padding:'12px 16px',borderBottom:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:10,color:T.textDim,marginBottom:8,fontFamily:mono}}>QUICK PROMPTS</div>
+                    <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                      {[
+                        `Summarize ${KPI_METRICS[modalKpi]?.label} status`,
+                        'Any issues or concerns?',
+                        'What needs attention?',
+                        'Trend analysis'
+                      ].map((prompt,i)=>(
+                        <button key={i} onClick={()=>setAiQuery(prompt)} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:6,padding:'6px 10px',fontSize:10,color:T.text,cursor:'pointer'}}>
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* AI Response */}
+                  <div style={{flex:1,padding:16,overflowY:'auto'}}>
+                    {aiResponse?(
+                      <div style={{background:T.card,borderRadius:8,padding:14}}>
+                        <div style={{fontSize:10,color:T.textDim,marginBottom:8,fontFamily:mono}}>AI RESPONSE</div>
+                        <div style={{fontSize:13,color:T.text,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{aiResponse}</div>
+                      </div>
+                    ):aiLoading?(
+                      <div style={{textAlign:'center',color:T.textMuted,padding:20}}>
+                        <div style={{fontSize:24,marginBottom:8}}>⏳</div>
+                        Thinking...
+                      </div>
+                    ):(
+                      <div style={{textAlign:'center',color:T.textDim,padding:20,fontSize:12}}>
+                        Click a job to see details, or ask about these {modalJobs.length} jobs
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Input */}
+                  <div style={{padding:16,borderTop:`1px solid ${T.border}`}}>
+                    <div style={{display:'flex',gap:8}}>
+                      <input
+                        type="text"
+                        placeholder="Ask the AI agent..."
+                        value={aiQuery}
+                        onChange={e=>setAiQuery(e.target.value)}
+                        onKeyDown={e=>{if(e.key==='Enter')askAgent();}}
+                        style={{flex:1,padding:'10px 14px',background:T.card,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:12}}
+                      />
+                      <button
+                        onClick={askAgent}
+                        disabled={aiLoading||!aiQuery.trim()}
+                        style={{padding:'10px 16px',background:aiLoading||!aiQuery.trim()?T.border:T.blue,border:'none',borderRadius:8,color:'#fff',fontSize:12,fontWeight:600,cursor:aiLoading?'wait':'pointer'}}
+                      >
+                        Ask
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
