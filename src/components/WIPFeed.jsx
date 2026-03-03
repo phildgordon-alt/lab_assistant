@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 
 // ─── Palette & shared styles ──────────────────────────────────────────────────
 const C = {
@@ -365,17 +365,85 @@ function CoatingQueue({ jobs }) {
   );
 }
 
+// ─── localStorage key for persistence ─────────────────────────────────────────
+const WIP_STORAGE_KEY = 'la_wip_data_v1';
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function WIPFeed() {
-  const [data, setData] = useState(null);
+  const [data, setData] = useState(() => {
+    // Load existing data from localStorage on mount
+    try {
+      const saved = localStorage.getItem(WIP_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        console.log(`[WIP] Loaded ${parsed.jobs?.length || 0} jobs from storage`);
+        return parsed;
+      }
+    } catch (e) {
+      console.error('[WIP] Failed to load from storage:', e);
+    }
+    return null;
+  });
   const [dragging, setDragging] = useState(false);
   const [tab, setTab] = useState("wip");
   const [error, setError] = useState(null);
+  const [mergeStats, setMergeStats] = useState(null);
+
+  // Save data to localStorage whenever it changes
+  useEffect(() => {
+    if (data) {
+      try {
+        localStorage.setItem(WIP_STORAGE_KEY, JSON.stringify(data));
+        console.log(`[WIP] Saved ${data.jobs?.length || 0} jobs to storage`);
+      } catch (e) {
+        console.error('[WIP] Failed to save to storage:', e);
+      }
+    }
+  }, [data]);
 
   const loadXML = useCallback((text) => {
     try {
       const parsed = parseWIP(text);
-      setData(parsed);
+
+      // Merge with existing data instead of replacing
+      setData(prevData => {
+        if (!prevData || !prevData.jobs || prevData.jobs.length === 0) {
+          // No existing data, just use new data
+          setMergeStats({ added: parsed.jobs.length, duplicates: 0, total: parsed.jobs.length });
+          return parsed;
+        }
+
+        // Build a Set of existing invoice numbers for fast lookup
+        const existingInvoices = new Set(prevData.jobs.map(j => j.invoice));
+
+        // Filter out duplicates from new jobs
+        const newJobs = parsed.jobs.filter(j => !existingInvoices.has(j.invoice));
+        const duplicateCount = parsed.jobs.length - newJobs.length;
+
+        // Merge: existing jobs + new unique jobs
+        const mergedJobs = [...prevData.jobs, ...newJobs];
+
+        // Sort by entry date (newest first)
+        mergedJobs.sort((a, b) => {
+          const dateA = new Date(a.entryDate || '1970-01-01');
+          const dateB = new Date(b.entryDate || '1970-01-01');
+          return dateB - dateA;
+        });
+
+        setMergeStats({
+          added: newJobs.length,
+          duplicates: duplicateCount,
+          total: mergedJobs.length
+        });
+
+        console.log(`[WIP] Merged: ${newJobs.length} new, ${duplicateCount} duplicates skipped, ${mergedJobs.length} total`);
+
+        return {
+          meta: parsed.meta, // Use latest meta
+          jobs: mergedJobs
+        };
+      });
+
       setError(null);
     } catch (e) {
       setError("Failed to parse XML: " + e.message);
@@ -501,17 +569,49 @@ export default function WIPFeed() {
           <div style={{ color: C.textDim, fontSize: 11 }}>
             {meta.lab} · CYCLE {meta.cycleDate}
           </div>
+          {mergeStats && (
+            <>
+              <div style={{ width: 1, height: 24, background: C.border }} />
+              <div style={{ color: C.green, fontSize: 11 }}>
+                +{mergeStats.added} added
+                {mergeStats.duplicates > 0 && (
+                  <span style={{ color: C.muted, marginLeft: 8 }}>
+                    ({mergeStats.duplicates} duplicates skipped)
+                  </span>
+                )}
+              </div>
+            </>
+          )}
         </div>
-        <button
-          onClick={() => { setData(null); setTab("wip"); }}
-          style={{
-            background: "transparent", border: `1px solid ${C.border}`,
-            color: C.muted, borderRadius: 4, padding: "5px 12px",
-            cursor: "pointer", fontSize: 11, ...mono,
-          }}
-        >
-          ↑ LOAD NEW FILE
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <label
+            style={{
+              background: C.green + "22", border: `1px solid ${C.green}44`,
+              color: C.green, borderRadius: 4, padding: "5px 12px",
+              cursor: "pointer", fontSize: 11, ...mono,
+            }}
+          >
+            + ADD MORE
+            <input type="file" accept=".xml" style={{ display: "none" }} onChange={onFile} />
+          </label>
+          <button
+            onClick={() => {
+              if (confirm('Clear all WIP data? This cannot be undone.')) {
+                localStorage.removeItem(WIP_STORAGE_KEY);
+                setData(null);
+                setMergeStats(null);
+                setTab("wip");
+              }
+            }}
+            style={{
+              background: "transparent", border: `1px solid ${C.red}44`,
+              color: C.red, borderRadius: 4, padding: "5px 12px",
+              cursor: "pointer", fontSize: 11, ...mono,
+            }}
+          >
+            CLEAR ALL
+          </button>
+        </div>
       </div>
 
       {/* Stat cards */}
