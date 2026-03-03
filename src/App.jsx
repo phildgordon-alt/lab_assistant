@@ -68,11 +68,78 @@ const getAnthropicApiKey = (settings) => {
   return settings?.anthropicApiKey || import.meta.env.VITE_ANTHROPIC_API_KEY || '';
 };
 
+// ── Gateway helper — calls MCP gateway or falls back to direct Anthropic ─────
+const callGateway = async (settings, question, { onChunk, agent, userId = 'web-user', context } = {}) => {
+  const gatewayUrl = settings?.gatewayUrl || 'http://localhost:3001';
+
+  // If streaming with onChunk callback, use SSE endpoint
+  if (onChunk) {
+    const res = await fetch(`${gatewayUrl}/web/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, agent, userId, context }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || `Gateway error ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let fullText = '';
+    let agentName = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('event: ')) {
+          // Skip event lines, data follows
+        } else if (line.startsWith('data: ')) {
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.name) agentName = data.name;
+            if (data.text) {
+              fullText += data.text;
+              onChunk(data.text);
+            }
+            if (data.message) throw new Error(data.message);
+          } catch (e) {
+            if (e.message && !e.message.includes('JSON')) throw e;
+          }
+        }
+      }
+    }
+
+    return { response: fullText, agent: agentName };
+  }
+
+  // Non-streaming sync call
+  const res = await fetch(`${gatewayUrl}/web/ask-sync`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question, agent, userId, context }),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message || `Gateway error ${res.status}`);
+  }
+
+  return await res.json();
+};
+
 // ── DEFAULT SETTINGS — equipment categories and configuration ────────────────
 const DEFAULT_SETTINGS = {
   pin: null,           // null = no PIN, otherwise 4-6 digit string
   pinEnabled: false,
-  anthropicApiKey: '', // Claude API key for AI features
+  anthropicApiKey: '', // Claude API key for AI features (fallback if no gateway)
+  gatewayUrl: 'http://localhost:3001', // MCP Gateway URL
   equipmentCategories: [
     { id: 'coaters', name: 'Coaters', icon: '🌡', color: '#F59E0B' },
     { id: 'ovens', name: 'Ovens', icon: '🔥', color: '#EF4444' },
@@ -727,8 +794,8 @@ function useSlackConfig(onIncoming, setMessages){
         setProxyConnected(true);
         const data=await r.json();
         // Include ALL messages (including bot) for display
-        // Filter out AI queries (/ai, @ai, ai:) - those are for lab use, not dashboard display
-        const allMsgs=(data.messages||[]).filter(m=>m.type==="message"&&m.text&&!m.text.match(/^(?:\/ai|@ai|ai:)/i));
+        // Filter out AI queries (/ai, @ai, ai:, /lab) - those are for lab use, not dashboard display
+        const allMsgs=(data.messages||[]).filter(m=>m.type==="message"&&m.text&&!m.text.match(/^(?:\/ai|@ai|ai:|\/lab\b)/i));
 
         // On first successful load, replace demo messages with real Slack messages
         if(!initialLoad.current && allMsgs.length>0 && setMessages){
@@ -1691,18 +1758,12 @@ function OverviewAICard({trays,batches,settings}){
   const [loading,setLoading]=useState(false);
   const ask=async()=>{
     if(!q.trim()||loading)return;
-    const apiKey=getAnthropicApiKey(settings);if(!apiKey){setAns("⚠️ No API key. Go to Settings → AI.");return;}
     setLoading(true);setAns("");
-    const ctx=`Lab state: ${trays.filter(t=>t.state!=="IDLE").length} active trays, ${trays.filter(t=>t.rush).length} rush, ${trays.filter(t=>["COATING_STAGED","COATING_IN_PROCESS"].includes(t.state)).length} in coating. Avg batch fill ${Math.round(batches.reduce((s,b)=>s+(b.loaded/b.capacity)*100,0)/batches.length)}%.`;
+    const ctx=`Lab state: ${trays.filter(t=>t.state!=="IDLE").length} active trays, ${trays.filter(t=>t.rush).length} rush, ${trays.filter(t=>["COATING_STAGED","COATING_IN_PROCESS"].includes(t.state)).length} in coating. Avg batch fill ${Math.round(batches.reduce((s,b)=>s+(b.loaded/b.capacity)*100,0)/batches.length)}%. Answer in 2-3 sentences max. Be specific and direct.`;
     try{
-      const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({
-        model:"claude-sonnet-4-20250514",max_tokens:300,
-        system:`You are Lab_Assistant AI for Pair Eyewear lens lab. ${ctx} Answer in 2-3 sentences max. Be specific and direct.`,
-        messages:[{role:"user",content:q}]
-      })});
-      const d=await r.json();
-      setAns(d?.content?.[0]?.text||d?.error?.message||"No response.");
-    }catch(e){setAns("Connection error.");}
+      const result = await callGateway(settings, q, { context: ctx });
+      setAns(result?.response || "No response.");
+    }catch(e){setAns(`Connection error: ${e.message}`);}
     setLoading(false);
   };
   return(
@@ -2467,28 +2528,12 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
     setLoading(true);
 
     try {
-      const apiKey = getAnthropicApiKey(settings);
-      if (!apiKey) {
-        setMessages(prev => [...prev, { role: "assistant", content: "⚠️ No API key configured. Go to Settings → AI to add your Anthropic API key." }]);
-        setLoading(false);
-        return;
-      }
       const systemPrompt = config.buildContext(contextData || {});
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2000,
-          system: systemPrompt,
-          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
-        }),
-      });
-      const data = await res.json();
-      const reply = data?.content?.[0]?.text || data?.error?.message || "Sorry, I couldn't get a response.";
+      const result = await callGateway(settings, userText, { context: systemPrompt });
+      const reply = result?.response || "Sorry, I couldn't get a response.";
       setMessages(prev => [...prev, { role: "assistant", content: reply, isReport: willBeReport, prompt: userText }]);
     } catch (e) {
-      setMessages(prev => [...prev, { role: "assistant", content: "Connection error. Check API access." }]);
+      setMessages(prev => [...prev, { role: "assistant", content: `⚠️ ${e.message}\n\nMake sure MCP Gateway is running.` }]);
     }
     setLoading(false);
   };
@@ -3199,6 +3244,36 @@ When generating reports: use ## for main sections, ### for subsections, - for bu
     if(!userText||loading)return;
     setInput("");
 
+    // "AI ?" - show available reports and prompts
+    if(userText.match(/^(ai\s*\?|help|commands|\?)$/i)){
+      const helpText=`## Available AI Reports & Commands
+
+### Quick Reports (click buttons on left, or type):
+${QUICK_PROMPTS.map(p=>`- **${p.icon} ${p.label}** — "${p.text.slice(0,50)}${p.text.length>50?'...':''}"${p.isReport?' 📄':''}"`).join('\n')}
+
+### Domain-Specific AI (type domain + question):
+- **coating** — Batch status, yield analysis, fill predictions
+- **cutting** — Queue status, breaks, rush priority
+- **assembly** — Station status, leaderboard, rush jobs
+- **shipping** — Ready to ship, overdue, due today
+- **inventory** — Stock levels, critical items, reorder
+- **maintenance** — Equipment alerts, PM schedule, downtime
+
+### MCP Tools (AI can use automatically):
+- **call_api** — Fetch live data from Lab Assistant
+- **query_database** — Run read-only SQL queries
+- **take_action** — Execute write operations (audit logged)
+
+### Tips:
+- Add "report" to any question to get a formatted, downloadable report
+- Use specific job IDs, tray numbers, or machine names
+- Ask about trends, comparisons, or recommendations
+
+Type a question to get started!`;
+      setMessages(prev=>[...prev,{role:"user",content:"AI ?"},{role:"assistant",content:helpText}]);
+      return;
+    }
+
     // WIP Aging Report — build full data-rich prompt, display friendly label in chat
     const isAgingReport = userText==="__WIP_AGING__";
     if(isAgingReport) userText=buildAgingPrompt();
@@ -3209,29 +3284,27 @@ When generating reports: use ## for main sections, ### for subsections, - for bu
     setMessages(newMessages);
     setLoading(true);
     try{
-      const apiKey=getAnthropicApiKey(settings);
-      if(!apiKey){
-        setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ No API key configured. Go to Settings → AI to add your Anthropic API key."}]);
-        setLoading(false);
-        return;
-      }
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",
-        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
-          max_tokens:2000,
-          system:buildContext(),
-          // Send real prompt to API, but display text already shown in chat
-          messages:[...messages.map(m=>({role:m.role,content:m.content})),{role:"user",content:userText}],
-        }),
+      // Use MCP gateway with streaming
+      let reply = '';
+      const msgIdx = newMessages.length;
+
+      // Add placeholder message for streaming
+      setMessages(prev => [...prev, { role: "assistant", content: "", isReport: willBeReport, prompt: isAgingReport ? "WIP Aging Report" : userText, msgIdx, streaming: true }]);
+
+      await callGateway(settings, userText, {
+        context: buildContext(),
+        onChunk: (chunk) => {
+          reply += chunk;
+          setMessages(prev => prev.map((m, i) => i === msgIdx ? { ...m, content: reply } : m));
+        }
       });
-      const data=await res.json();
-      const reply=data?.content?.[0]?.text||data?.error?.message||"Sorry, I couldn't get a response. Please try again.";
-      const msgIdx=newMessages.length;
-      setMessages(prev=>[...prev,{role:"assistant",content:reply,isReport:willBeReport,prompt:isAgingReport?"WIP Aging Report":userText,msgIdx}]);
-    }catch(e){
-      setMessages(prev=>[...prev,{role:"assistant",content:"Connection error. Make sure the Anthropic API is accessible."}]);
+
+      // Mark streaming complete
+      setMessages(prev => prev.map((m, i) => i === msgIdx ? { ...m, streaming: false } : m));
+
+    } catch(e) {
+      const errorMsg = e.message || "Connection error";
+      setMessages(prev => [...prev, { role: "assistant", content: `⚠️ ${errorMsg}\n\nMake sure the MCP Gateway is running (Settings → Server → Test).` }]);
     }
     setLoading(false);
   };
@@ -5042,6 +5115,15 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
   const [categoryFilter,setCategoryFilter]=useState("all");
   const [serverStatus,setServerStatus]=useState(null);
   const [testingServer,setTestingServer]=useState(false);
+  const [gatewayStatus,setGatewayStatus]=useState(null);
+  const [testingGateway,setTestingGateway]=useState(false);
+  const [gatewayData,setGatewayData]=useState(null);
+  const [gatewayRequests,setGatewayRequests]=useState([]);
+  const [loadingGateway,setLoadingGateway]=useState(false);
+  const [editingLimits,setEditingLimits]=useState(false);
+  const [limitsForm,setLimitsForm]=useState(null);
+  const [requestFilter,setRequestFilter]=useState({source:'all',status:'all',agent:'all'});
+  const [statsPeriod,setStatsPeriod]=useState('24h');
 
   // Check for lockout
   const isLockedOut = lockoutUntil && Date.now() < lockoutUntil;
@@ -5064,6 +5146,73 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       setServerStatus({ ok: false, message: e.message || 'Connection failed' });
     }
     setTestingServer(false);
+  };
+
+  // Test gateway connection
+  const testGatewayConnection = async () => {
+    setTestingGateway(true);
+    try {
+      const resp = await fetch(`${settings.gatewayUrl || 'http://localhost:3001'}/health`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setGatewayStatus({
+          ok: data.status === 'healthy',
+          message: `${data.status} — DB: ${data.database}, Circuit: ${data.circuit_breaker}`,
+          uptime: data.uptime
+        });
+      } else {
+        setGatewayStatus({ ok: false, message: `HTTP ${resp.status}` });
+      }
+    } catch (e) {
+      setGatewayStatus({ ok: false, message: e.message || 'Connection failed' });
+    }
+    setTestingGateway(false);
+  };
+
+  // Load gateway dashboard data
+  const loadGatewayData = async () => {
+    setLoadingGateway(true);
+    const gwUrl = settings.gatewayUrl || 'http://localhost:3001';
+    try {
+      const [statsRes, reqsRes] = await Promise.all([
+        fetch(`${gwUrl}/gateway/stats/detailed?since=${statsPeriod}`, { signal: AbortSignal.timeout(5000) }),
+        fetch(`${gwUrl}/gateway/requests?limit=100`, { signal: AbortSignal.timeout(5000) }),
+      ]);
+      if (statsRes.ok) {
+        const data = await statsRes.json();
+        setGatewayData(data);
+        if (!limitsForm) setLimitsForm(data.limits);
+      }
+      if (reqsRes.ok) {
+        const data = await reqsRes.json();
+        setGatewayRequests(data.requests || []);
+      }
+    } catch (e) {
+      console.error('Failed to load gateway data:', e);
+    }
+    setLoadingGateway(false);
+  };
+
+  // Save updated rate limits
+  const saveLimits = async () => {
+    const gwUrl = settings.gatewayUrl || 'http://localhost:3001';
+    try {
+      const resp = await fetch(`${gwUrl}/gateway/config/limits`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(limitsForm),
+      });
+      if (resp.ok) {
+        setEditingLimits(false);
+        loadGatewayData();
+      } else {
+        alert('Failed to save limits');
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    }
   };
 
   // PIN verification
@@ -5177,6 +5326,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
         {id:"equipment",icon:"⚙️",label:"Equipment"},
         {id:"categories",icon:"📦",label:"Categories"},
         {id:"server",icon:"🔗",label:"Server"},
+        {id:"gateway",icon:"🌐",label:"Gateway"},
         {id:"ai",icon:"🤖",label:"AI"},
         {id:"security",icon:"🔒",label:"Security"},
       ].map(n=>(
@@ -5383,6 +5533,26 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
               </div>
 
               <div>
+                <label style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:6}}>MCP GATEWAY URL</label>
+                <div style={{display:"flex",gap:8}}>
+                  <input value={settings.gatewayUrl||''} onChange={e=>setSettings(prev=>({...prev,gatewayUrl:e.target.value}))}
+                    placeholder="http://localhost:3001"
+                    style={{flex:1,background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 12px",color:T.text,fontSize:13,fontFamily:mono}}/>
+                  <button onClick={testGatewayConnection} disabled={testingGateway}
+                    style={{background:T.purple,border:"none",borderRadius:8,padding:"10px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:testingGateway?0.7:1}}>
+                    {testingGateway ? "Testing..." : "Test"}
+                  </button>
+                </div>
+                {gatewayStatus && (
+                  <div style={{marginTop:8,display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:gatewayStatus.ok?T.green:T.red}}/>
+                    <span style={{fontSize:11,color:gatewayStatus.ok?T.green:T.red,fontFamily:mono}}>{gatewayStatus.message}</span>
+                  </div>
+                )}
+                <div style={{fontSize:10,color:T.textDim,marginTop:4}}>AI gateway for Claude agents and MCP tools</div>
+              </div>
+
+              <div>
                 <label style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:6}}>SLACK WEBHOOK URL</label>
                 <input value={settings.slackWebhook||''} onChange={e=>setSettings(prev=>({...prev,slackWebhook:e.target.value}))}
                   placeholder="https://hooks.slack.com/services/..."
@@ -5404,6 +5574,14 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
               </div>
               <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:gatewayStatus?.ok?T.green:T.textDim}}/>
+                  <span style={{fontSize:12,fontWeight:700,color:T.text}}>MCP Gateway</span>
+                </div>
+                <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{settings.gatewayUrl || 'http://localhost:3001'}</div>
+                {gatewayStatus?.uptime && <div style={{fontSize:9,color:T.textDim,marginTop:4}}>Uptime: {Math.round(gatewayStatus.uptime/60)}m</div>}
+              </div>
+              <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                   <div style={{width:10,height:10,borderRadius:"50%",background:settings.slackWebhook?T.green:T.textDim}}/>
                   <span style={{fontSize:12,fontWeight:700,color:T.text}}>Slack</span>
                 </div>
@@ -5411,6 +5589,181 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
               </div>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* ══ GATEWAY ══ */}
+      {sub==="gateway"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          {/* Load data on mount */}
+          {!gatewayData && !loadingGateway && (
+            <div style={{textAlign:"center",padding:40}}>
+              <button onClick={loadGatewayData} style={{background:T.purple,border:"none",borderRadius:10,padding:"14px 28px",color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer"}}>
+                Load Gateway Dashboard
+              </button>
+            </div>
+          )}
+
+          {loadingGateway && (
+            <div style={{textAlign:"center",padding:40,color:T.textMuted}}>Loading gateway data...</div>
+          )}
+
+          {gatewayData && (
+            <>
+              {/* Stats Overview */}
+              <Card>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <SectionHeader style={{margin:0}}>Gateway Statistics</SectionHeader>
+                  <div style={{display:"flex",gap:6}}>
+                    {['1h','24h','7d'].map(p=>(
+                      <button key={p} onClick={()=>{setStatsPeriod(p);loadGatewayData();}}
+                        style={{background:statsPeriod===p?T.purple:'transparent',border:`1px solid ${statsPeriod===p?T.purple:T.border}`,borderRadius:6,padding:"5px 12px",color:statsPeriod===p?'#fff':T.textMuted,fontSize:11,fontWeight:600,cursor:"pointer"}}>{p}</button>
+                    ))}
+                    <button onClick={loadGatewayData} style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 12px",color:T.textMuted,fontSize:11,cursor:"pointer"}}>↻ Refresh</button>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12}}>
+                  <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontSize:24,fontWeight:800,color:T.blue}}>{gatewayData.stats?.total||0}</div>
+                    <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>TOTAL REQUESTS</div>
+                  </div>
+                  <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontSize:24,fontWeight:800,color:T.green}}>{Math.round(gatewayData.stats?.avg_duration_ms||0)}ms</div>
+                    <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>AVG DURATION</div>
+                  </div>
+                  <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontSize:24,fontWeight:800,color:gatewayData.circuit?.is_open?T.red:T.green}}>{gatewayData.circuit?.is_open?'OPEN':'CLOSED'}</div>
+                    <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>CIRCUIT BREAKER</div>
+                  </div>
+                  <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
+                    <div style={{fontSize:24,fontWeight:800,color:T.amber}}>{Object.keys(gatewayData.concurrent||{}).length}</div>
+                    <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>ACTIVE AGENTS</div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* Stats Breakdown */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}>
+                <Card>
+                  <SectionHeader>By Source</SectionHeader>
+                  {Object.entries(gatewayData.stats?.by_source||{}).map(([src,cnt])=>(
+                    <div key={src} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${T.border}`}}>
+                      <span style={{fontSize:12,color:T.text,textTransform:"capitalize"}}>{src}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:T.blue,fontFamily:mono}}>{cnt}</span>
+                    </div>
+                  ))}
+                  {!Object.keys(gatewayData.stats?.by_source||{}).length && <div style={{fontSize:12,color:T.textDim}}>No requests</div>}
+                </Card>
+                <Card>
+                  <SectionHeader>By Agent</SectionHeader>
+                  {Object.entries(gatewayData.stats?.by_agent||{}).map(([agent,cnt])=>(
+                    <div key={agent} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${T.border}`}}>
+                      <span style={{fontSize:11,color:T.text}}>{agent.replace('Agent','')}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:T.purple,fontFamily:mono}}>{cnt}</span>
+                    </div>
+                  ))}
+                  {!Object.keys(gatewayData.stats?.by_agent||{}).length && <div style={{fontSize:12,color:T.textDim}}>No requests</div>}
+                </Card>
+                <Card>
+                  <SectionHeader>By Status</SectionHeader>
+                  {Object.entries(gatewayData.stats?.by_status||{}).map(([status,cnt])=>(
+                    <div key={status} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${T.border}`}}>
+                      <span style={{fontSize:12,color:status==='success'?T.green:status==='error'?T.red:T.amber}}>{status}</span>
+                      <span style={{fontSize:12,fontWeight:700,fontFamily:mono,color:status==='success'?T.green:status==='error'?T.red:T.amber}}>{cnt}</span>
+                    </div>
+                  ))}
+                  {!Object.keys(gatewayData.stats?.by_status||{}).length && <div style={{fontSize:12,color:T.textDim}}>No requests</div>}
+                </Card>
+              </div>
+
+              {/* Rate Limits */}
+              <Card>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <SectionHeader style={{margin:0}}>Rate Limits</SectionHeader>
+                  {!editingLimits ? (
+                    <button onClick={()=>{setLimitsForm(gatewayData.limits);setEditingLimits(true);}} style={{background:T.blue,border:"none",borderRadius:6,padding:"6px 14px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>Edit Limits</button>
+                  ) : (
+                    <div style={{display:"flex",gap:8}}>
+                      <button onClick={()=>setEditingLimits(false)} style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"6px 14px",color:T.textMuted,fontSize:11,cursor:"pointer"}}>Cancel</button>
+                      <button onClick={saveLimits} style={{background:T.green,border:"none",borderRadius:6,padding:"6px 14px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>Save</button>
+                    </div>
+                  )}
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16}}>
+                  {['slack','web','rest'].map(src=>{
+                    const limits = editingLimits ? limitsForm?.[src] : gatewayData.limits?.[src];
+                    const perKey = src==='rest' ? 'perApiKey' : 'perUser';
+                    return(
+                      <div key={src} style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:14}}>
+                        <div style={{fontSize:12,fontWeight:700,color:T.text,textTransform:"uppercase",marginBottom:12}}>{src}</div>
+                        <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                          <div>
+                            <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>PER {src==='rest'?'API KEY':'USER'} (req/min)</label>
+                            {editingLimits ? (
+                              <input type="number" value={limits?.[perKey]?.requests||0}
+                                onChange={e=>setLimitsForm(prev=>({...prev,[src]:{...prev[src],[perKey]:{...prev[src]?.[perKey],requests:parseInt(e.target.value)||0}}}))}
+                                style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"6px 10px",color:T.text,fontSize:13,fontFamily:mono,marginTop:4}}/>
+                            ) : (
+                              <div style={{fontSize:16,fontWeight:700,color:T.blue}}>{limits?.[perKey]?.requests||0}</div>
+                            )}
+                          </div>
+                          <div>
+                            <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>GLOBAL (req/min)</label>
+                            {editingLimits ? (
+                              <input type="number" value={limits?.global?.requests||0}
+                                onChange={e=>setLimitsForm(prev=>({...prev,[src]:{...prev[src],global:{...prev[src]?.global,requests:parseInt(e.target.value)||0}}}))}
+                                style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"6px 10px",color:T.text,fontSize:13,fontFamily:mono,marginTop:4}}/>
+                            ) : (
+                              <div style={{fontSize:16,fontWeight:700,color:T.purple}}>{limits?.global?.requests||0}</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+
+              {/* Recent Requests */}
+              <Card>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+                  <SectionHeader style={{margin:0}}>Recent Requests</SectionHeader>
+                  <div style={{display:"flex",gap:8}}>
+                    <select value={requestFilter.source} onChange={e=>setRequestFilter(prev=>({...prev,source:e.target.value}))}
+                      style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 10px",color:T.text,fontSize:11}}>
+                      <option value="all">All Sources</option>
+                      <option value="web">Web</option>
+                      <option value="slack">Slack</option>
+                      <option value="rest">REST</option>
+                    </select>
+                    <select value={requestFilter.status} onChange={e=>setRequestFilter(prev=>({...prev,status:e.target.value}))}
+                      style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 10px",color:T.text,fontSize:11}}>
+                      <option value="all">All Status</option>
+                      <option value="success">Success</option>
+                      <option value="error">Error</option>
+                      <option value="rate_limited">Rate Limited</option>
+                    </select>
+                  </div>
+                </div>
+                <div style={{maxHeight:300,overflowY:"auto"}}>
+                  {gatewayRequests
+                    .filter(r=>(requestFilter.source==='all'||r.source===requestFilter.source)&&(requestFilter.status==='all'||r.status===requestFilter.status))
+                    .slice(0,50)
+                    .map((req,i)=>(
+                    <div key={req.id||i} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",borderBottom:`1px solid ${T.border}`,background:i%2===0?'transparent':T.bg}}>
+                      <div style={{width:8,height:8,borderRadius:"50%",background:req.status==='success'?T.green:req.status==='error'?T.red:T.amber}}/>
+                      <div style={{width:50,fontSize:10,color:T.textMuted,fontFamily:mono,textTransform:"uppercase"}}>{req.source}</div>
+                      <div style={{width:120,fontSize:11,color:T.purple,fontFamily:mono}}>{req.agent_name?.replace('Agent','')}</div>
+                      <div style={{flex:1,fontSize:11,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{req.input_text?.slice(0,60)}</div>
+                      <div style={{width:60,fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"right"}}>{req.duration_ms?`${req.duration_ms}ms`:'-'}</div>
+                      <div style={{width:70,fontSize:9,color:T.textDim,fontFamily:mono}}>{new Date(req.created_at).toLocaleTimeString()}</div>
+                    </div>
+                  ))}
+                  {!gatewayRequests.length && <div style={{padding:20,textAlign:"center",color:T.textDim}}>No requests recorded</div>}
+                </div>
+              </Card>
+            </>
+          )}
         </div>
       )}
 
@@ -6754,26 +7107,15 @@ function CorporateViewer({trays,batches,events,settings}){
   async function askAI(q){
     const question=q||aiInput.trim();
     if(!question)return;
-    const apiKey=getAnthropicApiKey(settings);
-    if(!apiKey){
-      setAiMessages(prev=>[...prev,{from:"ai",text:"⚠️ No API key configured. Go to Settings → AI to add your Anthropic API key.",time:new Date()}]);
-      return;
-    }
     setAiMessages(prev=>[...prev,{from:"user",text:question,time:new Date()}]);
     setAiInput(""); setAiLoading(true);
-    const ctx=`Lab context: ${totalTrays} total trays. ${activeTrays} active. ${running.length} batches running, ${hold.length} on hold. ${coatingActive} in coating. ${qcHold} QC hold. ${broken} broken. Recent events: ${events.slice(0,5).map(e=>e.message).join("; ")}.`;
+    const ctx=`Lab context: ${totalTrays} total trays. ${activeTrays} active. ${running.length} batches running, ${hold.length} on hold. ${coatingActive} in coating. ${qcHold} QC hold. ${broken} broken. Recent events: ${events.slice(0,5).map(e=>e.message).join("; ")}. You are a read-only corporate analytics assistant. Provide clear, concise operational insights. Be direct and data-driven. Format numbers clearly.`;
     try{
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-          system:`You are a read-only corporate analytics assistant for Pair Eyewear's optical lens lab. You have access to live lab data but CANNOT make any changes. Provide clear, concise operational insights. Be direct and data-driven. Format numbers clearly. ${ctx}`,
-          messages:[{role:"user",content:question}]})
-      });
-      const d=await resp.json();
-      const text=d.content?.[0]?.text||d?.error?.message||"Unable to retrieve data.";
+      const result = await callGateway(settings, question, { context: ctx });
+      const text = result?.response || "Unable to retrieve data.";
       setAiMessages(prev=>[...prev,{from:"ai",text,time:new Date()}]);
-    }catch{
-      setAiMessages(prev=>[...prev,{from:"ai",text:"Connection error — check server.",time:new Date()}]);
+    }catch(e){
+      setAiMessages(prev=>[...prev,{from:"ai",text:`Connection error: ${e.message}`,time:new Date()}]);
     }
     setAiLoading(false);
     setTimeout(()=>aiRef.current?.scrollTo({top:9999,behavior:"smooth"}),100);

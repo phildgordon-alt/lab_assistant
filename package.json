@@ -10,9 +10,14 @@
     "server:dev": "nodemon server/oven-timer-server.js"
   },
   "dependencies": {
+    "cors": "^2.8.6",
     "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "node-fetch": "^3.3.2",
+    "qrcode": "^1.5.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
