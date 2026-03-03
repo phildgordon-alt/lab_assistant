@@ -38,20 +38,26 @@ const CONFIG = {
   mockMode:      !process.env.ITEMPATH_TOKEN,          // auto-mock if no token configured
 
   // Low stock thresholds — SKU type → minimum qty before alert fires
-  // Customize these to match your actual reorder points
+  // These control dashboard display. Slack alerts use separate filtering below.
   lowStockThresholds: {
-    'AR':           30,   // AR coating blanks
-    'BLUE_CUT':     20,
-    'HARD_COAT':    25,
-    'MIRROR':       15,
-    'POLARIZED':    20,
-    'TRANSITIONS':  20,
-    'PREMIUM_AR':   15,
-    'DEFAULT':      10,   // fallback for any SKU not listed above
+    'AR':           5,
+    'BLUE_CUT':     5,
+    'HARD_COAT':    5,
+    'MIRROR':       3,
+    'POLARIZED':    5,
+    'TRANSITIONS':  5,
+    'PREMIUM_AR':   3,
+    'DEFAULT':      2,   // Only alert when nearly out
   },
 
-  // Slack webhook for low stock alerts (optional — same one used for oven timer)
-  slackWebhook: process.env.SLACK_WEBHOOK || '',
+  // Slack alert filtering — prevent alert floods
+  slackWebhook:  process.env.SLACK_WEBHOOK || '',
+  slackBotToken: process.env.SLACK_BOT_TOKEN || '',
+  slackChannel:  process.env.SLACK_CHANNEL || 'lab-assistant',
+  slackMaxAlertsPerHour: 10,  // Max alerts to send per hour
+  slackMinQtyDrop: 5,         // Only alert if item dropped BY at least this much
+  // Only send Slack alerts for these coating types (empty = all)
+  slackAlertCoatings: ['TRANSITIONS', 'POLARIZED', 'PREMIUM_AR', 'MIRROR'],
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,6 +68,12 @@ let cache = {
   activePicks:      [],   // active orders in progress: { orderId, sku, name, qty, picker, startedAt, status }
   recentTransactions: [], // completed picks last 2hrs: { id, sku, qty, type, completedAt, picker }
   alerts:           [],   // low stock alerts: { sku, name, qty, threshold, severity }
+  warehouses:       [],   // warehouse list: { id, name }
+  warehouseStats:   {},   // stats by warehouse: { WH1: { activeOrders, totalLines, totalQty }, ... }
+  hourlyStats:      {},   // hourly picks by warehouse: { WH1: { 0: qty, 1: qty, ... }, WH2: {...} }
+  vlmStats:         {},   // VLM breakdown: { KITCHEN01: { locationCount, totalQty }, ... }
+  carouselStats:    {},   // carousel inventory: { 'CAR-1': qty, 'CAR-2': qty, ... }
+  locations:        [],   // VLM locations: { id, name, vlm, qty }
   lastSync:         null,
   syncStatus:       'pending',  // 'pending' | 'ok' | 'error' | 'mock'
   syncError:        null,
@@ -87,7 +99,7 @@ async function ipFetch(path, params = {}) {
 
   const resp = await fetch(url.toString(), {
     headers: authHeaders(),
-    signal: AbortSignal.timeout(8000),
+    signal: AbortSignal.timeout(60000),  // 60s timeout for large fetches
   });
 
   if (!resp.ok) {
@@ -102,41 +114,50 @@ async function ipFetch(path, params = {}) {
 
 function normalizeMaterial(m) {
   // ItemPath materials = lens blanks in Kardex
-  // material.name / material.code / material.quantity / material.unit
-  // material.properties = array of { name, value } custom fields
-  // We look for properties like "coating_type", "rx_sphere", "rx_cylinder", "index"
-  const props = {};
-  (m.properties || []).forEach(p => { props[p.name?.toLowerCase().replace(/\s+/g,'_')] = p.value; });
+  // Actual ItemPath fields:
+  //   id, name (OPC code), currentQuantity, Info1-Info5 (product details)
+  //   Info1=type (BLY SV), Info2=color (CLR), Info3=index (HK 76), Info4=sphere, Info5=cylinder
+
+  // Build description from Info fields
+  const infoParts = [m.Info1, m.Info2, m.Info3].filter(Boolean);
+  const description = infoParts.join(' ') || m.name;
 
   return {
     id:           m.id,
-    sku:          m.code || m.id,
-    name:         m.name,
-    qty:          parseFloat(m.quantity) || 0,
-    unit:         m.unit || 'EA',
+    sku:          m.name,  // OPC code is in 'name' field
+    name:         description,  // Build readable name from Info fields
+    qty:          parseFloat(m.currentQuantity) || 0,  // ItemPath uses currentQuantity
+    unit:         m.unitOfMeasure || 'EA',
     location:     m.location || m.bin || null,
-    coatingType:  props['coating_type'] || props['coating'] || null,
-    index:        props['index'] || props['lens_index'] || null,
-    rxSphere:     props['sphere'] || props['rx_sphere'] || null,
-    rxCylinder:   props['cylinder'] || props['rx_cylinder'] || null,
-    rxAdd:        props['add'] || props['rx_add'] || null,
-    rawProps:     props,
+    coatingType:  m.Info1 || null,  // e.g., "BLY SV"
+    index:        m.Info3 || null,  // e.g., "HK 76"
+    rxSphere:     m.Info4 || null,  // e.g., "-8.00"
+    rxCylinder:   m.Info5 || null,  // e.g., "-2.00"
+    rxAdd:        null,
+    reorderPoint: parseFloat(m.reOrderPoint) || 10,
+    rawProps:     { Info1: m.Info1, Info2: m.Info2, Info3: m.Info3, Info4: m.Info4, Info5: m.Info5 },
     lastUpdated:  new Date().toISOString(),
   };
 }
 
 function normalizeOrder(o) {
+  // ItemPath uses order_lines (not lines)
+  const lines = o.order_lines || o.lines || [];
   return {
     orderId:   o.id,
     reference: o.reference || o.name,
     status:    o.status,
-    startedAt: o.created_at || o.started_at,
-    lines:     (o.lines || []).map(l => ({
-      sku:     l.material_code || l.sku,
-      name:    l.material_name || l.name,
+    warehouse: o.warehouseName || null,
+    startedAt: o.modifiedDate || o.created_at || o.started_at,
+    hasStock:  o.hasStock,
+    lines:     lines.map(l => ({
+      sku:     l.materialName || l.material_code || l.sku,
+      name:    l.Info3 ? `${l.Info3} ${l.Info1 || ''}`.trim() : (l.materialName || l.material_name || l.name),
       qty:     parseFloat(l.quantity) || 0,
       picked:  parseFloat(l.quantity_picked || l.picked || 0),
       pending: Math.max(0, (parseFloat(l.quantity)||0) - (parseFloat(l.quantity_picked||0))),
+      rxInfo:  l.Info1 || null,  // e.g., "R: -0.88  -0.55  89  225"
+      sizing:  l.Info2 || null,  // e.g., "30.5  28.0  3.4  19.4  -----"
     })),
   };
 }
@@ -196,40 +217,126 @@ function detectAlerts(materials) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SLACK ALERT — fires when new critical/high alerts appear
+// Supports both Bot Token (preferred) and Webhook methods
 // ─────────────────────────────────────────────────────────────────────────────
 let lastAlertSkus = new Set();
 
-async function sendSlackAlerts(alerts) {
-  if (!CONFIG.slackWebhook) return;
-  const newAlerts = alerts.filter(a =>
-    (a.severity === 'CRITICAL' || a.severity === 'HIGH') && !lastAlertSkus.has(a.sku)
-  );
-  if (!newAlerts.length) return;
-
-  const lines = newAlerts.map(a => {
-    const icon = a.severity === 'CRITICAL' ? '🔴' : '🟠';
-    return `${icon} *${a.name}* (${a.sku}) — ${a.qty} remaining (threshold: ${a.threshold})`;
-  });
-
-  try {
-    await fetch(CONFIG.slackWebhook, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: `*⚠ Kardex Low Stock Alert*\n${lines.join('\n')}`,
-      }),
-    });
-  } catch (e) {
-    console.warn('[ItemPath] Slack alert failed:', e.message);
+async function sendSlackMessage(message) {
+  // Method 1: Bot Token (preferred)
+  if (CONFIG.slackBotToken) {
+    try {
+      const resp = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${CONFIG.slackBotToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          channel: CONFIG.slackChannel,
+          text: message,
+          mrkdwn: true,
+        }),
+      });
+      const data = await resp.json();
+      if (!data.ok) {
+        console.warn('[ItemPath] Slack Bot API error:', data.error);
+      }
+      return data.ok;
+    } catch (e) {
+      console.warn('[ItemPath] Slack Bot API failed:', e.message);
+      return false;
+    }
   }
 
-  newAlerts.forEach(a => lastAlertSkus.add(a.sku));
-  // Reset seen set each hour so alerts can re-fire
-  setTimeout(() => { lastAlertSkus = new Set(); }, 3600000);
+  // Method 2: Webhook (legacy)
+  if (CONFIG.slackWebhook) {
+    try {
+      await fetch(CONFIG.slackWebhook, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: message }),
+      });
+      return true;
+    } catch (e) {
+      console.warn('[ItemPath] Slack webhook failed:', e.message);
+      return false;
+    }
+  }
+
+  return false;
+}
+
+// Track previous quantities to detect drops (not always-0 items)
+let previousQty = {};  // sku → last known qty
+let slackAlertsSentThisHour = 0;
+let lastHourReset = Date.now();
+
+async function sendSlackAlerts(alerts) {
+  if (!CONFIG.slackBotToken && !CONFIG.slackWebhook) return;
+
+  // Reset hourly counter
+  if (Date.now() - lastHourReset > 3600000) {
+    slackAlertsSentThisHour = 0;
+    lastAlertSkus = new Set();
+    lastHourReset = Date.now();
+  }
+
+  // Check if we've hit the hourly limit
+  if (slackAlertsSentThisHour >= CONFIG.slackMaxAlertsPerHour) return;
+
+  // Filter alerts:
+  // 1. Only CRITICAL or HIGH severity
+  // 2. Not already alerted this hour
+  // 3. If coating filter set, only matching coatings
+  // 4. Only items that DROPPED (were previously stocked)
+  const newAlerts = alerts.filter(a => {
+    if (a.severity !== 'CRITICAL' && a.severity !== 'HIGH') return false;
+    if (lastAlertSkus.has(a.sku)) return false;
+
+    // Filter by coating type if configured
+    if (CONFIG.slackAlertCoatings.length > 0) {
+      const coating = (a.coatingType || '').toUpperCase().replace(/\s+/g, '_');
+      const matchesCoating = CONFIG.slackAlertCoatings.some(c =>
+        coating.includes(c) || (a.name || '').toUpperCase().includes(c)
+      );
+      if (!matchesCoating) return false;
+    }
+
+    // Only alert if item dropped (was previously stocked)
+    const prevQty = previousQty[a.sku];
+    if (prevQty === undefined) return false;  // First time seeing this SKU, skip
+    if (prevQty === 0 && a.qty === 0) return false;  // Was already 0, skip
+    if (prevQty - a.qty < CONFIG.slackMinQtyDrop) return false;  // Didn't drop enough
+
+    return true;
+  });
+
+  if (!newAlerts.length) return;
+
+  // Limit to remaining quota
+  const toSend = newAlerts.slice(0, CONFIG.slackMaxAlertsPerHour - slackAlertsSentThisHour);
+
+  const lines = toSend.map(a => {
+    const icon = a.severity === 'CRITICAL' ? '🔴' : '🟠';
+    const dropAmt = (previousQty[a.sku] || 0) - a.qty;
+    return `${icon} *${a.name}* (${a.sku}) — ${a.qty} left (dropped ${dropAmt})`;
+  });
+
+  await sendSlackMessage(`*📦 Kardex Stock Alert*\n${lines.join('\n')}`);
+
+  toSend.forEach(a => lastAlertSkus.add(a.sku));
+  slackAlertsSentThisHour += toSend.length;
+}
+
+// Called after each poll to track qty changes
+function updatePreviousQty(materials) {
+  for (const m of materials) {
+    previousQty[m.sku] = m.qty;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAIN POLL — fetches all three endpoints in parallel
+// MAIN POLL — fetches all endpoints in parallel
 // ─────────────────────────────────────────────────────────────────────────────
 async function poll() {
   if (CONFIG.mockMode) {
@@ -239,30 +346,144 @@ async function poll() {
 
   try {
     const twoHrsAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    // Get today's start for pick transactions
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
 
-    // Parallel fetch — materials, active orders, recent transactions
-    const [materialsResp, ordersResp, txResp] = await Promise.all([
-      ipFetch('/api/materials', { limit: 1000 }),
-      ipFetch('/api/orders',    { status: 'in_progress', limit: 200 }),
-      ipFetch('/api/transactions', { after: twoHrsAgo, limit: 500 }),
+    // Parallel fetch — materials, active orders, transactions, warehouses, locations
+    // Note: Need 20000+ locations to capture all carousel bins
+    // type=4 transactions are completed picks
+    const [materialsResp, ordersResp, txResp, pickTxResp, warehousesResp, locationsResp] = await Promise.all([
+      ipFetch('/api/materials', { limit: 10000 }),
+      // ItemPath uses "In Process" status (not "in_progress")
+      ipFetch('/api/orders',    { limit: 500 }),  // Fetch all, filter by status client-side
+      ipFetch('/api/transactions', { after: twoHrsAgo, limit: 500 }).catch(() => ({ transactions: [] })),
+      // Today's pick transactions (type=4) for hourly stats
+      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 2000 }).catch(() => ({ transactions: [] })),
+      ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
+      ipFetch('/api/locations', { limit: 20000 }).catch(() => ({ locations: [] })),
     ]);
 
-    const materials   = (materialsResp.data   || materialsResp  || []).map(normalizeMaterial);
-    const activePicks = (ordersResp.data       || ordersResp     || []).map(normalizeOrder);
-    const recentTx    = (txResp.data           || txResp         || []).map(normalizeTransaction);
+    const materials   = (materialsResp.materials || materialsResp.data || materialsResp || []).map(normalizeMaterial);
+
+    // Filter orders by "In Process" status (active picks)
+    const allOrders   = (ordersResp.orders || ordersResp.data || ordersResp || []);
+    const activeOrders = allOrders.filter(o => o.status === 'In Process');
+    const activePicks = activeOrders.map(normalizeOrder);
+
+    const recentTx    = (txResp.transactions || txResp.data || txResp || []).map(normalizeTransaction);
+    const pickTxList  = (pickTxResp.transactions || pickTxResp.data || pickTxResp || []);
     const alerts      = detectAlerts(materials);
+    const warehouses  = (warehousesResp.warehouses || []).map(w => ({ id: w.id, name: w.name }));
+
+    // Calculate hourly pick stats from type=4 transactions (completed picks)
+    const hourlyStats = { WH1: {}, WH2: {} };
+    for (let h = 0; h < 24; h++) {
+      hourlyStats.WH1[h] = 0;
+      hourlyStats.WH2[h] = 0;
+    }
+    let todayPicksTotal = { WH1: 0, WH2: 0 };
+
+    for (const tx of pickTxList) {
+      const wh = tx.warehouseName || 'Unknown';
+      const date = tx.creationDate || '';
+      if (date && (wh === 'WH1' || wh === 'WH2')) {
+        const hour = parseInt(date.substring(11, 13)) || 0;
+        // Count jobs (transactions), not quantities
+        hourlyStats[wh][hour] += 1;
+        todayPicksTotal[wh] += 1;
+      }
+    }
+
+    // Calculate warehouse stats from orders (active/queued counts)
+    const warehouseStats = {};
+
+    for (const order of allOrders) {
+      const wh = order.warehouseName || 'Unknown';
+      if (!warehouseStats[wh]) {
+        warehouseStats[wh] = { activeOrders: 0, untouchedOrders: 0, totalLines: 0, totalQty: 0, todayPicks: 0 };
+      }
+
+      if (order.status === 'In Process') {
+        warehouseStats[wh].activeOrders++;
+      } else if (order.status === 'Untouched') {
+        warehouseStats[wh].untouchedOrders++;
+      }
+      const lines = order.order_lines || [];
+      warehouseStats[wh].totalLines += lines.length;
+      warehouseStats[wh].totalQty += lines.reduce((sum, l) => sum + (parseFloat(l.quantity) || 0), 0);
+    }
+
+    // Set today's picks from completed transactions
+    if (warehouseStats.WH1) warehouseStats.WH1.todayPicks = todayPicksTotal.WH1;
+    if (warehouseStats.WH2) warehouseStats.WH2.todayPicks = todayPicksTotal.WH2;
+
+    // Calculate VLM and carousel stats from locations
+    const locations = (locationsResp.locations || []);
+    const vlmStats = {};
+    const carouselStats = {};  // { 'CAR-1': qty, 'CAR-2': qty, ... }
+    const normalizedLocations = [];
+
+    for (const loc of locations) {
+      const name = loc.name || '';
+      const qty = parseFloat(loc.currentQuantity) || 0;
+
+      // Extract storage unit identifier
+      // CAR-6/ Shelf 058/ Position 01 -> CAR-6
+      // KITCHEN01-xxx -> KITCHEN01
+      // IRV02-xxx -> IRV02
+      let storageUnit = 'Unknown';
+      const carMatch = name.match(/^(CAR-\d+)/);
+      if (carMatch) {
+        storageUnit = carMatch[1];
+        // Track carousel inventory separately
+        if (!carouselStats[storageUnit]) {
+          carouselStats[storageUnit] = 0;
+        }
+        carouselStats[storageUnit] += qty;
+      } else if (name.startsWith('IRV')) {
+        storageUnit = 'IRV02';
+      } else if (name.startsWith('KITCHEN')) {
+        storageUnit = 'KITCHEN01';
+      } else {
+        storageUnit = name.split('-')[0] || 'Unknown';
+      }
+
+      if (!vlmStats[storageUnit]) {
+        vlmStats[storageUnit] = { locationCount: 0, totalQty: 0, filledLocations: 0 };
+      }
+      vlmStats[storageUnit].locationCount++;
+      vlmStats[storageUnit].totalQty += qty;
+      if (qty > 0) vlmStats[storageUnit].filledLocations++;
+
+      normalizedLocations.push({
+        id: loc.id,
+        name: loc.name,
+        vlm: storageUnit,
+        qty: qty,
+        fillLevel: loc.fillLevel || 0,
+        type: loc.typeDescription || 'Bin',
+      });
+    }
 
     cache = {
       materials,
       activePicks,
       recentTransactions: recentTx,
       alerts,
+      warehouses,
+      warehouseStats,
+      hourlyStats,
+      vlmStats,
+      carouselStats,  // { 'CAR-1': qty, 'CAR-2': qty, ... }
+      locations: normalizedLocations,
       lastSync:   new Date().toISOString(),
       syncStatus: 'ok',
       syncError:  null,
     };
 
     await sendSlackAlerts(alerts);
+    updatePreviousQty(materials);  // Track for next poll's drop detection
     console.log(`[ItemPath] ✓ Sync: ${materials.length} SKUs, ${activePicks.length} active orders, ${alerts.length} alerts`);
 
   } catch (err) {
@@ -328,21 +549,53 @@ function loadMockData() {
 /** Full normalized inventory */
 function getInventory() {
   return {
-    materials:  cache.materials,
-    lastSync:   cache.lastSync,
-    status:     cache.syncStatus,
-    error:      cache.syncError,
-    alertCount: cache.alerts.length,
+    materials:      cache.materials,
+    warehouses:     cache.warehouses,
+    warehouseStats: cache.warehouseStats,
+    hourlyStats:    cache.hourlyStats,
+    vlmStats:       cache.vlmStats,
+    carouselStats:  cache.carouselStats,  // { 'CAR-1': qty, 'CAR-2': qty, ... }
+    lastSync:       cache.lastSync,
+    status:         cache.syncStatus,
+    error:          cache.syncError,
+    alertCount:     cache.alerts.length,
   };
 }
 
 /** Active picks in progress */
 function getPicks() {
+  // Group active picks by warehouse
+  const byWarehouse = {};
+  for (const pick of cache.activePicks) {
+    const wh = pick.warehouse || 'Unknown';
+    if (!byWarehouse[wh]) byWarehouse[wh] = [];
+    byWarehouse[wh].push(pick);
+  }
+
   return {
-    picks:     cache.activePicks,
-    count:     cache.activePicks.length,
+    picks:       cache.activePicks,
+    count:       cache.activePicks.length,
+    byWarehouse: byWarehouse,
+    lastSync:    cache.lastSync,
+    recent:      cache.recentTransactions.slice(0, 20),
+  };
+}
+
+/** Warehouse breakdown */
+function getWarehouses() {
+  return {
+    warehouses:     cache.warehouses,
+    warehouseStats: cache.warehouseStats,
+    lastSync:       cache.lastSync,
+  };
+}
+
+/** VLM breakdown */
+function getVLMs() {
+  return {
+    vlmStats:  cache.vlmStats,
+    locations: cache.locations,
     lastSync:  cache.lastSync,
-    recent:    cache.recentTransactions.slice(0, 20),
   };
 }
 
@@ -426,4 +679,4 @@ function start() {
   setInterval(poll, CONFIG.pollInterval);
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, findBlank, getAIContext };
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getAIContext };

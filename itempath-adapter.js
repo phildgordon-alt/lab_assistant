@@ -102,25 +102,28 @@ async function ipFetch(path, params = {}) {
 
 function normalizeMaterial(m) {
   // ItemPath materials = lens blanks in Kardex
-  // material.name / material.code / material.quantity / material.unit
-  // material.properties = array of { name, value } custom fields
-  // We look for properties like "coating_type", "rx_sphere", "rx_cylinder", "index"
-  const props = {};
-  (m.properties || []).forEach(p => { props[p.name?.toLowerCase().replace(/\s+/g,'_')] = p.value; });
+  // Actual ItemPath fields:
+  //   id, name (OPC code), currentQuantity, Info1-Info5 (product details)
+  //   Info1=type (BLY SV), Info2=color (CLR), Info3=index (HK 76), Info4=sphere, Info5=cylinder
+
+  // Build description from Info fields
+  const infoParts = [m.Info1, m.Info2, m.Info3].filter(Boolean);
+  const description = infoParts.join(' ') || m.name;
 
   return {
     id:           m.id,
-    sku:          m.code || m.id,
-    name:         m.name,
-    qty:          parseFloat(m.quantity) || 0,
-    unit:         m.unit || 'EA',
+    sku:          m.name,  // OPC code is in 'name' field
+    name:         description,  // Build readable name from Info fields
+    qty:          parseFloat(m.currentQuantity) || 0,  // ItemPath uses currentQuantity
+    unit:         m.unitOfMeasure || 'EA',
     location:     m.location || m.bin || null,
-    coatingType:  props['coating_type'] || props['coating'] || null,
-    index:        props['index'] || props['lens_index'] || null,
-    rxSphere:     props['sphere'] || props['rx_sphere'] || null,
-    rxCylinder:   props['cylinder'] || props['rx_cylinder'] || null,
-    rxAdd:        props['add'] || props['rx_add'] || null,
-    rawProps:     props,
+    coatingType:  m.Info1 || null,  // e.g., "BLY SV"
+    index:        m.Info3 || null,  // e.g., "HK 76"
+    rxSphere:     m.Info4 || null,  // e.g., "-8.00"
+    rxCylinder:   m.Info5 || null,  // e.g., "-2.00"
+    rxAdd:        null,
+    reorderPoint: parseFloat(m.reOrderPoint) || 10,
+    rawProps:     { Info1: m.Info1, Info2: m.Info2, Info3: m.Info3, Info4: m.Info4, Info5: m.Info5 },
     lastUpdated:  new Date().toISOString(),
   };
 }
@@ -247,9 +250,9 @@ async function poll() {
       ipFetch('/api/transactions', { after: twoHrsAgo, limit: 500 }),
     ]);
 
-    const materials   = (materialsResp.data   || materialsResp  || []).map(normalizeMaterial);
-    const activePicks = (ordersResp.data       || ordersResp     || []).map(normalizeOrder);
-    const recentTx    = (txResp.data           || txResp         || []).map(normalizeTransaction);
+    const materials   = (materialsResp.materials || materialsResp.data || materialsResp || []).map(normalizeMaterial);
+    const activePicks = (ordersResp.orders || ordersResp.data || ordersResp || []).map(normalizeOrder);
+    const recentTx    = (txResp.transactions || txResp.data || txResp || []).map(normalizeTransaction);
     const alerts      = detectAlerts(materials);
 
     cache = {

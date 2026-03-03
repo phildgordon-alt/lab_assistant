@@ -1,5 +1,7 @@
-// Load environment variables from .env file
-require('dotenv').config();
+// Load environment variables from .env file (check both server dir and parent dir)
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '.env') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 /**
  * oven-timer-server.js — Lab_Assistant Oven Timer Bridge
@@ -25,12 +27,15 @@ require('dotenv').config();
 
 const http = require('http');
 const fs   = require('fs');
-const path = require('path');
 const { URL } = require('url');
 
 // ── ItemPath/Kardex inventory integration ─────────────────────
 const itempath = require('./itempath-adapter');
 itempath.start();
+
+// ── Limble CMMS maintenance integration ───────────────────────
+const limble = require('./limble-adapter');
+limble.start();
 
 const PORT      = parseInt(process.env.PORT || '3002', 10);
 const DATA_FILE = path.join(__dirname, 'oven-runs.json');
@@ -385,12 +390,220 @@ const server = http.createServer(async (req, res) => {
   if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {
     return json(res, itempath.getAlerts());
   }
-  if (req.method==='GET' && url.pathname==='/api/inventory/blank') {
-    const query = Object.fromEntries(url.searchParams);
-    return json(res, itempath.findBlank(query));
+  if (req.method==='GET' && url.pathname==='/api/inventory/warehouses') {
+    return json(res, itempath.getWarehouses());
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/vlms') {
+    return json(res, itempath.getVLMs());
   }
   if (req.method==='GET' && url.pathname==='/api/inventory/ai-context') {
     return json(res, itempath.getAIContext());
+  }
+
+  // ── Limble CMMS maintenance endpoints ──────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/maintenance/assets') {
+    return json(res, limble.getAssets());
+  }
+  if (req.method==='GET' && url.pathname==='/api/maintenance/tasks') {
+    return json(res, limble.getTasks());
+  }
+  if (req.method==='GET' && url.pathname==='/api/maintenance/downtime') {
+    return json(res, limble.getDowntime());
+  }
+  if (req.method==='GET' && url.pathname==='/api/maintenance/parts') {
+    return json(res, limble.getParts());
+  }
+  if (req.method==='GET' && url.pathname==='/api/maintenance/stats') {
+    return json(res, limble.getStats());
+  }
+  if (req.method==='GET' && url.pathname==='/api/maintenance/ai-context') {
+    return json(res, limble.getAIContext());
+  }
+
+  // Slack test endpoint
+  if (req.method==='POST' && url.pathname==='/api/slack/test') {
+    try {
+      const body = await readBody(req);
+      const message = body.message || '✅ Test message from Lab_Assistant';
+      const success = await limble.sendSlackMessage(message);
+      return json(res, { ok: success, message: success ? 'Message sent to Slack' : 'Failed to send - check Slack config' });
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+
+  // Slack messages proxy (reads channel history)
+  if (req.method==='GET' && url.pathname==='/api/slack/messages') {
+    const token = process.env.SLACK_BOT_TOKEN;
+    const channelId = url.searchParams.get('channel') || process.env.SLACK_CHANNEL_ID || '';
+    if (!token) return json(res, { ok: false, error: 'SLACK_BOT_TOKEN not configured' });
+    if (!channelId) return json(res, { ok: false, error: 'No channel ID - set SLACK_CHANNEL_ID in .env' });
+    try {
+      const oldest = url.searchParams.get('oldest') || '';
+      const params = new URLSearchParams({ channel: channelId, limit: '20' });
+      if (oldest) params.set('oldest', oldest);
+      const slackRes = await fetch(`https://slack.com/api/conversations.history?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await slackRes.json();
+      return json(res, data);
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+
+  // Slack send message
+  if (req.method==='POST' && url.pathname==='/api/slack/send') {
+    const token = process.env.SLACK_BOT_TOKEN;
+    const channel = process.env.SLACK_CHANNEL || 'lab-assistant';
+    if (!token) return json(res, { ok: false, error: 'SLACK_BOT_TOKEN not configured' });
+    try {
+      const body = await readBody(req);
+      const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, text: body.text || body.message })
+      });
+      const data = await slackRes.json();
+      return json(res, data);
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+
+  // Slack channel info (get channel ID by name)
+  if (req.method==='GET' && url.pathname==='/api/slack/channel') {
+    const token = process.env.SLACK_BOT_TOKEN;
+    const name = url.searchParams.get('name') || process.env.SLACK_CHANNEL || 'lab-assistant';
+    if (!token) return json(res, { ok: false, error: 'SLACK_BOT_TOKEN not configured' });
+    try {
+      const slackRes = await fetch('https://slack.com/api/conversations.list?types=public_channel&limit=200', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await slackRes.json();
+      if (data.ok && data.channels) {
+        const ch = data.channels.find(c => c.name === name);
+        return json(res, { ok: true, channel: ch || null, name });
+      }
+      return json(res, { ok: false, error: data.error });
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+
+  // AI Query endpoint - processes questions with lab context
+  if (req.method==='POST' && url.pathname==='/api/ai/query') {
+    const apiKey = process.env.VITE_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return json(res, { ok: false, error: 'No Anthropic API key configured' });
+    try {
+      const body = await readBody(req);
+      const question = body.question || body.text || '';
+      if (!question.trim()) return json(res, { ok: false, error: 'No question provided' });
+
+      // Gather lab context
+      const inventoryCtx = itempath.getAIContext ? itempath.getAIContext() : { summary: 'Inventory data not available' };
+      const maintenanceCtx = limble.getAIContext ? limble.getAIContext() : { summary: 'Maintenance data not available' };
+      const ovenStats = computeStats ? computeStats() : {};
+
+      const systemPrompt = `You are Lab_Assistant AI, an expert assistant for an optical lens laboratory. You have access to live data:
+
+INVENTORY (Kardex/ItemPath):
+${inventoryCtx.summary || 'No inventory data'}
+${inventoryCtx.alerts ? `- ${inventoryCtx.alerts.length} low stock alerts` : ''}
+
+MAINTENANCE (Limble CMMS):
+${maintenanceCtx.summary || 'No maintenance data'}
+
+OVEN STATUS:
+${ovenStats.activeTimers || 0} active oven timers, ${ovenStats.totalRuns || 0} runs on record
+
+Answer questions concisely and helpfully. If asked about specific inventory items, maintenance tasks, or equipment, use the data above. Keep responses under 300 words unless more detail is requested.`;
+
+      const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 1024,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: question }]
+        })
+      });
+
+      const claudeData = await claudeRes.json();
+      const answer = claudeData?.content?.[0]?.text || claudeData?.error?.message || 'Sorry, I could not process that question.';
+      return json(res, { ok: true, question, answer });
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+
+  // Slack AI auto-responder - checks for /ai or @ai messages and responds
+  if (req.method==='POST' && url.pathname==='/api/slack/ai-respond') {
+    const token = process.env.SLACK_BOT_TOKEN;
+    const apiKey = process.env.VITE_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+    const channelId = process.env.SLACK_CHANNEL_ID;
+    if (!token) return json(res, { ok: false, error: 'SLACK_BOT_TOKEN not configured' });
+    if (!apiKey) return json(res, { ok: false, error: 'No Anthropic API key configured' });
+
+    try {
+      const body = await readBody(req);
+      const text = body.text || '';
+      const threadTs = body.thread_ts || body.ts; // Reply in thread if available
+
+      // Extract question after /ai or @ai trigger
+      const match = text.match(/(?:\/ai|@ai|ai:)\s*(.+)/i);
+      if (!match) return json(res, { ok: false, error: 'No AI query found in message' });
+      const question = match[1].trim();
+
+      // Get AI response
+      const inventoryCtx = itempath.getAIContext ? itempath.getAIContext() : {};
+      const maintenanceCtx = limble.getAIContext ? limble.getAIContext() : {};
+
+      const systemPrompt = `You are Lab_Assistant AI for an optical lens lab. Answer concisely (under 200 words). Use this live data:
+INVENTORY: ${inventoryCtx.summary || 'N/A'}
+MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
+
+      const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-20250514',
+          max_tokens: 512,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: question }]
+        })
+      });
+
+      const claudeData = await claudeRes.json();
+      const answer = claudeData?.content?.[0]?.text || 'Sorry, I could not process that question.';
+
+      // Post response to Slack
+      const slackPayload = {
+        channel: body.channel || channelId,
+        text: `🤖 *Lab_Assistant AI*\n${answer}`,
+      };
+      if (threadTs) slackPayload.thread_ts = threadTs;
+
+      const slackRes = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(slackPayload)
+      });
+      const slackData = await slackRes.json();
+
+      return json(res, { ok: slackData.ok, question, answer, slackResponse: slackData });
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
   }
 
   // Body: { title, content, sections, generatedBy, timestamp }
@@ -579,8 +792,156 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     GET  /api/oven-runs        ← Dashboard history`);
   console.log(`     GET  /api/oven-live        ← Dashboard live state`);
   console.log(`     GET  /api/oven-stats       ← Dashboard KPIs`);
-  console.log(`     GET  /api/inventory        ← Kardex lens blank inventory`);
-  console.log(`     GET  /api/inventory/picks  ← Active pick orders`);
-  console.log(`     GET  /api/inventory/alerts ← Low stock alerts`);
-  console.log(`     GET  /api/inventory/blank  ← Find blanks by Rx/coating\n`);
+  console.log(`     GET  /api/inventory            ← Kardex lens blank inventory`);
+  console.log(`     GET  /api/inventory/picks      ← Active pick orders`);
+  console.log(`     GET  /api/inventory/alerts     ← Low stock alerts`);
+  console.log(`     GET  /api/inventory/warehouses ← Warehouse breakdown (WH1, WH2, WH3)`);
+  console.log(`     GET  /api/inventory/vlms       ← VLM inventory breakdown`);
+  console.log(`     GET  /api/maintenance/assets   ← Equipment from Limble CMMS`);
+  console.log(`     GET  /api/maintenance/tasks    ← Work orders & PMs`);
+  console.log(`     GET  /api/maintenance/downtime ← Downtime records`);
+  console.log(`     GET  /api/maintenance/stats    ← Maintenance KPIs`);
+  console.log(`     POST /api/ai/query             ← AI query with lab context`);
+  console.log(`     POST /api/slack/ai-respond     ← Process Slack AI query`);
+
+  // Start Slack AI auto-responder polling
+  startSlackAIPolling();
 });
+
+// ── Slack AI Auto-Responder ───────────────────────────────────────
+let lastProcessedTs = null;
+const processedMessages = new Set(); // Track processed message IDs
+
+async function startSlackAIPolling() {
+  const token = process.env.SLACK_BOT_TOKEN;
+  const apiKey = process.env.VITE_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+  const channelId = process.env.SLACK_CHANNEL_ID;
+
+  if (!token || !apiKey || !channelId) {
+    console.log('[Slack AI] Disabled — missing SLACK_BOT_TOKEN, ANTHROPIC_API_KEY, or SLACK_CHANNEL_ID');
+    return;
+  }
+
+  console.log('[Slack AI] Auto-responder enabled — polling every 10s for /ai queries');
+
+  // Poll every 10 seconds
+  setInterval(async () => {
+    try {
+      // Fetch recent messages
+      const params = new URLSearchParams({ channel: channelId, limit: '10' });
+      if (lastProcessedTs) params.set('oldest', lastProcessedTs);
+
+      const slackRes = await fetch(`https://slack.com/api/conversations.history?${params}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await slackRes.json();
+
+      if (!data.ok || !data.messages) return;
+
+      // Process messages (newest first, so reverse to process oldest first)
+      const messages = data.messages.reverse();
+
+      for (const msg of messages) {
+        // Skip if already processed, is a bot message, or doesn't have AI trigger
+        if (processedMessages.has(msg.ts)) continue;
+        if (msg.bot_id) continue;
+
+        const text = msg.text || '';
+        const aiMatch = text.match(/(?:\/ai|@ai|ai:)\s*(.+)/i);
+        if (!aiMatch) continue;
+
+        // Mark as processed immediately to avoid duplicates
+        processedMessages.add(msg.ts);
+        lastProcessedTs = msg.ts;
+
+        const question = aiMatch[1].trim();
+        console.log(`[Slack AI] Query from ${msg.user}: ${question.slice(0, 50)}...`);
+
+        // Handle "AI?" - show available preset queries
+        if (question === '?' || question.toLowerCase() === 'help') {
+          const helpText = `🤖 *Lab_Assistant AI — Quick Commands*
+
+*Reports:*
+• \`/ai end of day report\` — Shift summary with KPIs
+• \`/ai aging report\` — WIP aging analysis
+• \`/ai yield report\` — Coating yield analysis
+• \`/ai maintenance report\` — Equipment health summary
+
+*Quick Queries:*
+• \`/ai low stock\` — Critical inventory alerts
+• \`/ai open work orders\` — Active maintenance tasks
+• \`/ai pm schedule\` — Upcoming preventive maintenance
+• \`/ai equipment status\` — Asset health overview
+
+*Or ask any question:*
+• \`/ai what blanks are running low?\`
+• \`/ai any critical maintenance issues?\`
+• \`/ai how many jobs in coating?\``;
+
+          await fetch('https://slack.com/api/chat.postMessage', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              channel: channelId,
+              text: helpText,
+              thread_ts: msg.ts
+            })
+          });
+          console.log('[Slack AI] Sent help menu');
+          continue;
+        }
+
+        // Get AI response
+        const inventoryCtx = itempath.getAIContext ? itempath.getAIContext() : {};
+        const maintenanceCtx = limble.getAIContext ? limble.getAIContext() : {};
+
+        const systemPrompt = `You are Lab_Assistant AI for an optical lens lab. Answer concisely (under 200 words). Use this live data:
+INVENTORY: ${inventoryCtx.summary || 'N/A'}
+MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
+
+        try {
+          const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': apiKey,
+              'anthropic-version': '2023-06-01'
+            },
+            body: JSON.stringify({
+              model: 'claude-sonnet-4-20250514',
+              max_tokens: 512,
+              system: systemPrompt,
+              messages: [{ role: 'user', content: question }]
+            })
+          });
+
+          const claudeData = await claudeRes.json();
+          const answer = claudeData?.content?.[0]?.text || 'Sorry, I could not process that question.';
+
+          // Post response to Slack (in thread)
+          await fetch('https://slack.com/api/chat.postMessage', {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              channel: channelId,
+              text: `🤖 *Lab_Assistant AI*\n${answer}`,
+              thread_ts: msg.ts // Reply in thread
+            })
+          });
+
+          console.log(`[Slack AI] Responded to query`);
+        } catch (e) {
+          console.error('[Slack AI] Error processing query:', e.message);
+        }
+      }
+
+      // Cleanup old processed messages (keep last 100)
+      if (processedMessages.size > 100) {
+        const arr = Array.from(processedMessages);
+        arr.slice(0, arr.length - 100).forEach(ts => processedMessages.delete(ts));
+      }
+    } catch (e) {
+      // Silent fail on poll errors
+    }
+  }, 10000); // Poll every 10 seconds
+}

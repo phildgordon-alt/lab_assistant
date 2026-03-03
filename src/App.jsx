@@ -63,6 +63,36 @@ const COATING_COLORS = {
 
 const BATCH_STATES = { running: "RUNNING", hold: "HOLD", waiting: "WAITING", complete: "COMPLETE", idle: "IDLE", loading: "LOADING" };
 
+// ── API Key helper — checks settings first, then env variable ────────────────
+const getAnthropicApiKey = (settings) => {
+  return settings?.anthropicApiKey || import.meta.env.VITE_ANTHROPIC_API_KEY || '';
+};
+
+// ── DEFAULT SETTINGS — equipment categories and configuration ────────────────
+const DEFAULT_SETTINGS = {
+  pin: null,           // null = no PIN, otherwise 4-6 digit string
+  pinEnabled: false,
+  anthropicApiKey: '', // Claude API key for AI features
+  equipmentCategories: [
+    { id: 'coaters', name: 'Coaters', icon: '🌡', color: '#F59E0B' },
+    { id: 'ovens', name: 'Ovens', icon: '🔥', color: '#EF4444' },
+    { id: 'cutters', name: 'Cutters', icon: '✂️', color: '#8B5CF6' },
+    { id: 'polishers', name: 'Polishers', icon: '💿', color: '#06B6D4' },
+    { id: 'generators', name: 'Generators', icon: '⚡', color: '#10B981' },
+    { id: 'lasers', name: 'Lasers', icon: '📡', color: '#EC4899' },
+    { id: 'blockers', name: 'Blockers', icon: '🔲', color: '#3B82F6' },
+    { id: 'deblockers', name: 'De-blockers', icon: '🔳', color: '#64748B' },
+    { id: 'tapers', name: 'Tapers', icon: '📐', color: '#84CC16' },
+  ],
+  equipment: [
+    { id: 'eq1', categoryId: 'coaters', name: 'Satis 1200', serialNumber: '', location: 'Lab Floor 1' },
+    { id: 'eq2', categoryId: 'coaters', name: 'Satis 1200-B', serialNumber: '', location: 'Lab Floor 1' },
+    { id: 'eq3', categoryId: 'coaters', name: 'Opticoat S', serialNumber: '', location: 'Lab Floor 2' },
+  ],
+  serverUrl: 'http://localhost:3002',
+  slackWebhook: '',
+};
+
 const mono = "'JetBrains Mono','Fira Code',monospace";
 const sans = "'Outfit','DM Sans',system-ui,sans-serif";
 
@@ -418,7 +448,8 @@ function OvenTimer({tray}){
   );
 }
 
-function BatchCard({batch,trays,expanded,onToggle,onControl}){
+function BatchCard({batch,trays,expanded,onToggle,onControl,machineDisplayName}){
+  const displayName = machineDisplayName || batch.machine;
   const pct=batch.capacity>0?(batch.loaded/batch.capacity)*100:0;
   const stateColor={idle:T.textDim,loading:T.blue,running:T.green,complete:T.lime,waiting:T.amber,hold:T.red};
   const sc=stateColor[batch.status]||T.textDim;
@@ -439,7 +470,7 @@ function BatchCard({batch,trays,expanded,onToggle,onControl}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
           {isRunning&&<div style={{width:8,height:8,borderRadius:"50%",background:T.green,boxShadow:`0 0 8px ${T.green}`,animation:"pulse 1.5s infinite"}}/>}
-          <span style={{fontSize:14,fontWeight:800,color:T.text,fontFamily:mono}}>{batch.machine}</span>
+          <span style={{fontSize:14,fontWeight:800,color:T.text,fontFamily:mono}}>{displayName}</span>
           <span style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{batch.id}</span>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:6}}>
@@ -649,64 +680,100 @@ function useElapsed(startedAt, running) {
 // Incoming: polls a tiny local proxy at cfg.proxyUrl (see slack-proxy.js)
 //   Slack conversations.history blocks browser CORS directly,
 //   so a 1-file Node proxy runs alongside the app server-side.
-function useSlackConfig(onIncoming){
+function useSlackConfig(onIncoming, setMessages){
   const KEY="la_slack_v2";
-  const [cfg,setCfgRaw]=useState(()=>{try{return JSON.parse(localStorage.getItem(KEY)||"{}");}catch{return{};}});
+  const DEFAULTS={
+    proxyUrl:"http://localhost:3002/api/slack/messages?channel=C0AJH9LG96D",
+    channel:"lab-assistant",
+    channelId:"C0AJH9LG96D"
+  };
+  const [cfg,setCfgRaw]=useState(()=>{try{const stored=JSON.parse(localStorage.getItem(KEY)||"{}");return {...DEFAULTS,...stored};}catch{return DEFAULTS;}});
   const [status,setStatus]=useState(null);
+  const [proxyConnected,setProxyConnected]=useState(false);
   const lastTs=useRef(null);
+  const initialLoad=useRef(false);
   const save=(next)=>{setCfgRaw(next);try{localStorage.setItem(KEY,JSON.stringify(next));}catch{}};
 
-  // Post outgoing via Incoming Webhook
+  // Post outgoing via server proxy (uses bot token)
   const post=useCallback(async(text)=>{
-    if(!cfg.webhook)return false;
     setStatus("sending");
     try{
-      const r=await fetch(cfg.webhook,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-        text:`\ud83c\udfed *Lab_Assistant* \u203a ${cfg.channel||"Lens Lab"}\n${text}`,
-        username:"Lab_Assistant",icon_emoji:":eyeglasses:"
-      })});
-      const ok=r.ok||(await r.text().catch(()=>""))!=="invalid_payload";
+      // Use server proxy endpoint which has the bot token
+      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || 'http://localhost:3002/api/slack/send';
+      const r=await fetch(sendUrl,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          channel:cfg.channelId||"C0AJH9LG96D",
+          text:`🏭 *Lab_Assistant* › ${cfg.channel||"lab-assistant"}\n${text}`
+        })
+      });
+      const data=await r.json().catch(()=>({}));
+      const ok=r.ok && data.ok;
       setStatus(ok?"ok":"err");
       setTimeout(()=>setStatus(null),3000);
       return ok;
     }catch{setStatus("err");setTimeout(()=>setStatus(null),3000);return false;}
   },[cfg]);
 
-  // Poll incoming via local proxy (slack-proxy.js) every 12s
+  // Poll incoming via local proxy every 12s
   useEffect(()=>{
     if(!cfg.proxyUrl)return;
     const poll=async()=>{
       try{
-        const url=`${cfg.proxyUrl}?channel=${cfg.channelId||""}&oldest=${lastTs.current||""}`;
+        const url=cfg.proxyUrl.includes('?')?cfg.proxyUrl:`${cfg.proxyUrl}?channel=${cfg.channelId||""}`;
         const r=await fetch(url);
-        if(!r.ok)return;
+        if(!r.ok){setProxyConnected(false);return;}
+        setProxyConnected(true);
         const data=await r.json();
-        const msgs=(data.messages||[]).filter(m=>m.type==="message"&&!m.bot_id&&m.text);
-        if(!lastTs.current){
-          lastTs.current=msgs.length>0?msgs[0].ts:String(Date.now()/1000);
+        // Include ALL messages (including bot) for display
+        // Filter out AI queries (/ai, @ai, ai:) - those are for lab use, not dashboard display
+        const allMsgs=(data.messages||[]).filter(m=>m.type==="message"&&m.text&&!m.text.match(/^(?:\/ai|@ai|ai:)/i));
+
+        // On first successful load, replace demo messages with real Slack messages
+        if(!initialLoad.current && allMsgs.length>0 && setMessages){
+          initialLoad.current=true;
+          const slackMsgs=allMsgs.slice(0,20).map(m=>({
+            id:`slack-${m.ts}`,
+            from:m.bot_profile?.name||m.username||m.user||"Slack",
+            text:m.text.replace(/<[^>]*>/g,'').slice(0,200), // Strip Slack formatting, truncate
+            time:new Date(parseFloat(m.ts)*1000),
+            priority:m.text.toLowerCase().includes("rush")||m.text.toLowerCase().includes("hot")||m.text.toLowerCase().includes("critical")?"high":"normal",
+            source:"slack",
+            isBot:!!m.bot_id,
+          }));
+          setMessages(slackMsgs);
+          lastTs.current=allMsgs[0].ts;
           return;
         }
-        if(msgs.length>0){
-          lastTs.current=msgs[0].ts;
-          msgs.reverse().forEach(m=>{
-            onIncoming({
-              id:`slack-${m.ts}`,
-              from:m.username||m.user||"Slack",
-              text:m.text,
-              time:new Date(parseFloat(m.ts)*1000),
-              priority:m.text.toLowerCase().includes("rush")||m.text.toLowerCase().includes("hot")?"high":"normal",
-              source:"slack",
+
+        // After initial load, only add NEW human messages
+        const humanMsgs=allMsgs.filter(m=>!m.bot_id);
+        if(lastTs.current && humanMsgs.length>0){
+          const newMsgs=humanMsgs.filter(m=>parseFloat(m.ts)>parseFloat(lastTs.current));
+          if(newMsgs.length>0){
+            lastTs.current=humanMsgs[0].ts;
+            newMsgs.reverse().forEach(m=>{
+              onIncoming({
+                id:`slack-${m.ts}`,
+                from:m.username||m.user||"Slack",
+                text:m.text,
+                time:new Date(parseFloat(m.ts)*1000),
+                priority:m.text.toLowerCase().includes("rush")||m.text.toLowerCase().includes("hot")?"high":"normal",
+                source:"slack",
+              });
             });
-          });
+          }
         }
-      }catch(e){/* proxy not running */}
+        if(!lastTs.current && allMsgs.length>0) lastTs.current=allMsgs[0].ts;
+      }catch(e){setProxyConnected(false);}
     };
     poll();
     const iv=setInterval(poll,12000);
     return()=>clearInterval(iv);
-  },[cfg.proxyUrl,cfg.channelId,onIncoming]);
+  },[cfg.proxyUrl,cfg.channelId,onIncoming,setMessages]);
 
-  return{cfg,save,post,status};
+  return{cfg,save,post,status,proxyConnected};
 }
 
 // ── Card Registry ─────────────────────────────────────────────
@@ -721,6 +788,12 @@ const CARD_REGISTRY = [
   { type:"inventory",       label:"Lens Blank Inventory",  icon:"📦", desc:"Lens blank stock levels from Kardex / ItemPath (live when connected)" },
   { type:"ai_query",        label:"AI Quick Query",        icon:"🤖", desc:"Single-question AI widget — ask anything about current lab state" },
   { type:"custom_metric",   label:"Custom Metric",         icon:"✦",  desc:"Point at any server endpoint and display the returned value" },
+  // Production Stage Summary Cards
+  { type:"surfacing_summary", label:"Surfacing Summary", icon:"🌀", desc:"Surfacing queue status — jobs in queue, in progress, rush count, throughput" },
+  { type:"cutting_summary",   label:"Cutting Summary",   icon:"✂️", desc:"Cutting stage status — queue, breakage rate, edge quality metrics" },
+  { type:"assembly_summary",  label:"Assembly Summary",  icon:"🔧", desc:"Assembly station status — station queues, operator metrics, QC returns" },
+  { type:"shipping_summary",  label:"Shipping Summary",  icon:"📤", desc:"Shipping status — ready to ship, overdue, due today counts" },
+  { type:"maintenance_summary", label:"Maintenance Summary", icon:"🔩", desc:"Maintenance status — open work orders, PM compliance, equipment health, critical tasks" },
 ];
 
 const DEFAULT_CARDS = [
@@ -733,7 +806,12 @@ const DEFAULT_CARDS = [
 
 function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36).slice(2,6)); }
 
-function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl}){
+function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings}){
+  // Get coater machines from settings (fallback to MACHINES constant)
+  const coaterMachines=useMemo(()=>{
+    const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
+    return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
+  },[settings?.equipment]);
   const STORAGE_KEY = "la_cards_v1";
   const [cards,setCards]=useState(()=>{
     try{ const s=localStorage.getItem(STORAGE_KEY); return s?JSON.parse(s):DEFAULT_CARDS; }
@@ -741,12 +819,81 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
   });
   const [msgInput,setMsgInput]=useState("");
   const [messages,setMessages]=useState(initMessages||[]);
+  const messagesRef=useRef(null);
   const [expandedBatch,setExpandedBatch]=useState(null);
   const [drag,setDrag]=useState({dragging:null,over:null});
   const [showSlackCfg,setShowSlackCfg]=useState(false);
   const [draft,setDraft]=useState({});
   const [showCardPicker,setShowCardPicker]=useState(false);
   const [editCard,setEditCard]=useState(null); // card id being configured
+  const [cardMenu,setCardMenu]=useState(null); // card id with open menu
+
+  // Close card menu when clicking outside
+  useEffect(()=>{
+    if(!cardMenu)return;
+    const close=()=>setCardMenu(null);
+    document.addEventListener("click",close);
+    return()=>document.removeEventListener("click",close);
+  },[cardMenu]);
+
+  // Auto-scroll to newest message (at bottom)
+  useEffect(()=>{
+    if(messagesRef.current) messagesRef.current.scrollTop=messagesRef.current.scrollHeight;
+  },[messages]);
+
+  // Live inventory from ItemPath/Kardex
+  const [inventory,setInventory]=useState({materials:[],alerts:[],status:"pending",lastSync:null});
+  useEffect(()=>{
+    const fetchInventory=async()=>{
+      try{
+        const [invRes,alertRes]=await Promise.all([
+          fetch("http://localhost:3002/api/inventory"),
+          fetch("http://localhost:3002/api/inventory/alerts")
+        ]);
+        const inv=await invRes.json();
+        const alerts=await alertRes.json();
+        setInventory({
+          materials:inv.materials||[],
+          alerts:alerts.alerts||[],
+          status:inv.status||"ok",
+          lastSync:inv.lastSync,
+          alertCount:inv.alertCount||0
+        });
+      }catch(e){
+        setInventory(prev=>({...prev,status:"error",error:e.message}));
+      }
+    };
+    fetchInventory();
+    const iv=setInterval(fetchInventory,60000); // refresh every 60s
+    return()=>clearInterval(iv);
+  },[]);
+
+  // Live maintenance data from Limble CMMS
+  const [maintenanceData,setMaintenanceData]=useState({stats:{},openTasks:[],criticalTasks:[],status:"pending"});
+  useEffect(()=>{
+    const fetchMaintenance=async()=>{
+      try{
+        const [statsRes,tasksRes]=await Promise.all([
+          fetch("http://localhost:3002/api/maintenance/stats"),
+          fetch("http://localhost:3002/api/maintenance/tasks")
+        ]);
+        const stats=await statsRes.json();
+        const tasks=await tasksRes.json();
+        setMaintenanceData({
+          stats:stats||{},
+          openTasks:tasks.open||[],
+          criticalTasks:tasks.critical||[],
+          status:stats.status||"ok",
+          lastSync:stats.lastSync
+        });
+      }catch(e){
+        setMaintenanceData(prev=>({...prev,status:"error"}));
+      }
+    };
+    fetchMaintenance();
+    const iv=setInterval(fetchMaintenance,60000);
+    return()=>clearInterval(iv);
+  },[]);
 
   // Persist cards to localStorage
   useEffect(()=>{ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(cards));}catch{} },[cards]);
@@ -768,7 +915,7 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
     setMessages(prev=>[msg,...prev].slice(0,50));
   },[]);
 
-  const slack=useSlackConfig(handleIncoming);
+  const slack=useSlackConfig(handleIncoming, setMessages);
   const activeTrays=trays.filter(t=>t.state!=="IDLE").length;
   const rushCount=trays.filter(t=>t.rush).length;
   const coatingWIP=trays.filter(t=>["COATING_STAGED","COATING_IN_PROCESS"].includes(t.state)).length;
@@ -776,7 +923,7 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
   const pwOcc=putWall.filter(s=>s.trayId).length;
   const qcCount=trays.filter(t=>t.department==="QC").length;
   const breakCount=trays.filter(t=>t.state==="BROKEN").length;
-  const isConnected=!!slack.cfg.webhook;
+  const isConnected=slack.proxyConnected||!!slack.cfg.webhook;
   const qrData=slack.cfg.channelUrl||"https://slack.com";
   const sendBg=slack.status==="sending"?T.amber:slack.status==="ok"?T.green:slack.status==="err"?T.red:"#4A154B";
   const sendLabel=slack.status==="sending"?"…":slack.status==="ok"?"✓ SENT":slack.status==="err"?"✗ ERR":isConnected?"SEND":"SEND";
@@ -784,8 +931,18 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
   const handleSend=async()=>{
     if(!msgInput.trim())return;
     const text=msgInput.trim();
-    onSendMessage(text);
     setMsgInput("");
+    // Add to local messages immediately for instant feedback
+    const newMsg={
+      id:`sent-${Date.now()}`,
+      from:"You",
+      text,
+      time:new Date(),
+      priority:text.toLowerCase().includes("rush")||text.toLowerCase().includes("hot")?"high":"normal",
+      source:"local"
+    };
+    setMessages(prev=>[newMsg,...prev].slice(0,50));
+    onSendMessage(text);
     if(isConnected) slack.post(text);
   };
 
@@ -862,22 +1019,33 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
                     style={{width:"100%",background:"#0D0010",border:"1px solid #611f69",borderRadius:6,padding:"8px 12px",color:T.text,fontSize:11,fontFamily:mono,outline:"none",boxSizing:"border-box"}}/>
                 </div>
               ))}
+              <div style={{marginBottom:10}}>
+                <label style={{fontSize:9,color:"#E8A9F4",fontFamily:mono,display:"block",marginBottom:3,letterSpacing:1}}>TEXT SIZE</label>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <input type="range" min="10" max="18" value={draft.textSize||12} onChange={e=>setDraft(d=>({...d,textSize:parseInt(e.target.value)}))}
+                    style={{flex:1,accentColor:"#4A154B"}}/>
+                  <span style={{fontSize:12,color:T.text,fontFamily:mono,minWidth:36}}>{draft.textSize||12}px</span>
+                </div>
+              </div>
               <button onClick={()=>{slack.save(draft);setShowSlackCfg(false);}}
                 style={{width:"100%",padding:"9px",background:"#4A154B",border:"1px solid #611f69",borderRadius:6,color:"#E8A9F4",fontWeight:800,fontSize:12,cursor:"pointer",fontFamily:mono}}>
                 💾 SAVE & CONNECT
               </button>
             </div>
           )}
-          <div style={{maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
-            {messages.slice(0,12).map((m,i)=>(
-              <div key={m.id||i} style={{display:"flex",gap:8,padding:"7px 10px",background:T.bg,borderRadius:7,border:`1px solid ${m.priority==="high"?T.red:T.border}`}}>
+          <div ref={messagesRef} style={{maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
+            {[...messages.slice(0,12)].reverse().map((m,i)=>(
+              <div key={m.id||i} style={{display:"flex",gap:8,padding:"7px 10px",background:m.priority==="high"?"#7F1D1D33":T.bg,borderRadius:7,border:`2px solid ${m.priority==="high"?T.red:T.border}`,boxShadow:m.priority==="high"?`0 0 8px ${T.red}40`:""}}>
                 <div style={{width:7,height:7,borderRadius:"50%",background:m.source==="slack"?"#4A154B":T.blue,marginTop:4,flexShrink:0}}/>
                 <div style={{flex:1}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
                     <span style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono}}>{m.from||"System"}</span>
-                    <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{m.time instanceof Date?m.time.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}</span>
+                    <span style={{display:"flex",alignItems:"center",gap:6}}>
+                      {m.priority==="high"&&<span style={{padding:"2px 6px",background:T.red,borderRadius:4,fontSize:9,fontWeight:800,color:"#fff",fontFamily:mono}}>🔥 HOT</span>}
+                      <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{m.time instanceof Date?m.time.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}</span>
+                    </span>
                   </div>
-                  <div style={{fontSize:12,color:T.textMuted}}>{m.text}</div>
+                  <div style={{fontSize:slack.cfg.textSize||12,color:T.textMuted}}>{m.text}</div>
                 </div>
               </div>
             ))}
@@ -898,7 +1066,7 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
         <div>
           <SectionHeader>Coating Machines</SectionHeader>
           <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-            {batches.map(b=><BatchCard key={b.id} batch={b} trays={trays} expanded={expandedBatch===b.id} onToggle={()=>setExpandedBatch(expandedBatch===b.id?null:b.id)} onControl={onBatchControl}/>)}
+            {batches.map((b,idx)=><BatchCard key={b.id} batch={b} trays={trays} expanded={expandedBatch===b.id} onToggle={()=>setExpandedBatch(expandedBatch===b.id?null:b.id)} onControl={onBatchControl} machineDisplayName={coaterMachines[idx]}/>)}
           </div>
         </div>
       );
@@ -1047,49 +1215,96 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
       }
 
       case "inventory":{
-        const mockStock=[
-          {sku:"LB-AR-167",  name:"1.67 Hi-Index AR",    qty:47,thresh:30,coating:"AR"},
-          {sku:"LB-BC-156",  name:"1.56 Blue Cut",        qty:12,thresh:20,coating:"Blue Cut"},
-          {sku:"LB-HC-150",  name:"1.50 Hard Coat",       qty:89,thresh:25,coating:"Hard Coat"},
-          {sku:"LB-MR-167",  name:"1.67 Mirror",          qty:8, thresh:15,coating:"Mirror"},
-          {sku:"LB-PL-174",  name:"1.74 Polarized",       qty:31,thresh:20,coating:"Polarized"},
-          {sku:"LB-TR-156",  name:"1.56 Transitions",     qty:5, thresh:20,coating:"Transitions"},
-        ];
-        const liveConnected=false;
+        const liveConnected=inventory.status==="ok";
+        const opcWatchlist=card.config?.opcWatchlist||"";
+
+        // Parse OPC watchlist into array
+        const watchedOPCs=opcWatchlist.split(/[\n,]/).map(s=>s.trim()).filter(Boolean);
+        const hasWatchlist=watchedOPCs.length>0;
+
+        // Build inventory items to display
+        let displayItems=[];
+
+        if(hasWatchlist){
+          // Show watched OPCs from full inventory (not just alerts)
+          const materialMap=new Map(inventory.materials.map(m=>[m.sku?.toUpperCase(),m]));
+          displayItems=watchedOPCs.map(opc=>{
+            const mat=materialMap.get(opc.toUpperCase());
+            if(mat){
+              const thresh=20; // default threshold
+              const status=mat.qty===0?"CRITICAL":mat.qty<=thresh*0.5?"LOW":mat.qty<=thresh?"WATCH":"OK";
+              return {sku:mat.sku,name:mat.name||mat.sku,qty:mat.qty,thresh,severity:status,found:true};
+            }else{
+              return {sku:opc,name:opc,qty:null,thresh:0,severity:"NOT_FOUND",found:false};
+            }
+          });
+        }else{
+          // No watchlist - show low stock alerts
+          displayItems=inventory.alerts.slice(0,20).map(a=>({
+            sku:a.material?.sku||a.sku||"?",
+            name:a.material?.name||a.material?.description||a.name||"Unknown",
+            qty:a.qtyOnHand??0,
+            thresh:a.reorderPoint||20,
+            severity:a.severity,
+            found:true
+          }));
+        }
+
+        const hasData=displayItems.length>0;
+
         return(
           <div>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
               <SectionHeader>📦 Lens Blank Inventory</SectionHeader>
-              <div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:12,background:liveConnected?`${T.green}15`:`${T.amber}15`,border:`1px solid ${liveConnected?T.green:T.amber}`}}>
-                <div style={{width:6,height:6,borderRadius:"50%",background:liveConnected?T.green:T.amber}}/>
-                <span style={{fontSize:9,color:liveConnected?T.green:T.amber,fontFamily:mono,fontWeight:700}}>{liveConnected?"ITEMPATH LIVE":"MOCK DATA"}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                {hasWatchlist&&(
+                  <span style={{fontSize:9,color:T.blue,fontFamily:mono,fontWeight:700}}>
+                    {watchedOPCs.length} OPCs
+                  </span>
+                )}
+                <div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",borderRadius:12,background:liveConnected?`${T.green}15`:`${T.amber}15`,border:`1px solid ${liveConnected?T.green:T.amber}`}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:liveConnected?T.green:T.amber}}/>
+                  <span style={{fontSize:9,color:liveConnected?T.green:T.amber,fontFamily:mono,fontWeight:700}}>{liveConnected?"ITEMPATH LIVE":"CONNECTING..."}</span>
+                </div>
               </div>
             </div>
-            <div style={{display:"flex",flexDirection:"column",gap:6}}>
-              {mockStock.map(item=>{
-                const pct=Math.min(100,Math.round((item.qty/item.thresh)*50));
-                const col=item.qty===0?T.red:item.qty<=item.thresh*0.5?T.red:item.qty<=item.thresh?T.amber:T.green;
-                const status=item.qty===0?"CRITICAL":item.qty<=item.thresh*0.5?"LOW":item.qty<=item.thresh?"WATCH":"OK";
-                return(
-                  <div key={item.sku} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",background:T.bg,borderRadius:7,border:`1px solid ${T.border}`}}>
-                    <div style={{flex:1}}>
-                      <div style={{fontSize:11,fontWeight:700,color:T.text}}>{item.name}</div>
-                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginTop:1}}>{item.sku}</div>
-                    </div>
-                    <div style={{width:80,height:5,background:T.border,borderRadius:3,overflow:"hidden"}}>
-                      <div style={{width:`${pct}%`,height:"100%",background:col,borderRadius:3}}/>
-                    </div>
-                    <div style={{fontFamily:mono,fontSize:14,fontWeight:800,color:col,minWidth:32,textAlign:"right"}}>{item.qty}</div>
-                    <Pill color={col}>{status}</Pill>
-                  </div>
-                );
-              })}
+            <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginBottom:10}}>
+              {hasWatchlist?`Showing ${watchedOPCs.length} watched OPCs`:"Showing low-stock alerts · Use ⋮ menu to set OPC watchlist"}
             </div>
+            {!hasData?(
+              <div style={{textAlign:"center",padding:"30px 0",fontSize:12,color:liveConnected?T.green:T.textDim,fontFamily:mono}}>
+                {liveConnected?"Add OPCs via ⋮ Configure":"Loading inventory..."}
+              </div>
+            ):(
+              <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflowY:"auto"}}>
+                {displayItems.map(item=>{
+                  const isNotFound=item.severity==="NOT_FOUND";
+                  const pct=isNotFound?0:Math.min(100,Math.round((item.qty/(item.thresh||1))*50));
+                  const col=isNotFound?T.textDim:item.severity==="CRITICAL"?T.red:item.severity==="LOW"?T.orange:item.severity==="WATCH"?T.amber:T.green;
+                  const status=isNotFound?"NOT FOUND":item.severity==="OK"?"IN STOCK":item.severity;
+                  return(
+                    <div key={item.sku} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",background:T.bg,borderRadius:7,border:`1px solid ${T.border}`,opacity:isNotFound?0.6:1}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:11,fontWeight:700,color:T.text}}>{item.name}</div>
+                        <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginTop:1}}>{item.sku}</div>
+                      </div>
+                      {!isNotFound&&(
+                        <div style={{width:80,height:5,background:T.border,borderRadius:3,overflow:"hidden"}}>
+                          <div style={{width:`${pct}%`,height:"100%",background:col,borderRadius:3}}/>
+                        </div>
+                      )}
+                      <div style={{fontFamily:mono,fontSize:14,fontWeight:800,color:col,minWidth:32,textAlign:"right"}}>{isNotFound?"—":item.qty}</div>
+                      <Pill color={col}>{status}</Pill>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         );
       }
 
-      case "ai_query": return <OverviewAICard trays={trays} batches={batches}/>;
+      case "ai_query": return <OverviewAICard trays={trays} batches={batches} settings={settings}/>;
 
       case "custom_metric":{
         const url=card.config?.url||"";
@@ -1126,9 +1341,139 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
         );
       }
 
+      // ── Production Stage Summary Cards ──────────────────────────────
+      case "surfacing_summary":{
+        const surfacingJobs=trays.filter(t=>t.department==="SURFACING"&&t.state!=="IDLE");
+        const queueJobs=surfacingJobs.filter(t=>t.state==="QUEUED");
+        const inProgress=surfacingJobs.filter(t=>t.state==="IN_PROGRESS");
+        const rushJobs=surfacingJobs.filter(t=>t.rush);
+        return(
+          <div onClick={()=>setView("surfacing")} style={{cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <SectionHeader>🌀 Surfacing</SectionHeader>
+              <span style={{fontSize:10,color:T.blue,fontFamily:mono}}>VIEW TAB →</span>
+            </div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <KPICard label="Queue" value={queueJobs.length} sub="waiting" accent={T.blue}/>
+              <KPICard label="In Progress" value={inProgress.length} sub="active" accent={T.green}/>
+              <KPICard label="Rush" value={rushJobs.length} sub="priority" accent={rushJobs.length>0?T.red:T.textDim}/>
+            </div>
+          </div>
+        );
+      }
+
+      case "cutting_summary":{
+        const cuttingJobs=trays.filter(t=>t.department==="CUTTING"&&t.state!=="IDLE");
+        const queueJobs=cuttingJobs.filter(t=>t.state==="QUEUED");
+        const inProgress=cuttingJobs.filter(t=>t.state==="IN_PROGRESS");
+        const rushJobs=cuttingJobs.filter(t=>t.rush);
+        return(
+          <div onClick={()=>setView("cutting")} style={{cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <SectionHeader>✂️ Cutting</SectionHeader>
+              <span style={{fontSize:10,color:T.blue,fontFamily:mono}}>VIEW TAB →</span>
+            </div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <KPICard label="Queue" value={queueJobs.length} sub="waiting" accent={T.blue}/>
+              <KPICard label="In Progress" value={inProgress.length} sub="active" accent={T.green}/>
+              <KPICard label="Rush" value={rushJobs.length} sub="priority" accent={rushJobs.length>0?T.red:T.textDim}/>
+            </div>
+          </div>
+        );
+      }
+
+      case "assembly_summary":{
+        const assemblyJobs=trays.filter(t=>t.department==="ASSEMBLY"&&t.state!=="IDLE");
+        const queueJobs=assemblyJobs.filter(t=>t.state==="QUEUED");
+        const inProgress=assemblyJobs.filter(t=>t.state==="IN_PROGRESS");
+        const rushJobs=assemblyJobs.filter(t=>t.rush);
+        return(
+          <div onClick={()=>setView("assembly")} style={{cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <SectionHeader>🔧 Assembly</SectionHeader>
+              <span style={{fontSize:10,color:T.blue,fontFamily:mono}}>VIEW TAB →</span>
+            </div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <KPICard label="Queue" value={queueJobs.length} sub="waiting" accent={T.blue}/>
+              <KPICard label="In Progress" value={inProgress.length} sub="active" accent={T.green}/>
+              <KPICard label="Rush" value={rushJobs.length} sub="priority" accent={rushJobs.length>0?T.red:T.textDim}/>
+            </div>
+          </div>
+        );
+      }
+
+      case "shipping_summary":{
+        const shippingJobs=trays.filter(t=>t.department==="SHIPPING"&&t.state!=="IDLE");
+        const readyToShip=shippingJobs.filter(t=>t.state==="READY");
+        const inProgress=shippingJobs.filter(t=>t.state==="IN_PROGRESS");
+        const rushJobs=shippingJobs.filter(t=>t.rush);
+        return(
+          <div onClick={()=>setView("shipping")} style={{cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <SectionHeader>📤 Shipping</SectionHeader>
+              <span style={{fontSize:10,color:T.blue,fontFamily:mono}}>VIEW TAB →</span>
+            </div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <KPICard label="Ready" value={readyToShip.length} sub="to ship" accent={T.green}/>
+              <KPICard label="In Progress" value={inProgress.length} sub="packing" accent={T.blue}/>
+              <KPICard label="Rush" value={rushJobs.length} sub="priority" accent={rushJobs.length>0?T.red:T.textDim}/>
+            </div>
+          </div>
+        );
+      }
+
+      case "maintenance_summary":{
+        const ms=maintenanceData.stats;
+        const criticalCount=maintenanceData.criticalTasks?.length||0;
+        const openCount=ms.openTaskCount||maintenanceData.openTasks?.length||0;
+        const pmCompliance=ms.pmCompliancePercent;
+        const assetsDown=ms.assetsDown||0;
+        const hasData=ms.hasData!==false;
+        return(
+          <div onClick={()=>setView("maintenance")} style={{cursor:"pointer"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <SectionHeader>🔩 Maintenance</SectionHeader>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:maintenanceData.status==='ok'?T.green:maintenanceData.status==='mock'?T.amber:T.red}}/>
+                <span style={{fontSize:10,color:T.blue,fontFamily:mono}}>VIEW TAB →</span>
+              </div>
+            </div>
+            {!hasData&&<div style={{fontSize:10,color:T.amber,fontFamily:mono,marginBottom:8}}>⚠️ No recent maintenance data</div>}
+            <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+              <KPICard label="Open WOs" value={openCount} sub={`${criticalCount} critical`} accent={criticalCount>0?T.red:openCount>20?T.amber:T.green}/>
+              <KPICard label="PM Compliance" value={pmCompliance!=null?`${pmCompliance}%`:'—'} sub="on schedule" accent={pmCompliance!=null?(pmCompliance>=90?T.green:pmCompliance>=75?T.amber:T.red):T.textDim}/>
+              <KPICard label="Equipment" value={ms.totalAssets||0} sub={assetsDown>0?`${assetsDown} down`:'all operational'} accent={assetsDown>0?T.red:T.green}/>
+            </div>
+            {criticalCount>0&&(
+              <div style={{marginTop:10,padding:"8px 10px",background:`${T.red}15`,borderRadius:6,border:`1px solid ${T.red}30`}}>
+                <div style={{fontSize:10,fontWeight:700,color:T.red,marginBottom:4}}>CRITICAL TASKS:</div>
+                {maintenanceData.criticalTasks?.slice(0,2).map((t,i)=>(
+                  <div key={i} style={{fontSize:11,color:T.text,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.title}</div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      }
+
       default: return <div style={{padding:20,color:T.textDim,fontFamily:mono,fontSize:12}}>Unknown card type: {card.type}</div>;
     }
   };
+
+
+  // ── Card Config Modal state ──────────────────────────────────────
+  const [opcSearch,setOpcSearch]=useState("");
+
+  // Config modal helpers (computed when modal is open)
+  const configCard=editCard?cards.find(c=>c.id===editCard):null;
+  const configCfg=configCard?.config||{};
+  const configWatchedOPCs=configCard?(configCfg.opcWatchlist||"").split(/[\n,]/).map(s=>s.trim()).filter(Boolean):[];
+  const configFilteredMaterials=opcSearch.trim().length>=2
+    ? inventory.materials.filter(m=>
+        m.sku?.toLowerCase().includes(opcSearch.toLowerCase())||
+        m.name?.toLowerCase().includes(opcSearch.toLowerCase())
+      ).slice(0,15)
+    : [];
 
   // ── Card Picker Modal ──────────────────────────────────────
   const CardPickerModal=()=>(
@@ -1176,11 +1521,29 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,cursor:"grab",userSelect:"none"}}>
               <span style={{color:T.textDim,fontSize:16}}>⠿</span>
               <span style={{flex:1,fontSize:11,fontWeight:700,color:T.dim,fontFamily:mono,letterSpacing:1,textTransform:"uppercase"}}>{card.title}</span>
-              <button onClick={()=>removeCard(card.id)}
-                style={{background:"transparent",border:"none",color:T.textDim,cursor:"pointer",fontSize:16,lineHeight:1,padding:"0 2px"}}
-                title="Remove card"
-                onMouseEnter={e=>e.currentTarget.style.color=T.red}
-                onMouseLeave={e=>e.currentTarget.style.color=T.textDim}>✕</button>
+              <div style={{position:"relative"}}>
+                <button onClick={e=>{e.stopPropagation();setCardMenu(cardMenu===card.id?null:card.id);}}
+                  style={{background:"transparent",border:"none",color:T.textDim,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}
+                  title="Card menu"
+                  onMouseEnter={e=>e.currentTarget.style.color=T.text}
+                  onMouseLeave={e=>e.currentTarget.style.color=T.textDim}>⋮</button>
+                {cardMenu===card.id&&(
+                  <div style={{position:"absolute",right:0,top:"100%",marginTop:4,background:T.cardBg,border:`1px solid ${T.border}`,borderRadius:8,boxShadow:"0 4px 12px rgba(0,0,0,0.3)",zIndex:100,minWidth:140,overflow:"hidden"}}>
+                    <button onClick={()=>{setEditCard(card.id);setCardMenu(null);}}
+                      style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:T.text,fontSize:12,fontFamily:mono,cursor:"pointer",textAlign:"left"}}
+                      onMouseEnter={e=>e.currentTarget.style.background=T.bg}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <span>⚙</span> Configure
+                    </button>
+                    <button onClick={()=>{removeCard(card.id);setCardMenu(null);}}
+                      style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:T.red,fontSize:12,fontFamily:mono,cursor:"pointer",textAlign:"left"}}
+                      onMouseEnter={e=>e.currentTarget.style.background=T.bg}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <span>✕</span> Remove
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
             {renderCardContent(card)}
           </Card>
@@ -1198,27 +1561,147 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
         </div>
       )}
       {showCardPicker&&<CardPickerModal/>}
+      {editCard&&configCard&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={()=>{setEditCard(null);setOpcSearch("");}}>
+          <div style={{background:T.surface,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:28,width:480,maxWidth:"90vw",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontSize:16,fontWeight:800,color:T.text}}>⚙ Configure Card</div>
+              <button onClick={()=>{setEditCard(null);setOpcSearch("");}} style={{background:"transparent",border:"none",color:T.textDim,fontSize:20,cursor:"pointer"}}>✕</button>
+            </div>
+
+            {/* Card Title */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginBottom:6}}>CARD TITLE</div>
+              <input type="text" value={configCard.title} onChange={e=>updateCardTitle(configCard.id,e.target.value)} style={{width:"100%",padding:"10px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:mono}}/>
+            </div>
+
+            {/* Inventory Card Config */}
+            {configCard.type==="inventory"&&(
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginBottom:6}}>OPC WATCHLIST ({configWatchedOPCs.length} selected)</div>
+
+                {/* Selected OPCs as chips */}
+                {configWatchedOPCs.length>0&&(
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10,maxHeight:120,overflowY:"auto"}}>
+                    {configWatchedOPCs.map(sku=>{
+                      const mat=inventory.materials.find(m=>m.sku===sku);
+                      return(
+                        <div key={sku} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 8px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6}}>
+                          <span style={{fontSize:11,fontFamily:"monospace",color:T.text}}>{sku}</span>
+                          {mat&&<span style={{fontSize:10,color:T.green}}>{mat.qty}</span>}
+                          {!mat&&<span style={{fontSize:10,color:T.red}}>?</span>}
+                          <button onClick={()=>updateCardConfig(configCard.id,{opcWatchlist:configWatchedOPCs.filter(s=>s!==sku).join('\n')})} style={{background:"none",border:"none",color:T.textDim,cursor:"pointer",padding:0,fontSize:14,lineHeight:1}}>×</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Search input */}
+                <input
+                  type="text"
+                  placeholder="Type to search OPCs..."
+                  value={opcSearch}
+                  onChange={e=>setOpcSearch(e.target.value)}
+                  autoComplete="off"
+                  style={{width:"100%",padding:"10px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:mono}}
+                />
+
+                {/* Search results */}
+                {opcSearch.trim().length>=2&&(
+                  <div style={{marginTop:8,border:`1px solid ${T.border}`,borderRadius:8,maxHeight:180,overflowY:"auto",background:T.bg}}>
+                    {configFilteredMaterials.length>0?configFilteredMaterials.map(m=>(
+                      <div
+                        key={m.sku}
+                        onClick={()=>{
+                          if(!configWatchedOPCs.includes(m.sku)){
+                            updateCardConfig(configCard.id,{opcWatchlist:[...configWatchedOPCs,m.sku].join('\n')});
+                          }
+                          setOpcSearch("");
+                        }}
+                        style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",borderBottom:`1px solid ${T.border}`,cursor:"pointer"}}
+                      >
+                        <div>
+                          <div style={{fontSize:12,fontWeight:600,fontFamily:"monospace",color:T.text}}>{m.sku}</div>
+                          <div style={{fontSize:10,color:T.textDim}}>{m.name}</div>
+                        </div>
+                        <div style={{fontSize:12,fontWeight:700,color:m.qty>20?T.green:m.qty>5?T.amber:T.red}}>{m.qty}</div>
+                      </div>
+                    )):(
+                      <div style={{padding:12,textAlign:"center",color:T.textDim,fontSize:11}}>No OPCs match "{opcSearch}"</div>
+                    )}
+                  </div>
+                )}
+
+                <div style={{fontSize:10,color:T.textDim,marginTop:6}}>
+                  {opcSearch.trim().length<2?"Type at least 2 characters to search":"Click an item to add it"}
+                </div>
+              </div>
+            )}
+
+            {/* WIP Aging Config */}
+            {configCard.type==="wip_aging"&&(
+              <div style={{marginBottom:16}}>
+                <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginBottom:6}}>AGE THRESHOLD (HOURS)</div>
+                <select value={configCfg.thresholdHours||6} onChange={e=>updateCardConfig(configCard.id,{thresholdHours:Number(e.target.value)})} style={{width:"100%",padding:"10px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:mono,cursor:"pointer"}}>
+                  {[2,4,6,8,12,24,48].map(h=><option key={h} value={h}>{h} hours</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Custom Metric Config */}
+            {configCard.type==="custom_metric"&&(
+              <>
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginBottom:6}}>DATA URL</div>
+                  <input type="text" placeholder="https://api.example.com/metric" value={configCfg.url||""} onChange={e=>updateCardConfig(configCard.id,{url:e.target.value})} style={{width:"100%",padding:"10px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:mono}}/>
+                </div>
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginBottom:6}}>JSON FIELD (OPTIONAL)</div>
+                  <input type="text" placeholder="value" value={configCfg.field||""} onChange={e=>updateCardConfig(configCard.id,{field:e.target.value})} style={{width:"100%",padding:"10px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:mono}}/>
+                </div>
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginBottom:6}}>REFRESH INTERVAL (SECONDS)</div>
+                  <input type="number" min="5" max="3600" value={configCfg.intervalSec||30} onChange={e=>updateCardConfig(configCard.id,{intervalSec:Number(e.target.value)})} style={{width:"100%",padding:"10px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,color:T.text,fontSize:13,fontFamily:mono}}/>
+                </div>
+              </>
+            )}
+
+            {/* No config message */}
+            {!["inventory","wip_aging","custom_metric"].includes(configCard.type)&&(
+              <div style={{padding:20,textAlign:"center",color:T.textDim,fontSize:12,fontFamily:mono}}>
+                This card type has no additional settings.
+              </div>
+            )}
+
+            <button onClick={()=>setEditCard(null)} style={{width:"100%",marginTop:8,padding:"12px",background:T.blue,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── Overview AI Quick Query Card ───────────────────────────────
-function OverviewAICard({trays,batches}){
+function OverviewAICard({trays,batches,settings}){
   const [q,setQ]=useState("");
   const [ans,setAns]=useState("");
   const [loading,setLoading]=useState(false);
   const ask=async()=>{
     if(!q.trim()||loading)return;
+    const apiKey=getAnthropicApiKey(settings);if(!apiKey){setAns("⚠️ No API key. Go to Settings → AI.");return;}
     setLoading(true);setAns("");
     const ctx=`Lab state: ${trays.filter(t=>t.state!=="IDLE").length} active trays, ${trays.filter(t=>t.rush).length} rush, ${trays.filter(t=>["COATING_STAGED","COATING_IN_PROCESS"].includes(t.state)).length} in coating. Avg batch fill ${Math.round(batches.reduce((s,b)=>s+(b.loaded/b.capacity)*100,0)/batches.length)}%.`;
     try{
-      const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+      const r=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({
         model:"claude-sonnet-4-20250514",max_tokens:300,
         system:`You are Lab_Assistant AI for Pair Eyewear lens lab. ${ctx} Answer in 2-3 sentences max. Be specific and direct.`,
         messages:[{role:"user",content:q}]
       })});
       const d=await r.json();
-      setAns(d?.content?.[0]?.text||"No response.");
+      setAns(d?.content?.[0]?.text||d?.error?.message||"No response.");
     }catch(e){setAns("Connection error.");}
     setLoading(false);
   };
@@ -1511,19 +1994,41 @@ function OvenHistoryView({serverUrl}){
   );
 }
 
-function CoatingTab({batches,trays,inspections,onBatchControl,ovenServerUrl}){
+function CoatingTab({batches,trays,inspections,onBatchControl,ovenServerUrl,settings}){
   const [subView,setSubView]=useState("predictive");
+  // Get coater machines from settings
+  const coaterMachines=useMemo(()=>{
+    const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
+    return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
+  },[settings?.equipment]);
+
+  // Context for embedded AI
+  const coatingJobs=trays.filter(t=>t.department==="COATING");
+  const stagedJobs=coatingJobs.filter(t=>t.state==="COATING_STAGED");
+  const inProcess=coatingJobs.filter(t=>t.state==="COATING_IN_PROCESS");
+  const rushJobs=coatingJobs.filter(t=>t.rush);
+  const contextData={
+    jobs:coatingJobs,
+    stagedCount:stagedJobs.length,
+    inProcessCount:inProcess.length,
+    rushCount:rushJobs.length,
+    batches:batches,
+    machines:coaterMachines,
+  };
+
   return(
+    <ProductionStageTab domain="coating" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16}}>
         {[{id:"predictive",label:"Predictive Analysis",icon:"📊"},{id:"inspection",label:"Inspection & QC",icon:"🔬"},{id:"oven",label:"Oven History",icon:"🌡"}].map(sv=>(
           <button key={sv.id} onClick={()=>setSubView(sv.id)} style={{background:subView===sv.id?T.blueDark:"transparent",border:`1px solid ${subView===sv.id?T.blue:"transparent"}`,borderRadius:8,padding:"10px 20px",cursor:"pointer",color:subView===sv.id?T.blue:T.textMuted,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,fontFamily:sans}}><span>{sv.icon}</span>{sv.label}</button>
         ))}
       </div>
-      {subView==="predictive"&&<PredictiveView batches={batches} trays={trays} onBatchControl={onBatchControl}/>}
+      {subView==="predictive"&&<PredictiveView batches={batches} trays={trays} onBatchControl={onBatchControl} coaterMachines={coaterMachines}/>}
       {subView==="inspection"&&<InspectionView inspections={inspections}/>}
       {subView==="oven"&&<OvenHistoryView serverUrl={ovenServerUrl}/>}
     </div>
+    </ProductionStageTab>
   );
 }
 
@@ -1684,9 +2189,878 @@ function InlineMd({text}){
 }
 
 // ══════════════════════════════════════════════════════════════
+// ── Domain AI Configurations ──────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+
+const DOMAIN_CONFIGS = {
+  surfacing: {
+    title: "Surfacing AI",
+    greeting: "I'm your Surfacing specialist. I can help with Rx interpretation, blank selection, queue priority, and defect troubleshooting.",
+    quickPrompts: [
+      { icon: "📋", label: "Queue Status", text: "Summarize current surfacing queue status and priorities." },
+      { icon: "🔴", label: "Rush Jobs", text: "List all rush jobs in surfacing and recommended priority order." },
+      { icon: "⚠️", label: "High Power Rx", text: "Identify any high-power Rx jobs (>6.00 sph/cyl) that need special attention." },
+      { icon: "🔧", label: "Defect Help", text: "Help me troubleshoot a surfacing defect. What questions should I answer?" },
+      { icon: "📊", label: "Throughput Report", text: "Generate a brief throughput report for the current shift.", isReport: true },
+    ],
+    buildContext: (data) => `You are the Surfacing Specialist AI for Pair Eyewear's lens lab.
+
+CURRENT SURFACING STATE (${new Date().toLocaleString()}):
+SURFACING QUEUE: ${data.queueCount || 0} jobs waiting
+IN PROCESS: ${data.inProcessCount || 0} jobs
+RUSH JOBS: ${data.rushCount || 0} active
+
+JOBS IN SURFACING:
+${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: ${j.rx?.sphere || '?'}/${j.rx?.cylinder || '?'} | ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in surfacing'}
+
+STAGE METRICS:
+  Queue depth: ${data.queueCount || 0}
+  In process: ${data.inProcessCount || 0}
+  Rush active: ${data.rushCount || 0}
+
+You are an expert in lens surfacing operations. Help operators with:
+- Rx interpretation and machine setup guidance
+- Troubleshooting surfacing defects (scratches, pits, tool marks)
+- Prioritizing rush jobs and managing queue
+- Blank selection guidance based on Rx power
+
+Be direct and technical. Use actual job IDs from the data.`,
+  },
+
+  cutting: {
+    title: "Cutting AI",
+    greeting: "I'm your Cutting/Edging specialist. I can help with edge quality, frame fit, breakage analysis, and axis verification.",
+    quickPrompts: [
+      { icon: "📋", label: "Queue Status", text: "What's the current cutting queue status?" },
+      { icon: "💥", label: "Recent Breaks", text: "List any breaks reported in cutting today and their causes." },
+      { icon: "🔴", label: "Rush Priority", text: "Which rush jobs need immediate edging attention?" },
+      { icon: "🔧", label: "Edge Issue", text: "Help troubleshoot an edge quality issue. What information do you need?" },
+      { icon: "📐", label: "Frame Fit", text: "Guide me through checking frame-to-lens fit parameters." },
+    ],
+    buildContext: (data) => `You are the Cutting/Edging Specialist AI for Pair Eyewear's lens lab.
+
+CURRENT CUTTING STATE (${new Date().toLocaleString()}):
+CUTTING QUEUE: ${data.queueCount || 0} jobs
+IN PROCESS: ${data.inProcessCount || 0} jobs
+ON HOLD: ${data.holdCount || 0} jobs
+RUSH ACTIVE: ${data.rushCount || 0}
+
+JOBS IN CUTTING:
+${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: Frame ${j.frameRef || 'TBD'} | ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in cutting'}
+
+You are an expert in lens edging operations. Help with:
+- Edge quality troubleshooting (chips, cracks, bevel issues)
+- Frame-to-lens fit problems
+- Axis orientation verification
+- Safety bevel requirements
+
+Be specific with job IDs and frame references.`,
+  },
+
+  coating: {
+    title: "Coating AI",
+    greeting: "I'm your Coating specialist. I can help with batch timing, yield analysis, defect patterns, and oven/coater optimization.",
+    quickPrompts: [
+      { icon: "📊", label: "Batch Status", text: "Summarize all active coating batches and their status." },
+      { icon: "⏱", label: "Fill Prediction", text: "When should we run the next batch for each coating type?" },
+      { icon: "📉", label: "Yield Analysis", text: "Analyze current yield rates and flag any concerns.", isReport: true },
+      { icon: "⚠️", label: "Defect Pattern", text: "Are there any defect patterns suggesting equipment issues?" },
+      { icon: "🌡", label: "Oven Timing", text: "Review current oven dwell times and recommend adjustments." },
+      { icon: "🔴", label: "Rush Coating", text: "Which rush jobs are currently in coating and their ETA?" },
+    ],
+    buildContext: (data) => `You are the Coating Specialist AI for Pair Eyewear's lens lab.
+
+CURRENT COATING STATE (${new Date().toLocaleString()}):
+TOTAL IN COATING: ${data.inCoating || 0} jobs across ${(data.batches || []).length} batches
+MACHINES: ${(data.machines || []).join(', ') || 'Unknown'}
+
+LIVE BATCHES:
+${(data.batches || []).map(b => `  ${b.id}: ${b.coatingType || b.coating} | ${b.machine} | ${b.loaded}/${b.capacity} | ${b.status}`).join('\n') || '  No active batches'}
+
+STAGE PIPELINE:
+${Object.entries(data.stageCounts || {}).map(([stage, count]) => `  ${stage}: ${count}`).join('\n') || '  No stage data'}
+
+YIELD BY COATING TYPE:
+${Object.entries(data.yieldByType || {}).map(([type, rate]) => `  ${type}: ${rate}%`).join('\n') || '  No yield data'}
+
+You are an expert in AR, Blue Cut, Mirror, Transitions, Polarized, and Hard Coat processes.
+Help operators with:
+- Batch timing and fill optimization
+- Yield troubleshooting by defect type
+- Oven/coater dwell time decisions
+- Chemical bath maintenance indicators
+
+Flag anything below 90% yield as a concern.`,
+  },
+
+  assembly: {
+    title: "Assembly AI",
+    greeting: "I'm your Assembly specialist. I can help with station optimization, operator performance, QC returns, and frame troubleshooting.",
+    quickPrompts: [
+      { icon: "📋", label: "Station Status", text: "Show current status of all assembly stations." },
+      { icon: "🏆", label: "Leaderboard", text: "Who are today's top performers in assembly?" },
+      { icon: "🔴", label: "Rush Priority", text: "Which rush jobs need immediate assembly attention?" },
+      { icon: "⚠️", label: "QC Returns", text: "Analyze recent QC returns and identify patterns." },
+      { icon: "📊", label: "Shift Report", text: "Generate current shift assembly summary.", isReport: true },
+      { icon: "🔧", label: "Frame Issue", text: "Help troubleshoot a frame assembly problem." },
+    ],
+    buildContext: (data) => `You are the Assembly Specialist AI for Pair Eyewear's lens lab.
+
+CURRENT ASSEMBLY STATE (${new Date().toLocaleString()}):
+JOBS IN ASSEMBLY: ${data.inProcessCount || 0} in progress
+QUEUE DEPTH: ${data.queueCount || 0} waiting
+COMPLETED TODAY: ${data.completedToday || 0}
+ON HOLD: ${data.holdCount || 0}
+
+JOBS IN ASSEMBLY:
+${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in assembly'}
+
+QC RETURNS:
+${(data.qcReturns || []).slice(0, 3).map(r => `  ${r.job}: ${r.reason}`).join('\n') || '  None recent'}
+
+You are an expert in eyewear assembly operations. Help with:
+- Station assignment optimization
+- Frame/lens compatibility issues
+- Screw/hinge troubleshooting
+- QC return root cause analysis
+- Rush job prioritization
+
+Reference specific job IDs.`,
+  },
+
+  shipping: {
+    title: "Shipping AI",
+    greeting: "I'm your Shipping specialist. I can help with priority decisions, overdue tracking, carrier selection, and customer escalations.",
+    quickPrompts: [
+      { icon: "📦", label: "Ready to Ship", text: "What jobs are ready to ship right now?" },
+      { icon: "🔴", label: "Overdue", text: "List all overdue shipments and recommended actions." },
+      { icon: "⏰", label: "Due Today", text: "Which shipments are due today and their status?" },
+      { icon: "🚚", label: "Carrier Summary", text: "Summarize today's shipments by carrier." },
+      { icon: "📊", label: "EOD Report", text: "Generate end-of-day shipping report.", isReport: true },
+      { icon: "🔍", label: "Track Job", text: "Help me track a specific job. Which job ID?" },
+    ],
+    buildContext: (data) => `You are the Shipping Specialist AI for Pair Eyewear's lens lab.
+
+CURRENT SHIPPING STATE (${new Date().toLocaleString()}):
+READY TO SHIP: ${data.readyCount || 0} jobs
+SHIPPED TODAY: ${data.shippedToday || 0}
+OVERDUE: ${data.overdueCount || 0}
+
+JOBS IN SHIPPING:
+${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in shipping'}
+
+OVERDUE JOBS:
+${(data.overdue || []).map(j => `  ${j.job || j.id}: Due ${j.dueDate} — ${j.reason || 'Unknown hold'}`).join('\n') || '  None'}
+
+You are an expert in optical lab shipping operations. Help with:
+- Shipping priority decisions
+- Address/label verification
+- Carrier selection optimization
+- Tracking inquiry handling
+- Customer escalation guidance
+
+Always include job IDs and specific timing.`,
+  },
+
+  inventory: {
+    title: "Inventory AI",
+    greeting: "I'm your Inventory specialist. I can help with stock levels, reorder recommendations, blank searches, and usage trend analysis.",
+    quickPrompts: [
+      { icon: "⚠️", label: "Critical Stock", text: "What items are out of stock or critically low?" },
+      { icon: "📊", label: "Stock Report", text: "Generate inventory status report.", isReport: true },
+      { icon: "🔍", label: "Find Blank", text: "Help me find a lens blank. What Rx parameters?" },
+      { icon: "📈", label: "Usage Trends", text: "Which SKUs are being consumed fastest?" },
+      { icon: "📦", label: "Reorder List", text: "Generate recommended reorder list based on usage.", isReport: true },
+      { icon: "🌡", label: "By Coating", text: "Summarize stock levels by coating type." },
+    ],
+    buildContext: (data) => `You are the Inventory Specialist AI for Pair Eyewear's lens lab.
+
+INVENTORY STATUS (${new Date().toLocaleString()}):
+TOTAL SKUs: ${data.totalSkus || 0}
+TOTAL UNITS: ${data.totalUnits || 0}
+OUT OF STOCK: ${data.outOfStock || 0} SKUs
+LOW STOCK: ${data.lowStock || 0} SKUs
+
+CRITICAL ALERTS:
+${(data.criticalAlerts || []).slice(0, 5).map(m => `  ${m.sku}: ${m.name} — ${m.qty} left`).join('\n') || '  None'}
+
+STOCK BY COATING TYPE:
+${Object.entries(data.byCoatingType || {}).map(([type, count]) => `  ${type}: ${count} units`).join('\n') || '  No data'}
+
+RECENT PICKS:
+${(data.recentPicks || []).slice(0, 5).map(p => `  ${p.sku}: qty ${p.qty}`).join('\n') || '  None'}
+
+You are an expert in lens blank inventory management. Help with:
+- Low stock prioritization and reorder recommendations
+- Finding specific blanks by Rx parameters
+- Usage trend analysis
+- Kardex pick optimization
+- Safety stock level recommendations
+
+Reference specific SKUs and quantities.`,
+  },
+
+  maintenance: {
+    title: "Maintenance AI",
+    greeting: "I'm your Maintenance specialist. I can help with PM scheduling, troubleshooting, downtime analysis, and spare parts.",
+    quickPrompts: [
+      { icon: "⚠️", label: "Alerts", text: "What equipment issues need immediate attention?" },
+      { icon: "📅", label: "PM Schedule", text: "What preventive maintenance is due this week?" },
+      { icon: "🔴", label: "Downtime", text: "Summarize recent equipment downtime and root causes." },
+      { icon: "📊", label: "Health Report", text: "Generate equipment health report.", isReport: true },
+      { icon: "🔧", label: "Troubleshoot", text: "Help troubleshoot an equipment issue. Which asset?" },
+      { icon: "📦", label: "Parts Check", text: "Are there any spare parts running low?" },
+    ],
+    buildContext: (data) => `You are the Maintenance Specialist AI for Pair Eyewear's lens lab.
+
+MAINTENANCE STATUS (${new Date().toLocaleString()}):
+TOTAL ASSETS: ${data.totalAssets || 0}
+OPERATIONAL: ${data.operational || 0}
+DOWN: ${data.down || 0}
+
+OPEN WORK ORDERS:
+${(data.openTasks || []).slice(0, 5).map(t => `  ${t.id}: ${t.asset} — ${t.description} [${t.priority}]`).join('\n') || '  None'}
+
+OVERDUE PM:
+${(data.overduePM || []).slice(0, 5).map(t => `  ${t.asset}: ${t.pmType} due ${t.dueDate}`).join('\n') || '  None'}
+
+RECENT DOWNTIME:
+${(data.recentDowntime || []).slice(0, 5).map(d => `  ${d.asset}: ${d.duration}min — ${d.reason}`).join('\n') || '  None'}
+
+You are an expert in optical lab equipment maintenance. Help with:
+- PM scheduling and prioritization
+- Troubleshooting equipment issues
+- Root cause analysis for recurring failures
+- Spare parts inventory management
+- Downtime impact analysis
+
+Reference specific asset IDs and work order numbers.`,
+  },
+};
+
+// ══════════════════════════════════════════════════════════════
+// ── Embedded AI Panel (Reusable) ──────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) {
+  const config = DOMAIN_CONFIGS[domain] || DOMAIN_CONFIGS.coating;
+  const mono = "'JetBrains Mono',monospace";
+
+  const [messages, setMessages] = useState([
+    { role: "assistant", content: config.greeting }
+  ]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [reportDownloading, setReportDownloading] = useState(null);
+  const chatRef = useRef(null);
+
+  const REPORT_KEYWORDS = ["report", "summary", "analysis", "generate", "breakdown", "overview"];
+  const isReportRequest = (text) => REPORT_KEYWORDS.some(k => text.toLowerCase().includes(k));
+
+  const sendMessage = async (text) => {
+    const userText = (text || input).trim();
+    if (!userText || loading) return;
+    setInput("");
+
+    const willBeReport = isReportRequest(userText);
+    const newMessages = [...messages, { role: "user", content: userText }];
+    setMessages(newMessages);
+    setLoading(true);
+
+    try {
+      const apiKey = getAnthropicApiKey(settings);
+      if (!apiKey) {
+        setMessages(prev => [...prev, { role: "assistant", content: "⚠️ No API key configured. Go to Settings → AI to add your Anthropic API key." }]);
+        setLoading(false);
+        return;
+      }
+      const systemPrompt = config.buildContext(contextData || {});
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 2000,
+          system: systemPrompt,
+          messages: newMessages.map(m => ({ role: m.role, content: m.content })),
+        }),
+      });
+      const data = await res.json();
+      const reply = data?.content?.[0]?.text || data?.error?.message || "Sorry, I couldn't get a response.";
+      setMessages(prev => [...prev, { role: "assistant", content: reply, isReport: willBeReport, prompt: userText }]);
+    } catch (e) {
+      setMessages(prev => [...prev, { role: "assistant", content: "Connection error. Check API access." }]);
+    }
+    setLoading(false);
+  };
+
+  const downloadWordReport = async (msg, idx) => {
+    setReportDownloading(idx);
+    try {
+      const title = msg.prompt?.replace(/^generate\s+a?\s*/i, "").replace(/report.*/i, "Report").trim().slice(0, 60) || "Report";
+      const res = await fetch(`${serverUrl}/api/report`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, content: msg.content, generatedBy: `${config.title}`, timestamp: Date.now() }),
+      });
+      if (!res.ok) throw new Error("Server error");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${domain}_Report_${new Date().toISOString().slice(0, 10)}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert(`Word export failed: ${e.message}`);
+    }
+    setReportDownloading(null);
+  };
+
+  useEffect(() => {
+    if (chatRef.current) chatRef.current.scrollTop = chatRef.current.scrollHeight;
+  }, [messages, loading]);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: T.surface }}>
+      {/* Header */}
+      <div style={{ padding: "12px 14px", borderBottom: `1px solid ${T.border}`, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg, ${T.blue}, ${T.blueGlow})`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13 }}>🤖</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: T.text }}>{config.title}</div>
+          <div style={{ fontSize: 9, color: T.green, fontFamily: mono }}>● ONLINE</div>
+        </div>
+        <button onClick={onClose} style={{ background: "transparent", border: `1px solid ${T.border}`, borderRadius: 4, padding: "4px 8px", cursor: "pointer", color: T.textDim, fontSize: 10 }}>✕</button>
+      </div>
+
+      {/* Quick Actions */}
+      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${T.border}`, display: "flex", flexWrap: "wrap", gap: 4, flexShrink: 0 }}>
+        {config.quickPrompts.slice(0, 4).map((p, i) => (
+          <button key={i} onClick={() => sendMessage(p.text)} disabled={loading}
+            style={{ display: "flex", alignItems: "center", gap: 4, padding: "5px 8px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 5, cursor: loading ? "not-allowed" : "pointer", color: T.textMuted, fontSize: 10, fontFamily: mono, opacity: loading ? 0.5 : 1 }}>
+            <span>{p.icon}</span><span>{p.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Chat Messages */}
+      <div ref={chatRef} style={{ flex: 1, overflowY: "auto", padding: "12px", display: "flex", flexDirection: "column", gap: 10 }}>
+        {messages.map((m, i) => (
+          <div key={i} style={{ display: "flex", gap: 8, flexDirection: m.role === "user" ? "row-reverse" : "row", alignItems: "flex-start" }}>
+            <div style={{ width: 24, height: 24, borderRadius: 5, background: m.role === "user" ? T.blue : `linear-gradient(135deg, ${T.blue}50, ${T.blueGlow}50)`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>
+              {m.role === "user" ? "👤" : "🤖"}
+            </div>
+            <div style={{ maxWidth: "85%", display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ padding: "8px 10px", borderRadius: 8, background: m.role === "user" ? `${T.blue}20` : T.bg, border: `1px solid ${m.role === "user" ? T.blue : T.border}`, fontSize: 11, color: T.text, lineHeight: 1.6 }}>
+                {m.role === "user" ? <span style={{ fontFamily: mono }}>{m.content}</span> : <MarkdownMsg text={m.content} />}
+              </div>
+              {m.role === "assistant" && m.isReport && (
+                <button onClick={() => downloadWordReport(m, i)} disabled={reportDownloading === i}
+                  style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: `${T.blue}20`, border: `1px solid ${T.blue}`, borderRadius: 4, color: T.blue, fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                  {reportDownloading === i ? "⏳..." : "📄 Word"}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+            <div style={{ width: 24, height: 24, borderRadius: 5, background: `linear-gradient(135deg, ${T.blue}50, ${T.blueGlow}50)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11 }}>🤖</div>
+            <div style={{ padding: "8px 10px", borderRadius: 8, background: T.bg, border: `1px solid ${T.border}` }}>
+              <div style={{ display: "flex", gap: 3 }}>
+                {[0, 1, 2].map(j => (<div key={j} style={{ width: 5, height: 5, borderRadius: "50%", background: T.blue, animation: `pulse 1.2s ${j * 0.2}s infinite` }} />))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Input */}
+      <div style={{ padding: "10px 12px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8, flexShrink: 0 }}>
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
+          placeholder="Ask a question..." disabled={loading}
+          style={{ flex: 1, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, padding: "8px 10px", color: T.text, fontSize: 11, fontFamily: mono, outline: "none" }} />
+        <button onClick={() => sendMessage()} disabled={!input.trim() || loading}
+          style={{ padding: "0 14px", background: input.trim() && !loading ? T.blue : T.border, border: "none", borderRadius: 6, color: input.trim() && !loading ? "#fff" : T.textDim, fontSize: 11, fontWeight: 700, cursor: input.trim() && !loading ? "pointer" : "default", fontFamily: mono }}>
+          Send
+        </button>
+      </div>
+
+      <style>{`@keyframes pulse{0%,100%{opacity:0.3;transform:scale(0.8)}50%{opacity:1;transform:scale(1.1)}}`}</style>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── Production Stage Tab Wrapper ──────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function ProductionStageTab({ domain, children, contextData, serverUrl, settings }) {
+  const [aiPanelOpen, setAIPanelOpen] = useState(false);
+
+  return (
+    <div style={{ display: "flex", height: "calc(100vh - 160px)", overflow: "hidden" }}>
+      {/* Main Content */}
+      <div style={{ flex: 1, overflow: "auto", padding: "22px 28px" }}>
+        {children}
+      </div>
+
+      {/* AI Toggle Button (when collapsed) */}
+      {!aiPanelOpen && (
+        <button onClick={() => setAIPanelOpen(true)}
+          style={{ position: "fixed", right: 0, top: "50%", transform: "translateY(-50%)", background: T.blue, border: "none", borderRadius: "8px 0 0 8px", padding: "14px 10px", cursor: "pointer", color: "#fff", fontSize: 18, zIndex: 50, boxShadow: `0 0 20px ${T.blue}40` }}>
+          🤖
+        </button>
+      )}
+
+      {/* AI Sidebar */}
+      <div style={{ width: aiPanelOpen ? 320 : 0, overflow: "hidden", transition: "width 0.3s ease", borderLeft: aiPanelOpen ? `1px solid ${T.border}` : "none", background: T.surface, flexShrink: 0 }}>
+        {aiPanelOpen && (
+          <EmbeddedAIPanel domain={domain} contextData={contextData} serverUrl={serverUrl} onClose={() => setAIPanelOpen(false)} settings={settings} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── Surfacing Tab ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function SurfacingTab({ trays, ovenServerUrl, settings }) {
+  const mono = "'JetBrains Mono',monospace";
+
+  // Filter trays in surfacing department
+  const surfacingJobs = useMemo(() => trays.filter(t => t.department === "SURFACING"), [trays]);
+  const queueJobs = surfacingJobs.filter(t => t.state === "BOUND" || t.state === "ACTIVE");
+  const inProcess = surfacingJobs.filter(t => t.state === "IN_PROCESS" || t.state === "COATING_STAGED");
+  const rushJobs = surfacingJobs.filter(t => t.rush);
+  const holdJobs = surfacingJobs.filter(t => t.state === "QC_HOLD");
+
+  const contextData = {
+    jobs: surfacingJobs,
+    queueCount: queueJobs.length,
+    inProcessCount: inProcess.length,
+    rushCount: rushJobs.length,
+    holdCount: holdJobs.length,
+  };
+
+  return (
+    <ProductionStageTab domain="surfacing" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+      {/* Stage Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>🌀 Surfacing</h2>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Lens surfacing and grinding operations</p>
+        </div>
+        <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>QUEUE</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{queueJobs.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN PROCESS</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inProcess.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: rushJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{rushJobs.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* WIP Queue */}
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader right={`${surfacingJobs.length} total`}>WIP Queue</SectionHeader>
+        {surfacingJobs.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: T.bg }}>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
+                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>TIME IN STAGE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {surfacingJobs.slice(0, 20).map(t => {
+                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
+                return (
+                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
+                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                    </td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
+                    <td style={{ padding: "10px 12px" }}><Pill color={t.state === "QC_HOLD" ? T.red : T.blue}>{t.state}</Pill></td>
+                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 60 ? T.amber : T.textDim, textAlign: "right" }}>{mins}m</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs in surfacing</div>
+        )}
+      </Card>
+
+      {/* Hold Queue */}
+      {holdJobs.length > 0 && (
+        <Card>
+          <SectionHeader right={`${holdJobs.length} on hold`}>QC Holds</SectionHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {holdJobs.map(t => (
+              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: `${T.red}10`, borderRadius: 6, borderLeft: `4px solid ${T.red}` }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: mono, fontSize: 12, fontWeight: 600, color: T.text }}>{t.job}</div>
+                  <div style={{ fontSize: 11, color: T.textDim }}>Tray: {t.id}</div>
+                </div>
+                <Pill color={T.red}>HOLD</Pill>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </ProductionStageTab>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── Cutting Tab ───────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function CuttingTab({ trays, breakage, ovenServerUrl, settings }) {
+  const mono = "'JetBrains Mono',monospace";
+
+  const cuttingJobs = useMemo(() => trays.filter(t => t.department === "CUTTING"), [trays]);
+  const queueJobs = cuttingJobs.filter(t => t.state === "BOUND" || t.state === "ACTIVE");
+  const inProcess = cuttingJobs.filter(t => t.state === "IN_PROCESS");
+  const rushJobs = cuttingJobs.filter(t => t.rush);
+  const holdJobs = cuttingJobs.filter(t => t.state === "QC_HOLD");
+
+  // Recent breaks in cutting
+  const cuttingBreaks = (breakage || []).filter(b => b.dept === "CUTTING").slice(0, 10);
+
+  const contextData = {
+    jobs: cuttingJobs,
+    queueCount: queueJobs.length,
+    inProcessCount: inProcess.length,
+    rushCount: rushJobs.length,
+    holdCount: holdJobs.length,
+    recentBreaks: cuttingBreaks,
+  };
+
+  return (
+    <ProductionStageTab domain="cutting" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+      {/* Stage Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>✂️ Cutting / Edging</h2>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Lens cutting and edging operations</p>
+        </div>
+        <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>QUEUE</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{queueJobs.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN PROCESS</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inProcess.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: rushJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{rushJobs.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>BREAKS</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: cuttingBreaks.length > 0 ? T.amber : T.green, fontFamily: mono }}>{cuttingBreaks.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* WIP Queue */}
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader right={`${cuttingJobs.length} total`}>WIP Queue</SectionHeader>
+        {cuttingJobs.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: T.bg }}>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
+                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>TIME</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cuttingJobs.slice(0, 20).map(t => {
+                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
+                return (
+                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
+                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                    </td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
+                    <td style={{ padding: "10px 12px" }}><Pill color={t.state === "QC_HOLD" ? T.red : T.blue}>{t.state}</Pill></td>
+                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 60 ? T.amber : T.textDim, textAlign: "right" }}>{mins}m</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs in cutting</div>
+        )}
+      </Card>
+
+      {/* Recent Breaks */}
+      {cuttingBreaks.length > 0 && (
+        <Card>
+          <SectionHeader right={`${cuttingBreaks.length} today`}>Recent Breaks</SectionHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {cuttingBreaks.slice(0, 5).map((b, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: 10, background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.amber}` }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: T.text }}>{b.job}</div>
+                  <div style={{ fontSize: 10, color: T.textDim }}>{b.type} • {b.lens}</div>
+                </div>
+                <div style={{ fontFamily: mono, fontSize: 11, color: T.amber }}>${b.cost?.toFixed(2)}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </ProductionStageTab>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── Assembly Tab ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function AssemblyTab({ trays, ovenServerUrl, settings }) {
+  const mono = "'JetBrains Mono',monospace";
+
+  const assemblyJobs = useMemo(() => trays.filter(t => t.department === "ASSEMBLY"), [trays]);
+  const queueJobs = assemblyJobs.filter(t => t.state === "BOUND" || t.state === "ACTIVE");
+  const inProcess = assemblyJobs.filter(t => t.state === "IN_PROCESS");
+  const rushJobs = assemblyJobs.filter(t => t.rush);
+  const holdJobs = assemblyJobs.filter(t => t.state === "QC_HOLD");
+  const completedToday = trays.filter(t => t.state === "COMPLETE" && t.updatedAt && (Date.now() - t.updatedAt) < 86400000).length;
+
+  const contextData = {
+    jobs: assemblyJobs,
+    queueCount: queueJobs.length,
+    inProcessCount: inProcess.length,
+    rushCount: rushJobs.length,
+    holdCount: holdJobs.length,
+    completedToday,
+    qcReturns: holdJobs.map(t => ({ job: t.job, reason: "QC Hold" })),
+  };
+
+  return (
+    <ProductionStageTab domain="assembly" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+      {/* Stage Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>🔧 Assembly</h2>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Frame assembly and final inspection</p>
+        </div>
+        <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>QUEUE</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{queueJobs.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN PROCESS</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inProcess.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>COMPLETED</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{completedToday}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: rushJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{rushJobs.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* WIP Queue */}
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader right={`${assemblyJobs.length} total`}>WIP Queue</SectionHeader>
+        {assemblyJobs.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: T.bg }}>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
+                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>TIME</th>
+              </tr>
+            </thead>
+            <tbody>
+              {assemblyJobs.slice(0, 20).map(t => {
+                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
+                return (
+                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
+                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                    </td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
+                    <td style={{ padding: "10px 12px" }}><Pill color={t.state === "QC_HOLD" ? T.red : T.blue}>{t.state}</Pill></td>
+                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 60 ? T.amber : T.textDim, textAlign: "right" }}>{mins}m</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs in assembly</div>
+        )}
+      </Card>
+
+      {/* QC Returns */}
+      {holdJobs.length > 0 && (
+        <Card>
+          <SectionHeader right={`${holdJobs.length} returns`}>QC Returns</SectionHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {holdJobs.map(t => (
+              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: `${T.amber}10`, borderRadius: 6, borderLeft: `4px solid ${T.amber}` }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: mono, fontSize: 12, fontWeight: 600, color: T.text }}>{t.job}</div>
+                  <div style={{ fontSize: 11, color: T.textDim }}>Tray: {t.id}</div>
+                </div>
+                <Pill color={T.amber}>QC RETURN</Pill>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+    </ProductionStageTab>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── Shipping Tab ──────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function ShippingTab({ trays, ovenServerUrl, settings }) {
+  const mono = "'JetBrains Mono',monospace";
+
+  const shippingJobs = useMemo(() => trays.filter(t => t.department === "SHIPPING"), [trays]);
+  const readyToShip = shippingJobs.filter(t => t.state === "COMPLETE");
+  const inProcess = shippingJobs.filter(t => t.state !== "COMPLETE");
+  const rushJobs = shippingJobs.filter(t => t.rush);
+
+  // Simulate overdue (jobs in shipping > 2 hours)
+  const overdueJobs = shippingJobs.filter(t => t.updatedAt && (Date.now() - t.updatedAt) > 2 * 3600000);
+  const shippedToday = trays.filter(t => t.state === "SHIPPED" || (t.department === "SHIPPING" && t.state === "COMPLETE")).length;
+
+  const contextData = {
+    jobs: shippingJobs,
+    readyCount: readyToShip.length,
+    inProcessCount: inProcess.length,
+    rushCount: rushJobs.length,
+    overdueCount: overdueJobs.length,
+    shippedToday,
+    overdue: overdueJobs.map(t => ({ job: t.job, dueDate: "Today", reason: "Delayed" })),
+  };
+
+  return (
+    <ProductionStageTab domain="shipping" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+      {/* Stage Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>📤 Shipping</h2>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Final QC and shipment processing</p>
+        </div>
+        <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>READY</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{readyToShip.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SHIPPED TODAY</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{shippedToday}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>OVERDUE</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: overdueJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{overdueJobs.length}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: rushJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{rushJobs.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Ready to Ship */}
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader right={`${readyToShip.length} ready`}>Ready to Ship</SectionHeader>
+        {readyToShip.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ background: T.bg }}>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>TRAY</th>
+                <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>COATING</th>
+                <th style={{ padding: "10px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>WAIT TIME</th>
+              </tr>
+            </thead>
+            <tbody>
+              {readyToShip.slice(0, 20).map(t => {
+                const mins = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 60000) : 0;
+                return (
+                  <tr key={t.id} style={{ borderBottom: `1px solid ${T.border}`, background: t.rush ? `${T.red}08` : "transparent" }}>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
+                      {t.job || "—"} {t.rush && <span style={{ color: T.red }}>🔴</span>}
+                    </td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{t.id}</td>
+                    <td style={{ padding: "10px 12px", fontSize: 11, color: T.textMuted }}>{t.coatingType || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: mins > 120 ? T.red : T.textDim, textAlign: "right" }}>{mins}m</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No jobs ready to ship</div>
+        )}
+      </Card>
+
+      {/* Overdue */}
+      {overdueJobs.length > 0 && (
+        <Card>
+          <SectionHeader right={`${overdueJobs.length} overdue`}>Overdue Shipments</SectionHeader>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {overdueJobs.map(t => {
+              const hrs = t.updatedAt ? Math.floor((Date.now() - t.updatedAt) / 3600000) : 0;
+              return (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: `${T.red}10`, borderRadius: 6, borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontFamily: mono, fontSize: 12, fontWeight: 600, color: T.text }}>{t.job}</div>
+                    <div style={{ fontSize: 11, color: T.textDim }}>Waiting {hrs}+ hours</div>
+                  </div>
+                  <Pill color={T.red}>OVERDUE</Pill>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+    </ProductionStageTab>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // ── Claude AI Assistant Tab ───────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function AIAssistantTab({trays,batches}){
+function AIAssistantTab({trays,batches,settings}){
+  // Get coater machines from settings (fallback to MACHINES constant)
+  const coaterMachines=useMemo(()=>{
+    const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
+    return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
+  },[settings?.equipment]);
+
   const [messages,setMessages]=useState([
     {role:"assistant",content:"Hello! I'm your Lab_Assistant AI. I have full context on your tray fleet, coating batches, and production data.\n\nAsk me anything — job lookups, yield analysis, shift reports — or click a quick action. For reports, I'll also offer a **Download as Word** button so you can share them directly."}
   ]);
@@ -1814,7 +3188,7 @@ ${recentBatches.map(b=>`  ${b.id}: ${b.coating} | ${b.machine} | ${b.lenses}/${b
 YIELD BY COATING TYPE:
 ${Object.entries(byCoating).map(([k,v])=>`  ${k}: ${v.count} batches, avg ${Math.round(v.passSum/v.count)}% pass rate`).join("\n")}
 
-MACHINES: ${MACHINES.join(", ")}
+MACHINES: ${coaterMachines.join(", ")}
 COATING TYPES: ${COATING_TYPES.join(", ")}
 
 When generating reports: use ## for main sections, ### for subsections, - for bullet points, **bold** for key metrics. Be specific with actual numbers from the data. Flag anything below 90% pass rate as a concern. Be concise but comprehensive.`;
@@ -1835,9 +3209,15 @@ When generating reports: use ## for main sections, ### for subsections, - for bu
     setMessages(newMessages);
     setLoading(true);
     try{
+      const apiKey=getAnthropicApiKey(settings);
+      if(!apiKey){
+        setMessages(prev=>[...prev,{role:"assistant",content:"⚠️ No API key configured. Go to Settings → AI to add your Anthropic API key."}]);
+        setLoading(false);
+        return;
+      }
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+        headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body:JSON.stringify({
           model:"claude-sonnet-4-20250514",
           max_tokens:2000,
@@ -1847,7 +3227,7 @@ When generating reports: use ## for main sections, ### for subsections, - for bu
         }),
       });
       const data=await res.json();
-      const reply=data?.content?.[0]?.text||"Sorry, I couldn't get a response. Please try again.";
+      const reply=data?.content?.[0]?.text||data?.error?.message||"Sorry, I couldn't get a response. Please try again.";
       const msgIdx=newMessages.length;
       setMessages(prev=>[...prev,{role:"assistant",content:reply,isReport:willBeReport,prompt:isAgingReport?"WIP Aging Report":userText,msgIdx}]);
     }catch(e){
@@ -3144,7 +4524,7 @@ function Spark({values,color=T.blue,h=32}){
   );
 }
 
-function AnalyticsTab({batches,trays,ovenServerUrl}){
+function AnalyticsTab({batches,trays,ovenServerUrl,settings}){
   const mono="'JetBrains Mono',monospace";
   const [sub,setSub]=useState("overview");
   const [range,setRange]=useState("30d");
@@ -3154,6 +4534,12 @@ function AnalyticsTab({batches,trays,ovenServerUrl}){
   const [ovenRuns,setOvenRuns]=useState([]);
   const [ovenStats,setOvenStats]=useState(null);
   const [ovenOk,setOvenOk]=useState(false);
+
+  // Get coater machines from settings (fallback to MACHINES constant)
+  const coaterMachines=useMemo(()=>{
+    const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
+    return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
+  },[settings?.equipment]);
 
   // Static historical data (replace with API)
   const [history]=useState(()=>genHistoricalBatches(30));
@@ -3400,7 +4786,7 @@ function AnalyticsTab({batches,trays,ovenServerUrl}){
                   {/* Machine breakdown */}
                   <div style={{flex:1}}>
                     <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,marginBottom:6}}>BY MACHINE</div>
-                    {MACHINES.map(m=>{
+                    {coaterMachines.map(m=>{
                       const cnt=d.rows.filter(b=>b.machine===m).length;
                       const pct=d.batches?Math.round(cnt/d.batches*100):0;
                       if(!cnt)return null;
@@ -3642,6 +5028,1685 @@ function AnalyticsTab({batches,trays,ovenServerUrl}){
   );
 }
 
+// ── SETTINGS TAB ──────────────────────────────────────────────────────────────
+function SettingsTab({settings,setSettings,ovenServerUrl}){
+  const mono="'JetBrains Mono',monospace";
+  const [sub,setSub]=useState("equipment");
+  const [pinInput,setPinInput]=useState("");
+  const [pinMode,setPinMode]=useState(null); // null, 'set', 'change', 'verify'
+  const [pinError,setPinError]=useState("");
+  const [pinAttempts,setPinAttempts]=useState(0);
+  const [lockoutUntil,setLockoutUntil]=useState(null);
+  const [editingCategory,setEditingCategory]=useState(null);
+  const [editingEquipment,setEditingEquipment]=useState(null);
+  const [categoryFilter,setCategoryFilter]=useState("all");
+  const [serverStatus,setServerStatus]=useState(null);
+  const [testingServer,setTestingServer]=useState(false);
+
+  // Check for lockout
+  const isLockedOut = lockoutUntil && Date.now() < lockoutUntil;
+  const lockoutRemaining = isLockedOut ? Math.ceil((lockoutUntil - Date.now()) / 1000) : 0;
+
+  // Test server connection
+  const testServerConnection = async () => {
+    setTestingServer(true);
+    try {
+      const resp = await fetch(`${settings.serverUrl || ovenServerUrl}/health`, {
+        signal: AbortSignal.timeout(5000)
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setServerStatus({ ok: true, message: `Connected — ${data.runs || 0} runs, ${data.liveRacks || 0} live racks` });
+      } else {
+        setServerStatus({ ok: false, message: `HTTP ${resp.status}` });
+      }
+    } catch (e) {
+      setServerStatus({ ok: false, message: e.message || 'Connection failed' });
+    }
+    setTestingServer(false);
+  };
+
+  // PIN verification
+  const handlePinSubmit = () => {
+    if (isLockedOut) return;
+
+    if (pinMode === 'verify') {
+      if (pinInput === settings.pin) {
+        setPinMode(null);
+        setPinInput("");
+        setPinError("");
+        setPinAttempts(0);
+      } else {
+        const newAttempts = pinAttempts + 1;
+        setPinAttempts(newAttempts);
+        setPinError(`Incorrect PIN (${3 - newAttempts} attempts remaining)`);
+        setPinInput("");
+        if (newAttempts >= 3) {
+          setLockoutUntil(Date.now() + 30000);
+          setPinError("Too many attempts. Locked for 30 seconds.");
+        }
+      }
+    } else if (pinMode === 'set' || pinMode === 'change') {
+      if (pinInput.length < 4 || pinInput.length > 6) {
+        setPinError("PIN must be 4-6 digits");
+        return;
+      }
+      if (!/^\d+$/.test(pinInput)) {
+        setPinError("PIN must be numbers only");
+        return;
+      }
+      setSettings(prev => ({ ...prev, pin: pinInput, pinEnabled: true }));
+      setPinMode(null);
+      setPinInput("");
+      setPinError("");
+    }
+  };
+
+  const disablePin = () => {
+    setSettings(prev => ({ ...prev, pin: null, pinEnabled: false }));
+  };
+
+  // Category CRUD
+  const addCategory = () => {
+    const id = `cat_${Date.now()}`;
+    setSettings(prev => ({
+      ...prev,
+      equipmentCategories: [...prev.equipmentCategories, { id, name: 'New Category', icon: '⚙️', color: '#64748B' }]
+    }));
+    setEditingCategory(id);
+  };
+
+  const updateCategory = (id, updates) => {
+    setSettings(prev => ({
+      ...prev,
+      equipmentCategories: prev.equipmentCategories.map(c => c.id === id ? { ...c, ...updates } : c)
+    }));
+  };
+
+  const deleteCategory = (id) => {
+    if (!confirm(`Delete this category? Equipment in this category will be moved to "Uncategorized".`)) return;
+    setSettings(prev => ({
+      ...prev,
+      equipmentCategories: prev.equipmentCategories.filter(c => c.id !== id),
+      equipment: prev.equipment.map(e => e.categoryId === id ? { ...e, categoryId: null } : e)
+    }));
+  };
+
+  // Equipment CRUD
+  const addEquipment = () => {
+    const id = `eq_${Date.now()}`;
+    const defaultCat = settings.equipmentCategories[0]?.id || null;
+    setSettings(prev => ({
+      ...prev,
+      equipment: [...prev.equipment, { id, categoryId: defaultCat, name: 'New Equipment', serialNumber: '', location: '' }]
+    }));
+    setEditingEquipment(id);
+  };
+
+  const updateEquipment = (id, updates) => {
+    setSettings(prev => ({
+      ...prev,
+      equipment: prev.equipment.map(e => e.id === id ? { ...e, ...updates } : e)
+    }));
+  };
+
+  const deleteEquipment = (id) => {
+    if (!confirm(`Delete this equipment?`)) return;
+    setSettings(prev => ({
+      ...prev,
+      equipment: prev.equipment.filter(e => e.id !== id)
+    }));
+    if (editingEquipment === id) setEditingEquipment(null);
+  };
+
+  // Available icons for picker
+  const ICONS = ['⚙️','🌡','🔥','✂️','💿','⚡','📡','🔲','🔳','📐','🔧','🛠️','⚗️','🔬','📦','🏭','💡','🔌'];
+
+  // Filter equipment
+  const filteredEquipment = categoryFilter === 'all'
+    ? settings.equipment
+    : settings.equipment.filter(e => e.categoryId === categoryFilter);
+
+  // Get category by ID
+  const getCat = (id) => settings.equipmentCategories.find(c => c.id === id) || { name: 'Uncategorized', icon: '❓', color: '#64748B' };
+
+  // Top nav
+  const topBar = (
+    <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:18,flexWrap:"wrap"}}>
+      {[
+        {id:"equipment",icon:"⚙️",label:"Equipment"},
+        {id:"categories",icon:"📦",label:"Categories"},
+        {id:"server",icon:"🔗",label:"Server"},
+        {id:"ai",icon:"🤖",label:"AI"},
+        {id:"security",icon:"🔒",label:"Security"},
+      ].map(n=>(
+        <button key={n.id} onClick={()=>setSub(n.id)}
+          style={{background:sub===n.id?T.blueDark:"transparent",border:`1px solid ${sub===n.id?T.blue:"transparent"}`,
+          borderRadius:8,padding:"9px 18px",cursor:"pointer",color:sub===n.id?"#93C5FD":T.textMuted,
+          fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:7,fontFamily:"'DM Sans',sans-serif",transition:"all 0.2s"}}>
+          {n.icon} {n.label}
+        </button>
+      ))}
+    </div>
+  );
+
+  return(
+    <div>
+      <div style={{marginBottom:20}}>
+        <div style={{fontSize:22,fontWeight:800,color:T.text,marginBottom:4}}>Settings</div>
+        <div style={{fontSize:12,color:T.textMuted}}>Configure equipment, categories, and server connections</div>
+      </div>
+
+      {topBar}
+
+      {/* ══ EQUIPMENT ══ */}
+      {sub==="equipment"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>FILTER:</span>
+              <select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}
+                style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"6px 10px",color:T.text,fontSize:12,fontFamily:mono}}>
+                <option value="all">All Categories</option>
+                {settings.equipmentCategories.map(c=>(
+                  <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
+                ))}
+              </select>
+            </div>
+            <button onClick={addEquipment}
+              style={{background:T.blue,border:"none",borderRadius:8,padding:"8px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+              + Add Equipment
+            </button>
+          </div>
+
+          <Card style={{padding:0}}>
+            <div style={{maxHeight:500,overflowY:"auto"}}>
+              {filteredEquipment.length === 0 ? (
+                <div style={{padding:40,textAlign:"center",color:T.textDim}}>
+                  <div style={{fontSize:32,marginBottom:10}}>⚙️</div>
+                  <div style={{fontSize:13}}>No equipment in this category</div>
+                  <button onClick={addEquipment} style={{marginTop:12,background:"transparent",border:`1px solid ${T.blue}`,borderRadius:6,padding:"6px 14px",color:T.blue,fontSize:12,cursor:"pointer"}}>
+                    + Add Equipment
+                  </button>
+                </div>
+              ) : (
+                filteredEquipment.map(eq => {
+                  const cat = getCat(eq.categoryId);
+                  const isEditing = editingEquipment === eq.id;
+                  return(
+                    <div key={eq.id} style={{borderBottom:`1px solid ${T.border}`,padding:"14px 16px",background:isEditing?`${T.blue}08`:'transparent'}}>
+                      {isEditing ? (
+                        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                          <div style={{display:"flex",gap:10}}>
+                            <div style={{flex:1}}>
+                              <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:4}}>NAME</label>
+                              <input value={eq.name} onChange={e=>updateEquipment(eq.id,{name:e.target.value})}
+                                style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 10px",color:T.text,fontSize:13}}/>
+                            </div>
+                            <div style={{width:180}}>
+                              <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:4}}>CATEGORY</label>
+                              <select value={eq.categoryId||''} onChange={e=>updateEquipment(eq.id,{categoryId:e.target.value})}
+                                style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 10px",color:T.text,fontSize:12}}>
+                                <option value="">Uncategorized</option>
+                                {settings.equipmentCategories.map(c=>(
+                                  <option key={c.id} value={c.id}>{c.icon} {c.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",gap:10}}>
+                            <div style={{flex:1}}>
+                              <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:4}}>SERIAL NUMBER</label>
+                              <input value={eq.serialNumber||''} onChange={e=>updateEquipment(eq.id,{serialNumber:e.target.value})} placeholder="Optional"
+                                style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 10px",color:T.text,fontSize:13}}/>
+                            </div>
+                            <div style={{flex:1}}>
+                              <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:4}}>LOCATION</label>
+                              <input value={eq.location||''} onChange={e=>updateEquipment(eq.id,{location:e.target.value})} placeholder="Optional"
+                                style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 10px",color:T.text,fontSize:13}}/>
+                            </div>
+                          </div>
+                          <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+                            <button onClick={()=>deleteEquipment(eq.id)} style={{background:"transparent",border:`1px solid ${T.red}`,borderRadius:6,padding:"6px 12px",color:T.red,fontSize:11,cursor:"pointer"}}>Delete</button>
+                            <button onClick={()=>setEditingEquipment(null)} style={{background:T.blue,border:"none",borderRadius:6,padding:"6px 16px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>Done</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{display:"flex",alignItems:"center",gap:12}}>
+                          <div style={{width:36,height:36,borderRadius:8,background:`${cat.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>{cat.icon}</div>
+                          <div style={{flex:1}}>
+                            <div style={{fontSize:14,fontWeight:700,color:T.text}}>{eq.name}</div>
+                            <div style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{cat.name}{eq.location ? ` · ${eq.location}` : ''}</div>
+                          </div>
+                          {eq.serialNumber && <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>S/N: {eq.serialNumber}</span>}
+                          <button onClick={()=>setEditingEquipment(eq.id)} style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"6px 12px",color:T.textMuted,fontSize:11,cursor:"pointer"}}>Edit</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ CATEGORIES ══ */}
+      {sub==="categories"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div style={{fontSize:12,color:T.textMuted}}>{settings.equipmentCategories.length} categories</div>
+            <button onClick={addCategory}
+              style={{background:T.blue,border:"none",borderRadius:8,padding:"8px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+              + Add Category
+            </button>
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+            {settings.equipmentCategories.map(cat => {
+              const isEditing = editingCategory === cat.id;
+              const eqCount = settings.equipment.filter(e => e.categoryId === cat.id).length;
+              return(
+                <Card key={cat.id} style={{padding:isEditing?16:14,borderLeft:`4px solid ${cat.color}`}}>
+                  {isEditing ? (
+                    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                      <div>
+                        <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:4}}>NAME</label>
+                        <input value={cat.name} onChange={e=>updateCategory(cat.id,{name:e.target.value})}
+                          style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 10px",color:T.text,fontSize:13}}/>
+                      </div>
+                      <div>
+                        <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:4}}>ICON</label>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          {ICONS.map(icon=>(
+                            <button key={icon} onClick={()=>updateCategory(cat.id,{icon})}
+                              style={{width:32,height:32,borderRadius:6,border:cat.icon===icon?`2px solid ${T.blue}`:`1px solid ${T.border}`,background:cat.icon===icon?T.blueDark:"transparent",cursor:"pointer",fontSize:16}}>
+                              {icon}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:4}}>COLOR</label>
+                        <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+                          {['#EF4444','#F97316','#F59E0B','#84CC16','#10B981','#06B6D4','#3B82F6','#8B5CF6','#EC4899','#64748B'].map(c=>(
+                            <button key={c} onClick={()=>updateCategory(cat.id,{color:c})}
+                              style={{width:28,height:28,borderRadius:6,background:c,border:cat.color===c?`2px solid #fff`:'none',cursor:"pointer",boxShadow:cat.color===c?'0 0 0 2px #3B82F6':'none'}}/>
+                          ))}
+                        </div>
+                      </div>
+                      <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+                        <button onClick={()=>deleteCategory(cat.id)} style={{background:"transparent",border:`1px solid ${T.red}`,borderRadius:6,padding:"6px 12px",color:T.red,fontSize:11,cursor:"pointer"}}>Delete</button>
+                        <button onClick={()=>setEditingCategory(null)} style={{background:T.blue,border:"none",borderRadius:6,padding:"6px 16px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer"}}>Done</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <div style={{width:44,height:44,borderRadius:10,background:`${cat.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:22}}>{cat.icon}</div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:15,fontWeight:700,color:T.text}}>{cat.name}</div>
+                        <div style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{eqCount} equipment</div>
+                      </div>
+                      <button onClick={()=>setEditingCategory(cat.id)} style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"6px 12px",color:T.textMuted,fontSize:11,cursor:"pointer"}}>Edit</button>
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* ══ SERVER SETTINGS ══ */}
+      {sub==="server"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <Card>
+            <SectionHeader>Server Connection</SectionHeader>
+            <div style={{display:"flex",flexDirection:"column",gap:16}}>
+              <div>
+                <label style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:6}}>OVEN/MAINTENANCE SERVER URL</label>
+                <div style={{display:"flex",gap:8}}>
+                  <input value={settings.serverUrl||''} onChange={e=>setSettings(prev=>({...prev,serverUrl:e.target.value}))}
+                    placeholder="http://localhost:3002"
+                    style={{flex:1,background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 12px",color:T.text,fontSize:13,fontFamily:mono}}/>
+                  <button onClick={testServerConnection} disabled={testingServer}
+                    style={{background:T.blue,border:"none",borderRadius:8,padding:"10px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:testingServer?0.7:1}}>
+                    {testingServer ? "Testing..." : "Test"}
+                  </button>
+                </div>
+                {serverStatus && (
+                  <div style={{marginTop:8,display:"flex",alignItems:"center",gap:6}}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:serverStatus.ok?T.green:T.red}}/>
+                    <span style={{fontSize:11,color:serverStatus.ok?T.green:T.red,fontFamily:mono}}>{serverStatus.message}</span>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:6}}>SLACK WEBHOOK URL</label>
+                <input value={settings.slackWebhook||''} onChange={e=>setSettings(prev=>({...prev,slackWebhook:e.target.value}))}
+                  placeholder="https://hooks.slack.com/services/..."
+                  style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 12px",color:T.text,fontSize:13,fontFamily:mono}}/>
+                <div style={{fontSize:10,color:T.textDim,marginTop:4}}>Used for sending alerts to Slack</div>
+              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader>Connection Status</SectionHeader>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:12}}>
+              <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:serverStatus?.ok?T.green:T.textDim}}/>
+                  <span style={{fontSize:12,fontWeight:700,color:T.text}}>Oven Server</span>
+                </div>
+                <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{settings.serverUrl || 'Not configured'}</div>
+              </div>
+              <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <div style={{width:10,height:10,borderRadius:"50%",background:settings.slackWebhook?T.green:T.textDim}}/>
+                  <span style={{fontSize:12,fontWeight:700,color:T.text}}>Slack</span>
+                </div>
+                <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{settings.slackWebhook ? 'Configured' : 'Not configured'}</div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ AI ══ */}
+      {sub==="ai"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <Card>
+            <SectionHeader>Claude AI Configuration</SectionHeader>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:13,color:T.textMuted,marginBottom:12}}>
+                Enter your Anthropic API key to enable AI features. You can get an API key from{' '}
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{color:T.blue}}>console.anthropic.com</a>
+              </div>
+              <div style={{marginBottom:16}}>
+                <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:6,letterSpacing:1}}>ANTHROPIC API KEY</label>
+                <input
+                  type="password"
+                  value={settings.anthropicApiKey||""}
+                  onChange={e=>setSettings(prev=>({...prev,anthropicApiKey:e.target.value}))}
+                  placeholder="sk-ant-api03-..."
+                  style={{width:"100%",maxWidth:500,background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,padding:"12px 14px",color:T.text,fontSize:13,fontFamily:mono,outline:"none",boxSizing:"border-box"}}
+                />
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:10,height:10,borderRadius:"50%",background:settings.anthropicApiKey?T.green:T.textDim}}/>
+                <span style={{fontSize:12,color:settings.anthropicApiKey?T.green:T.textMuted,fontFamily:mono}}>
+                  {settings.anthropicApiKey?"API Key configured":"No API key set — AI features will not work"}
+                </span>
+              </div>
+            </div>
+          </Card>
+          <Card>
+            <SectionHeader>AI Features</SectionHeader>
+            <div style={{fontSize:13,color:T.textMuted}}>
+              <p style={{marginBottom:8}}>When configured, AI is available in:</p>
+              <ul style={{margin:0,paddingLeft:20,lineHeight:1.8}}>
+                <li><strong>AI Assistant tab</strong> — Full chat with pre-loaded report prompts</li>
+                <li><strong>Production tabs</strong> — Embedded specialists in Surfacing, Cutting, Coating, Assembly, Shipping</li>
+                <li><strong>Support tabs</strong> — Embedded specialists in Inventory and Maintenance</li>
+              </ul>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ SECURITY ══ */}
+      {sub==="security"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <Card>
+            <SectionHeader>PIN Protection</SectionHeader>
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:13,color:T.textMuted,marginBottom:12}}>
+                {settings.pinEnabled
+                  ? "Settings are protected with a PIN. You'll need to enter the PIN when accessing Settings."
+                  : "No PIN set. Anyone can access and modify settings."}
+              </div>
+
+              {isLockedOut ? (
+                <div style={{background:`${T.red}15`,border:`1px solid ${T.red}`,borderRadius:10,padding:"16px 20px",textAlign:"center"}}>
+                  <div style={{fontSize:13,color:T.red,fontWeight:700}}>Locked Out</div>
+                  <div style={{fontSize:11,color:T.textMuted,marginTop:4}}>Too many incorrect attempts. Try again in {lockoutRemaining} seconds.</div>
+                </div>
+              ) : pinMode ? (
+                <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"20px 24px",maxWidth:300}}>
+                  <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:12}}>
+                    {pinMode === 'set' ? 'Set New PIN' : pinMode === 'change' ? 'Enter New PIN' : 'Enter Current PIN'}
+                  </div>
+                  <div style={{display:"flex",gap:8,marginBottom:12}}>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={6}
+                      value={pinInput}
+                      onChange={e=>setPinInput(e.target.value.replace(/\D/g,''))}
+                      onKeyDown={e=>e.key==='Enter'&&handlePinSubmit()}
+                      placeholder="4-6 digits"
+                      style={{flex:1,background:T.surface,border:`1px solid ${pinError?T.red:T.border}`,borderRadius:8,padding:"12px 14px",color:T.text,fontSize:18,fontFamily:mono,textAlign:"center",letterSpacing:8}}
+                    />
+                  </div>
+                  {pinError && <div style={{fontSize:11,color:T.red,marginBottom:8}}>{pinError}</div>}
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>{setPinMode(null);setPinInput("");setPinError("");}}
+                      style={{flex:1,background:"transparent",border:`1px solid ${T.border}`,borderRadius:6,padding:"8px",color:T.textMuted,fontSize:12,cursor:"pointer"}}>Cancel</button>
+                    <button onClick={handlePinSubmit} disabled={pinInput.length<4}
+                      style={{flex:1,background:T.blue,border:"none",borderRadius:6,padding:"8px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:pinInput.length<4?0.5:1}}>
+                      {pinMode === 'verify' ? 'Unlock' : 'Set PIN'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{display:"flex",gap:10}}>
+                  {settings.pinEnabled ? (
+                    <>
+                      <button onClick={()=>setPinMode('change')} style={{background:T.blue,border:"none",borderRadius:8,padding:"10px 20px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Change PIN</button>
+                      <button onClick={disablePin} style={{background:"transparent",border:`1px solid ${T.red}`,borderRadius:8,padding:"10px 20px",color:T.red,fontSize:12,fontWeight:700,cursor:"pointer"}}>Disable PIN</button>
+                    </>
+                  ) : (
+                    <button onClick={()=>setPinMode('set')} style={{background:T.blue,border:"none",borderRadius:8,padding:"10px 20px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer"}}>Set PIN</button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{borderTop:`1px solid ${T.border}`,paddingTop:16}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{width:40,height:40,borderRadius:10,background:settings.pinEnabled?`${T.green}20`:`${T.textDim}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
+                  {settings.pinEnabled ? '🔒' : '🔓'}
+                </div>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:T.text}}>Status: {settings.pinEnabled ? 'Protected' : 'Unprotected'}</div>
+                  <div style={{fontSize:11,color:T.textMuted}}>{settings.pinEnabled ? `PIN: ${'•'.repeat(settings.pin?.length || 4)}` : 'No PIN configured'}</div>
+                </div>
+              </div>
+            </div>
+          </Card>
+
+          <Card>
+            <SectionHeader>Data Management</SectionHeader>
+            <div style={{display:"flex",gap:10}}>
+              <button onClick={()=>{
+                if(confirm('Reset all settings to defaults? This cannot be undone.')){
+                  setSettings(DEFAULT_SETTINGS);
+                }
+              }} style={{background:"transparent",border:`1px solid ${T.amber}`,borderRadius:8,padding:"10px 16px",color:T.amber,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                Reset to Defaults
+              </button>
+              <button onClick={()=>{
+                const data = JSON.stringify(settings, null, 2);
+                const blob = new Blob([data], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `lab-assistant-settings-${new Date().toISOString().slice(0,10)}.json`;
+                a.click();
+              }} style={{background:"transparent",border:`1px solid ${T.blue}`,borderRadius:8,padding:"10px 16px",color:T.blue,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                Export Settings
+              </button>
+            </div>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── INVENTORY TAB ─────────────────────────────────────────────────────────────
+function InventoryTab({ovenServerUrl,settings}){
+  const mono="'JetBrains Mono',monospace";
+  const [sub,setSub]=useState("inventory");
+  const [inventory,setInventory]=useState({materials:[],lastSync:null,status:'pending',alertCount:0,warehouses:[],warehouseStats:{},vlmStats:{}});
+  const [picks,setPicks]=useState({picks:[],recent:[],count:0,byWarehouse:{}});
+  const [alerts,setAlerts]=useState({alerts:[],critical:0,high:0,low:0});
+  const [vlms,setVlms]=useState({vlmStats:{},locations:[]});
+  const [loading,setLoading]=useState(true);
+  const [searchQuery,setSearchQuery]=useState("");
+  const [filterCoating,setFilterCoating]=useState("All");
+  const [sortCol,setSortCol]=useState("qty");
+  const [sortDir,setSortDir]=useState("asc");
+
+  // Fetch all inventory data
+  useEffect(()=>{
+    if(!ovenServerUrl)return;
+    const go=async()=>{
+      try{
+        const [invResp,picksResp,alertsResp,vlmsResp]=await Promise.all([
+          fetch(`${ovenServerUrl}/api/inventory`).then(r=>r.json()),
+          fetch(`${ovenServerUrl}/api/inventory/picks`).then(r=>r.json()),
+          fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r=>r.json()),
+          fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r=>r.json()),
+        ]);
+        setInventory(invResp);
+        setPicks(picksResp);
+        setAlerts(alertsResp);
+        setVlms(vlmsResp);
+        setLoading(false);
+      }catch(e){
+        console.error('[Inventory] Fetch error:',e);
+        setLoading(false);
+      }
+    };
+    go();
+    const iv=setInterval(go,30000);
+    return()=>clearInterval(iv);
+  },[ovenServerUrl]);
+
+  // Filter and sort materials
+  const filteredMaterials=useMemo(()=>{
+    let items=[...(inventory.materials||[])];
+    if(searchQuery){
+      const q=searchQuery.toLowerCase();
+      items=items.filter(m=>
+        m.sku?.toLowerCase().includes(q)||
+        m.name?.toLowerCase().includes(q)||
+        m.coatingType?.toLowerCase().includes(q)||
+        m.location?.toLowerCase().includes(q)
+      );
+    }
+    if(filterCoating!=="All"){
+      items=items.filter(m=>m.coatingType===filterCoating);
+    }
+    items.sort((a,b)=>{
+      const av=a[sortCol],bv=b[sortCol];
+      if(typeof av==="number"&&typeof bv==="number")return sortDir==="asc"?av-bv:bv-av;
+      return sortDir==="asc"?String(av||"").localeCompare(String(bv||"")):String(bv||"").localeCompare(String(av||""));
+    });
+    return items;
+  },[inventory.materials,searchQuery,filterCoating,sortCol,sortDir]);
+
+  // Get unique coating types for filter
+  const coatingTypes=useMemo(()=>{
+    const types=new Set((inventory.materials||[]).map(m=>m.coatingType).filter(Boolean));
+    return ["All",...Array.from(types).sort()];
+  },[inventory.materials]);
+
+  // Stats
+  const totalSKUs=(inventory.materials||[]).length;
+  const totalQty=(inventory.materials||[]).reduce((s,m)=>s+(m.qty||0),0);
+  const outOfStock=(inventory.materials||[]).filter(m=>m.qty===0).length;
+  const lowStock=alerts.critical+alerts.high;
+
+  const toggleSort=col=>{if(sortCol===col)setSortDir(d=>d==="asc"?"desc":"asc");else{setSortCol(col);setSortDir("asc");}};
+
+  const SHdr=({col,children,align="left"})=>(
+    <th onClick={()=>toggleSort(col)} style={{fontFamily:mono,fontSize:9,color:sortCol===col?T.amber:T.textDim,letterSpacing:1.5,
+      textAlign:align,padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase",whiteSpace:"nowrap",cursor:"pointer",userSelect:"none"}}>
+      {children}{sortCol===col?<span style={{marginLeft:3}}>{sortDir==="asc"?"▲":"▼"}</span>:null}
+    </th>
+  );
+
+  const SubNav=()=>(
+    <div style={{display:"flex",gap:4,marginBottom:20}}>
+      {[{id:"inventory",label:"📦 Inventory"},{id:"warehouses",label:"🏭 Warehouses"},{id:"picks",label:"📋 Picks"},{id:"alerts",label:"⚠️ Alerts"},{id:"search",label:"🔍 Lens Search"}].map(t=>(
+        <button key={t.id} onClick={()=>setSub(t.id)} style={{background:sub===t.id?T.blueDark:"transparent",border:`1px solid ${sub===t.id?T.blue:T.border}`,
+          borderRadius:6,padding:"8px 16px",color:sub===t.id?T.blue:T.textMuted,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:mono}}>
+          {t.label}
+          {t.id==="alerts"&&alerts.critical>0?<span style={{marginLeft:6,background:T.red,color:"#fff",borderRadius:10,padding:"2px 6px",fontSize:9}}>{alerts.critical}</span>:null}
+          {t.id==="picks"&&picks.count>0?<span style={{marginLeft:6,background:T.amber,color:"#000",borderRadius:10,padding:"2px 6px",fontSize:9}}>{picks.count}</span>:null}
+        </button>
+      ))}
+    </div>
+  );
+
+  const contextData={
+    totalSKUs,totalQty,outOfStock,lowStock,
+    criticalAlerts:alerts.critical,highAlerts:alerts.high,
+    activePicks:picks.count,
+    status:inventory.status,
+    warehouses:inventory.warehouses,
+    warehouseStats:inventory.warehouseStats,
+    vlmStats:vlms.vlmStats,
+    picksByWarehouse:picks.byWarehouse
+  };
+
+  if(loading){
+    return(<div style={{padding:32,textAlign:"center",color:T.textMuted,fontFamily:mono}}>Loading inventory data...</div>);
+  }
+
+  return(
+    <ProductionStageTab domain="inventory" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+    <div>
+      <SubNav/>
+
+      {sub==="inventory"&&(
+        <div>
+          {/* Summary cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:16,marginBottom:24}}>
+            <Card style={{padding:16,textAlign:"center"}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>TOTAL SKUS</div>
+              <div style={{fontSize:28,fontWeight:800,color:T.text,fontFamily:mono}}>{totalSKUs.toLocaleString()}</div>
+            </Card>
+            <Card style={{padding:16,textAlign:"center"}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>TOTAL QTY</div>
+              <div style={{fontSize:28,fontWeight:800,color:T.blue,fontFamily:mono}}>{totalQty.toLocaleString()}</div>
+            </Card>
+            <Card style={{padding:16,textAlign:"center"}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>OUT OF STOCK</div>
+              <div style={{fontSize:28,fontWeight:800,color:outOfStock>0?T.red:T.green,fontFamily:mono}}>{outOfStock}</div>
+            </Card>
+            <Card style={{padding:16,textAlign:"center"}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>LOW STOCK</div>
+              <div style={{fontSize:28,fontWeight:800,color:lowStock>0?T.amber:T.green,fontFamily:mono}}>{lowStock}</div>
+            </Card>
+          </div>
+
+          {/* Filters */}
+          <div style={{display:"flex",gap:12,marginBottom:16,alignItems:"center"}}>
+            <input type="text" placeholder="Search SKU, name, location..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)}
+              style={{flex:1,maxWidth:300,padding:"8px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.text,fontSize:12,fontFamily:mono}}/>
+            <select value={filterCoating} onChange={e=>setFilterCoating(e.target.value)}
+              style={{padding:"8px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.text,fontSize:12,fontFamily:mono}}>
+              {coatingTypes.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+            <div style={{fontSize:11,color:T.textDim,fontFamily:mono}}>
+              {filteredMaterials.length} of {totalSKUs} SKUs
+            </div>
+          </div>
+
+          {/* Inventory table */}
+          <Card style={{overflow:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{background:T.bg}}>
+                  <SHdr col="sku">SKU</SHdr>
+                  <SHdr col="name">Description</SHdr>
+                  <SHdr col="coatingType">Type</SHdr>
+                  <SHdr col="qty" align="right">Qty</SHdr>
+                  <SHdr col="location">Location</SHdr>
+                  <SHdr col="index">Index</SHdr>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMaterials.slice(0,100).map(m=>{
+                  const isLow=m.qty<=(m.reorderPoint||10);
+                  const isOut=m.qty===0;
+                  return(
+                    <tr key={m.id||m.sku} style={{borderBottom:`1px solid ${T.border}`,background:isOut?`${T.red}08`:isLow?`${T.amber}08`:"transparent"}}>
+                      <td style={{padding:"10px 12px",fontFamily:mono,fontSize:11,color:T.text,fontWeight:600}}>{m.sku}</td>
+                      <td style={{padding:"10px 12px",fontSize:12,color:T.textMuted,maxWidth:300,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{m.name}</td>
+                      <td style={{padding:"10px 12px"}}>
+                        {m.coatingType&&<Pill color={T.blue} bg={`${T.blue}15`}>{m.coatingType}</Pill>}
+                      </td>
+                      <td style={{padding:"10px 12px",fontFamily:mono,fontSize:13,fontWeight:700,textAlign:"right",
+                        color:isOut?T.red:isLow?T.amber:T.green}}>
+                        {m.qty}
+                      </td>
+                      <td style={{padding:"10px 12px",fontFamily:mono,fontSize:11,color:T.textDim}}>{m.location||"—"}</td>
+                      <td style={{padding:"10px 12px",fontFamily:mono,fontSize:11,color:T.textMuted}}>{m.index||"—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+            {filteredMaterials.length>100&&(
+              <div style={{padding:12,textAlign:"center",color:T.textDim,fontSize:11,fontFamily:mono}}>
+                Showing 100 of {filteredMaterials.length} items. Refine your search to see more.
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {sub==="warehouses"&&(
+        <div>
+          {/* Hourly Picks Chart - Bold totals at top */}
+          <Card style={{marginBottom:24,padding:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <div style={{fontSize:14,fontWeight:700,color:T.text,fontFamily:mono}}>TODAY'S PICKS BY HOUR</div>
+              <div style={{display:"flex",gap:24}}>
+                {['WH1','WH2'].map(wh=>{
+                  const total=Object.values(inventory.hourlyStats?.[wh]||{}).reduce((s,v)=>s+v,0);
+                  const color=wh==='WH1'?T.blue:T.green;
+                  return(
+                    <div key={wh} style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:12,height:12,borderRadius:3,background:color}}/>
+                      <span style={{fontFamily:mono,fontSize:12,color:T.textMuted}}>{wh}:</span>
+                      <span style={{fontFamily:mono,fontSize:20,fontWeight:900,color:color}}>{total}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Horizontal bar chart */}
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {['WH1','WH2'].map(wh=>{
+                const hourData=inventory.hourlyStats?.[wh]||{};
+                const maxVal=Math.max(1,...Object.values(hourData));
+                const color=wh==='WH1'?T.blue:T.green;
+                const currentHour=new Date().getHours();
+                return(
+                  <div key={wh}>
+                    <div style={{fontFamily:mono,fontSize:11,fontWeight:700,color:color,marginBottom:4}}>{wh}</div>
+                    <div style={{display:"flex",gap:2,alignItems:"flex-end",height:50,paddingTop:16}}>
+                      {Array.from({length:24},(_, h)=>{
+                        const val=hourData[h]||hourData[String(h)]||0;
+                        const barHeight=val>0?Math.max(6,Math.round((val/maxVal)*34)):2;
+                        const isNow=h===currentHour;
+                        return(
+                          <div key={h} style={{flex:1,position:"relative"}}>
+                            {val>0&&<div style={{position:"absolute",bottom:barHeight+2,left:"50%",transform:"translateX(-50%)",fontSize:9,fontWeight:700,color:color,fontFamily:mono,whiteSpace:"nowrap"}}>{val}</div>}
+                            <div style={{
+                              width:"100%",
+                              height:barHeight,
+                              background:val>0?color:`${color}30`,
+                              borderRadius:2,
+                              border:isNow?`2px solid ${T.amber}`:'none'
+                            }}/>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{display:"flex",gap:2,marginTop:2}}>
+                      {Array.from({length:24},(_,h)=>(
+                        <div key={h} style={{flex:1,textAlign:"center",fontSize:8,color:h===currentHour?T.amber:T.textDim,fontFamily:mono,fontWeight:h===currentHour?700:400}}>
+                          {h%3===0?h:''}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+
+          {/* Warehouse breakdown */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:24}}>
+            {(inventory.warehouses||[]).map(wh=>{
+              const stats=inventory.warehouseStats?.[wh.name]||{activeOrders:0,untouchedOrders:0,totalLines:0,totalQty:0,todayPicks:0};
+              return(
+                <Card key={wh.id} style={{padding:20,borderLeft:`4px solid ${wh.name==='WH1'?T.blue:wh.name==='WH2'?T.green:T.amber}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontSize:20,fontWeight:800,color:T.text,fontFamily:mono}}>{wh.name}</div>
+                    <div style={{fontSize:11,color:T.textDim,fontFamily:mono}}>{stats.todayPicks||0} picks today</div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                    <div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>ACTIVE</div>
+                      <div style={{fontSize:24,fontWeight:800,color:stats.activeOrders>0?T.amber:T.textDim,fontFamily:mono}}>{stats.activeOrders}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>QUEUED</div>
+                      <div style={{fontSize:24,fontWeight:800,color:T.blue,fontFamily:mono}}>{stats.untouchedOrders}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>LINES</div>
+                      <div style={{fontSize:18,fontWeight:700,color:T.textMuted,fontFamily:mono}}>{stats.totalLines}</div>
+                    </div>
+                    <div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>UNITS</div>
+                      <div style={{fontSize:18,fontWeight:700,color:T.textMuted,fontFamily:mono}}>{stats.totalQty}</div>
+                    </div>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Carousel Inventory Chart - matches ItemPath dashboard */}
+          {inventory.carouselStats && Object.keys(inventory.carouselStats).length > 0 && (
+            <Card style={{marginBottom:24,padding:20}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+                <div style={{fontSize:14,fontWeight:700,color:T.text,fontFamily:mono}}>CAROUSEL INVENTORY</div>
+                <div style={{fontSize:12,fontFamily:mono,color:T.textDim}}>
+                  Total: <span style={{fontWeight:800,color:T.orange}}>{Object.values(inventory.carouselStats).reduce((s,v)=>s+v,0).toLocaleString()}</span>
+                </div>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:12}}>
+                {['CAR-1','CAR-2','CAR-3','CAR-4','CAR-5','CAR-6'].map(car=>{
+                  const qty=inventory.carouselStats[car]||0;
+                  const maxQty=Math.max(...Object.values(inventory.carouselStats),1);
+                  const pct=Math.round((qty/maxQty)*100);
+                  return(
+                    <div key={car} style={{textAlign:"center"}}>
+                      <div style={{height:140,display:"flex",flexDirection:"column",justifyContent:"flex-end",alignItems:"center",marginBottom:8}}>
+                        <div style={{
+                          width:"70%",
+                          height:`${Math.max(pct,5)}%`,
+                          background:T.orange,
+                          borderRadius:"4px 4px 0 0",
+                          position:"relative",
+                          display:"flex",
+                          alignItems:"center",
+                          justifyContent:"center"
+                        }}>
+                          <span style={{
+                            fontSize:11,
+                            fontWeight:800,
+                            color:"#fff",
+                            fontFamily:mono,
+                            textShadow:"0 1px 2px rgba(0,0,0,0.3)"
+                          }}>{qty.toLocaleString()}</span>
+                        </div>
+                      </div>
+                      <div style={{fontSize:11,fontWeight:700,color:T.textMuted,fontFamily:mono}}>{car}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          )}
+
+          {/* VLM Inventory */}
+          <Card style={{marginBottom:20}}>
+            <SectionHeader right={`${Object.keys(vlms.vlmStats||{}).length} VLMs`}>VLM Inventory</SectionHeader>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))",gap:16}}>
+              {Object.entries(vlms.vlmStats||{}).map(([vlm,stats])=>(
+                <div key={vlm} style={{padding:16,background:T.bg,borderRadius:8,border:`1px solid ${T.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                    <div style={{fontFamily:mono,fontSize:16,fontWeight:800,color:T.text}}>{vlm}</div>
+                    <Pill color={T.cyan}>{stats.locationCount} bins</Pill>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:800,color:T.blue,fontFamily:mono}}>{stats.totalQty?.toLocaleString()}</div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>TOTAL QTY</div>
+                    </div>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:800,color:T.green,fontFamily:mono}}>{stats.filledLocations}</div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>FILLED</div>
+                    </div>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:22,fontWeight:800,color:T.textDim,fontFamily:mono}}>{stats.locationCount-stats.filledLocations}</div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>EMPTY</div>
+                    </div>
+                  </div>
+                  {/* Fill bar */}
+                  <div style={{marginTop:12,height:6,background:T.border,borderRadius:3,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:`${Math.round((stats.filledLocations/stats.locationCount)*100)}%`,background:T.green,borderRadius:3}}/>
+                  </div>
+                  <div style={{marginTop:4,fontSize:10,color:T.textDim,textAlign:"right",fontFamily:mono}}>
+                    {Math.round((stats.filledLocations/stats.locationCount)*100)}% utilized
+                  </div>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          {/* Active orders by warehouse */}
+          <Card>
+            <SectionHeader>Active Orders by Warehouse</SectionHeader>
+            {Object.keys(picks.byWarehouse||{}).length>0?(
+              <div style={{display:"flex",flexDirection:"column",gap:16}}>
+                {Object.entries(picks.byWarehouse).map(([wh,orders])=>(
+                  <div key={wh}>
+                    <div style={{fontFamily:mono,fontSize:14,fontWeight:700,color:T.text,marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+                      <span style={{width:12,height:12,borderRadius:3,background:wh==='WH1'?T.blue:wh==='WH2'?T.green:T.amber}}/>
+                      {wh}
+                      <span style={{fontSize:11,color:T.textDim,fontWeight:400}}>({orders.length} orders)</span>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))",gap:8}}>
+                      {orders.slice(0,6).map(p=>(
+                        <div key={p.orderId} style={{padding:10,background:T.bg,borderRadius:6,border:`1px solid ${T.border}`}}>
+                          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                            <span style={{fontFamily:mono,fontSize:11,fontWeight:600,color:T.text}}>{p.reference}</span>
+                            <span style={{fontSize:10,color:T.amber,fontFamily:mono}}>{p.lines?.length||0} items</span>
+                          </div>
+                          <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>
+                            {p.lines?.slice(0,2).map(l=>l.name).join(', ')}
+                            {(p.lines?.length||0)>2?'...':''}
+                          </div>
+                        </div>
+                      ))}
+                      {orders.length>6&&(
+                        <div style={{padding:10,textAlign:"center",color:T.textDim,fontSize:11,fontFamily:mono}}>
+                          +{orders.length-6} more orders
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ):(
+              <div style={{padding:20,textAlign:"center",color:T.textDim}}>No active orders</div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {sub==="picks"&&(
+        <div>
+          {/* Active picks */}
+          <Card style={{marginBottom:20}}>
+            <SectionHeader right={`${picks.count} active`}>Active Pick Orders</SectionHeader>
+            {picks.picks?.length>0?(
+              <div style={{display:"flex",flexDirection:"column",gap:12}}>
+                {picks.picks.map(p=>(
+                  <div key={p.orderId} style={{padding:14,background:T.bg,borderRadius:8,border:`1px solid ${T.border}`}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                      <div>
+                        <span style={{fontFamily:mono,fontSize:13,fontWeight:700,color:T.text}}>{p.reference}</span>
+                        {p.warehouse&&<Pill style={{marginLeft:8}} color={p.warehouse==='WH1'?T.blue:p.warehouse==='WH2'?T.green:T.amber}>{p.warehouse}</Pill>}
+                      </div>
+                      <Pill color={p.status==="In Process"?T.amber:T.green}>{p.status}</Pill>
+                    </div>
+                    {p.lines?.map((l,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",fontSize:12}}>
+                        <span style={{color:T.textMuted}}>{l.name} <span style={{fontFamily:mono,color:T.textDim}}>({l.sku})</span></span>
+                        <span style={{fontFamily:mono,color:l.pending>0?T.amber:T.green}}>{l.picked}/{l.qty} picked</span>
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ):(
+              <div style={{padding:20,textAlign:"center",color:T.textDim}}>No active pick orders</div>
+            )}
+          </Card>
+
+          {/* Recent transactions */}
+          <Card>
+            <SectionHeader right={`Last 2 hours`}>Recent Picks</SectionHeader>
+            {picks.recent?.length>0?(
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead>
+                  <tr style={{background:T.bg}}>
+                    <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono}}>TIME</th>
+                    <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono}}>SKU</th>
+                    <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono}}>ITEM</th>
+                    <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:T.textDim,fontFamily:mono}}>QTY</th>
+                    <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono}}>PICKER</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {picks.recent.map(t=>(
+                    <tr key={t.id} style={{borderBottom:`1px solid ${T.border}`}}>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.textDim}}>
+                        {new Date(t.completedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}
+                      </td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.text}}>{t.sku}</td>
+                      <td style={{padding:"8px 12px",fontSize:11,color:T.textMuted}}>{t.name}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:12,fontWeight:600,textAlign:"right",color:T.text}}>{t.qty}</td>
+                      <td style={{padding:"8px 12px",fontSize:11,color:T.textMuted}}>{t.picker||"—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ):(
+              <div style={{padding:20,textAlign:"center",color:T.textDim}}>No recent picks</div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {sub==="alerts"&&(
+        <div>
+          {/* Alert summary */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:24}}>
+            <Card style={{padding:16,textAlign:"center",borderLeft:`4px solid ${T.red}`}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>CRITICAL</div>
+              <div style={{fontSize:32,fontWeight:800,color:alerts.critical>0?T.red:T.green,fontFamily:mono}}>{alerts.critical}</div>
+            </Card>
+            <Card style={{padding:16,textAlign:"center",borderLeft:`4px solid ${T.amber}`}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>HIGH</div>
+              <div style={{fontSize:32,fontWeight:800,color:alerts.high>0?T.amber:T.green,fontFamily:mono}}>{alerts.high}</div>
+            </Card>
+            <Card style={{padding:16,textAlign:"center",borderLeft:`4px solid ${T.blue}`}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>LOW</div>
+              <div style={{fontSize:32,fontWeight:800,color:T.blue,fontFamily:mono}}>{alerts.low}</div>
+            </Card>
+          </div>
+
+          {/* Alerts list */}
+          <Card>
+            <SectionHeader right={`${alerts.alerts?.length||0} total`}>Low Stock Alerts</SectionHeader>
+            {alerts.alerts?.length>0?(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                {alerts.alerts.map((a,i)=>{
+                  const sevColor={CRITICAL:T.red,HIGH:T.amber,LOW:T.blue}[a.severity]||T.textDim;
+                  return(
+                    <div key={i} style={{display:"flex",alignItems:"center",gap:12,padding:12,background:T.bg,borderRadius:6,borderLeft:`4px solid ${sevColor}`}}>
+                      <div style={{flex:1}}>
+                        <div style={{fontFamily:mono,fontSize:12,fontWeight:600,color:T.text}}>{a.name}</div>
+                        <div style={{fontSize:11,color:T.textDim}}>{a.sku} • {a.location||"No location"}</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontFamily:mono,fontSize:16,fontWeight:800,color:sevColor}}>{a.qty}</div>
+                        <div style={{fontSize:9,color:T.textDim}}>threshold: {a.threshold}</div>
+                      </div>
+                      <Pill color={sevColor} bg={`${sevColor}15`}>{a.severity}</Pill>
+                    </div>
+                  );
+                })}
+              </div>
+            ):(
+              <div style={{padding:20,textAlign:"center",color:T.green}}>✓ No low stock alerts</div>
+            )}
+          </Card>
+        </div>
+      )}
+
+      {sub==="search"&&(
+        <Card>
+          <SectionHeader>Lens Blank Search</SectionHeader>
+          <p style={{color:T.textMuted,fontSize:12,marginBottom:16}}>
+            Search for lens blanks by coating type, index, or prescription range.
+          </p>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+            <div>
+              <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:4}}>COATING TYPE</label>
+              <select style={{width:"100%",padding:"8px 10px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.text,fontSize:12}}>
+                <option value="">Any</option>
+                {coatingTypes.filter(c=>c!=="All").map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:4}}>INDEX</label>
+              <select style={{width:"100%",padding:"8px 10px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.text,fontSize:12}}>
+                <option value="">Any</option>
+                <option value="1.50">1.50</option>
+                <option value="1.56">1.56</option>
+                <option value="1.67">1.67</option>
+                <option value="1.74">1.74</option>
+              </select>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:4}}>SPHERE</label>
+              <input type="text" placeholder="-2.00" style={{width:"100%",padding:"8px 10px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.text,fontSize:12,fontFamily:mono}}/>
+            </div>
+            <div>
+              <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:4}}>CYLINDER</label>
+              <input type="text" placeholder="-1.00" style={{width:"100%",padding:"8px 10px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.text,fontSize:12,fontFamily:mono}}/>
+            </div>
+          </div>
+          <button style={{background:T.blue,border:"none",borderRadius:6,padding:"10px 24px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:mono}}>
+            Search Inventory
+          </button>
+          <div style={{marginTop:24,padding:20,background:T.bg,borderRadius:8,textAlign:"center",color:T.textDim}}>
+            Enter search criteria above and click Search to find matching lens blanks.
+          </div>
+        </Card>
+      )}
+
+      {/* Sync status footer */}
+      <div style={{marginTop:20,display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:T.bg,borderRadius:8}}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:inventory.status==="ok"||inventory.status==="mock"?T.green:T.red}}/>
+          <span style={{fontSize:11,color:T.textDim,fontFamily:mono}}>
+            {inventory.status==="mock"?"Mock Mode":"ItemPath"} • {inventory.lastSync?new Date(inventory.lastSync).toLocaleTimeString():"Not synced"}
+          </span>
+        </div>
+        <span style={{fontSize:10,color:T.textDim}}>Auto-refresh every 30s</span>
+      </div>
+    </div>
+    </ProductionStageTab>
+  );
+}
+
+// ── MAINTENANCE & FACILITIES TAB ──────────────────────────────────────────────
+function MaintenanceTab({ovenServerUrl,settings}){
+  const mono="'JetBrains Mono',monospace";
+  const [sub,setSub]=useState("overview");
+  const [maintenance,setMaintenance]=useState({assets:[],tasks:[],downtime:[],parts:[],stats:{},lastSync:null,status:'pending'});
+  const [loading,setLoading]=useState(true);
+  const [selectedTask,setSelectedTask]=useState(null);  // For work order detail modal
+
+  // Fetch maintenance data from server
+  useEffect(()=>{
+    if(!ovenServerUrl)return;
+    const go=async()=>{
+      try{
+        const [aR,tR,dR,pR,sR]=await Promise.all([
+          fetch(`${ovenServerUrl}/api/maintenance/assets`,{signal:AbortSignal.timeout(5000)}),
+          fetch(`${ovenServerUrl}/api/maintenance/tasks`,{signal:AbortSignal.timeout(5000)}),
+          fetch(`${ovenServerUrl}/api/maintenance/downtime`,{signal:AbortSignal.timeout(5000)}),
+          fetch(`${ovenServerUrl}/api/maintenance/parts`,{signal:AbortSignal.timeout(5000)}),
+          fetch(`${ovenServerUrl}/api/maintenance/stats`,{signal:AbortSignal.timeout(5000)}),
+        ]);
+        const assets=aR.ok?await aR.json():{assets:[]};
+        const tasks=tR.ok?await tR.json():{tasks:[],open:[],critical:[]};
+        const downtime=dR.ok?await dR.json():{downtime:[],planned:[],unplanned:[]};
+        const parts=pR.ok?await pR.json():{parts:[],lowStock:[]};
+        const stats=sR.ok?await sR.json():{};
+        setMaintenance({
+          assets:assets.assets||[],
+          tasks:tasks.tasks||[],
+          openTasks:tasks.open||[],
+          criticalTasks:tasks.critical||[],
+          downtime:downtime.downtime||[],
+          plannedDowntime:downtime.planned||[],
+          unplannedDowntime:downtime.unplanned||[],
+          parts:parts.parts||[],
+          lowStockParts:parts.lowStock||[],
+          stats:stats||{},
+          lastSync:stats.lastSync||assets.lastSync,
+          status:stats.status||assets.status||'ok',
+        });
+        setLoading(false);
+      }catch(e){
+        console.error('[Maintenance] Fetch error:',e);
+        setMaintenance(prev=>({...prev,status:'error'}));
+        setLoading(false);
+      }
+    };
+    go(); const iv=setInterval(go,60000); return()=>clearInterval(iv);
+  },[ovenServerUrl]);
+
+  const s=maintenance.stats;
+  const fmtHrs=h=>h!==null&&h!==undefined?`${h}h`:'—';
+
+  // Equipment categories for grouping
+  const assetsByCategory=useMemo(()=>{
+    const map={};
+    maintenance.assets.forEach(a=>{
+      const cat=a.category||'Other';
+      if(!map[cat])map[cat]=[];
+      map[cat].push(a);
+    });
+    return map;
+  },[maintenance.assets]);
+
+  // Status color helper
+  const statusColor=(status)=>{
+    if(status==='operational'||status==='online')return T.green;
+    if(status==='down'||status==='offline')return T.red;
+    if(status==='maintenance')return T.amber;
+    return T.textMuted;
+  };
+
+  const priorityColor=(p)=>{
+    if(p==='critical')return T.red;
+    if(p==='high')return T.orange;
+    if(p==='medium')return T.amber;
+    return T.textMuted;
+  };
+
+  const pmStatusColor=(s)=>{
+    if(s==='overdue')return T.red;
+    if(s==='due-soon')return T.amber;
+    return T.green;
+  };
+
+  // Top bar navigation
+  const topBar=(
+    <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:18,flexWrap:"wrap"}}>
+      {[{id:"overview",icon:"◉",label:"Overview"},{id:"equipment",icon:"⚙️",label:"Equipment"},
+        {id:"tasks",icon:"📋",label:"Work Orders"},{id:"downtime",icon:"⏱️",label:"Downtime"},
+        {id:"parts",icon:"🔩",label:"Spare Parts"}].map(n=>(
+        <button key={n.id} onClick={()=>setSub(n.id)}
+          style={{background:sub===n.id?T.blueDark:"transparent",border:`1px solid ${sub===n.id?T.blue:"transparent"}`,
+          borderRadius:8,padding:"9px 18px",cursor:"pointer",color:sub===n.id?"#93C5FD":T.textMuted,
+          fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:7,fontFamily:"'DM Sans',sans-serif",transition:"all 0.2s"}}>
+          {n.icon} {n.label}
+        </button>
+      ))}
+      <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
+        <div style={{width:8,height:8,borderRadius:"50%",background:maintenance.status==='ok'?T.green:maintenance.status==='mock'?T.amber:T.red}}/>
+        <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{maintenance.status==='mock'?'MOCK DATA':maintenance.status==='ok'?'LIMBLE LIVE':'OFFLINE'}</span>
+        {maintenance.lastSync&&<span style={{fontSize:9,color:T.textDim,fontFamily:mono,marginLeft:4}}>Last sync: {new Date(maintenance.lastSync).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>}
+      </div>
+    </div>
+  );
+
+  const contextData={
+    uptimePercent:s.uptimePercent,oePercent:s.oePercent,teapScore:s.teapScore,
+    openTaskCount:s.openTaskCount||0,criticalTaskCount:s.criticalTaskCount||0,
+    pmCompliancePercent:s.pmCompliancePercent,
+    assetCount:maintenance.assets?.length||0,
+    hasData:s.hasData,
+    status:maintenance.status
+  };
+
+  if(loading){
+    return(
+      <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:300}}>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:32,marginBottom:10}}>🔧</div>
+          <div style={{fontSize:14,color:T.textMuted}}>Loading maintenance data...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return(
+    <ProductionStageTab domain="maintenance" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+    <div>
+      {topBar}
+
+      {/* ══ OVERVIEW ══ */}
+      {sub==="overview"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:20}}>
+          {/* No data warning banner */}
+          {s.hasData===false&&(
+            <div style={{background:`${T.amber}15`,border:`1px solid ${T.amber}40`,borderRadius:8,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:20}}>⚠️</span>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:T.amber}}>No Recent Maintenance Data</div>
+                <div style={{fontSize:11,color:T.textMuted}}>All tasks in Limble are historical (completed). KPIs will show once new work orders or downtime records are logged.</div>
+              </div>
+            </div>
+          )}
+          {/* Primary KPI strip */}
+          <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+            <KPICard label="Uptime" value={s.uptimePercent!=null?`${s.uptimePercent}%`:'—'} sub="last 30 days" accent={s.uptimePercent!=null?(s.uptimePercent>95?T.green:s.uptimePercent>90?T.amber:T.red):T.textDim}/>
+            <KPICard label="OE Score" value={s.oePercent!=null?`${s.oePercent}%`:'—'} sub="operational efficiency" accent={s.oePercent!=null?(s.oePercent>90?T.green:s.oePercent>80?T.amber:T.red):T.textDim}/>
+            <KPICard label="TEAP Score" value={s.teapScore!=null?s.teapScore:'—'} sub="total effective performance" accent={s.teapScore!=null?(s.teapScore>85?T.green:s.teapScore>75?T.amber:T.red):T.textDim}/>
+            <KPICard label="Open Tasks" value={s.openTaskCount||0} sub={`${s.criticalTaskCount||0} critical`} accent={s.criticalTaskCount>0?T.red:s.openTaskCount>10?T.amber:T.green}/>
+            <KPICard label="PM Compliance" value={s.pmCompliancePercent!=null?`${s.pmCompliancePercent}%`:'—'} sub={`${s.pmCompleted30d||0} of ${s.pmScheduled30d||0}`} accent={s.pmCompliancePercent!=null?(s.pmCompliancePercent>90?T.green:s.pmCompliancePercent>75?T.amber:T.red):T.textDim}/>
+          </div>
+
+          {/* Secondary stats row */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))",gap:14}}>
+            <Card style={{padding:"14px 18px"}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:6}}>DOWNTIME (30D)</div>
+              <div style={{display:"flex",gap:16}}>
+                <div>
+                  <div style={{fontSize:24,fontWeight:800,color:T.text,fontFamily:mono}}>{fmtHrs(s.totalDowntimeHrs)}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>total</div>
+                </div>
+                <div>
+                  <div style={{fontSize:18,fontWeight:700,color:T.amber,fontFamily:mono}}>{fmtHrs(s.plannedDowntimeHrs)}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>planned</div>
+                </div>
+                <div>
+                  <div style={{fontSize:18,fontWeight:700,color:T.red,fontFamily:mono}}>{fmtHrs(s.unplannedDowntimeHrs)}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>unplanned</div>
+                </div>
+              </div>
+            </Card>
+            <Card style={{padding:"14px 18px"}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:6}}>RELIABILITY</div>
+              <div style={{display:"flex",gap:20}}>
+                <div>
+                  <div style={{fontSize:24,fontWeight:800,color:T.cyan,fontFamily:mono}}>{s.mtbfHrs!==null?`${s.mtbfHrs}h`:'—'}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>MTBF</div>
+                </div>
+                <div>
+                  <div style={{fontSize:24,fontWeight:800,color:T.purple,fontFamily:mono}}>{s.mttrHrs!==null?`${s.mttrHrs}h`:'—'}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>MTTR</div>
+                </div>
+              </div>
+            </Card>
+            <Card style={{padding:"14px 18px"}}>
+              <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:6}}>EQUIPMENT STATUS</div>
+              <div style={{display:"flex",gap:16}}>
+                <div>
+                  <div style={{fontSize:24,fontWeight:800,color:T.green,fontFamily:mono}}>{s.operationalAssets||0}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>operational</div>
+                </div>
+                <div>
+                  <div style={{fontSize:18,fontWeight:700,color:T.red,fontFamily:mono}}>{s.assetsDown||0}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>down</div>
+                </div>
+                <div>
+                  <div style={{fontSize:18,fontWeight:700,color:T.amber,fontFamily:mono}}>{s.assetsPMOverdue||0}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>PM overdue</div>
+                </div>
+              </div>
+            </Card>
+          </div>
+
+          {/* Critical tasks and equipment health side by side */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
+            <Card>
+              <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{maintenance.openTasks?.length||0} open</span>}>Critical & High Priority Tasks</SectionHeader>
+              <div style={{maxHeight:280,overflowY:"auto"}}>
+                {maintenance.openTasks?.filter(t=>t.priority==='critical'||t.priority==='high').slice(0,8).map(t=>(
+                  <div key={t.id} onClick={()=>setSelectedTask(t)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 0",borderBottom:`1px solid ${T.border}`,cursor:"pointer",transition:"background 0.15s",marginLeft:-8,marginRight:-8,paddingLeft:8,paddingRight:8,borderRadius:6}}
+                    onMouseEnter={e=>e.currentTarget.style.background=T.bg}
+                    onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <div style={{width:8,height:8,borderRadius:"50%",background:priorityColor(t.priority),flexShrink:0}}/>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:12,color:T.text,fontWeight:600,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.title}</div>
+                      <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{t.asset||'General'} · {t.assignee||'Unassigned'}</div>
+                    </div>
+                    <Pill color={priorityColor(t.priority)}>{t.priority}</Pill>
+                  </div>
+                ))}
+                {(!maintenance.openTasks||maintenance.openTasks.filter(t=>t.priority==='critical'||t.priority==='high').length===0)&&(
+                  <div style={{textAlign:"center",padding:20,color:T.textDim,fontFamily:mono,fontSize:11}}>No critical/high priority tasks</div>
+                )}
+              </div>
+            </Card>
+
+            <Card>
+              <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{maintenance.assets?.length||0} assets</span>}>Equipment by Category</SectionHeader>
+              <div style={{maxHeight:280,overflowY:"auto"}}>
+                {Object.entries(assetsByCategory).map(([cat,assets])=>{
+                  const operational=assets.filter(a=>a.status==='operational'||a.status==='online').length;
+                  const down=assets.filter(a=>a.status!=='operational'&&a.status!=='online').length;
+                  const pmIssues=assets.filter(a=>a.pmStatus==='overdue'||a.pmStatus==='due-soon').length;
+                  return(
+                    <div key={cat} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 0",borderBottom:`1px solid ${T.border}`}}>
+                      <div style={{fontSize:16}}>⚙️</div>
+                      <div style={{flex:1}}>
+                        <div style={{fontSize:13,fontWeight:700,color:T.text}}>{cat}</div>
+                        <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{assets.length} units</div>
+                      </div>
+                      <div style={{display:"flex",gap:6}}>
+                        <span style={{fontSize:11,fontWeight:700,color:T.green,fontFamily:mono}}>{operational}✓</span>
+                        {down>0&&<span style={{fontSize:11,fontWeight:700,color:T.red,fontFamily:mono}}>{down}✗</span>}
+                        {pmIssues>0&&<span style={{fontSize:11,fontWeight:700,color:T.amber,fontFamily:mono}}>{pmIssues}⚠</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* ══ EQUIPMENT ══ */}
+      {sub==="equipment"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {Object.entries(assetsByCategory).map(([cat,assets])=>(
+            <Card key={cat} style={{borderLeft:`4px solid ${T.blue}`}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+                <span style={{fontSize:18}}>⚙️</span>
+                <span style={{fontSize:16,fontWeight:800,color:T.text}}>{cat}</span>
+                <span style={{fontSize:11,color:T.textDim,fontFamily:mono}}>{assets.length} units</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12}}>
+                {assets.map(a=>(
+                  <div key={a.id} style={{background:T.bg,border:`1px solid ${statusColor(a.status)}30`,borderRadius:10,padding:"12px 14px"}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                      <div>
+                        <div style={{fontSize:14,fontWeight:700,color:T.text}}>{a.name}</div>
+                        <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{a.manufacturer} {a.model}</div>
+                      </div>
+                      <Pill color={statusColor(a.status)} bg={`${statusColor(a.status)}20`}>{a.status}</Pill>
+                    </div>
+                    <div style={{display:"flex",gap:12,fontSize:10,color:T.textDim,fontFamily:mono}}>
+                      <span>📍 {a.location||'—'}</span>
+                      <span>🔢 {a.serialNumber||'—'}</span>
+                    </div>
+                    <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                      <div style={{fontSize:10,color:T.textDim}}>
+                        <span style={{marginRight:8}}>Last PM: {a.lastPM?new Date(a.lastPM).toLocaleDateString():'—'}</span>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:4}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:pmStatusColor(a.pmStatus)}}/>
+                        <span style={{fontSize:9,color:pmStatusColor(a.pmStatus),fontFamily:mono,fontWeight:700}}>
+                          {a.pmStatus==='overdue'?'PM OVERDUE':a.pmStatus==='due-soon'?'PM DUE SOON':'PM OK'}
+                        </span>
+                      </div>
+                    </div>
+                    {a.hoursRun>0&&<div style={{marginTop:6,fontSize:10,color:T.textMuted,fontFamily:mono}}>{a.hoursRun.toLocaleString()} hours run</div>}
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* ══ WORK ORDERS ══ */}
+      {sub==="tasks"&&(
+        <Card style={{padding:0}}>
+          <div style={{overflowX:"auto",maxHeight:620,overflowY:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead style={{position:"sticky",top:0,background:T.card,zIndex:1}}>
+                <tr>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>ID</th>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Type</th>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Title</th>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Asset</th>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Priority</th>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Status</th>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Assignee</th>
+                  <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                {maintenance.tasks.slice(0,100).map(t=>{
+                  const overdue=t.dueDate&&new Date(t.dueDate)<new Date()&&t.status!=='completed';
+                  return(
+                    <tr key={t.id} onClick={()=>setSelectedTask(t)} style={{borderBottom:`1px solid ${T.border}`,background:overdue?`${T.red}08`:'',cursor:'pointer',transition:'background 0.15s'}}
+                      onMouseEnter={e=>e.currentTarget.style.background=overdue?`${T.red}12`:T.bg}
+                      onMouseLeave={e=>e.currentTarget.style.background=overdue?`${T.red}08`:''}>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:T.textDim}}>{t.id}</td>
+                      <td style={{padding:"8px 12px"}}>
+                        <Pill color={t.type==='pm'?T.cyan:t.type==='work-request'?T.purple:T.blue}>{t.type}</Pill>
+                      </td>
+                      <td style={{padding:"8px 12px",fontSize:12,color:T.text,maxWidth:200,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{t.title}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.amber}}>{t.asset||'—'}</td>
+                      <td style={{padding:"8px 12px"}}>
+                        <Pill color={priorityColor(t.priority)}>{t.priority}</Pill>
+                      </td>
+                      <td style={{padding:"8px 12px"}}>
+                        <Pill color={t.status==='completed'?T.green:t.status==='in-progress'?T.blue:t.status==='on-hold'?T.amber:T.textMuted}>{t.status}</Pill>
+                      </td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.textMuted}}>{t.assignee||'—'}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:overdue?T.red:T.textDim}}>{t.dueDate?new Date(t.dueDate).toLocaleDateString():'—'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
+
+      {/* ══ DOWNTIME ══ */}
+      {sub==="downtime"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          {/* No data warning */}
+          {s.hasData===false&&(
+            <div style={{background:`${T.amber}15`,border:`1px solid ${T.amber}40`,borderRadius:8,padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+              <span style={{fontSize:20}}>⚠️</span>
+              <div>
+                <div style={{fontSize:13,fontWeight:700,color:T.amber}}>No Downtime Data Available</div>
+                <div style={{fontSize:11,color:T.textMuted}}>No downtime records found in Limble. Stats will populate when downtime events are logged.</div>
+              </div>
+            </div>
+          )}
+          {/* Summary stats */}
+          <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+            <KPICard label="Total Downtime" value={fmtHrs(s.totalDowntimeHrs)} sub="last 30 days" accent={s.totalDowntimeHrs!=null?T.purple:T.textDim}/>
+            <KPICard label="Planned" value={fmtHrs(s.plannedDowntimeHrs)} sub="scheduled maintenance" accent={s.plannedDowntimeHrs!=null?T.amber:T.textDim}/>
+            <KPICard label="Unplanned" value={fmtHrs(s.unplannedDowntimeHrs)} sub="failures/issues" accent={s.unplannedDowntimeHrs!=null?T.red:T.textDim}/>
+            <KPICard label="Uptime" value={s.uptimePercent!=null?`${s.uptimePercent}%`:'—'} sub="availability" accent={s.uptimePercent!=null?(s.uptimePercent>95?T.green:T.amber):T.textDim}/>
+          </div>
+
+          <Card style={{padding:0}}>
+            <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <span style={{fontSize:13,fontWeight:700,color:T.textMuted,fontFamily:mono,letterSpacing:1}}>DOWNTIME RECORDS (30 DAYS)</span>
+              <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{maintenance.downtime?.length||0} records</span>
+            </div>
+            <div style={{overflowX:"auto",maxHeight:400,overflowY:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead style={{position:"sticky",top:0,background:T.card,zIndex:1}}>
+                  <tr>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Asset</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Start</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Duration</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Type</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {maintenance.downtime?.slice(0,50).map(d=>(
+                    <tr key={d.id} style={{borderBottom:`1px solid ${T.border}`}}>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:12,color:T.amber,fontWeight:700}}>{d.assetName}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:T.textDim}}>{new Date(d.startTime).toLocaleString([],{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:12,fontWeight:700,color:T.text}}>{d.durationMins?`${Math.round(d.durationMins/60*10)/10}h`:'ongoing'}</td>
+                      <td style={{padding:"8px 12px"}}>
+                        <Pill color={d.planned?T.amber:T.red}>{d.planned?'Planned':'Unplanned'}</Pill>
+                      </td>
+                      <td style={{padding:"8px 12px",fontSize:11,color:T.textMuted,maxWidth:200,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{d.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ══ SPARE PARTS ══ */}
+      {sub==="parts"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:14}}>
+          <div style={{display:"flex",gap:14}}>
+            <KPICard label="Total Parts" value={maintenance.parts?.length||0} sub="tracked items" accent={T.blue}/>
+            <KPICard label="Low Stock" value={maintenance.lowStockParts?.length||0} sub="below minimum" accent={maintenance.lowStockParts?.length>0?T.red:T.green}/>
+          </div>
+
+          <Card style={{padding:0}}>
+            <div style={{overflowX:"auto",maxHeight:500,overflowY:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse"}}>
+                <thead style={{position:"sticky",top:0,background:T.card,zIndex:1}}>
+                  <tr>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Part</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Part #</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"right",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Qty</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"right",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Min</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Location</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"left",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Vendor</th>
+                    <th style={{fontFamily:mono,fontSize:9,color:T.textDim,letterSpacing:1.5,textAlign:"right",padding:"9px 12px",borderBottom:`2px solid ${T.border}`,textTransform:"uppercase"}}>Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {maintenance.parts?.map(p=>(
+                    <tr key={p.id} style={{borderBottom:`1px solid ${T.border}`,background:p.lowStock?`${T.red}08`:''}}>
+                      <td style={{padding:"8px 12px",fontSize:12,color:T.text,fontWeight:600}}>{p.name}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:T.textDim}}>{p.partNum||'—'}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:13,fontWeight:800,color:p.lowStock?T.red:T.text,textAlign:"right"}}>{p.qty}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.textDim,textAlign:"right"}}>{p.minQty}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:T.textMuted}}>{p.location||'—'}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:10,color:T.textMuted}}>{p.vendor||'—'}</td>
+                      <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.textDim,textAlign:"right"}}>{p.cost?`$${p.cost.toFixed(2)}`:'—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* Work Order Detail Modal */}
+      {selectedTask&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={()=>setSelectedTask(null)}>
+          <div style={{background:T.surface,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:0,width:600,maxWidth:"90vw",maxHeight:"85vh",overflow:"hidden"}} onClick={e=>e.stopPropagation()}>
+            {/* Header */}
+            <div style={{padding:"18px 24px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"flex-start",background:T.card}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+                  <Pill color={selectedTask.type==='pm'?T.cyan:selectedTask.type==='work-request'?T.purple:T.blue}>{selectedTask.type==='pm'?'PM':selectedTask.type==='work-request'?'Work Request':'Work Order'}</Pill>
+                  <Pill color={priorityColor(selectedTask.priority)}>{selectedTask.priority}</Pill>
+                  <Pill color={selectedTask.status==='completed'?T.green:selectedTask.status==='in-progress'?T.blue:selectedTask.status==='on-hold'?T.amber:T.textMuted}>{selectedTask.status}</Pill>
+                </div>
+                <div style={{fontSize:18,fontWeight:800,color:T.text,lineHeight:1.3}}>{selectedTask.title}</div>
+                <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginTop:6}}>ID: {selectedTask.id}</div>
+              </div>
+              <button onClick={()=>setSelectedTask(null)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:24,cursor:"pointer",padding:4,marginTop:-4}}>✕</button>
+            </div>
+
+            {/* Content */}
+            <div style={{padding:"20px 24px",maxHeight:"60vh",overflowY:"auto"}}>
+              {/* Key Details Grid */}
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:20}}>
+                <div style={{background:T.bg,padding:14,borderRadius:10,border:`1px solid ${T.border}`}}>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:6}}>ASSET</div>
+                  <div style={{fontSize:14,fontWeight:700,color:T.amber}}>{selectedTask.asset||'Not specified'}</div>
+                  {selectedTask.assetId&&<div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>ID: {selectedTask.assetId}</div>}
+                </div>
+                <div style={{background:T.bg,padding:14,borderRadius:10,border:`1px solid ${T.border}`}}>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:6}}>ASSIGNEE</div>
+                  <div style={{fontSize:14,fontWeight:700,color:T.text}}>{selectedTask.assignee||'Unassigned'}</div>
+                  {selectedTask.teamId&&<div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>Team: {selectedTask.teamId}</div>}
+                </div>
+              </div>
+
+              {/* Dates */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:20}}>
+                <div>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:4}}>CREATED</div>
+                  <div style={{fontSize:12,color:T.text,fontFamily:mono}}>{selectedTask.createdAt?new Date(selectedTask.createdAt).toLocaleDateString():'—'}</div>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:4}}>DUE DATE</div>
+                  <div style={{fontSize:12,color:selectedTask.dueDate&&new Date(selectedTask.dueDate)<new Date()&&selectedTask.status!=='completed'?T.red:T.text,fontFamily:mono,fontWeight:700}}>
+                    {selectedTask.dueDate?new Date(selectedTask.dueDate).toLocaleDateString():'Not set'}
+                    {selectedTask.dueDate&&new Date(selectedTask.dueDate)<new Date()&&selectedTask.status!=='completed'&&<span style={{marginLeft:6,fontSize:10}}>OVERDUE</span>}
+                  </div>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:4}}>COMPLETED</div>
+                  <div style={{fontSize:12,color:selectedTask.completedAt?T.green:T.textDim,fontFamily:mono}}>{selectedTask.completedAt?new Date(selectedTask.completedAt).toLocaleDateString():'—'}</div>
+                </div>
+              </div>
+
+              {/* Time Estimates */}
+              {(selectedTask.estimatedHrs||selectedTask.actualHrs)&&(
+                <div style={{display:"flex",gap:16,marginBottom:20}}>
+                  {selectedTask.estimatedHrs&&(
+                    <div style={{background:T.bg,padding:12,borderRadius:8,border:`1px solid ${T.border}`}}>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>ESTIMATED</div>
+                      <div style={{fontSize:18,fontWeight:800,color:T.cyan,fontFamily:mono}}>{selectedTask.estimatedHrs}h</div>
+                    </div>
+                  )}
+                  {selectedTask.actualHrs&&(
+                    <div style={{background:T.bg,padding:12,borderRadius:8,border:`1px solid ${T.border}`}}>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>ACTUAL</div>
+                      <div style={{fontSize:18,fontWeight:800,color:T.green,fontFamily:mono}}>{selectedTask.actualHrs}h</div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Description */}
+              {selectedTask.description&&(
+                <div style={{marginBottom:20}}>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:8}}>DESCRIPTION</div>
+                  <div style={{background:T.bg,padding:14,borderRadius:10,border:`1px solid ${T.border}`,fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selectedTask.description}</div>
+                </div>
+              )}
+
+              {/* Completion Notes */}
+              {selectedTask.completionNotes&&(
+                <div style={{marginBottom:20}}>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:8}}>COMPLETION NOTES</div>
+                  <div style={{background:`${T.green}10`,padding:14,borderRadius:10,border:`1px solid ${T.green}30`,fontSize:13,color:T.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selectedTask.completionNotes}</div>
+                </div>
+              )}
+
+              {/* Requestor Info (for work requests) */}
+              {selectedTask.requestor&&(
+                <div style={{marginBottom:20}}>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:8}}>REQUESTOR</div>
+                  <div style={{background:T.bg,padding:14,borderRadius:10,border:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:13,fontWeight:600,color:T.text}}>{selectedTask.requestor.name}</div>
+                    {selectedTask.requestor.email&&<div style={{fontSize:11,color:T.textDim,marginTop:4}}>{selectedTask.requestor.email}</div>}
+                    {selectedTask.requestor.phone&&<div style={{fontSize:11,color:T.textDim}}>{selectedTask.requestor.phone}</div>}
+                  </div>
+                </div>
+              )}
+
+              {/* Tags */}
+              {selectedTask.customTags&&selectedTask.customTags.length>0&&(
+                <div>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:8}}>TAGS</div>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                    {selectedTask.customTags.map((tag,i)=>(
+                      <span key={i} style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:12,padding:"4px 10px",fontSize:11,color:T.textMuted}}>{tag}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div style={{padding:"14px 24px",borderTop:`1px solid ${T.border}`,background:T.card,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <a href={`https://app.limblecmms.com/tasks/${selectedTask.id}`} target="_blank" rel="noopener noreferrer"
+                style={{fontSize:12,color:T.blue,textDecoration:"none",display:"flex",alignItems:"center",gap:6}}>
+                Open in Limble ↗
+              </a>
+              <button onClick={()=>setSelectedTask(null)} style={{background:T.blue,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer"}}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+    </ProductionStageTab>
+  );
+}
+
 
 // ── Main App ─────────────────────────────────────────────────
 // ── MODE DETECTION ────────────────────────────────────────────────────────────
@@ -3653,7 +6718,7 @@ function getMode(){
 }
 
 // ── CORPORATE VIEWER ──────────────────────────────────────────────────────────
-function CorporateViewer({trays,batches,events}){
+function CorporateViewer({trays,batches,events,settings}){
   const [aiInput,setAiInput]=useState("");
   const [aiMessages,setAiMessages]=useState([
     {from:"ai",text:"Corporate view active. I have read-only access to lab data — ask me anything about throughput, yield, coating status, or tray activity.",time:new Date()},
@@ -3689,18 +6754,23 @@ function CorporateViewer({trays,batches,events}){
   async function askAI(q){
     const question=q||aiInput.trim();
     if(!question)return;
+    const apiKey=getAnthropicApiKey(settings);
+    if(!apiKey){
+      setAiMessages(prev=>[...prev,{from:"ai",text:"⚠️ No API key configured. Go to Settings → AI to add your Anthropic API key.",time:new Date()}]);
+      return;
+    }
     setAiMessages(prev=>[...prev,{from:"user",text:question,time:new Date()}]);
     setAiInput(""); setAiLoading(true);
     const ctx=`Lab context: ${totalTrays} total trays. ${activeTrays} active. ${running.length} batches running, ${hold.length} on hold. ${coatingActive} in coating. ${qcHold} QC hold. ${broken} broken. Recent events: ${events.slice(0,5).map(e=>e.message).join("; ")}.`;
     try{
       const resp=await fetch("https://api.anthropic.com/v1/messages",{
-        method:"POST",headers:{"Content-Type":"application/json"},
+        method:"POST",headers:{"Content-Type":"application/json","x-api-key":apiKey,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
           system:`You are a read-only corporate analytics assistant for Pair Eyewear's optical lens lab. You have access to live lab data but CANNOT make any changes. Provide clear, concise operational insights. Be direct and data-driven. Format numbers clearly. ${ctx}`,
           messages:[{role:"user",content:question}]})
       });
       const d=await resp.json();
-      const text=d.content?.[0]?.text||"Unable to retrieve data.";
+      const text=d.content?.[0]?.text||d?.error?.message||"Unable to retrieve data.";
       setAiMessages(prev=>[...prev,{from:"ai",text,time:new Date()}]);
     }catch{
       setAiMessages(prev=>[...prev,{from:"ai",text:"Connection error — check server.",time:new Date()}]);
@@ -3729,8 +6799,10 @@ function CorporateViewer({trays,batches,events}){
           </div>
           <div style={{marginLeft:16,background:"#0A1F40",border:"1px solid #3B82F6",borderRadius:6,padding:"4px 12px",fontSize:10,color:"#60A5FA",fontFamily:mono,fontWeight:700}}>READ ONLY</div>
         </div>
-        <div style={{display:"flex",gap:4}}>
-          {navItems.map(n=>(
+        <div style={{display:"flex",gap:4,alignItems:"center"}}>
+          {navItems.map(n=>n.type==="separator"?(
+            <div key={n.id} style={{width:1,height:24,background:T.border,margin:"0 6px"}}/>
+          ):(
             <button key={n.id} onClick={()=>setCorpView(n.id)} style={{background:corpView===n.id?"#1E3A5F":"transparent",border:`1px solid ${corpView===n.id?"#3B82F6":"transparent"}`,borderRadius:8,padding:"8px 16px",cursor:"pointer",color:corpView===n.id?"#93C5FD":T.textMuted,fontSize:13,fontWeight:700,fontFamily:sans,display:"flex",alignItems:"center",gap:6}}>
               <span>{n.icon}</span>{n.label}
             </button>
@@ -3921,6 +6993,30 @@ export default function LabAssistantV2(){
   const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||"http://localhost:3002";}catch{return "http://localhost:3002";} });
   const [clock,setClock]=useState(new Date());
 
+  // Settings state with localStorage persistence
+  const [settings,setSettings]=useState(()=>{
+    try{
+      const stored=localStorage.getItem("la_settings_v1");
+      if(stored){
+        const parsed=JSON.parse(stored);
+        // Merge with defaults to handle new fields
+        return {...DEFAULT_SETTINGS,...parsed};
+      }
+    }catch{}
+    return DEFAULT_SETTINGS;
+  });
+
+  // Persist settings to localStorage
+  useEffect(()=>{
+    try{localStorage.setItem("la_settings_v1",JSON.stringify(settings));}catch{}
+  },[settings]);
+
+  // Derive coater machines from settings (fallback to MACHINES constant)
+  const coaterMachines=useMemo(()=>{
+    const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
+    return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
+  },[settings?.equipment]);
+
   const sendMessage=useCallback((text)=>{
     setMessages(prev=>[{id:Date.now(),from:"Dashboard",text,time:new Date(),priority:text.toLowerCase().includes("rush")||text.toLowerCase().includes("hot")?"high":"normal"},...prev].slice(0,20));
   },[]);
@@ -3956,7 +7052,7 @@ export default function LabAssistantV2(){
           if(newState==="COATING_STAGED")coatingStage=pick(["QUEUE","DIP","SCAN_IN"]);
           else if(newState==="COATING_IN_PROCESS")coatingStage=pick(["OVEN","COATER","COOL_DOWN"]);
           else coatingStage=pick(stages);
-          if(["OVEN","COATER"].includes(coatingStage))machine=pick(MACHINES);
+          if(["OVEN","COATER"].includes(coatingStage))machine=pick(coaterMachines);
           if(coatingStage!=="QUEUE")batchId=pick(["B01","B02","B03"]);
           if(["OVEN","COATER"].includes(coatingStage)&&!next[idx].stageEnteredAt)next[idx]={...next[idx],stageEnteredAt:Date.now()};
         }
@@ -3998,19 +7094,36 @@ export default function LabAssistantV2(){
 
   // Corporate mode — render read-only viewer
   if(appMode==="corporate"){
-    return <CorporateViewer trays={trays} batches={batches} events={events}/>;
+    return <CorporateViewer trays={trays} batches={batches} events={events} settings={settings}/>;
   }
 
   const isTablet = appMode==="tablet";
 
+  // Navigation structure: Overview | Production Flow | Support | Settings
   const navItems=[
-    {id:"overview",  label:"Overview",     icon:"◉"},
-    {id:"putwall",   label:"Quick Bind",   icon:"⊡"},
-    {id:"coating",   label:"Coating Intel",icon:"◎"},
-    {id:"analytics", label:"Analytics",    icon:"📊"},
-    {id:"qc",        label:"QC & Breakage",icon:"🔬"},
-    {id:"trays",     label:"Smart Trays",  icon:"◈"},
-    {id:"ai",        label:"AI Assistant", icon:"🤖"},
+    // System
+    {id:"overview",    label:"Overview",    icon:"◉",  group:"system"},
+    // Production flow (separator before)
+    {id:"separator1",  type:"separator"},
+    {id:"surfacing",   label:"Surfacing",   icon:"🌀", group:"production"},
+    {id:"cutting",     label:"Cutting",     icon:"✂️", group:"production"},
+    {id:"coating",     label:"Coating",     icon:"🌡", group:"production"},
+    {id:"assembly",    label:"Assembly",    icon:"🔧", group:"production"},
+    {id:"shipping",    label:"Shipping",    icon:"📤", group:"production"},
+    // Support (separator before)
+    {id:"separator2",  type:"separator"},
+    {id:"putwall",     label:"Put Wall",    icon:"⬡",  group:"support"},
+    {id:"trays",       label:"Tray Fleet",  icon:"📡", group:"support"},
+    {id:"inventory",   label:"Inventory",   icon:"📦", group:"support"},
+    {id:"maintenance", label:"Maintenance", icon:"🔩", group:"support"},
+    // Analytics & QC (separator before)
+    {id:"separator3",  type:"separator"},
+    {id:"analytics",   label:"Analytics",   icon:"📊", group:"analytics"},
+    {id:"qc",          label:"QC",          icon:"✓",  group:"analytics"},
+    {id:"ai",          label:"AI Assistant",icon:"🤖", group:"analytics"},
+    // Settings (separator before)
+    {id:"separator4",  type:"separator"},
+    {id:"settings",    label:"Settings",    icon:"⚙️", group:"system"},
   ];
 
   return(
@@ -4028,8 +7141,10 @@ export default function LabAssistantV2(){
                 <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>MES v2.1 — OPTICAL MANUFACTURING</div>
               </div>
             </div>
-            <div style={{display:"flex",gap:3,marginLeft:24}}>
-              {navItems.map(n=>(
+            <div style={{display:"flex",gap:3,marginLeft:24,alignItems:"center"}}>
+              {navItems.map(n=>n.type==="separator"?(
+                <div key={n.id} style={{width:1,height:24,background:T.border,margin:"0 8px"}}/>
+              ):(
                 <button key={n.id} onClick={()=>setView(n.id)} style={{background:view===n.id?T.blueDark:"transparent",border:`1px solid ${view===n.id?T.blue:"transparent"}`,borderRadius:8,padding:"8px 16px",cursor:"pointer",color:view===n.id?"#93C5FD":T.textMuted,fontSize:13,fontWeight:700,fontFamily:sans,display:"flex",alignItems:"center",gap:6,transition:"all 0.2s"}}><span style={{fontSize:15}}>{n.icon}</span>{n.label}</button>
               ))}
             </div>
@@ -4066,19 +7181,26 @@ export default function LabAssistantV2(){
 
       {/* CONTENT */}
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
-        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl}/>}
+        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events}/>}
-        {view==="coating"&&<CoatingTab batches={batches} trays={trays} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl}/>}
-        {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} ovenServerUrl={ovenServerUrl}/>}
+        {view==="coating"&&<CoatingTab batches={batches} trays={trays} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="surfacing"&&<SurfacingTab trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="cutting"&&<CuttingTab trays={trays} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="assembly"&&<AssemblyTab trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="shipping"&&<ShippingTab trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="inventory"&&<InventoryTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="qc"&&<QCTab trays={trays} breakage={breakage} setBreakage={setBreakage}/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
-        {view==="ai"&&<AIAssistantTab trays={trays} batches={batches}/>}
+        {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} settings={settings}/>}
+        {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl}/>}
       </div>
 
       {/* TABLET BOTTOM NAV */}
       {isTablet&&(
         <div style={{position:"fixed",bottom:0,left:0,right:0,background:T.surface,borderTop:`1px solid ${T.border}`,display:"flex",zIndex:200,boxShadow:"0 -4px 24px #00000060"}}>
-          {navItems.map(n=>(
+          {navItems.filter(n=>n.type!=="separator").map(n=>(
             <button key={n.id} onClick={()=>setView(n.id)} style={{flex:1,padding:"10px 2px 14px",background:"transparent",border:"none",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:3,borderTop:`3px solid ${view===n.id?T.blue:"transparent"}`,WebkitTapHighlightColor:"transparent",transition:"all 0.15s"}}>
               <span style={{fontSize:19}}>{n.icon}</span>
               <span style={{fontSize:8,fontWeight:700,fontFamily:sans,color:view===n.id?"#93C5FD":T.textMuted,letterSpacing:0.5,textTransform:"uppercase"}}>{n.label.split(" ")[0]}</span>
