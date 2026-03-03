@@ -19,11 +19,33 @@ const C = {
 
 const mono = { fontFamily: "'JetBrains Mono', 'Fira Code', 'Courier New', monospace" };
 
+// ─── Helper: Convert MM/DD/YY to YYYY-MM-DD ───────────────────────────────────
+function convertDate(dateStr) {
+  if (!dateStr) return '';
+  // Handle MM/DD/YY format
+  const match = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
+  if (match) {
+    const [, mm, dd, yy] = match;
+    const year = parseInt(yy) > 50 ? `19${yy}` : `20${yy}`;
+    return `${year}-${mm}-${dd}`;
+  }
+  return dateStr;
+}
+
 // ─── XML Parser ───────────────────────────────────────────────────────────────
 export function parseWIP(xmlText) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xmlText, "application/xml");
+
+  // Check for parse errors
+  const parseError = doc.querySelector("parsererror");
+  if (parseError) {
+    console.error("[WIP] XML Parse Error:", parseError.textContent);
+    throw new Error("Invalid XML format");
+  }
+
   const root = doc.documentElement;
+  console.log("[WIP] Root element:", root?.tagName, "Lab:", root?.getAttribute("Lab"));
 
   const meta = {
     lab:       root.getAttribute("Lab"),
@@ -61,9 +83,9 @@ export function parseWIP(xmlText) {
       tray:         od?.getAttribute("Tray"),
       reference:    od?.getAttribute("Reference"),
       rxNumber:     od?.getAttribute("RxNumber"),
-      entryDate:    od?.getAttribute("EntryDate"),
+      entryDate:    convertDate(od?.getAttribute("EntryDate")),
       entryTime:    od?.getAttribute("EntryTime"),
-      shipDate:     od?.getAttribute("ShipDate"),
+      shipDate:     convertDate(od?.getAttribute("ShipDate")),
       shipTime:     od?.getAttribute("ShipTime"),
       jobOrigin:    od?.getAttribute("JobOrigin"),
       originalInvoice: od?.getAttribute("OriginalInvoice") || null,
@@ -86,7 +108,7 @@ export function parseWIP(xmlText) {
       hasBreakage:   breakageCount > 0,
       breakageCount,
       breakageItems: bkItems.map(b => ({
-        date:       b.getAttribute("Date"),
+        date:       convertDate(b.getAttribute("Date")),
         time:       b.getAttribute("Time"),
         dept:       b.getAttribute("Department"),
         position:   b.getAttribute("Position"),
@@ -99,6 +121,7 @@ export function parseWIP(xmlText) {
     });
   }
 
+  console.log(`[WIP] Parsed ${jobs.length} jobs from XML`);
   return { meta, jobs };
 }
 
