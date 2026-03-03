@@ -1051,26 +1051,33 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
   const [aiLoading,setAiLoading]=useState(false);
   const mono="'JetBrains Mono',monospace";
 
-  // Get jobs for a specific KPI
+  // Get jobs for a specific KPI (handles both WIP XML and DVI CSV formats)
   const getJobsForKPI=(kpiId)=>{
-    const {trays=[],batches=[],dviJobs=[],breakage=[]}=data||{};
-    const byStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||j.station||'').toLowerCase().includes(stage.toLowerCase()));
+    const {trays=[],batches=[],dviJobs=[],breakage=[],wipJobs=[]}=data||{};
+    const jobs=dviJobs; // Already merged in parent
+    const byStage=(stage)=>jobs.filter(j=>(j.stage||j.Stage||j.station||j.department||'').toLowerCase().includes(stage.toLowerCase()));
 
     switch(kpiId){
-      case 'incoming_jobs': return dviJobs.filter(j=>{
+      case 'incoming_jobs': return jobs.filter(j=>{
         const station=(j.station||'').toUpperCase();
+        // WIP data: check daysInLab=0 or 1
+        if(j.daysInLab!==undefined) return j.daysInLab<=1;
         return station.includes('INITIATE')||station.includes('NEW WORK')||station.includes('RECEIVED');
       });
-      case 'total_wip': return dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED');
-      case 'shipped_jobs': return dviJobs.filter(j=>(j.status==='SHIPPED'||j.stage==='SHIP'));
-      case 'coating_wip': return byStage('COAT').concat(byStage('CCL')).concat(byStage('CCP'));
+      case 'total_wip': return jobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED');
+      case 'shipped_jobs': return jobs.filter(j=>(j.status==='SHIPPED'||j.stage==='SHIP'));
+      case 'coating_wip':
+        // WIP XML has inCoatingQueue flag
+        return jobs.filter(j=>j.inCoatingQueue||byStage('COAT').includes(j)||byStage('CCL').includes(j)||byStage('CCP').includes(j));
       case 'cutting_wip': return byStage('CUT').concat(byStage('EDGER')).concat(byStage('LCU'));
       case 'assembly_wip': return byStage('ASSEMBL');
       case 'surfacing_wip': return byStage('SURF').concat(byStage('GENERATOR'));
       case 'qc_wip': return byStage('QC');
-      case 'breakage': return dviJobs.filter(j=>(j.station||'').toUpperCase().includes('BREAKAGE'));
-      case 'rush_jobs': return dviJobs.filter(j=>j.rush==='Y'||j.Rush==='Y'||j.priority==='RUSH');
-      case 'qc_holds': return dviJobs.filter(j=>(j.station||'').toUpperCase().includes('QC_HOLD')||(j.status||'').includes('HOLD'));
+      case 'breakage':
+        // WIP XML has hasBreakage flag
+        return jobs.filter(j=>j.hasBreakage||(j.station||'').toUpperCase().includes('BREAKAGE'));
+      case 'rush_jobs': return jobs.filter(j=>j.rush==='Y'||j.Rush==='Y'||j.priority==='RUSH');
+      case 'qc_holds': return jobs.filter(j=>(j.station||'').toUpperCase().includes('QC_HOLD')||(j.status||'').includes('HOLD'));
       default: return [];
     }
   };
@@ -1987,7 +1994,7 @@ const DEFAULT_CARDS = [
 
 function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36).slice(2,6)); }
 
-function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[]}){
+function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[],dviJobs=[],wipJobs=[]}){
   // Get coater machines from settings (fallback to MACHINES constant)
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
@@ -2076,25 +2083,6 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
     return()=>clearInterval(iv);
   },[]);
 
-  // Live DVI jobs data from gateway
-  const [dviJobs,setDviJobs]=useState([]);
-  useEffect(()=>{
-    const fetchDviJobs=async()=>{
-      try{
-        const res=await fetch("http://localhost:3001/api/dvi/data");
-        if(res.ok){
-          const data=await res.json();
-          setDviJobs(data?.jobs||[]);
-        }
-      }catch(e){
-        console.warn("DVI fetch failed:",e.message);
-      }
-    };
-    fetchDviJobs();
-    const iv=setInterval(fetchDviJobs,120000); // refresh every 2 min
-    return()=>clearInterval(iv);
-  },[]);
-
   // Persist cards to localStorage
   useEffect(()=>{ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(cards));}catch{} },[cards]);
 
@@ -2169,7 +2157,7 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
 
       case "kpi_row": return(
         <ConfigurableKPIRow
-          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData}}
+          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs}}
           settings={settings}
           cardConfig={card.config}
           onConfigChange={(cfg)=>updateCardConfig(card.id,cfg)}
@@ -8751,6 +8739,58 @@ export default function LabAssistantV2(){
   const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||"http://localhost:3002";}catch{return "http://localhost:3002";} });
   const [clock,setClock]=useState(new Date());
 
+  // DVI jobs from gateway + WIP data from localStorage
+  const [dviJobs,setDviJobs]=useState([]);
+  const [wipJobs,setWipJobs]=useState([]);
+
+  // Load WIP data from localStorage (populated by WIPFeed component)
+  useEffect(()=>{
+    const loadWipData=()=>{
+      try{
+        const saved=localStorage.getItem('la_wip_data_v1');
+        if(saved){
+          const parsed=JSON.parse(saved);
+          if(parsed.jobs&&parsed.jobs.length>0){
+            setWipJobs(parsed.jobs);
+            console.log(`[App] Loaded ${parsed.jobs.length} WIP jobs from localStorage`);
+          }
+        }
+      }catch(e){
+        console.warn("WIP load failed:",e.message);
+      }
+    };
+    loadWipData();
+    // Listen for storage changes
+    const handleStorage=(e)=>{ if(e.key==='la_wip_data_v1') loadWipData(); };
+    window.addEventListener('storage',handleStorage);
+    const iv=setInterval(loadWipData,30000);
+    return()=>{ window.removeEventListener('storage',handleStorage); clearInterval(iv); };
+  },[]);
+
+  // Fetch DVI data from gateway
+  useEffect(()=>{
+    const fetchDvi=async()=>{
+      try{
+        const res=await fetch("http://localhost:3001/api/dvi/data");
+        if(res.ok){
+          const data=await res.json();
+          // Filter out CANCELED jobs
+          const jobs=(data?.jobs||[]).filter(j=>j.stage!=='CANCELED'&&j.station!=='CANCELED');
+          setDviJobs(jobs);
+        }
+      }catch(e){ console.warn("DVI fetch:",e.message); }
+    };
+    fetchDvi();
+    const iv=setInterval(fetchDvi,120000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  // Merge WIP + DVI: prefer WIP (has detailed data), fallback to DVI
+  const mergedJobs=useMemo(()=>{
+    if(wipJobs.length>0) return wipJobs;
+    return dviJobs;
+  },[wipJobs,dviJobs]);
+
   // Settings state with localStorage persistence
   const [settings,setSettings]=useState(()=>{
     try{
@@ -8940,13 +8980,13 @@ export default function LabAssistantV2(){
 
       {/* CONTENT */}
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
-        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage}/>}
+        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events}/>}
-        {view==="coating"&&<CoatingTab batches={batches} trays={trays} dviJobs={dviJobs} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={dviJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="cutting"&&<CuttingTab trays={trays} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="assembly"&&<AssemblyTab trays={trays} dviJobs={dviJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="shipping"&&<ShippingTab trays={trays} dviJobs={dviJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="coating"&&<CoatingTab batches={batches} trays={trays} dviJobs={mergedJobs} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="cutting"&&<CuttingTab trays={trays} dviJobs={mergedJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="assembly"&&<AssemblyTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="shipping"&&<ShippingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="inventory"&&<InventoryTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
