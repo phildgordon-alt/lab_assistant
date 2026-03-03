@@ -6,19 +6,31 @@
 // Keyword-based classification (v1)
 // Will be replaced with LLM classification in v2
 const AGENT_KEYWORDS: Record<string, string[]> = {
+  DevOpsAgent: [
+    'api', 'gateway', 'connection', 'server', 'config', 'environment',
+    'env', 'startup', 'port', 'mock', 'database', 'postgres', 'slack',
+    'health', 'error', 'not working', 'not loading', 'disconnected',
+    'timeout', 'integration', 'setup', 'configure', 'devops', 'debug',
+    'limble', 'itempath', 'dvi', 'kardex', 'anthropic',
+  ],
   CodingAgent: [
     'coding', 'barcode', 'data matrix', 'datamatrix', 'scan', 'marking',
-    'engraving', 'label', 'laser', 'code', 'coded', 'ecc200',
+    'engraving', 'label', 'laser mark', 'code', 'coded', 'ecc200', 'traceability',
+  ],
+  CoatingAgent: [
+    'coating', 'coater', 'ar', 'anti-reflective', 'blue light', 'bluecut',
+    'photochromic', 'transitions', 'polarized', 'hard coat', 'mirror',
+    'crazing', 'pinholes', 'delamination', 'haze', 'satis', 'opticoat',
+    'batch', 'oven', 'cure', 'curing', 'rack',
   ],
   PickingAgent: [
     'pick', 'picking', 'kardex', 'put wall', 'putwall', 'tray', 'dispensing',
     'dispense', 'carousel', 'storage', 'bin', 'lens blank', 'inventory',
   ],
   SurfacingAgent: [
-    'surfacing', 'coating', 'ar', 'anti-reflective', 'blue light', 'bluecut',
-    'photochromic', 'transitions', 'polarized', 'hard coat', 'mirror',
-    'yield', 'defect', 'crazing', 'pinholes', 'delamination', 'haze',
-    'coater', 'satis', 'opticoat',
+    'surfacing', 'generator', 'generation', 'base curve', 'front curve',
+    'freeform', 'progressive', 'pal', 'bifocal', 'lens blank', 'blocking',
+    'polishing', 'yield', 'defect', 'scratch', 'chip',
   ],
   CuttingAgent: [
     'cutting', 'edging', 'single vision', 'sv', 'edger', 'lens cut',

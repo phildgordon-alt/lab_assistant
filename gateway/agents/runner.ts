@@ -86,6 +86,7 @@ export function getAgentPromptInfo(): Array<{
   size: number;
 }> {
   const agents = [
+    'DevOpsAgent',
     'CodingAgent',
     'PickingAgent',
     'SurfacingAgent',

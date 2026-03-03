@@ -13,37 +13,15 @@ import { runAgentStreaming } from '../agents/runner.js';
 const router = Router();
 
 /**
- * POST /web/ask
- * Query endpoint with SSE streaming response
- *
- * Request body:
- * {
- *   "question": "What's the shift summary?",
- *   "agent": "ShiftReportAgent",  // optional
- *   "userId": "phil@pair.com"     // optional
- * }
- *
- * Response: Server-Sent Events stream
- * event: agent
- * data: {"name": "ShiftReportAgent"}
- *
- * event: chunk
- * data: {"text": "The current shift..."}
- *
- * event: done
- * data: {"duration_ms": 1234}
+ * Shared SSE streaming handler
  */
-router.post('/ask', async (req: Request, res: Response) => {
-  const { question, agent, userId = 'web-anonymous', context } = req.body;
-
-  if (!question || typeof question !== 'string') {
-    res.status(400).json({
-      error: 'bad_request',
-      message: 'Missing required field: question',
-    });
-    return;
-  }
-
+async function handleSSEQuery(
+  res: Response,
+  question: string,
+  agent: string | undefined,
+  userId: string,
+  context?: any
+): Promise<void> {
   // Check rate limit
   const rateResult = await checkRateLimit('web', userId);
   if (!rateResult.allowed) {
@@ -110,6 +88,41 @@ router.post('/ask', async (req: Request, res: Response) => {
     res.write(`event: error\ndata: ${JSON.stringify({ message: errorMessage })}\n\n`);
     res.end();
   }
+}
+
+/**
+ * POST /web/ask
+ * Query endpoint with SSE streaming response
+ *
+ * Request body:
+ * {
+ *   "question": "What's the shift summary?",
+ *   "agent": "ShiftReportAgent",  // optional
+ *   "userId": "phil@pair.com"     // optional
+ * }
+ *
+ * Response: Server-Sent Events stream
+ * event: agent
+ * data: {"name": "ShiftReportAgent"}
+ *
+ * event: chunk
+ * data: {"text": "The current shift..."}
+ *
+ * event: done
+ * data: {"duration_ms": 1234}
+ */
+router.post('/ask', async (req: Request, res: Response) => {
+  const { question, agent, userId = 'web-anonymous', context } = req.body;
+
+  if (!question || typeof question !== 'string') {
+    res.status(400).json({
+      error: 'bad_request',
+      message: 'Missing required field: question',
+    });
+    return;
+  }
+
+  await handleSSEQuery(res, question, agent, userId, context);
 });
 
 /**
@@ -129,9 +142,7 @@ router.get('/ask', async (req: Request, res: Response) => {
     return;
   }
 
-  // Forward to POST handler
-  req.body = { question, agent, userId };
-  return router.handle(req, res, () => {});
+  await handleSSEQuery(res, question, agent, userId);
 });
 
 /**

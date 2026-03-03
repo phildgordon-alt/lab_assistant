@@ -43,6 +43,36 @@ standalone/AssemblyDashboard.html  server/itempath-adapter.js  → ItemPath API
 - `/?mode=tablet` — Manager tablet, same features, touch-optimized (44px targets, bottom nav)
 - `/?mode=corporate` — Read-only corporate viewer, 4 tabs only, no write operations
 
+### Two-Server Architecture (CRITICAL)
+
+Lab_Assistant runs **two separate servers** that must both be running:
+
+| Server | Port | Location | Purpose |
+|--------|------|----------|---------|
+| **Lab Server** | 3002 | `server/oven-timer-server.js` | Core MES APIs: inventory, maintenance, timers, DVI, ItemPath |
+| **Gateway** | 3001 | `gateway/index.ts` | AI/Agentic APIs: Claude agents, Slack Socket Mode, DVI uploads |
+
+**Frontend calls Lab Server (3002)** for:
+- `/api/inventory/*` — ItemPath lens blank data
+- `/api/maintenance/*` — Limble CMMS data
+- `/api/dvi/*` — DVI job data
+- WebSocket — Oven timer sync
+
+**Frontend calls Gateway (3001)** for:
+- `/web/ask` — Claude AI queries (SSE streaming)
+- `/gateway/*` — Stats, agent prompts, health
+- DVI XML uploads
+
+**Environment variables:**
+- Root `.env` — Used by Lab Server (port 3002)
+- `gateway/.env` — Used by Gateway (port 3001)
+
+Both need: `ITEMPATH_URL`, `ITEMPATH_TOKEN`, `LIMBLE_URL`, `LIMBLE_CLIENT_ID`, `LIMBLE_CLIENT_SECRET`
+
+**Common issue:** If Inventory/Maintenance tabs show empty data, check:
+1. Lab Server running? → `npm run server` (from root)
+2. Root `.env` has credentials? → Copy from `gateway/.env` if missing
+
 ---
 
 ## File Map — Every File and What It Does
@@ -84,18 +114,37 @@ Main Node.js backend. Express + WebSocket.
 - **Add 4 lines to integrate ItemPath adapter** (see itempath-adapter.js header comments)
 - Runs on port 3002
 
-### `server/dvi-adapter.js` (20KB)
-Polls DVI API every 90 seconds for assembly job data.
-- Auth: API key (`X-API-Key` header) or Basic Auth — set via `DVI_AUTH` env var
-- Normalizes DVI field names (variants documented inline — DVI schemas differ by install)
-- `DVI_ASSEMBLY_STAGE` env var controls what DVI calls the assembly step (default: 'ASSEMBLY')
-- **Currently not integrated** into oven-timer-server.js — add 4 lines (see file header)
-- Mock mode activates when `DVI_URL` not set — generates 60 realistic jobs with 6 operators
-- Exports: `start()`, `getJobs(query)`, `getStats()`, `getOperatorStats(name)`, `getAIContext()`
+### `gateway/sources/dvi-soap.ts` — DVI SOAP Adapter (LIVE)
+Real-time connection to DVI RxLab via SOAP API.
+- **Endpoint:** `https://dvirx.com:443/DVIRx/services/DVIRxSOAP`
+- **Protocol:** SOAP 1.1 with XML payloads
+- **Auth:** Username/password + application GUID
 
-**IMPORTANT — DVI field mapping:** DVI installs vary. Before going live, get a sample JSON
-response from your DVI admin to verify field names match the normalization map in the file.
-Common variants are documented inline (e.g., `job_id` vs `order_number` vs `lab_order_id`).
+**Gateway endpoints:**
+- `GET /api/dvi/live/orders?max=100` — Download pending orders from DVI
+- `GET /api/dvi/live/statuses?hours=24` — Get status updates since N hours ago
+- `GET /api/dvi/live/health` — Check DVI connection
+- `GET /api/dvi/live/context` — Get AI-ready context summary
+
+**Environment variables:**
+```
+DVI_SOAP_URL=https://dvirx.com:443/DVIRx/services/DVIRxSOAP
+DVI_USERNAME=pair
+DVI_PASSWORD=<password>
+DVI_APPLICATION=65613E2E-7C28-497C-961C-8F8415E5C216
+```
+
+**Available SOAP operations:**
+- `DownloadOrders` — Get pending orders (newest first)
+- `DownloadStatuses` — Get status updates since a date
+- `DownloadJobMessages` — Get job messages
+- `LookupByAccount` — Search by account/tray/Rx number
+- `GetOrderDetail` — Get full order details
+
+### `server/dvi-adapter.js` (20KB) — Legacy REST Adapter
+Polls DVI REST API for assembly job data (not currently in use).
+- Auth: API key (`X-API-Key` header) or Basic Auth
+- Mock mode when `DVI_URL` not set
 
 ### `server/itempath-adapter.js` (21KB)
 Polls ItemPath/Kardex API every 60 seconds for live lens blank inventory.
@@ -171,14 +220,16 @@ Standalone tablet app for individual coaters. One tablet per coater.
 | Tray/batch data | 🟡 MOCK | Generated in-memory. Wire to server APIs. |
 | Oven timers | ✅ LIVE | oven-timer-server.js + WebSocket |
 | Word report export | ✅ LIVE | `/api/report` endpoint in server |
-| AI Assistant | ✅ LIVE | Calls Anthropic API directly |
-| ItemPath adapter | 🟡 MOCK | Written, not integrated. Needs `ITEMPATH_TOKEN`. |
-| DVI adapter | 🟡 MOCK | Written, not integrated. Needs `DVI_URL` + `DVI_API_KEY`. |
-| Assembly Dashboard | 🟡 MOCK | Standalone, works. Wire to dvi-adapter when ready. |
+| AI Assistant | ✅ LIVE | Gateway AI agents + Anthropic API |
+| ItemPath adapter | ✅ LIVE | Lab server + gateway proxy. Credentials in `.env` |
+| DVI SOAP API | ✅ LIVE | `gateway/sources/dvi-soap.ts` — real-time orders/statuses |
+| DVI File Upload | ✅ LIVE | `/api/dvi/upload` — manual XML upload + archive |
+| Limble CMMS | ✅ LIVE | Maintenance data via gateway proxy |
+| Assembly Dashboard | 🟡 MOCK | Standalone, works. Wire to DVI when ready. |
 | Nightly ETL | 🟡 STUB | Written, not scheduled. Needs Looker credentials. |
 | BLE zone readers | 📋 PLANNED | Hardware BOM done. Raspberry Pi Zero 2W + ASUS USB-BT500. |
 | Smart Tray BLE tags | 📋 PLANNED | Minew E7 beacons, retrofit BOM done. |
-| Slack alerts | ✅ LIVE | slack-proxy.js + SLACK_WEBHOOK env var |
+| Slack alerts | ✅ LIVE | Socket Mode via gateway + bot token |
 
 ---
 
@@ -254,18 +305,31 @@ npm install
 # 2. Install server deps
 cd server && npm install express cors node-fetch ws qrcode && cd ..
 
-# 3. Copy env file and fill in credentials
+# 3. Install gateway deps
+cd gateway && npm install && cd ..
+
+# 4. Copy env files and fill in credentials
 cp .env.example .env
+# Also ensure gateway/.env has ANTHROPIC_API_KEY and SLACK tokens
 
-# 4. Start server (terminal 1)
+# 5. Start Lab Server (terminal 1) — port 3002
 npm run server
+# Serves: /api/inventory/*, /api/maintenance/*, timers, DVI, ItemPath
 
-# 5. Start frontend dev server (terminal 2)
+# 6. Start Gateway (terminal 2) — port 3001
+cd gateway && npx tsx index.ts
+# Serves: /web/ask (Claude AI), /gateway/*, Slack Socket Mode, DVI uploads
+
+# 7. Start frontend dev server (terminal 3)
 npm run dev
 
 # App at http://localhost:5173
 # Tablet mode: http://localhost:5173/?mode=tablet
 # Corporate: http://localhost:5173/?mode=corporate
+
+# IMPORTANT: Both servers (3001 + 3002) must be running for full functionality
+# - Lab Server down → Inventory/Maintenance tabs empty
+# - Gateway down → AI Assistant broken, Slack disconnected
 
 # Standalone apps — just open directly in browser, no server needed for mock mode:
 # standalone/AssemblyDashboard.html
@@ -495,13 +559,19 @@ See `.env.example` for full list. Key ones:
 
 | Variable | Used By | Description |
 |---|---|---|
-| `PORT` | oven-timer-server.js | Server port (default 3002) |
-| `SLACK_WEBHOOK` | All adapters | Slack incoming webhook URL |
-| `ITEMPATH_URL` | itempath-adapter.js | ItemPath base URL |
-| `ITEMPATH_TOKEN` | itempath-adapter.js | Non-expiring application token |
-| `DVI_URL` | dvi-adapter.js | DVI API base URL |
-| `DVI_API_KEY` | dvi-adapter.js | DVI API key |
-| `DVI_ASSEMBLY_STAGE` | dvi-adapter.js | What DVI calls assembly (default: ASSEMBLY) |
+| `PORT` | servers | Lab server 3002, Gateway 3001 |
+| `ANTHROPIC_API_KEY` | gateway | Claude API key for AI agents |
+| `SLACK_BOT_TOKEN` | gateway | Slack bot token (xoxb-...) |
+| `SLACK_APP_TOKEN` | gateway | Slack app token for Socket Mode (xapp-...) |
+| `ITEMPATH_URL` | gateway, server | ItemPath base URL |
+| `ITEMPATH_TOKEN` | gateway, server | Non-expiring application token |
+| `DVI_SOAP_URL` | gateway | DVI SOAP endpoint |
+| `DVI_USERNAME` | gateway | DVI login username |
+| `DVI_PASSWORD` | gateway | DVI login password |
+| `DVI_APPLICATION` | gateway | DVI application GUID |
+| `LIMBLE_URL` | gateway, server | Limble CMMS base URL |
+| `LIMBLE_CLIENT_ID` | gateway, server | Limble OAuth2 client ID |
+| `LIMBLE_CLIENT_SECRET` | gateway, server | Limble OAuth2 client secret |
 | `LOOKER_URL` | nightly-etl.js | Looker instance URL |
 | `LOOKER_CLIENT_ID` | nightly-etl.js | Looker OAuth2 client ID |
 | `LOOKER_CLIENT_SECRET` | nightly-etl.js | Looker OAuth2 client secret |

@@ -130,6 +130,7 @@ router.post('/ask', verifyJwt, async (req: Request, res: Response) => {
  */
 router.get('/agents', (_req: Request, res: Response) => {
   const agents = [
+    { name: 'DevOpsAgent', description: 'API connections, gateway, server config, troubleshooting' },
     { name: 'CodingAgent', description: 'Barcode/data matrix coding, job tracking' },
     { name: 'PickingAgent', description: 'Kardex picks, put wall, tray dispensing' },
     { name: 'SurfacingAgent', description: 'Coating lines, AR/Blue Light/Photochromic yield' },

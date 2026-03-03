@@ -1,21 +1,30 @@
 /**
  * Slack Source Handler
  * Handles /lab slash commands and @LabAssistant mentions
+ *
+ * NOTE: Uses lazy loading for @slack/bolt to prevent import hang
  */
 
-import { App, LogLevel } from '@slack/bolt';
 import { checkRateLimit } from '../limiter.js';
 import { isCircuitOpen } from '../circuit-breaker.js';
 import { startLog, completeLog, errorLog, log } from '../logger.js';
 import { classifyIntent } from '../agents/classifier.js';
 import { runAgent } from '../agents/runner.js';
 
+// Lazy-loaded Slack types and app
+type App = import('@slack/bolt').App;
 let slackApp: App | null = null;
+let slackInitialized = false;
 
 /**
- * Initialize Slack Bolt app
+ * Initialize Slack Bolt app (lazy-loads @slack/bolt)
  */
-export function initSlack(): App | null {
+export async function initSlack(): Promise<App | null> {
+  if (slackInitialized) {
+    return slackApp;
+  }
+  slackInitialized = true;
+
   const token = process.env.SLACK_BOT_TOKEN;
   const signingSecret = process.env.SLACK_SIGNING_SECRET;
   const appToken = process.env.SLACK_APP_TOKEN;
@@ -25,20 +34,28 @@ export function initSlack(): App | null {
     return null;
   }
 
-  slackApp = new App({
-    token,
-    signingSecret,
-    appToken,
-    socketMode: !!appToken,
-    logLevel: LogLevel.WARN,
-  });
+  try {
+    // Dynamically import @slack/bolt to prevent blocking on module load
+    const { App, LogLevel } = await import('@slack/bolt');
 
-  // Register handlers
-  registerSlashCommand(slackApp);
-  registerMention(slackApp);
+    slackApp = new App({
+      token,
+      signingSecret,
+      appToken,
+      socketMode: !!appToken,
+      logLevel: LogLevel.WARN,
+    });
 
-  log.info('Slack integration initialized');
-  return slackApp;
+    // Register handlers
+    registerSlashCommand(slackApp);
+    registerMention(slackApp);
+
+    log.info('Slack integration initialized');
+    return slackApp;
+  } catch (error) {
+    log.error('Failed to initialize Slack:', error);
+    return null;
+  }
 }
 
 /**
@@ -72,7 +89,7 @@ function registerSlashCommand(app: App): void {
  */
 function registerMention(app: App): void {
   app.event('app_mention', async ({ event, say }) => {
-    const userId = event.user;
+    const userId = event.user || 'unknown';
     // Remove the bot mention from the text
     const text = event.text.replace(/<@[A-Z0-9]+>/g, '').trim();
 
@@ -85,9 +102,11 @@ function registerMention(app: App): void {
     }
 
     await handleSlackQuery(userId, text, async (response) => {
+      const formatted = formatSlackResponse(response);
       await say({
         thread_ts: event.ts,
-        ...formatSlackResponse(response),
+        text: formatted.text || 'Response from Lab Assistant',
+        blocks: formatted.blocks as any,
       });
     });
   });
@@ -230,14 +249,18 @@ function formatSlackResponse(result: AgentResponse | SlackResponse): SlackRespon
  */
 export async function startSlack(): Promise<void> {
   if (slackApp && process.env.SLACK_APP_TOKEN) {
-    await slackApp.start();
-    log.info('Slack Socket Mode connected');
+    try {
+      await slackApp.start();
+      log.info('Slack Socket Mode connected');
+    } catch (error) {
+      log.error('Slack Socket Mode failed to start:', error);
+    }
   }
 }
 
 /**
- * Get the Express receiver for HTTP mode
+ * Get the Slack app instance
  */
-export function getSlackReceiver() {
+export function getSlackApp(): App | null {
   return slackApp;
 }

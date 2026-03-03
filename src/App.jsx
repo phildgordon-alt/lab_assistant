@@ -140,6 +140,17 @@ const DEFAULT_SETTINGS = {
   pinEnabled: false,
   anthropicApiKey: '', // Claude API key for AI features (fallback if no gateway)
   gatewayUrl: 'http://localhost:3001', // MCP Gateway URL
+  // API Connections
+  itempathUrl: '',
+  itempathToken: '',
+  dviUrl: '',
+  dviApiKey: '',
+  limbleUrl: '',
+  limbleApiKey: '',
+  slackBotToken: '',
+  slackSigningSecret: '',
+  slackAppToken: '',
+  databaseUrl: '',
   equipmentCategories: [
     { id: 'coaters', name: 'Coaters', icon: '🌡', color: '#F59E0B' },
     { id: 'ovens', name: 'Ovens', icon: '🔥', color: '#EF4444' },
@@ -303,8 +314,667 @@ const SectionHeader = ({children,right})=>(
 const Card = ({children,style,onClick})=>(
   <div onClick={onClick} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:16,cursor:onClick?"pointer":"default",transition:"border-color 0.2s",...style}}>{children}</div>
 );
-const KPICard = ({label,value,sub,trend,accent})=>(
-  <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 22px",flex:"1 1 0",minWidth:160,borderTop:`4px solid ${accent||T.blue}`}}>
+
+// DevOps AI Card for Settings/Connections
+function DevOpsAICard({settings,connections}){
+  const [query,setQuery]=useState('');
+  const [response,setResponse]=useState('');
+  const [loading,setLoading]=useState(false);
+  const mono="'JetBrains Mono',monospace";
+
+  const askDevOps = async (q) => {
+    const question = q || query;
+    if(!question.trim()) return;
+    setLoading(true);
+    setResponse('');
+    const gwUrl = settings?.gatewayUrl || 'http://localhost:3001';
+    try {
+      // Build context from connections
+      const ctx = connections ? `Current connection status:\n${JSON.stringify(connections.connections,null,2)}` : '';
+      const resp = await fetch(`${gwUrl}/web/ask`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({question,agent:'DevOpsAgent',context:ctx})
+      });
+      if(!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      // SSE streaming
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let text = '';
+      while(true){
+        const {done,value} = await reader.read();
+        if(done) break;
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        for(const line of lines){
+          if(line.startsWith('data: ')){
+            try{
+              const data = JSON.parse(line.slice(6));
+              if(data.text) { text += data.text; setResponse(text); }
+            }catch{}
+          }
+        }
+      }
+    } catch(e) {
+      setResponse(`Error: ${e.message}\n\nMake sure the MCP Gateway is running on ${gwUrl}`);
+    }
+    setLoading(false);
+  };
+
+  const quickPrompts = [
+    "Why is Lab Backend disconnected?",
+    "How do I configure ItemPath?",
+    "What env vars do I need?",
+    "Debug gateway startup"
+  ];
+
+  return(
+    <Card style={{background:`${T.purple}10`,border:`1px solid ${T.purple}40`,padding:0,overflow:'hidden'}}>
+      <div style={{padding:16,borderBottom:`1px solid ${T.purple}30`}}>
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+          <span style={{fontSize:24}}>🤖</span>
+          <div>
+            <div style={{fontSize:14,fontWeight:700,color:T.text}}>DevOps AI Assistant</div>
+            <div style={{fontSize:11,color:T.textMuted}}>Ask about APIs, gateway, config, or troubleshooting</div>
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8}}>
+          <input
+            value={query}
+            onChange={e=>setQuery(e.target.value)}
+            onKeyDown={e=>e.key==='Enter'&&askDevOps()}
+            placeholder="Ask about connections, APIs, or configuration..."
+            style={{flex:1,background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 14px",color:T.text,fontSize:13}}
+          />
+          <button onClick={()=>askDevOps()} disabled={loading||!query.trim()}
+            style={{background:T.purple,border:"none",borderRadius:8,padding:"0 20px",color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",opacity:loading||!query.trim()?0.5:1}}>
+            {loading?"...":"Ask"}
+          </button>
+        </div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:10}}>
+          {quickPrompts.map(q=>(
+            <button key={q} onClick={()=>{setQuery(q);askDevOps(q);}}
+              style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"5px 10px",color:T.textMuted,fontSize:10,cursor:"pointer"}}>
+              {q}
+            </button>
+          ))}
+        </div>
+      </div>
+      {(response || loading) && (
+        <div style={{padding:16,background:T.bg,maxHeight:300,overflowY:'auto'}}>
+          {loading && !response && <div style={{color:T.textMuted,fontSize:12}}>Thinking...</div>}
+          {response && (
+            <pre style={{margin:0,whiteSpace:'pre-wrap',fontSize:12,color:T.text,fontFamily:mono,lineHeight:1.5}}>{response}</pre>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+// ── Agents Management Panel ───────────────────────────────────────────────────
+function AgentsPanel({settings}){
+  const mono="'JetBrains Mono',monospace";
+  const [agents,setAgents]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [selectedAgent,setSelectedAgent]=useState(null);
+  const [editContent,setEditContent]=useState('');
+  const [saving,setSaving]=useState(false);
+  const [showCreate,setShowCreate]=useState(false);
+  const [newAgentName,setNewAgentName]=useState('');
+  const [newAgentContent,setNewAgentContent]=useState('');
+  const gwUrl=settings?.gatewayUrl||'http://localhost:3001';
+
+  // Load agents on mount
+  useEffect(()=>{
+    loadAgents();
+  },[]);
+
+  const loadAgents=async()=>{
+    setLoading(true);
+    try{
+      const resp=await fetch(`${gwUrl}/gateway/agents/prompts`);
+      if(resp.ok){
+        const data=await resp.json();
+        setAgents(data.agents||[]);
+        if(data.agents?.length>0&&!selectedAgent){
+          setSelectedAgent(data.agents[0].name);
+          setEditContent(data.agents[0].content);
+        }
+      }
+    }catch(e){
+      console.error('Failed to load agents:',e);
+    }
+    setLoading(false);
+  };
+
+  const selectAgent=(name)=>{
+    const agent=agents.find(a=>a.name===name);
+    if(agent){
+      setSelectedAgent(name);
+      setEditContent(agent.content);
+    }
+  };
+
+  const saveAgent=async()=>{
+    if(!selectedAgent||!editContent.trim())return;
+    setSaving(true);
+    try{
+      const resp=await fetch(`${gwUrl}/gateway/agents/prompts/${selectedAgent}`,{
+        method:'PUT',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({content:editContent})
+      });
+      if(resp.ok){
+        // Update local state
+        setAgents(prev=>prev.map(a=>a.name===selectedAgent?{...a,content:editContent}:a));
+      }
+    }catch(e){
+      console.error('Failed to save agent:',e);
+    }
+    setSaving(false);
+  };
+
+  const createAgent=async()=>{
+    if(!newAgentName.trim()||!newAgentContent.trim())return;
+    setSaving(true);
+    try{
+      const resp=await fetch(`${gwUrl}/gateway/agents/prompts`,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({name:newAgentName.trim(),content:newAgentContent})
+      });
+      if(resp.ok){
+        setShowCreate(false);
+        setNewAgentName('');
+        setNewAgentContent('');
+        await loadAgents();
+      }else{
+        const err=await resp.json();
+        alert(err.error||'Failed to create agent');
+      }
+    }catch(e){
+      console.error('Failed to create agent:',e);
+    }
+    setSaving(false);
+  };
+
+  const deleteAgent=async(name)=>{
+    if(!confirm(`Delete agent "${name}"? This cannot be undone.`))return;
+    try{
+      const resp=await fetch(`${gwUrl}/gateway/agents/prompts/${name}`,{method:'DELETE'});
+      if(resp.ok){
+        await loadAgents();
+        if(selectedAgent===name){
+          setSelectedAgent(null);
+          setEditContent('');
+        }
+      }
+    }catch(e){
+      console.error('Failed to delete agent:',e);
+    }
+  };
+
+  // Default template for new agents
+  const defaultTemplate=`# AgentName — Lab Assistant Specialist
+
+You are a specialist agent for Pair Eyewear's lens lab operations. You help with [AREA] operations.
+
+## Your Responsibilities
+
+1. **Primary Function** — Describe main purpose
+2. **Data Analysis** — What data you analyze
+3. **Recommendations** — What advice you provide
+
+## Key Metrics to Monitor
+
+- Metric 1
+- Metric 2
+- Metric 3
+
+## Response Style
+
+- Be concise and data-driven
+- Use specific numbers when available
+- Recommend actionable next steps
+
+## MCP Tools Available
+
+- \`query_database\` — Run read-only SQL queries
+- \`call_api\` — Call Lab Assistant REST API endpoints
+- \`think_aloud\` — Structure your reasoning
+`;
+
+  if(loading){
+    return(
+      <Card style={{padding:40,textAlign:'center'}}>
+        <div style={{color:T.textMuted}}>Loading agents...</div>
+      </Card>
+    );
+  }
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Header */}
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <div>
+          <div style={{fontSize:16,fontWeight:700,color:T.text}}>AI Agents</div>
+          <div style={{fontSize:11,color:T.textMuted}}>{agents.length} agents configured</div>
+        </div>
+        <button onClick={()=>{setShowCreate(true);setNewAgentContent(defaultTemplate);}}
+          style={{background:T.blue,border:'none',borderRadius:8,padding:'10px 20px',color:'#fff',fontSize:13,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',gap:8}}>
+          + Create Agent
+        </button>
+      </div>
+
+      {/* Create Agent Modal */}
+      {showCreate&&(
+        <Card style={{background:`${T.green}10`,border:`1px solid ${T.green}40`}}>
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:10,color:T.textMuted,fontFamily:mono,letterSpacing:1}}>AGENT NAME</label>
+            <input value={newAgentName} onChange={e=>setNewAgentName(e.target.value.replace(/[^a-zA-Z0-9_]/g,''))}
+              placeholder="MyNewAgent"
+              style={{width:'100%',marginTop:4,background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:'10px 14px',color:T.text,fontSize:14,fontFamily:mono}}/>
+            <div style={{fontSize:10,color:T.textDim,marginTop:4}}>Letters, numbers, and underscores only. Will be saved as {newAgentName||'AgentName'}.md</div>
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:10,color:T.textMuted,fontFamily:mono,letterSpacing:1}}>SYSTEM PROMPT (MARKDOWN)</label>
+            <textarea value={newAgentContent} onChange={e=>setNewAgentContent(e.target.value)}
+              rows={15}
+              style={{width:'100%',marginTop:4,background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:'12px 14px',color:T.text,fontSize:12,fontFamily:mono,lineHeight:1.6,resize:'vertical'}}/>
+          </div>
+          <div style={{display:'flex',gap:10}}>
+            <button onClick={createAgent} disabled={saving||!newAgentName.trim()||!newAgentContent.trim()}
+              style={{background:T.green,border:'none',borderRadius:8,padding:'10px 24px',color:'#fff',fontSize:13,fontWeight:700,cursor:'pointer',opacity:saving?0.5:1}}>
+              {saving?'Creating...':'Create Agent'}
+            </button>
+            <button onClick={()=>setShowCreate(false)}
+              style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:8,padding:'10px 24px',color:T.textMuted,fontSize:13,cursor:'pointer'}}>
+              Cancel
+            </button>
+          </div>
+        </Card>
+      )}
+
+      {/* Agent List + Editor */}
+      <div style={{display:'grid',gridTemplateColumns:'280px 1fr',gap:16}}>
+        {/* Agent List */}
+        <Card style={{padding:0,maxHeight:600,overflowY:'auto'}}>
+          {agents.map(agent=>(
+            <div key={agent.name} onClick={()=>selectAgent(agent.name)}
+              style={{padding:'14px 16px',borderBottom:`1px solid ${T.border}`,cursor:'pointer',
+                background:selectedAgent===agent.name?`${T.blue}15`:'transparent',
+                borderLeft:selectedAgent===agent.name?`3px solid ${T.blue}`:'3px solid transparent'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:600,color:selectedAgent===agent.name?T.blue:T.text}}>{agent.name}</div>
+                  <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{agent.filename}</div>
+                </div>
+                <button onClick={e=>{e.stopPropagation();deleteAgent(agent.name);}}
+                  style={{background:'transparent',border:'none',color:T.red,fontSize:14,cursor:'pointer',opacity:0.6,padding:4}}
+                  title="Delete agent">×</button>
+              </div>
+            </div>
+          ))}
+          {agents.length===0&&(
+            <div style={{padding:30,textAlign:'center',color:T.textMuted}}>
+              <div style={{fontSize:24,marginBottom:8}}>🧠</div>
+              <div style={{fontSize:12}}>No agents configured</div>
+            </div>
+          )}
+        </Card>
+
+        {/* Editor */}
+        <Card style={{padding:0,display:'flex',flexDirection:'column'}}>
+          {selectedAgent?(
+            <>
+              <div style={{padding:'12px 16px',borderBottom:`1px solid ${T.border}`,display:'flex',justifyContent:'space-between',alignItems:'center',background:T.surface}}>
+                <div>
+                  <div style={{fontSize:14,fontWeight:700,color:T.text}}>{selectedAgent}</div>
+                  <div style={{fontSize:10,color:T.textDim}}>Edit system prompt below</div>
+                </div>
+                <button onClick={saveAgent} disabled={saving}
+                  style={{background:T.green,border:'none',borderRadius:6,padding:'8px 20px',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',opacity:saving?0.5:1}}>
+                  {saving?'Saving...':'Save Changes'}
+                </button>
+              </div>
+              <textarea value={editContent} onChange={e=>setEditContent(e.target.value)}
+                style={{flex:1,minHeight:450,background:T.bg,border:'none',padding:'16px',color:T.text,fontSize:12,fontFamily:mono,lineHeight:1.6,resize:'none'}}/>
+            </>
+          ):(
+            <div style={{padding:60,textAlign:'center',color:T.textMuted}}>
+              <div style={{fontSize:32,marginBottom:12}}>←</div>
+              <div style={{fontSize:13}}>Select an agent to edit its system prompt</div>
+            </div>
+          )}
+        </Card>
+      </div>
+
+      {/* Help Text */}
+      <Card style={{background:`${T.purple}08`,border:`1px solid ${T.purple}30`}}>
+        <div style={{fontSize:12,color:T.textMuted,lineHeight:1.6}}>
+          <strong style={{color:T.text}}>Agent Prompts Guide:</strong><br/>
+          • Each agent has a system prompt that defines its personality and capabilities<br/>
+          • Use Markdown formatting for structure (headers, lists, code blocks)<br/>
+          • Include specific data sources and metrics the agent should reference<br/>
+          • Define the response style (concise, detailed, data-driven, etc.)<br/>
+          • List available MCP tools the agent can use
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── Data Import Panel (DVI file upload) ───────────────────────────────────────
+function DataImportPanel({settings}){
+  const mono="'JetBrains Mono',monospace";
+  const [dragOver,setDragOver]=useState(false);
+  const [uploading,setUploading]=useState(false);
+  const [uploadResult,setUploadResult]=useState(null);
+  const [dviData,setDviData]=useState(null);
+  const [uploads,setUploads]=useState({uploads:[],missingDates:[],missingCount:0});
+  const [error,setError]=useState(null);
+  const gwUrl=settings?.gatewayUrl||'http://localhost:3001';
+  const fileInputRef=useRef(null);
+
+  // Load existing DVI data and upload history on mount
+  useEffect(()=>{
+    loadDVIData();
+    loadUploads();
+  },[]);
+
+  const loadDVIData=async()=>{
+    try{
+      const resp=await fetch(`${gwUrl}/api/dvi/data`);
+      if(resp.ok){
+        const data=await resp.json();
+        setDviData(data);
+      }
+    }catch(e){
+      console.error('Failed to load DVI data:',e);
+    }
+  };
+
+  const loadUploads=async()=>{
+    try{
+      const resp=await fetch(`${gwUrl}/api/dvi/uploads`);
+      if(resp.ok){
+        const data=await resp.json();
+        setUploads(data);
+      }
+    }catch(e){
+      console.error('Failed to load uploads:',e);
+    }
+  };
+
+  const handleDrop=async(e)=>{
+    e.preventDefault();
+    setDragOver(false);
+    const file=e.dataTransfer?.files?.[0];
+    if(file) await uploadFile(file);
+  };
+
+  const handleFileSelect=async(e)=>{
+    const file=e.target.files?.[0];
+    if(file) await uploadFile(file);
+  };
+
+  const uploadFile=async(file)=>{
+    setUploading(true);
+    setError(null);
+    setUploadResult(null);
+
+    try{
+      // Read file content
+      const content=await file.text();
+
+      const resp=await fetch(`${gwUrl}/api/dvi/upload`,{
+        method:'POST',
+        headers:{
+          'Content-Type':'text/csv',
+          'X-Filename':file.name
+        },
+        body:content
+      });
+
+      if(resp.ok){
+        const result=await resp.json();
+        setUploadResult(result);
+        await loadDVIData();
+        await loadUploads();
+      }else{
+        const err=await resp.json();
+        setError(err.error||'Upload failed');
+      }
+    }catch(e){
+      setError(e.message||'Upload failed');
+    }
+    setUploading(false);
+  };
+
+  return(
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Header */}
+      <div>
+        <div style={{fontSize:16,fontWeight:700,color:T.text}}>Data Import</div>
+        <div style={{fontSize:11,color:T.textMuted}}>Upload DVI data files for processing (CSV format)</div>
+      </div>
+
+      {/* Upload Area */}
+      <Card
+        onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+        onDragLeave={()=>setDragOver(false)}
+        onDrop={handleDrop}
+        onClick={()=>fileInputRef.current?.click()}
+        style={{
+          padding:40,
+          textAlign:'center',
+          cursor:'pointer',
+          border:`2px dashed ${dragOver?T.blue:T.border}`,
+          background:dragOver?`${T.blue}10`:T.card,
+          transition:'all 0.2s'
+        }}>
+        <input ref={fileInputRef} type="file" accept=".xml,.csv,.txt" onChange={handleFileSelect} style={{display:'none'}}/>
+        {uploading?(
+          <>
+            <div style={{fontSize:32,marginBottom:12}}>⏳</div>
+            <div style={{fontSize:14,fontWeight:600,color:T.text}}>Uploading...</div>
+          </>
+        ):(
+          <>
+            <div style={{fontSize:32,marginBottom:12}}>📥</div>
+            <div style={{fontSize:14,fontWeight:600,color:T.text}}>Drop DVI file here (XML or CSV)</div>
+            <div style={{fontSize:12,color:T.textMuted,marginTop:4}}>or click to browse</div>
+          </>
+        )}
+      </Card>
+
+      {/* Error */}
+      {error&&(
+        <Card style={{background:`${T.red}15`,border:`1px solid ${T.red}40`,padding:16}}>
+          <div style={{color:T.red,fontWeight:600,fontSize:13}}>Error: {error}</div>
+        </Card>
+      )}
+
+      {/* Upload Result */}
+      {uploadResult&&(
+        <Card style={{background:`${T.green}10`,border:`1px solid ${T.green}40`}}>
+          <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+            <span style={{fontSize:20}}>✓</span>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:T.green}}>Upload Successful</div>
+              <div style={{fontSize:11,color:T.textMuted}}>{uploadResult.filename}</div>
+            </div>
+          </div>
+          <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
+            <div style={{background:T.surface,borderRadius:8,padding:12,textAlign:'center'}}>
+              <div style={{fontSize:20,fontWeight:700,color:T.text}}>{uploadResult.rowCount}</div>
+              <div style={{fontSize:10,color:T.textMuted}}>Rows Imported</div>
+            </div>
+            <div style={{background:T.surface,borderRadius:8,padding:12,textAlign:'center'}}>
+              <div style={{fontSize:20,fontWeight:700,color:T.text}}>{uploadResult.columns?.length||0}</div>
+              <div style={{fontSize:10,color:T.textMuted}}>Columns</div>
+            </div>
+            <div style={{background:T.surface,borderRadius:8,padding:12,textAlign:'center'}}>
+              <div style={{fontSize:10,fontWeight:600,color:T.text,wordBreak:'break-all'}}>{new Date(uploadResult.uploadedAt).toLocaleString()}</div>
+              <div style={{fontSize:10,color:T.textMuted}}>Uploaded</div>
+            </div>
+          </div>
+          {uploadResult.columns&&(
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:10,color:T.textMuted,marginBottom:6}}>COLUMNS DETECTED:</div>
+              <div style={{fontSize:11,color:T.text,fontFamily:mono,background:T.surface,padding:8,borderRadius:6,wordBreak:'break-all'}}>
+                {uploadResult.columns.join(', ')}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Current Data Status */}
+      <Card>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.text}}>Current DVI Data</div>
+          {dviData?.uploadedAt&&(
+            <button onClick={async()=>{
+              if(!confirm('Clear current DVI data? (Previous uploads will be archived)'))return;
+              try{
+                await fetch(`${gwUrl}/api/dvi/data`,{method:'DELETE'});
+                setDviData(null);
+                setUploadResult(null);
+                await loadDVIData();
+                await loadUploads();
+              }catch(e){console.error(e);}
+            }}
+            style={{background:'transparent',border:`1px solid ${T.red}40`,borderRadius:6,padding:'6px 12px',color:T.red,fontSize:11,cursor:'pointer'}}>
+              Clear Data
+            </button>
+          )}
+        </div>
+        {dviData?.uploadedAt?(
+          <div>
+            <div style={{background:`${T.green}15`,border:`1px solid ${T.green}40`,borderRadius:8,padding:10,marginBottom:12,display:'flex',alignItems:'center',gap:8}}>
+              <span style={{fontSize:16}}>✓</span>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:T.green}}>Real Data Loaded</div>
+                <div style={{fontSize:10,color:T.textMuted}}>All mock data has been replaced with your uploaded data</div>
+              </div>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12,marginBottom:12}}>
+              <div style={{background:T.surface,borderRadius:8,padding:12,textAlign:'center'}}>
+                <div style={{fontSize:24,fontWeight:700,color:T.blue}}>{dviData.jobs?.length||0}</div>
+                <div style={{fontSize:10,color:T.textMuted}}>Total Jobs</div>
+              </div>
+              <div style={{background:T.surface,borderRadius:8,padding:12,textAlign:'center'}}>
+                <div style={{fontSize:24,fontWeight:700,color:T.green}}>Real</div>
+                <div style={{fontSize:10,color:T.textMuted}}>Data Source</div>
+              </div>
+              <div style={{background:T.surface,borderRadius:8,padding:12,textAlign:'center'}}>
+                <div style={{fontSize:12,fontWeight:600,color:T.text}}>{dviData.filename||'—'}</div>
+                <div style={{fontSize:10,color:T.textMuted}}>Source File</div>
+              </div>
+              <div style={{background:T.surface,borderRadius:8,padding:12,textAlign:'center'}}>
+                <div style={{fontSize:10,fontWeight:600,color:T.text}}>{dviData.uploadedAt?new Date(dviData.uploadedAt).toLocaleString():'—'}</div>
+                <div style={{fontSize:10,color:T.textMuted}}>Last Updated</div>
+              </div>
+            </div>
+            {dviData.jobs?.length>0&&(
+              <div>
+                <div style={{fontSize:10,color:T.textMuted,marginBottom:6}}>SAMPLE DATA (first 5 rows):</div>
+                <div style={{background:T.surface,borderRadius:8,padding:12,overflowX:'auto',maxHeight:200}}>
+                  <pre style={{margin:0,fontSize:10,color:T.text,fontFamily:mono}}>
+                    {JSON.stringify(dviData.jobs.slice(0,5),null,2)}
+                  </pre>
+                </div>
+              </div>
+            )}
+          </div>
+        ):(
+          <div style={{textAlign:'center',padding:20,color:T.textMuted}}>
+            <div style={{fontSize:24,marginBottom:8}}>📄</div>
+            <div style={{fontSize:12}}>No DVI data uploaded</div>
+            <div style={{fontSize:11,marginTop:4}}>Upload an XML or CSV file to see real production data</div>
+          </div>
+        )}
+      </Card>
+
+      {/* Upload History */}
+      <Card>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+          <div style={{fontSize:13,fontWeight:700,color:T.text}}>Upload History</div>
+          <div style={{fontSize:11,color:T.textMuted}}>{uploads.totalUploads||0} uploads archived</div>
+        </div>
+
+        {/* Missing Dates Warning */}
+        {uploads.missingCount>0&&(
+          <div style={{background:`${T.amber}15`,border:`1px solid ${T.amber}40`,borderRadius:8,padding:12,marginBottom:12}}>
+            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:8}}>
+              <span style={{fontSize:16}}>⚠️</span>
+              <div style={{fontSize:12,fontWeight:600,color:T.amber}}>Missing {uploads.missingCount} days in last 30 days</div>
+            </div>
+            <div style={{fontSize:10,color:T.textMuted,fontFamily:mono,display:'flex',flexWrap:'wrap',gap:4}}>
+              {uploads.missingDates?.slice(0,10).map(d=>(
+                <span key={d} style={{background:T.surface,padding:'2px 6px',borderRadius:4}}>{d}</span>
+              ))}
+              {uploads.missingDates?.length>10&&<span style={{color:T.textDim}}>+{uploads.missingDates.length-10} more</span>}
+            </div>
+          </div>
+        )}
+
+        {/* Upload List */}
+        {uploads.uploads?.length>0?(
+          <div style={{maxHeight:250,overflowY:'auto'}}>
+            <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+              <thead>
+                <tr style={{background:T.surface,position:'sticky',top:0}}>
+                  <th style={{textAlign:'left',padding:'8px 10px',color:T.textMuted,fontWeight:600}}>Data Date</th>
+                  <th style={{textAlign:'left',padding:'8px 10px',color:T.textMuted,fontWeight:600}}>Filename</th>
+                  <th style={{textAlign:'right',padding:'8px 10px',color:T.textMuted,fontWeight:600}}>Jobs</th>
+                  <th style={{textAlign:'right',padding:'8px 10px',color:T.textMuted,fontWeight:600}}>Uploaded</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploads.uploads.map((u,i)=>(
+                  <tr key={u.id||i} style={{borderBottom:`1px solid ${T.border}`,background:u.isCurrent?`${T.green}10`:'transparent'}}>
+                    <td style={{padding:'8px 10px',fontFamily:mono}}>
+                      <span style={{color:u.dataDate?T.text:T.textDim}}>{u.dataDate||'—'}</span>
+                      {u.isCurrent&&<span style={{marginLeft:6,fontSize:9,background:T.green,color:'#fff',padding:'1px 4px',borderRadius:3}}>CURRENT</span>}
+                    </td>
+                    <td style={{padding:'8px 10px',color:T.textMuted,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.filename}</td>
+                    <td style={{padding:'8px 10px',textAlign:'right',fontFamily:mono,color:T.text}}>{u.rowCount?.toLocaleString()}</td>
+                    <td style={{padding:'8px 10px',textAlign:'right',color:T.textDim,fontSize:10}}>{u.uploadedAt?new Date(u.uploadedAt).toLocaleString():''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ):(
+          <div style={{textAlign:'center',padding:20,color:T.textMuted}}>
+            <div style={{fontSize:11}}>No uploads yet</div>
+          </div>
+        )}
+      </Card>
+
+      {/* Help */}
+      <Card style={{background:`${T.amber}08`,border:`1px solid ${T.amber}30`}}>
+        <div style={{fontSize:12,color:T.textMuted,lineHeight:1.6}}>
+          <strong style={{color:T.text}}>DVI Data Import Guide:</strong><br/>
+          • Export your DVI data as CSV (comma-separated values)<br/>
+          • First row should contain column headers<br/>
+          • Common columns: job_id, order_id, stage, status, rx_type, operator, created_at<br/>
+          • Data is stored in memory until live API connection is established<br/>
+          • Uploaded data will be used by AI agents for analysis
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+const KPICard = ({label,value,sub,trend,accent,onRemove,editable})=>(
+  <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:12,padding:"18px 22px",flex:"1 1 0",minWidth:160,borderTop:`4px solid ${accent||T.blue}`,position:'relative'}}>
+    {editable&&onRemove&&(
+      <button onClick={onRemove} style={{position:'absolute',top:6,right:6,background:'transparent',border:'none',color:T.textDim,fontSize:14,cursor:'pointer',opacity:0.5,padding:2}} title="Remove KPI">×</button>
+    )}
     <div style={{fontSize:12,color:T.textDim,textTransform:"uppercase",letterSpacing:1.5,fontFamily:mono}}>{label}</div>
     <div style={{fontSize:36,fontWeight:800,color:T.text,marginTop:4,fontFamily:mono}}>{value}</div>
     <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
@@ -313,6 +983,139 @@ const KPICard = ({label,value,sub,trend,accent})=>(
     </div>
   </div>
 );
+
+// ── KPI Metrics Registry ──────────────────────────────────────────────────────
+// All available KPI metrics that can be added to the customizable KPI row
+const KPI_METRICS = {
+  incoming_jobs:     { label: "Incoming Jobs",    desc: "Yesterday's incoming work",      accent: T.blue,   category: "Production" },
+  total_wip:         { label: "Total WIP",        desc: "Jobs in all queues",            accent: T.cyan,   category: "Production" },
+  shipped_jobs:      { label: "Shipped Jobs",     desc: "Jobs shipped today",            accent: T.green,  category: "Production" },
+  coating_wip:       { label: "Coating WIP",      desc: "Jobs in coating",               accent: T.amber,  category: "Department" },
+  cutting_wip:       { label: "Cutting WIP",      desc: "Jobs in cutting/edging",        accent: T.purple, category: "Department" },
+  assembly_wip:      { label: "Assembly WIP",     desc: "Jobs in assembly",              accent: T.pink,   category: "Department" },
+  surfacing_wip:     { label: "Surfacing WIP",    desc: "Jobs in surfacing",             accent: T.orange, category: "Department" },
+  qc_wip:            { label: "QC WIP",           desc: "Jobs in QC",                    accent: T.cyan,   category: "Department" },
+  breakage:          { label: "Breakage",         desc: "Broken jobs today",             accent: T.red,    category: "Quality" },
+  rush_jobs:         { label: "Rush Jobs",        desc: "Rush priority in system",       accent: T.red,    category: "Production" },
+  qc_holds:          { label: "QC Holds",         desc: "Jobs held for inspection",      accent: T.orange, category: "Quality" },
+  active_trays:      { label: "Active Trays",     desc: "Trays in production",           accent: T.blue,   category: "Fleet" },
+  avg_batch_fill:    { label: "Avg Batch Fill",   desc: "Coating batch fill rate",       accent: T.purple, category: "Efficiency" },
+  pm_compliance:     { label: "PM Compliance",    desc: "Preventive maintenance rate",   accent: T.green,  category: "Maintenance" },
+  open_work_orders:  { label: "Open WOs",         desc: "Open maintenance work orders",  accent: T.amber,  category: "Maintenance" },
+  equipment_uptime:  { label: "Equipment Uptime", desc: "Overall equipment availability",accent: T.green,  category: "Maintenance" },
+};
+
+// Default KPI configuration (user's requested defaults)
+const DEFAULT_KPIS = ['incoming_jobs', 'total_wip', 'shipped_jobs', 'coating_wip', 'cutting_wip', 'assembly_wip', 'breakage'];
+
+// Configurable KPI Row Component
+function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
+  const [editing,setEditing]=useState(false);
+  const [selectedKpis,setSelectedKpis]=useState(cardConfig?.kpis || DEFAULT_KPIS);
+  const mono="'JetBrains Mono',monospace";
+
+  // Compute KPI values from data
+  const getKPIValue=(kpiId)=>{
+    const {trays=[],batches=[],dviJobs=[],breakage=[],maintenance={}}=data||{};
+    const dviByStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||'').toLowerCase().includes(stage.toLowerCase())).length;
+
+    switch(kpiId){
+      case 'incoming_jobs': return {value:dviJobs.filter(j=>j.created_at&&new Date(j.created_at)>new Date(Date.now()-48*60*60*1000)).length,sub:"yesterday"};
+      case 'total_wip': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"in queues"};
+      case 'shipped_jobs': return {value:dviJobs.filter(j=>(j.status==='SHIPPED'||j.stage==='SHIP')).length,sub:"today"};
+      case 'coating_wip': return {value:dviByStage('COAT'),sub:"in coating"};
+      case 'cutting_wip': return {value:dviByStage('CUT'),sub:"in cutting"};
+      case 'assembly_wip': return {value:dviByStage('ASSEMBL'),sub:"in assembly"};
+      case 'surfacing_wip': return {value:dviByStage('SURF'),sub:"in surfacing"};
+      case 'qc_wip': return {value:dviByStage('QC'),sub:"in QC"};
+      case 'breakage': return {value:breakage.filter(b=>new Date(b.timestamp)>new Date(Date.now()-24*60*60*1000)).length,sub:"today",accent:T.red};
+      case 'rush_jobs': return {value:dviJobs.filter(j=>j.rush==='Y'||j.Rush==='Y'||j.priority==='RUSH').length,sub:"in system"};
+      case 'qc_holds': return {value:trays.filter(t=>t.state==='QC_HOLD').length,sub:"held"};
+      case 'active_trays': return {value:trays.filter(t=>t.state!=='IDLE').length,sub:`of ${trays.length}`};
+      case 'avg_batch_fill': return {value:`${batches.length>0?Math.round(batches.reduce((s,b)=>s+(b.jobs||0),0)/batches.length/1.4):0}%`,sub:"of capacity"};
+      case 'pm_compliance': return {value:maintenance.stats?.pmCompliancePercent!=null?`${maintenance.stats.pmCompliancePercent}%`:'—',sub:"on schedule"};
+      case 'open_work_orders': return {value:maintenance.stats?.openWorkOrders||0,sub:"open"};
+      case 'equipment_uptime': return {value:maintenance.stats?.uptimePercent!=null?`${maintenance.stats.uptimePercent}%`:'—',sub:"availability"};
+      default: return {value:'—',sub:''};
+    }
+  };
+
+  const addKPI=(kpiId)=>{
+    if(!selectedKpis.includes(kpiId)){
+      const newKpis=[...selectedKpis,kpiId];
+      setSelectedKpis(newKpis);
+      onConfigChange?.({...cardConfig,kpis:newKpis});
+    }
+  };
+
+  const removeKPI=(kpiId)=>{
+    const newKpis=selectedKpis.filter(k=>k!==kpiId);
+    setSelectedKpis(newKpis);
+    onConfigChange?.({...cardConfig,kpis:newKpis});
+  };
+
+  const availableKpis=Object.keys(KPI_METRICS).filter(k=>!selectedKpis.includes(k));
+  const categories=[...new Set(Object.values(KPI_METRICS).map(m=>m.category))];
+
+  return(
+    <div>
+      {/* KPI Cards */}
+      <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+        {selectedKpis.map(kpiId=>{
+          const metric=KPI_METRICS[kpiId];
+          if(!metric)return null;
+          const val=getKPIValue(kpiId);
+          return(
+            <KPICard key={kpiId} label={metric.label} value={val.value} sub={val.sub} trend={val.trend} accent={val.accent||metric.accent} editable={editing} onRemove={()=>removeKPI(kpiId)}/>
+          );
+        })}
+        {editing&&(
+          <div onClick={()=>{}} style={{background:`${T.blue}10`,border:`2px dashed ${T.blue}40`,borderRadius:12,padding:"18px 22px",flex:"0 0 160px",minWidth:160,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}}>
+            <span style={{color:T.blue,fontSize:24}}>+</span>
+          </div>
+        )}
+      </div>
+
+      {/* Edit Controls */}
+      <div style={{marginTop:12,display:'flex',justifyContent:'flex-end',gap:8}}>
+        {!editing?(
+          <button onClick={()=>setEditing(true)} style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:6,padding:'6px 14px',color:T.textMuted,fontSize:11,cursor:'pointer',display:'flex',alignItems:'center',gap:4}}>
+            <span style={{fontSize:12}}>⚙</span> Customize KPIs
+          </button>
+        ):(
+          <button onClick={()=>setEditing(false)} style={{background:T.green,border:'none',borderRadius:6,padding:'6px 14px',color:'#fff',fontSize:11,fontWeight:600,cursor:'pointer'}}>
+            Done
+          </button>
+        )}
+      </div>
+
+      {/* Add KPI Panel */}
+      {editing&&availableKpis.length>0&&(
+        <div style={{marginTop:12,background:T.surface,borderRadius:10,padding:14,border:`1px solid ${T.border}`}}>
+          <div style={{fontSize:11,color:T.textMuted,marginBottom:10,fontWeight:600}}>ADD KPI METRIC</div>
+          {categories.map(cat=>{
+            const catKpis=availableKpis.filter(k=>KPI_METRICS[k].category===cat);
+            if(catKpis.length===0)return null;
+            return(
+              <div key={cat} style={{marginBottom:10}}>
+                <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,marginBottom:6}}>{cat.toUpperCase()}</div>
+                <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+                  {catKpis.map(kpiId=>(
+                    <button key={kpiId} onClick={()=>addKPI(kpiId)}
+                      style={{background:T.card,border:`1px solid ${KPI_METRICS[kpiId].accent}40`,borderRadius:6,padding:'6px 12px',color:T.text,fontSize:11,cursor:'pointer',display:'flex',alignItems:'center',gap:6}}>
+                      <span style={{width:8,height:8,borderRadius:2,background:KPI_METRICS[kpiId].accent}}></span>
+                      {KPI_METRICS[kpiId].label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Battery Icon (iPhone-style) ──────────────────────────────
 function BatteryIcon({level,size=28}){
@@ -750,7 +1553,7 @@ function useElapsed(startedAt, running) {
 function useSlackConfig(onIncoming, setMessages){
   const KEY="la_slack_v2";
   const DEFAULTS={
-    proxyUrl:"http://localhost:3002/api/slack/messages?channel=C0AJH9LG96D",
+    proxyUrl:"http://localhost:3001/api/slack/messages?channel=C0AJH9LG96D",
     channel:"lab-assistant",
     channelId:"C0AJH9LG96D"
   };
@@ -766,7 +1569,7 @@ function useSlackConfig(onIncoming, setMessages){
     setStatus("sending");
     try{
       // Use server proxy endpoint which has the bot token
-      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || 'http://localhost:3002/api/slack/send';
+      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || 'http://localhost:3001/api/slack/send';
       const r=await fetch(sendUrl,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -873,7 +1676,7 @@ const DEFAULT_CARDS = [
 
 function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36).slice(2,6)); }
 
-function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings}){
+function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[]}){
   // Get coater machines from settings (fallback to MACHINES constant)
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
@@ -962,6 +1765,25 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
     return()=>clearInterval(iv);
   },[]);
 
+  // Live DVI jobs data from gateway
+  const [dviJobs,setDviJobs]=useState([]);
+  useEffect(()=>{
+    const fetchDviJobs=async()=>{
+      try{
+        const res=await fetch("http://localhost:3001/api/dvi/data");
+        if(res.ok){
+          const data=await res.json();
+          setDviJobs(data?.jobs||[]);
+        }
+      }catch(e){
+        console.warn("DVI fetch failed:",e.message);
+      }
+    };
+    fetchDviJobs();
+    const iv=setInterval(fetchDviJobs,120000); // refresh every 2 min
+    return()=>clearInterval(iv);
+  },[]);
+
   // Persist cards to localStorage
   useEffect(()=>{ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(cards));}catch{} },[cards]);
 
@@ -1035,14 +1857,12 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
     switch(card.type){
 
       case "kpi_row": return(
-        <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-          <KPICard label="Active Trays"   value={activeTrays}               sub={`of ${trays.length}`} trend={3}  accent={T.blue}/>
-          <KPICard label="Quick Bind"     value={`${pwOcc}/20`}             sub="slots filled"                     accent={T.green}/>
-          <KPICard label="Coating WIP"    value={coatingWIP}                sub="in process"           trend={-5} accent={T.amber}/>
-          <KPICard label="Avg Batch Fill" value={`${avgBatchFill}%`}        sub="3 machines"           trend={2}  accent={T.purple}/>
-          <KPICard label="Rush Jobs"      value={rushCount}                 sub="in system"                        accent={T.red}/>
-          <KPICard label="QC / Breaks"    value={`${qcCount}/${breakCount}`} sub="holds / broken"                 accent={T.orange}/>
-        </div>
+        <ConfigurableKPIRow
+          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData}}
+          settings={settings}
+          cardConfig={card.config}
+          onConfigChange={(cfg)=>updateCardConfig(card.id,cfg)}
+        />
       );
 
       case "slack_feed": return(
@@ -5104,7 +5924,7 @@ function AnalyticsTab({batches,trays,ovenServerUrl,settings}){
 // ── SETTINGS TAB ──────────────────────────────────────────────────────────────
 function SettingsTab({settings,setSettings,ovenServerUrl}){
   const mono="'JetBrains Mono',monospace";
-  const [sub,setSub]=useState("equipment");
+  const [sub,setSub]=useState("connections");
   const [pinInput,setPinInput]=useState("");
   const [pinMode,setPinMode]=useState(null); // null, 'set', 'change', 'verify'
   const [pinError,setPinError]=useState("");
@@ -5124,6 +5944,10 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
   const [limitsForm,setLimitsForm]=useState(null);
   const [requestFilter,setRequestFilter]=useState({source:'all',status:'all',agent:'all'});
   const [statsPeriod,setStatsPeriod]=useState('24h');
+  const [connections,setConnections]=useState(null);
+  const [loadingConnections,setLoadingConnections]=useState(false);
+  const [expandedService,setExpandedService]=useState(null);
+  const [showApiKeys,setShowApiKeys]=useState({});
 
   // Check for lockout
   const isLockedOut = lockoutUntil && Date.now() < lockoutUntil;
@@ -5194,6 +6018,31 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
     }
     setLoadingGateway(false);
   };
+
+  // Load connections status
+  const loadConnections = async () => {
+    setLoadingConnections(true);
+    const gwUrl = settings.gatewayUrl || 'http://localhost:3001';
+    try {
+      const resp = await fetch(`${gwUrl}/gateway/connections`, { signal: AbortSignal.timeout(5000) });
+      if (resp.ok) {
+        const data = await resp.json();
+        setConnections(data);
+      }
+    } catch (e) {
+      setConnections({ error: e.message });
+    }
+    setLoadingConnections(false);
+  };
+
+  // Auto-load connections when on connections tab
+  useEffect(() => {
+    if (sub === 'connections') {
+      loadConnections();
+      const interval = setInterval(loadConnections, 10000); // Refresh every 10s
+      return () => clearInterval(interval);
+    }
+  }, [sub, settings.gatewayUrl]);
 
   // Save updated rate limits
   const saveLimits = async () => {
@@ -5323,6 +6172,9 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
   const topBar = (
     <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:18,flexWrap:"wrap"}}>
       {[
+        {id:"connections",icon:"📡",label:"Connections"},
+        {id:"agents",icon:"🧠",label:"Agents"},
+        {id:"dataimport",icon:"📥",label:"Data Import"},
         {id:"equipment",icon:"⚙️",label:"Equipment"},
         {id:"categories",icon:"📦",label:"Categories"},
         {id:"server",icon:"🔗",label:"Server"},
@@ -5348,6 +6200,200 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       </div>
 
       {topBar}
+
+      {/* ══ CONNECTIONS ══ */}
+      {sub==="connections"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:T.text}}>API & Service Connections</div>
+              <div style={{fontSize:11,color:T.textMuted}}>Real-time status of all integrated services</div>
+            </div>
+            <button onClick={loadConnections} disabled={loadingConnections}
+              style={{background:T.blue,border:"none",borderRadius:8,padding:"8px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:loadingConnections?0.6:1}}>
+              {loadingConnections?"Refreshing...":"↻ Refresh"}
+            </button>
+          </div>
+
+          {connections?.error ? (
+            <Card style={{background:`${T.red}15`,border:`1px solid ${T.red}40`}}>
+              <div style={{display:"flex",alignItems:"center",gap:12,color:T.red}}>
+                <span style={{fontSize:24}}>⚠️</span>
+                <div>
+                  <div style={{fontWeight:700}}>Gateway Not Reachable</div>
+                  <div style={{fontSize:12,opacity:0.8}}>{connections.error}</div>
+                </div>
+              </div>
+            </Card>
+          ) : connections ? (
+            <>
+              {/* Summary Cards */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+                {[
+                  {label:"Connected",value:connections.summary?.connected||0,color:T.green,icon:"✓"},
+                  {label:"Mock Mode",value:connections.summary?.mock||0,color:T.amber,icon:"⚡"},
+                  {label:"Disconnected",value:connections.summary?.disconnected||0,color:T.red,icon:"✗"},
+                  {label:"Unconfigured",value:connections.summary?.unconfigured||0,color:T.textMuted,icon:"○"},
+                ].map(s=>(
+                  <Card key={s.label} style={{textAlign:"center",padding:"16px 12px"}}>
+                    <div style={{fontSize:28,fontWeight:800,color:s.color,fontFamily:mono}}>{s.value}</div>
+                    <div style={{fontSize:11,color:T.textMuted,marginTop:4}}>{s.icon} {s.label}</div>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Connection Details */}
+              <Card style={{padding:0}}>
+                <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <span style={{fontSize:10,fontWeight:700,color:T.textDim,letterSpacing:1,fontFamily:mono}}>SERVICE STATUS</span>
+                  <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>Last updated: {new Date(connections.timestamp).toLocaleTimeString()}</span>
+                </div>
+                {connections.connections && Object.entries(connections.connections).map(([key,conn])=>{
+                  const statusColors = {connected:T.green,mock:T.amber,disconnected:T.red,unconfigured:T.textMuted};
+                  const serviceNames = {
+                    gateway:"MCP Gateway",
+                    database:"Database (PostgreSQL)",
+                    lab_backend:"Lab Backend Server",
+                    slack:"Slack Integration",
+                    anthropic:"Anthropic Claude API",
+                    itempath:"ItemPath/Kardex",
+                    dvi:"DVI Lab System",
+                    limble:"Limble CMMS"
+                  };
+                  const serviceIcons = {
+                    gateway:"🌐",database:"🗄️",lab_backend:"🔧",slack:"💬",
+                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️"
+                  };
+                  const startCommands = {
+                    lab_backend: "npm run server",
+                    gateway: "cd gateway && npm run dev"
+                  };
+                  // Config fields for each service
+                  const serviceConfigs = {
+                    gateway: [{key:'gatewayUrl',label:'Gateway URL',type:'url'}],
+                    database: [{key:'databaseUrl',label:'DATABASE_URL',type:'password'}],
+                    lab_backend: [{key:'serverUrl',label:'Server URL',type:'url'}],
+                    slack: [
+                      {key:'slackBotToken',label:'SLACK_BOT_TOKEN',type:'password'},
+                      {key:'slackSigningSecret',label:'SLACK_SIGNING_SECRET',type:'password'},
+                      {key:'slackAppToken',label:'SLACK_APP_TOKEN',type:'password'}
+                    ],
+                    anthropic: [{key:'anthropicApiKey',label:'ANTHROPIC_API_KEY',type:'password'}],
+                    itempath: [
+                      {key:'itempathUrl',label:'ITEMPATH_URL',type:'url'},
+                      {key:'itempathToken',label:'ITEMPATH_TOKEN',type:'password'}
+                    ],
+                    dvi: [
+                      {key:'dviUrl',label:'DVI_URL',type:'url'},
+                      {key:'dviApiKey',label:'DVI_API_KEY',type:'password'}
+                    ],
+                    limble: [
+                      {key:'limbleUrl',label:'LIMBLE_URL',type:'url'},
+                      {key:'limbleApiKey',label:'LIMBLE_API_KEY',type:'password'}
+                    ]
+                  };
+                  const isExpanded = expandedService === key;
+                  const configs = serviceConfigs[key] || [];
+                  return(
+                    <div key={key} style={{borderBottom:`1px solid ${T.border}`}}>
+                      <div style={{padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",cursor:configs.length?'pointer':'default',background:isExpanded?`${T.blue}08`:'transparent'}}
+                        onClick={()=>configs.length && setExpandedService(isExpanded?null:key)}>
+                        <div style={{display:"flex",alignItems:"center",gap:12}}>
+                          <span style={{fontSize:20}}>{serviceIcons[key]||"⚙️"}</span>
+                          <div>
+                            <div style={{fontSize:13,fontWeight:600,color:T.text,display:"flex",alignItems:"center",gap:8}}>
+                              {serviceNames[key]||key}
+                              <span style={{width:8,height:8,borderRadius:"50%",background:statusColors[conn.status]}}/>
+                            </div>
+                            <div style={{fontSize:11,color:T.textMuted}}>{conn.message}</div>
+                          </div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:10}}>
+                          {conn.latency !== undefined && conn.latency > 0 && (
+                            <span style={{fontSize:11,color:T.textDim,fontFamily:mono}}>{conn.latency}ms</span>
+                          )}
+                          {conn.status === 'disconnected' && startCommands[key] && (
+                            <button onClick={(e)=>{e.stopPropagation();navigator.clipboard.writeText(startCommands[key]).then(()=>alert(`Copied: ${startCommands[key]}`))}}
+                              style={{background:T.green,border:"none",borderRadius:6,padding:"5px 10px",color:"#fff",fontSize:10,fontWeight:700,cursor:"pointer"}}>
+                              ▶ Start
+                            </button>
+                          )}
+                          <span style={{fontSize:10,fontWeight:700,padding:"4px 10px",borderRadius:4,
+                            background:`${statusColors[conn.status]}20`,color:statusColors[conn.status],fontFamily:mono}}>
+                            {conn.status.toUpperCase()}
+                          </span>
+                          {configs.length > 0 && (
+                            <span style={{fontSize:12,color:T.textDim,transform:isExpanded?'rotate(180deg)':'rotate(0)',transition:'transform 0.2s'}}>▼</span>
+                          )}
+                        </div>
+                      </div>
+                      {isExpanded && configs.length > 0 && (
+                        <div style={{padding:"12px 16px 16px 52px",background:`${T.blue}05`,borderTop:`1px solid ${T.border}`}}>
+                          <div style={{fontSize:10,fontWeight:700,color:T.textDim,marginBottom:10,letterSpacing:1,fontFamily:mono}}>CONFIGURATION</div>
+                          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                            {configs.map(cfg=>(
+                              <div key={cfg.key} style={{display:"flex",alignItems:"center",gap:10}}>
+                                <label style={{fontSize:11,color:T.textMuted,minWidth:140,fontFamily:mono}}>{cfg.label}</label>
+                                <div style={{flex:1,display:"flex",gap:6}}>
+                                  <input
+                                    type={cfg.type==='password' && !showApiKeys[cfg.key] ? 'password' : 'text'}
+                                    value={settings[cfg.key]||''}
+                                    onChange={e=>setSettings(prev=>({...prev,[cfg.key]:e.target.value}))}
+                                    placeholder={cfg.type==='url'?'https://...':'Enter value...'}
+                                    style={{flex:1,background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 10px",color:T.text,fontSize:12,fontFamily:mono}}
+                                  />
+                                  {cfg.type==='password' && (
+                                    <button onClick={()=>setShowApiKeys(prev=>({...prev,[cfg.key]:!prev[cfg.key]}))}
+                                      style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"0 10px",color:T.textMuted,fontSize:14,cursor:"pointer"}}>
+                                      {showApiKeys[cfg.key]?'🙈':'👁'}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                            <div style={{fontSize:10,color:T.textDim,marginTop:4}}>
+                              💡 Changes are saved automatically. Gateway uses env vars from <code style={{background:T.surface,padding:"2px 4px",borderRadius:3}}>gateway/.env</code> — update there for production.
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </Card>
+
+              {/* DevOps AI Assistant */}
+              <DevOpsAICard settings={settings} connections={connections} />
+
+              {/* Help Text */}
+              <Card style={{background:`${T.blue}08`,border:`1px solid ${T.blue}30`}}>
+                <div style={{fontSize:12,color:T.textMuted,lineHeight:1.6}}>
+                  <strong style={{color:T.text}}>Connection Status Guide:</strong><br/>
+                  • <span style={{color:T.green}}>Connected</span> — Service is running and reachable<br/>
+                  • <span style={{color:T.amber}}>Mock Mode</span> — Using simulated data (credentials not configured)<br/>
+                  • <span style={{color:T.red}}>Disconnected</span> — Service is configured but not reachable<br/>
+                  • <span style={{color:T.textMuted}}>Unconfigured</span> — Environment variables not set
+                </div>
+              </Card>
+            </>
+          ) : (
+            <Card style={{textAlign:"center",padding:40}}>
+              <div style={{fontSize:32,marginBottom:10}}>📡</div>
+              <div style={{color:T.textMuted}}>Loading connection status...</div>
+            </Card>
+          )}
+        </div>
+      )}
+
+      {/* ══ AGENTS ══ */}
+      {sub==="agents"&&(
+        <AgentsPanel settings={settings} />
+      )}
+
+      {/* ══ DATA IMPORT ══ */}
+      {sub==="dataimport"&&(
+        <DataImportPanel settings={settings} />
+      )}
 
       {/* ══ EQUIPMENT ══ */}
       {sub==="equipment"&&(
@@ -7523,7 +8569,7 @@ export default function LabAssistantV2(){
 
       {/* CONTENT */}
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
-        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings}/>}
+        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events}/>}
         {view==="coating"&&<CoatingTab batches={batches} trays={trays} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="surfacing"&&<SurfacingTab trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}

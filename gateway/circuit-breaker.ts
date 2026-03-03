@@ -33,7 +33,18 @@ export async function initCircuitBreaker(options?: {
   if (options?.onOpen) onCircuitOpen = options.onOpen;
   if (options?.onClose) onCircuitClose = options.onClose;
 
-  cachedState = await getCircuitState();
+  try {
+    cachedState = await getCircuitState();
+  } catch (err) {
+    log.warn('Failed to load circuit state from DB, using defaults');
+    cachedState = {
+      is_open: false,
+      error_count: 0,
+      last_checked_at: new Date(),
+      opened_at: null,
+      recovered_at: null,
+    };
+  }
   lastStateCheck = Date.now();
 
   log.info(`Circuit breaker initialized: ${cachedState.is_open ? 'OPEN' : 'CLOSED'}`);
