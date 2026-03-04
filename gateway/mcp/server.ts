@@ -210,11 +210,14 @@ function handleDviEndpoint(endpoint: string): unknown {
       dataDate: current.dataDate,
       uploadedAt: current.uploadedAt,
       oldestJobs: sortedByAge.slice(0, 20).map((j: any) => ({
+        job_id: j.job_id || j.invoice || j.tray || 'unknown',
         invoice: j.invoice,
         tray: j.tray,
         stage: j.stage || j.Stage || j.station,
-        daysInLab: j.daysInLab,
-        entryDate: j.entryDate,
+        station: j.station,
+        date: j.date || j.entryDate || j.entry_date,
+        daysInLab: j.daysInLab || j.days_in_lab,
+        status: j.status,
         rush: j.rush || j.Rush,
       })),
       stageSummary: Object.entries(byStage)
