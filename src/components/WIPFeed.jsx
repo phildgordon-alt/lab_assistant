@@ -33,7 +33,7 @@ function convertDate(dateStr) {
 }
 
 // ─── XML Parser ───────────────────────────────────────────────────────────────
-export function parseWIP(xmlText) {
+function parseWIP(xmlText) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(xmlText, "application/xml");
 
