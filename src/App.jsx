@@ -7688,8 +7688,13 @@ function InventoryTab({ovenServerUrl,settings}){
 
   const contextData={
     totalSKUs,totalQty,outOfStock,lowStock,
-    criticalAlerts:alerts.critical,highAlerts:alerts.high,
+    totalSkus:totalSKUs,totalUnits:totalQty,
+    criticalAlerts:(alerts.alerts||[]).filter(a=>a.severity==='CRITICAL'||a.severity==='critical'),
+    highAlerts:(alerts.alerts||[]).filter(a=>a.severity==='HIGH'||a.severity==='high'),
+    criticalCount:alerts.critical,highCount:alerts.high,
     activePicks:picks.count,
+    recentPicks:picks.picks||picks.activePicks||[],
+    byCoatingType:inventory.byCoatingType||{},
     status:inventory.status,
     warehouses:inventory.warehouses,
     warehouseStats:inventory.warehouseStats,
