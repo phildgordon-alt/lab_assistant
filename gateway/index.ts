@@ -1148,6 +1148,14 @@ function syncDviToSqlite(): void {
 
     const upsertMany = db.transaction((items: any[]) => {
       for (const j of items) {
+        const entryDate = j.entryDate || j.entry_date || j.date;
+        // Calculate days_in_lab from entry_date if not provided
+        let daysInLab = j.daysInLab || j.days_in_lab;
+        if (!daysInLab && entryDate) {
+          const entry = new Date(entryDate);
+          const now = new Date();
+          daysInLab = Math.floor((now.getTime() - entry.getTime()) / (1000 * 60 * 60 * 24));
+        }
         upsertStmt.run(
           j.job_id || j.invoice || `${dataDate}-${j.station}-${Math.random()}`,
           j.invoice,
@@ -1156,8 +1164,8 @@ function syncDviToSqlite(): void {
           j.station,
           j.status,
           j.rush || j.Rush,
-          j.entryDate || j.entry_date || j.date,
-          j.daysInLab || j.days_in_lab,
+          entryDate,
+          daysInLab,
           j.coating || j.coatR,
           j.frameName || j.frame_name,
           dataDate

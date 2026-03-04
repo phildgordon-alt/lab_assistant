@@ -226,6 +226,205 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(stat_date);
 `);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TIERED DATA ARCHITECTURE
+// Hot: Real-time queries (SOAP when live, current state)
+// Warm: Pre-aggregated summaries for agent queries
+// Cold: Raw archives for deep analysis
+// Reference: SCD Type 2 catalogs for historical accuracy
+// ─────────────────────────────────────────────────────────────────────────────
+
+db.exec(`
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- COLD LAYER: Raw XML archives (append-only, never queried directly by agents)
+  -- ═══════════════════════════════════════════════════════════════════════════
+
+  -- DVI XML imports with raw blob for full context retrieval
+  CREATE TABLE IF NOT EXISTS dvi_imports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    filename TEXT NOT NULL,
+    import_date TEXT NOT NULL,
+    data_date TEXT,                    -- Date the data represents
+    job_count INTEGER,
+    xml_blob TEXT,                     -- Full raw XML for context retrieval
+    xml_hash TEXT,                     -- SHA256 to detect duplicates
+    file_size_bytes INTEGER,
+    source TEXT DEFAULT 'upload',      -- 'upload', 'email', 'watch_folder'
+    processed_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(xml_hash)
+  );
+  CREATE INDEX IF NOT EXISTS idx_imports_date ON dvi_imports(import_date);
+  CREATE INDEX IF NOT EXISTS idx_imports_data_date ON dvi_imports(data_date);
+
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- HOT LAYER: Current state (refreshed on each sync, queried for real-time)
+  -- ═══════════════════════════════════════════════════════════════════════════
+
+  -- Breakage events extracted from DVI data
+  CREATE TABLE IF NOT EXISTS breakage_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id TEXT,
+    invoice TEXT,
+    department TEXT,                   -- S=Surfacing, C=Coating, E=Edging, A=Assembly
+    reason TEXT,
+    stage TEXT,
+    operator TEXT,
+    occurred_at TEXT,
+    notes TEXT,
+    import_id INTEGER,                 -- Link to dvi_imports for full context
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (import_id) REFERENCES dvi_imports(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_breakage_dept ON breakage_events(department);
+  CREATE INDEX IF NOT EXISTS idx_breakage_reason ON breakage_events(reason);
+  CREATE INDEX IF NOT EXISTS idx_breakage_date ON breakage_events(occurred_at);
+  CREATE INDEX IF NOT EXISTS idx_breakage_job ON breakage_events(job_id);
+
+  -- Coating queue (jobs currently in coating stages)
+  CREATE TABLE IF NOT EXISTS coating_queue (
+    id TEXT PRIMARY KEY,
+    invoice TEXT,
+    tray TEXT,
+    coating_type TEXT,                 -- AR, BLUE_CUT, HARD_COAT, MIRROR, etc.
+    stage TEXT,                        -- COAT_QUEUE, COATING, COAT_QC
+    entered_queue_at TEXT,
+    rush TEXT,
+    days_in_queue INTEGER,
+    machine TEXT,
+    operator TEXT,
+    last_sync TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_coating_type ON coating_queue(coating_type);
+  CREATE INDEX IF NOT EXISTS idx_coating_stage ON coating_queue(stage);
+  CREATE INDEX IF NOT EXISTS idx_coating_rush ON coating_queue(rush);
+
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- WARM LAYER: Pre-aggregated summaries (auto-refresh on hot layer writes)
+  -- Agent queries hit these, not raw data
+  -- ═══════════════════════════════════════════════════════════════════════════
+
+  -- Daily throughput summary (refreshed on each DVI import)
+  CREATE TABLE IF NOT EXISTS throughput_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stat_date TEXT NOT NULL UNIQUE,
+    jobs_entered INTEGER DEFAULT 0,
+    jobs_shipped INTEGER DEFAULT 0,
+    jobs_in_surfacing INTEGER DEFAULT 0,
+    jobs_in_coating INTEGER DEFAULT 0,
+    jobs_in_cutting INTEGER DEFAULT 0,
+    jobs_in_assembly INTEGER DEFAULT 0,
+    rush_entered INTEGER DEFAULT 0,
+    rush_shipped INTEGER DEFAULT 0,
+    avg_days_in_lab REAL,
+    max_days_in_lab INTEGER,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_throughput_date ON throughput_daily(stat_date);
+
+  -- Breakage summary by department/reason (rolled up daily)
+  CREATE TABLE IF NOT EXISTS breakage_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stat_date TEXT NOT NULL,
+    department TEXT NOT NULL,
+    reason TEXT,
+    count INTEGER DEFAULT 0,
+    jobs_affected INTEGER DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(stat_date, department, reason)
+  );
+  CREATE INDEX IF NOT EXISTS idx_breakage_daily_date ON breakage_daily(stat_date);
+  CREATE INDEX IF NOT EXISTS idx_breakage_daily_dept ON breakage_daily(department);
+
+  -- WIP aging buckets (pre-computed for fast agent queries)
+  CREATE TABLE IF NOT EXISTS aging_buckets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    snapshot_date TEXT NOT NULL,
+    bucket TEXT NOT NULL,              -- '0-1d', '1-2d', '2-3d', '3-5d', '5-7d', '7d+'
+    stage TEXT,
+    job_count INTEGER DEFAULT 0,
+    rush_count INTEGER DEFAULT 0,
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(snapshot_date, bucket, stage)
+  );
+  CREATE INDEX IF NOT EXISTS idx_aging_date ON aging_buckets(snapshot_date);
+
+  -- Coating yield summary (daily by coating type)
+  CREATE TABLE IF NOT EXISTS coating_yield_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    stat_date TEXT NOT NULL,
+    coating_type TEXT NOT NULL,
+    jobs_attempted INTEGER DEFAULT 0,
+    jobs_passed INTEGER DEFAULT 0,
+    jobs_failed INTEGER DEFAULT 0,
+    yield_percent REAL,
+    avg_cycle_time_min REAL,
+    updated_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(stat_date, coating_type)
+  );
+  CREATE INDEX IF NOT EXISTS idx_yield_date ON coating_yield_daily(stat_date);
+  CREATE INDEX IF NOT EXISTS idx_yield_coating ON coating_yield_daily(coating_type);
+
+  -- ═══════════════════════════════════════════════════════════════════════════
+  -- REFERENCE LAYER: SCD Type 2 catalogs (valid_from/valid_to for history)
+  -- ═══════════════════════════════════════════════════════════════════════════
+
+  -- Lens catalog with SCD Type 2 for historical accuracy
+  CREATE TABLE IF NOT EXISTS lens_catalog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    opc TEXT NOT NULL,                 -- Optical Product Code
+    material TEXT,                     -- CR39, POLY, HI_INDEX, TRIVEX
+    style TEXT,                        -- SV, PROG, BIFOCAL
+    coating_type TEXT,
+    base_curve REAL,
+    diameter INTEGER,
+    manufacturer TEXT,
+    cost REAL,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT,                     -- NULL = currently active
+    deprecated_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_lens_opc ON lens_catalog(opc);
+  CREATE INDEX IF NOT EXISTS idx_lens_valid ON lens_catalog(valid_from, valid_to);
+  CREATE INDEX IF NOT EXISTS idx_lens_active ON lens_catalog(valid_to) WHERE valid_to IS NULL;
+
+  -- Frame catalog with SCD Type 2
+  CREATE TABLE IF NOT EXISTS frame_catalog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    frame_code TEXT NOT NULL,
+    frame_name TEXT,
+    brand TEXT,
+    style TEXT,
+    color TEXT,
+    size TEXT,                         -- e.g., "52-18-140"
+    material TEXT,
+    cost REAL,
+    valid_from TEXT NOT NULL,
+    valid_to TEXT,                     -- NULL = currently active
+    discontinued_reason TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_frame_code ON frame_catalog(frame_code);
+  CREATE INDEX IF NOT EXISTS idx_frame_valid ON frame_catalog(valid_from, valid_to);
+
+  -- Operators with SCD Type 2 (track role/dept changes)
+  CREATE TABLE IF NOT EXISTS operators (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    employee_id TEXT NOT NULL,
+    name TEXT,
+    department TEXT,                   -- SURFACING, COATING, CUTTING, ASSEMBLY, QC
+    role TEXT,                         -- OPERATOR, LEAD, SUPERVISOR
+    shift TEXT,                        -- AM, PM, NIGHT
+    trained_on TEXT,                   -- JSON array of certifications
+    valid_from TEXT NOT NULL,
+    valid_to TEXT,                     -- NULL = currently active
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_operator_id ON operators(employee_id);
+  CREATE INDEX IF NOT EXISTS idx_operator_dept ON operators(department);
+  CREATE INDEX IF NOT EXISTS idx_operator_active ON operators(valid_to) WHERE valid_to IS NULL;
+`);
+
 console.log('[DB] SQLite database initialized:', DB_FILE);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -802,6 +1001,325 @@ function updateDailyPickStats() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// COLD LAYER: DVI Import with XML Blob
+// ─────────────────────────────────────────────────────────────────────────────
+
+const crypto = require('crypto');
+
+function storeDviImport(filename, xmlContent, dataDate, jobCount, source = 'upload') {
+  const xmlHash = crypto.createHash('sha256').update(xmlContent).digest('hex');
+
+  // Check for duplicate
+  const existing = db.prepare('SELECT id FROM dvi_imports WHERE xml_hash = ?').get(xmlHash);
+  if (existing) {
+    console.log(`[DB] DVI import already exists (hash: ${xmlHash.slice(0, 8)}...)`);
+    return { duplicate: true, id: existing.id };
+  }
+
+  const result = db.prepare(`
+    INSERT INTO dvi_imports (filename, import_date, data_date, job_count, xml_blob, xml_hash, file_size_bytes, source)
+    VALUES (?, date('now'), ?, ?, ?, ?, ?, ?)
+  `).run(
+    filename,
+    dataDate,
+    jobCount,
+    xmlContent,
+    xmlHash,
+    Buffer.byteLength(xmlContent, 'utf8'),
+    source
+  );
+
+  console.log(`[DB] DVI import stored: ${filename} (${jobCount} jobs, ${result.lastInsertRowid})`);
+  return { duplicate: false, id: result.lastInsertRowid };
+}
+
+function getDviImport(importId) {
+  return db.prepare('SELECT * FROM dvi_imports WHERE id = ?').get(importId);
+}
+
+function getRecentDviImports(days = 30) {
+  return db.prepare(`
+    SELECT id, filename, import_date, data_date, job_count, file_size_bytes, source, processed_at
+    FROM dvi_imports
+    WHERE import_date >= date('now', '-${days} days')
+    ORDER BY import_date DESC
+  `).all();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WARM LAYER: Refresh Summary Tables
+// Called after hot layer updates to pre-compute agent-friendly aggregates
+// ─────────────────────────────────────────────────────────────────────────────
+
+function refreshWarmLayer() {
+  const today = new Date().toISOString().split('T')[0];
+
+  // Refresh throughput_daily
+  const throughput = db.prepare(`
+    SELECT
+      COUNT(*) as total_wip,
+      SUM(CASE WHEN stage LIKE '%SURF%' THEN 1 ELSE 0 END) as in_surfacing,
+      SUM(CASE WHEN stage LIKE '%COAT%' THEN 1 ELSE 0 END) as in_coating,
+      SUM(CASE WHEN stage LIKE '%CUT%' OR stage LIKE '%EDGE%' THEN 1 ELSE 0 END) as in_cutting,
+      SUM(CASE WHEN stage LIKE '%ASSEM%' THEN 1 ELSE 0 END) as in_assembly,
+      SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush_count,
+      AVG(days_in_lab) as avg_days,
+      MAX(days_in_lab) as max_days
+    FROM dvi_jobs
+    WHERE archived = 0 AND stage NOT IN ('CANCELED', 'SHIPPED')
+  `).get();
+
+  const shipped = db.prepare(`
+    SELECT COUNT(*) as count, SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush
+    FROM dvi_jobs_history WHERE date(shipped_at) = ?
+  `).get(today);
+
+  db.prepare(`
+    INSERT INTO throughput_daily (stat_date, jobs_in_surfacing, jobs_in_coating, jobs_in_cutting, jobs_in_assembly, rush_entered, jobs_shipped, rush_shipped, avg_days_in_lab, max_days_in_lab)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(stat_date) DO UPDATE SET
+      jobs_in_surfacing = excluded.jobs_in_surfacing,
+      jobs_in_coating = excluded.jobs_in_coating,
+      jobs_in_cutting = excluded.jobs_in_cutting,
+      jobs_in_assembly = excluded.jobs_in_assembly,
+      rush_entered = excluded.rush_entered,
+      jobs_shipped = excluded.jobs_shipped,
+      rush_shipped = excluded.rush_shipped,
+      avg_days_in_lab = excluded.avg_days_in_lab,
+      max_days_in_lab = excluded.max_days_in_lab,
+      updated_at = datetime('now')
+  `).run(
+    today,
+    throughput.in_surfacing || 0,
+    throughput.in_coating || 0,
+    throughput.in_cutting || 0,
+    throughput.in_assembly || 0,
+    throughput.rush_count || 0,
+    shipped.count || 0,
+    shipped.rush || 0,
+    throughput.avg_days,
+    throughput.max_days
+  );
+
+  // Refresh aging_buckets
+  const buckets = [
+    { name: '0-1d', min: 0, max: 1 },
+    { name: '1-2d', min: 1, max: 2 },
+    { name: '2-3d', min: 2, max: 3 },
+    { name: '3-5d', min: 3, max: 5 },
+    { name: '5-7d', min: 5, max: 7 },
+    { name: '7d+', min: 7, max: 9999 }
+  ];
+
+  const agingStmt = db.prepare(`
+    INSERT INTO aging_buckets (snapshot_date, bucket, stage, job_count, rush_count)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(snapshot_date, bucket, stage) DO UPDATE SET
+      job_count = excluded.job_count,
+      rush_count = excluded.rush_count,
+      updated_at = datetime('now')
+  `);
+
+  for (const bucket of buckets) {
+    const byStage = db.prepare(`
+      SELECT stage, COUNT(*) as count, SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush
+      FROM dvi_jobs
+      WHERE archived = 0 AND stage NOT IN ('CANCELED', 'SHIPPED')
+        AND days_in_lab >= ? AND days_in_lab < ?
+      GROUP BY stage
+    `).all(bucket.min, bucket.max);
+
+    for (const row of byStage) {
+      agingStmt.run(today, bucket.name, row.stage, row.count, row.rush);
+    }
+  }
+
+  console.log(`[DB] Warm layer refreshed for ${today}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NARROW QUERY FUNCTIONS (for MCP tools - agent-sized results)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Get WIP snapshot - summary only, ~10 rows
+function getWipSnapshot(summaryOnly = true) {
+  if (summaryOnly) {
+    const stats = db.prepare(`
+      SELECT
+        COUNT(*) as total_wip,
+        SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush_count,
+        AVG(days_in_lab) as avg_days,
+        MAX(days_in_lab) as max_days
+      FROM dvi_jobs
+      WHERE archived = 0 AND stage NOT IN ('CANCELED', 'SHIPPED')
+    `).get();
+
+    const byStage = db.prepare(`
+      SELECT stage, COUNT(*) as count
+      FROM dvi_jobs
+      WHERE archived = 0 AND stage NOT IN ('CANCELED', 'SHIPPED')
+      GROUP BY stage ORDER BY count DESC LIMIT 10
+    `).all();
+
+    return { ...stats, byStage, source: 'sqlite' };
+  }
+}
+
+// Get coating queue with optional age filter - max ~20 rows
+function getCoatingQueueAged(minDays = 0) {
+  return db.prepare(`
+    SELECT id, invoice, tray, coating_type, stage, days_in_lab, rush, entry_date
+    FROM dvi_jobs
+    WHERE archived = 0
+      AND stage LIKE '%COAT%'
+      AND days_in_lab >= ?
+    ORDER BY days_in_lab DESC
+    LIMIT 25
+  `).all(minDays);
+}
+
+// Get breakage summary by department - summary + top 5 events
+function getBreakageByDept(dept = null, sinceDays = 7) {
+  const whereClause = dept ? `AND department = '${dept}'` : '';
+
+  const summary = db.prepare(`
+    SELECT department, reason, COUNT(*) as count
+    FROM breakage_events
+    WHERE occurred_at >= datetime('now', '-${sinceDays} days') ${whereClause}
+    GROUP BY department, reason
+    ORDER BY count DESC
+    LIMIT 15
+  `).all();
+
+  const recent = db.prepare(`
+    SELECT job_id, invoice, department, reason, occurred_at
+    FROM breakage_events
+    WHERE occurred_at >= datetime('now', '-${sinceDays} days') ${whereClause}
+    ORDER BY occurred_at DESC
+    LIMIT 5
+  `).all();
+
+  return { summary, recentEvents: recent, source: 'sqlite' };
+}
+
+// Get single job detail with full context (can retrieve XML blob if needed)
+function getJobDetail(invoice) {
+  const job = db.prepare(`
+    SELECT * FROM dvi_jobs WHERE invoice = ?
+  `).get(invoice);
+
+  if (!job) {
+    // Check history
+    const historical = db.prepare(`
+      SELECT * FROM dvi_jobs_history WHERE invoice = ? ORDER BY shipped_at DESC LIMIT 1
+    `).get(invoice);
+
+    if (historical) {
+      return { job: historical, status: 'shipped', source: 'sqlite' };
+    }
+    return { job: null, status: 'not_found', source: 'sqlite' };
+  }
+
+  // Get breakage events for this job
+  const breakages = db.prepare(`
+    SELECT * FROM breakage_events WHERE invoice = ? ORDER BY occurred_at DESC
+  `).all(invoice);
+
+  return { job, breakages, status: job.archived ? 'archived' : 'active', source: 'sqlite' };
+}
+
+// Get aging report with threshold - bucketed summary
+function getAgingReport(thresholdHours = 48) {
+  const thresholdDays = thresholdHours / 24;
+
+  const buckets = db.prepare(`
+    SELECT bucket, SUM(job_count) as count, SUM(rush_count) as rush
+    FROM aging_buckets
+    WHERE snapshot_date = date('now')
+    GROUP BY bucket
+    ORDER BY
+      CASE bucket
+        WHEN '0-1d' THEN 1
+        WHEN '1-2d' THEN 2
+        WHEN '2-3d' THEN 3
+        WHEN '3-5d' THEN 4
+        WHEN '5-7d' THEN 5
+        ELSE 6
+      END
+  `).all();
+
+  const overThreshold = db.prepare(`
+    SELECT invoice, stage, days_in_lab, rush, entry_date
+    FROM dvi_jobs
+    WHERE archived = 0 AND days_in_lab >= ?
+    ORDER BY days_in_lab DESC
+    LIMIT 20
+  `).all(thresholdDays);
+
+  return { buckets, overThreshold, thresholdDays, source: 'sqlite' };
+}
+
+// Get throughput trend - daily rollup
+function getThroughputTrend(days = 7) {
+  return db.prepare(`
+    SELECT stat_date, jobs_shipped, jobs_in_surfacing, jobs_in_coating,
+           jobs_in_cutting, jobs_in_assembly, avg_days_in_lab
+    FROM throughput_daily
+    WHERE stat_date >= date('now', '-${days} days')
+    ORDER BY stat_date DESC
+  `).all();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REFERENCE LAYER: SCD Type 2 Catalog Queries
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Get current active lens by OPC
+function getLensInfo(opc) {
+  return db.prepare(`
+    SELECT * FROM lens_catalog WHERE opc = ? AND valid_to IS NULL
+  `).get(opc);
+}
+
+// Get lens info as of a specific date (for historical job analysis)
+function getLensInfoAsOf(opc, asOfDate) {
+  return db.prepare(`
+    SELECT * FROM lens_catalog
+    WHERE opc = ? AND valid_from <= ? AND (valid_to IS NULL OR valid_to > ?)
+  `).get(opc, asOfDate, asOfDate);
+}
+
+// Upsert lens catalog with SCD Type 2 logic
+function upsertLensCatalog(lens) {
+  const current = db.prepare(`
+    SELECT * FROM lens_catalog WHERE opc = ? AND valid_to IS NULL
+  `).get(lens.opc);
+
+  if (current) {
+    // Check if anything changed
+    const changed = current.material !== lens.material ||
+                    current.coating_type !== lens.coating_type ||
+                    current.cost !== lens.cost;
+
+    if (changed) {
+      // Close current record
+      db.prepare(`UPDATE lens_catalog SET valid_to = date('now') WHERE id = ?`).run(current.id);
+      // Insert new record
+      db.prepare(`
+        INSERT INTO lens_catalog (opc, material, style, coating_type, base_curve, diameter, manufacturer, cost, valid_from)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, date('now'))
+      `).run(lens.opc, lens.material, lens.style, lens.coating_type, lens.base_curve, lens.diameter, lens.manufacturer, lens.cost);
+    }
+  } else {
+    // New OPC
+    db.prepare(`
+      INSERT INTO lens_catalog (opc, material, style, coating_type, base_curve, diameter, manufacturer, cost, valid_from)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, date('now'))
+    `).run(lens.opc, lens.material, lens.style, lens.coating_type, lens.base_curve, lens.diameter, lens.manufacturer, lens.cost);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -817,7 +1335,7 @@ module.exports = {
   upsertTasks,
   upsertParts,
   upsertJobs,
-  // Query functions (for AI/MCP)
+  // Query functions (for AI/MCP) - legacy
   queryInventorySummary,
   queryAlerts,
   queryTodaysPicks,
@@ -832,5 +1350,22 @@ module.exports = {
   queryInventoryTrend,
   // Snapshot functions
   takeInventorySnapshot,
-  updateDailyPickStats
+  updateDailyPickStats,
+  // Cold layer (XML archives)
+  storeDviImport,
+  getDviImport,
+  getRecentDviImports,
+  // Warm layer (summary refresh)
+  refreshWarmLayer,
+  // Narrow MCP queries (agent-sized results)
+  getWipSnapshot,
+  getCoatingQueueAged,
+  getBreakageByDept,
+  getJobDetail,
+  getAgingReport,
+  getThroughputTrend,
+  // Reference layer (SCD Type 2)
+  getLensInfo,
+  getLensInfoAsOf,
+  upsertLensCatalog
 };
