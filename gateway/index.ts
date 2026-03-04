@@ -1145,11 +1145,24 @@ function syncDviToSqlite(): void {
     });
     archiveCompleted();
 
-    // Also archive jobs that are in the XML with ShipDate (explicitly shipped in this file)
+    // Also archive jobs that are in the XML/CSV with ShipDate (explicitly shipped in this file)
+    // For shipped jobs, we need to store the actual ship date (last_update from CSV parsing)
+    const archiveShippedStmt = db.prepare(`
+      INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, rx_number, archived, shipped_at, last_sync)
+      VALUES (?, ?, ?, ?, ?, 'SHIPPED', ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        archived = 1,
+        data_date = excluded.data_date,
+        shipped_at = datetime('now'),
+        last_sync = datetime('now')
+    `);
+
     const archiveShippedFromXml = db.transaction(() => {
       for (const j of shippedJobs) {
         const jobId = j.job_id || j.invoice || `${dataDate}-${j.station}-${Math.random()}`;
         const entryDate = j.entryDate || j.entry_date || j.date;
+        // Use last_update as the ship date (from CSV parsing), fallback to dataDate
+        const shipDate = j.last_update || dataDate;
         let daysInLab = j.daysInLab || j.days_in_lab;
         if (!daysInLab && entryDate) {
           const entry = new Date(entryDate);
@@ -1157,8 +1170,23 @@ function syncDviToSqlite(): void {
           daysInLab = Math.floor((now.getTime() - entry.getTime()) / (1000 * 60 * 60 * 24));
         }
 
-        // Archive this job
-        archiveStmt.run(jobId);
+        // Insert/update shipped job with actual ship date in data_date
+        archiveShippedStmt.run(
+          jobId,
+          j.invoice,
+          j.tray,
+          j.stage || j.Stage || 'SHIPPED',
+          j.station || 'SHIPPED',
+          j.rush || j.Rush || 'N',
+          entryDate,
+          daysInLab,
+          j.coating || j.coatR,
+          j.frame_name || '',
+          shipDate,  // Actual ship date goes into data_date
+          j.rx_number || j.invoice
+        );
+
+        // Also insert into history
         historyStmt.run(
           jobId,
           j.invoice,
@@ -1594,10 +1622,41 @@ app.post('/api/dvi/upload', express.text({ limit: '50mb', type: '*/*' }), (req: 
         // DVI Status Detail format - job-level pivot with station columns
         const parsed = parseDviStatusDetailCSV(rawData);
         if (parsed) {
-          // Use WIP jobs (active, not shipped/canceled)
+          // Use WIP jobs for display (active, not shipped/canceled)
           jobs = parsed.wip;
           header = parsed.columns;
           log.info(`[DVI] Status Detail: ${parsed.jobs.length} total jobs, ${parsed.wip.length} WIP jobs`);
+
+          // Also store shipped jobs directly to SQLite with correct ship dates
+          const shippedJobs = parsed.jobs.filter((j: any) => j.status === 'SHIPPED');
+          if (shippedJobs.length > 0) {
+            const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+            if (existsSync(dbPath)) {
+              const db = new Database(dbPath);
+              const insertShipped = db.prepare(`
+                INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, rx_number, archived, shipped_at, last_sync)
+                VALUES (?, ?, ?, 'SHIPPED', 'SHIPPED', 'SHIPPED', 'N', ?, 0, '', '', ?, ?, 1, datetime('now'), datetime('now'))
+                ON CONFLICT(id) DO UPDATE SET
+                  data_date = excluded.data_date,
+                  archived = 1,
+                  shipped_at = datetime('now')
+              `);
+              db.transaction(() => {
+                for (const j of shippedJobs) {
+                  insertShipped.run(
+                    j.job_id,
+                    j.invoice,
+                    j.tray,
+                    j.last_update,  // entry_date
+                    j.last_update,  // data_date = actual ship date
+                    j.rx_number
+                  );
+                }
+              })();
+              db.close();
+              log.info(`[DVI] Status Detail: Stored ${shippedJobs.length} shipped jobs with actual ship dates`);
+            }
+          }
         } else {
           return res.status(400).json({ error: 'Failed to parse DVI Status Detail CSV' });
         }
