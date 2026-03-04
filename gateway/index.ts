@@ -1229,6 +1229,81 @@ function syncDviToSqlite(): void {
 // Load DVI data on startup
 loadDviData();
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DVI SOAP Polling - Download new orders automatically
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SOAP_POLL_INTERVAL = 60_000; // Poll every 60 seconds
+
+async function pollDviSoapOrders(): Promise<void> {
+  try {
+    const orders = await dviSoap.downloadOrders(100);
+    if (orders.length === 0) return;
+
+    log.info(`[DVI] SOAP: Downloaded ${orders.length} new orders`);
+
+    // Convert SOAP orders to job format and add to database
+    const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+    if (!existsSync(dbPath)) return;
+
+    const db = new Database(dbPath);
+
+    const upsertStmt = db.prepare(`
+      INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, rx_number, archived, last_sync)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        stage = excluded.stage,
+        status = excluded.status,
+        coating = excluded.coating,
+        last_sync = datetime('now')
+    `);
+
+    let addedCount = 0;
+    const today = new Date().toISOString().split('T')[0];
+
+    db.transaction(() => {
+      for (const order of orders) {
+        // Use remoteInvoice as job_id, fallback to orderNumber
+        const jobId = order.remoteInvoice || order.orderNumber;
+        const coating = order.rightLens?.coating || order.leftLens?.coating || '';
+
+        upsertStmt.run(
+          jobId,
+          order.remoteInvoice,
+          order.remoteInvoice, // tray = invoice for new orders
+          'S', // New orders start in Surfacing
+          null, // station
+          'In Progress',
+          'N', // rush - would need to parse from instructions
+          today, // entry_date
+          0, // days_in_lab
+          coating,
+          order.frame?.style || '',
+          today, // data_date
+          order.rxNumber
+        );
+        addedCount++;
+      }
+    })();
+
+    db.close();
+
+    if (addedCount > 0) {
+      log.info(`[DVI] SOAP: Added/updated ${addedCount} jobs to WIP`);
+    }
+  } catch (err: any) {
+    // Don't log error if it's just no password configured
+    if (!err.message?.includes('No password')) {
+      log.error('[DVI] SOAP polling error:', err.message);
+    }
+  }
+}
+
+// Start SOAP polling
+pollDviSoapOrders(); // Initial poll on startup
+setInterval(pollDviSoapOrders, SOAP_POLL_INTERVAL);
+log.info(`[DVI] SOAP polling started (every ${SOAP_POLL_INTERVAL / 1000}s)`);
+
 // DVI MegaTransfer XML parser - extracts RxOrder records with nested data
 function parseXMLToJobs(xmlContent: string): { jobs: Record<string, any>[], columns: string[] } {
   const jobs: Record<string, any>[] = [];
@@ -1995,63 +2070,94 @@ app.get('/api/dvi/stats', (req: Request, res: Response) => {
 });
 
 // WIP Summary endpoint - returns aggregated stats + limited job list to avoid token limits
+// Merges data from SQLite (SOAP polling) and XML uploads
 app.get('/api/wip/summary', (_req: Request, res: Response) => {
-  const current = dviDataStore.current;
-  if (!current) {
-    return res.json({
-      totalJobs: 0,
-      byStage: {},
-      rushJobs: 0,
-      oldestJobs: [],
-      recentJobs: [],
-      message: 'No DVI data uploaded'
-    });
+  const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+  let dbJobs: any[] = [];
+
+  // First, get jobs from SQLite (SOAP polling data)
+  if (existsSync(dbPath)) {
+    try {
+      const db = new Database(dbPath);
+      dbJobs = db.prepare(`
+        SELECT id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, rx_number
+        FROM dvi_jobs WHERE archived = 0
+      `).all();
+      db.close();
+    } catch (e) {
+      log.error('[WIP] SQLite read error:', e);
+    }
   }
 
-  const jobs = current.jobs || [];
+  // Then get jobs from XML upload store
+  const current = dviDataStore.current;
+  const xmlJobs = current?.jobs || [];
+
+  // Filter XML jobs to active only (not shipped/canceled)
+  const activeXmlJobs = xmlJobs.filter((j: any) => {
+    const status = (j.status || '').toUpperCase();
+    const stage = (j.stage || j.Stage || j.station || '').toUpperCase();
+    return status !== 'SHIPPED' && status !== 'CANCELED' && stage !== 'SHIPPED' && stage !== 'CANCELED';
+  });
+
+  // Merge: use SQLite as primary, XML as supplement (avoid duplicates by invoice)
+  const jobMap = new Map<string, any>();
+
+  // Add XML jobs first
+  activeXmlJobs.forEach((j: any) => {
+    const key = j.invoice || j.id || j.tray;
+    if (key) jobMap.set(key, { ...j, source: 'xml' });
+  });
+
+  // Add/overwrite with SQLite jobs (fresher data)
+  dbJobs.forEach((j: any) => {
+    const key = j.invoice || j.id;
+    if (key) jobMap.set(key, { ...j, source: 'soap' });
+  });
+
+  const allJobs = Array.from(jobMap.values());
 
   // Compute stats
   const byStage: Record<string, number> = {};
   let rushCount = 0;
 
-  jobs.forEach((job: any) => {
+  allJobs.forEach((job: any) => {
     const stage = (job.stage || job.Stage || job.station || 'UNKNOWN').toUpperCase();
-    // Skip CANCELED and SHIPPED for WIP
-    if (stage === 'CANCELED' || stage === 'SHIPPED' || job.status === 'CANCELED' || job.status === 'SHIPPED') return;
     byStage[stage] = (byStage[stage] || 0) + 1;
     if (job.rush === 'Y' || job.Rush === 'Y') rushCount++;
   });
 
-  // Get oldest jobs (by daysInLab)
-  const activeJobs = jobs.filter((j: any) => {
-    const stage = (j.stage || j.Stage || j.station || '').toUpperCase();
-    return stage !== 'CANCELED' && stage !== 'SHIPPED' && j.status !== 'CANCELED' && j.status !== 'SHIPPED';
-  });
-
-  const sortedByAge = [...activeJobs].sort((a: any, b: any) => {
-    const daysA = parseInt(a.daysInLab) || 0;
-    const daysB = parseInt(b.daysInLab) || 0;
+  // Sort by days in lab (oldest first)
+  const sortedByAge = [...allJobs].sort((a: any, b: any) => {
+    const daysA = parseInt(a.daysInLab || a.days_in_lab) || 0;
+    const daysB = parseInt(b.daysInLab || b.days_in_lab) || 0;
     return daysB - daysA;
   });
 
   // Return limited data to avoid token limits
   res.json({
-    totalWIP: activeJobs.length,
+    totalWIP: allJobs.length,
     byStage,
     rushJobs: rushCount,
-    dataDate: current.dataDate,
-    uploadedAt: current.uploadedAt,
+    dataDate: current?.dataDate || new Date().toISOString().split('T')[0],
+    uploadedAt: current?.uploadedAt || null,
+    sources: {
+      soap: dbJobs.length,
+      xml: activeXmlJobs.length,
+      merged: allJobs.length
+    },
     // Only return top 20 oldest jobs with essential fields
     oldestJobs: sortedByAge.slice(0, 20).map((j: any) => ({
       invoice: j.invoice,
       tray: j.tray,
       stage: j.stage || j.Stage || j.station,
-      daysInLab: j.daysInLab,
-      entryDate: j.entryDate,
-      shipDate: j.shipDate,
+      daysInLab: j.daysInLab || j.days_in_lab,
+      entryDate: j.entryDate || j.entry_date,
+      shipDate: j.shipDate || j.ship_date,
       rush: j.rush || j.Rush,
-      coatR: j.coatR,
-      coatL: j.coatL
+      coatR: j.coatR || j.coating,
+      coatL: j.coatL,
+      source: j.source
     })),
     // Stage breakdown for context
     stageSummary: Object.entries(byStage)
