@@ -130,6 +130,61 @@ export type { AgentConfig };
 export const MCP_TOOLS = ALL_TOOLS;
 
 /**
+ * Get all tool definitions with metadata for UI
+ */
+export function getAllToolDefinitions(): Array<{
+  name: string;
+  description: string;
+  category: string;
+  inputSchema: any;
+}> {
+  const categories: Record<string, string[]> = {
+    'WIP & Jobs': ['get_wip_snapshot', 'get_wip_jobs', 'get_job_detail'],
+    'Reports': ['get_aging_report', 'get_throughput_trend', 'get_remake_rate'],
+    'Breakage': ['get_breakage_summary', 'get_breakage_events', 'get_breakage_by_position'],
+    'Coating': ['get_coating_queue', 'get_coating_wait_summary'],
+    'Inventory': ['get_inventory_summary', 'get_inventory_detail'],
+    'Maintenance': ['get_maintenance_summary', 'get_maintenance_tasks'],
+    'Catalog': ['get_lens_catalog', 'get_frame_catalog', 'get_opc_history'],
+    'Settings': ['get_settings', 'update_setting'],
+    'Generic': ['query_database', 'call_api', 'think_aloud'],
+  };
+
+  const categoryMap: Record<string, string> = {};
+  for (const [cat, tools] of Object.entries(categories)) {
+    for (const t of tools) categoryMap[t] = cat;
+  }
+
+  return ALL_TOOLS.map(tool => ({
+    name: tool.name,
+    description: tool.description,
+    category: categoryMap[tool.name] || 'Other',
+    inputSchema: tool.input_schema,
+  }));
+}
+
+/**
+ * Get all MCP agent configurations for UI
+ */
+export function getAllAgentConfigs(): Array<{
+  name: string;
+  description: string;
+  department: string | null;
+  tools: string[];
+}> {
+  const agents = getAvailableAgents();
+  return agents.map(name => {
+    const config = getAgentConfig(name);
+    return {
+      name: config.name,
+      description: config.description,
+      department: config.department || null,
+      tools: config.tools.map((t: any) => t.name),
+    };
+  });
+}
+
+/**
  * Get tools for a specific agent (department-scoped)
  * This is the preferred way to get tools - each agent sees only relevant tools
  */

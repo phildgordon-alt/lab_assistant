@@ -18,6 +18,7 @@ import { initSlack, startSlack } from './sources/slack.js';
 import { initRestRouter } from './sources/rest.js';
 import { initWebRouter } from './sources/web.js';
 import { getAgentPromptInfo } from './agents/runner.js';
+import { getAllToolDefinitions, getAllAgentConfigs, handleToolCall } from './mcp/server.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -346,6 +347,77 @@ app.delete('/gateway/agents/prompts/:name', (req: Request, res: Response) => {
     res.json({ success: true, name, message: 'Agent deleted' });
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete agent', message: String(error) });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP Tools Management API
+// ─────────────────────────────────────────────────────────────────────────────
+
+// List all MCP tools with their schemas
+app.get('/gateway/tools', (_req: Request, res: Response) => {
+  try {
+    const tools = getAllToolDefinitions();
+    res.json({ tools, count: tools.length });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get tools', message: String(error) });
+  }
+});
+
+// Get single tool details
+app.get('/gateway/tools/:name', (req: Request, res: Response) => {
+  try {
+    const tools = getAllToolDefinitions();
+    const tool = tools.find(t => t.name === req.params.name);
+    if (!tool) {
+      return res.status(404).json({ error: 'Tool not found' });
+    }
+    res.json({ tool });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get tool', message: String(error) });
+  }
+});
+
+// Test a tool with inputs
+app.post('/gateway/tools/test', async (req: Request, res: Response) => {
+  const { tool, input } = req.body;
+
+  if (!tool || typeof tool !== 'string') {
+    return res.status(400).json({ error: 'Tool name is required' });
+  }
+
+  try {
+    const startTime = Date.now();
+    const result = await handleToolCall(tool, input || {});
+    const durationMs = Date.now() - startTime;
+
+    log.info(`Tool test: ${tool}`, { durationMs, input });
+    res.json({
+      success: true,
+      tool,
+      input: input || {},
+      result,
+      durationMs,
+    });
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    log.error(`Tool test failed: ${tool}`, error);
+    res.json({
+      success: false,
+      tool,
+      input: input || {},
+      error: errorMsg,
+    });
+  }
+});
+
+// List all MCP agent configurations
+app.get('/gateway/mcp/agents', (_req: Request, res: Response) => {
+  try {
+    const agents = getAllAgentConfigs();
+    res.json({ agents, count: agents.length });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get agent configs', message: String(error) });
   }
 });
 
@@ -1327,10 +1399,12 @@ async function pollDviSoapOrders(): Promise<void> {
   }
 }
 
-// Start SOAP polling
-pollDviSoapOrders(); // Initial poll on startup
-setInterval(pollDviSoapOrders, SOAP_POLL_INTERVAL);
-log.info(`[DVI] SOAP polling started (every ${SOAP_POLL_INTERVAL / 1000}s)`);
+// Start SOAP polling - delay initial poll to not block server startup
+setTimeout(() => {
+  pollDviSoapOrders().catch(err => log.warn('[DVI] Initial SOAP poll failed:', err.message));
+  setInterval(pollDviSoapOrders, SOAP_POLL_INTERVAL);
+  log.info(`[DVI] SOAP polling started (every ${SOAP_POLL_INTERVAL / 1000}s)`);
+}, 5000); // Wait 5s after module load
 
 // DVI MegaTransfer XML parser - extracts RxOrder records with nested data
 function parseXMLToJobs(xmlContent: string): { jobs: Record<string, any>[], columns: string[] } {

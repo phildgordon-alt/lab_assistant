@@ -21,6 +21,36 @@ import { getAgentConfigName } from './classifier.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+// Friendly labels for MCP tools (shown during streaming)
+const TOOL_LABELS: Record<string, string> = {
+  get_wip_snapshot: 'Checking WIP status',
+  get_wip_jobs: 'Fetching job details',
+  get_job_detail: 'Looking up job',
+  get_aging_report: 'Analyzing aging data',
+  get_throughput_trend: 'Checking throughput trends',
+  get_remake_rate: 'Calculating remake rate',
+  get_breakage_summary: 'Reviewing breakage data',
+  get_breakage_events: 'Fetching breakage events',
+  get_breakage_by_position: 'Analyzing breakage by position',
+  get_coating_queue: 'Checking coating queue',
+  get_coating_wait_summary: 'Reviewing coating wait times',
+  get_inventory_summary: 'Checking inventory levels',
+  get_inventory_detail: 'Fetching inventory details',
+  get_maintenance_summary: 'Checking maintenance status',
+  get_maintenance_tasks: 'Fetching maintenance tasks',
+  get_lens_catalog: 'Searching lens catalog',
+  get_frame_catalog: 'Searching frame catalog',
+  get_opc_history: 'Looking up OPC history',
+  get_settings: 'Loading settings',
+  query_database: 'Running database query',
+  call_api: 'Calling API',
+  think_aloud: 'Analyzing',
+};
+
+function getToolLabel(toolName: string): string {
+  return TOOL_LABELS[toolName] || `Using ${toolName.replace(/_/g, ' ')}`;
+}
+
 // Initialize Anthropic client
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -315,11 +345,14 @@ export async function runAgentStreaming(
         }
 
         // Handle tool calls with agent context (applies department defaults)
-        onChunk('\n\n_Using tools..._\n\n');
         const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
         for (const toolUse of toolUseBlocks) {
           if (toolUse.type === 'tool_use') {
+            // Show progress for each tool
+            const toolLabel = getToolLabel(toolUse.name);
+            onChunk(`\n\n> ${toolLabel}...\n\n`);
+
             log.info(`MCP Tool call (streaming): ${toolUse.name}`, { source, userId, agentName, mcpAgent: mcpAgentName });
 
             try {
@@ -337,6 +370,7 @@ export async function runAgentStreaming(
             } catch (error) {
               const errorMsg = error instanceof Error ? error.message : 'Tool execution failed';
               log.error(`MCP Tool error (streaming): ${toolUse.name}`, error);
+              onChunk(`_(error: ${errorMsg})_\n`);
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,

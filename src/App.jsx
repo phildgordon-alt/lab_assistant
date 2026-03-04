@@ -6581,6 +6581,16 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
   const [loadingConnections,setLoadingConnections]=useState(false);
   const [expandedService,setExpandedService]=useState(null);
   const [showApiKeys,setShowApiKeys]=useState({});
+  // MCP Tools state
+  const [mcpTools,setMcpTools]=useState([]);
+  const [mcpAgents,setMcpAgents]=useState([]);
+  const [loadingMcp,setLoadingMcp]=useState(false);
+  const [selectedTool,setSelectedTool]=useState(null);
+  const [toolTestInput,setToolTestInput]=useState("{}");
+  const [toolTestResult,setToolTestResult]=useState(null);
+  const [testingTool,setTestingTool]=useState(false);
+  const [mcpFilter,setMcpFilter]=useState({category:"all",search:""});
+  const [mcpView,setMcpView]=useState("tools"); // tools | agents | tester
 
   // Check for lockout
   const isLockedOut = lockoutUntil && Date.now() < lockoutUntil;
@@ -6676,6 +6686,58 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       return () => clearInterval(interval);
     }
   }, [sub, settings.gatewayUrl]);
+
+  // Load MCP tools and agents
+  const loadMcpData = async () => {
+    setLoadingMcp(true);
+    const gwUrl = settings.gatewayUrl || 'http://localhost:3001';
+    try {
+      const [toolsRes, agentsRes] = await Promise.all([
+        fetch(`${gwUrl}/gateway/tools`, { signal: AbortSignal.timeout(5000) }),
+        fetch(`${gwUrl}/gateway/mcp/agents`, { signal: AbortSignal.timeout(5000) }),
+      ]);
+      if (toolsRes.ok) {
+        const data = await toolsRes.json();
+        setMcpTools(data.tools || []);
+      }
+      if (agentsRes.ok) {
+        const data = await agentsRes.json();
+        setMcpAgents(data.agents || []);
+      }
+    } catch (e) {
+      console.error('Failed to load MCP data:', e);
+    }
+    setLoadingMcp(false);
+  };
+
+  // Auto-load MCP data when on mcptools tab
+  useEffect(() => {
+    if (sub === 'mcptools') {
+      loadMcpData();
+    }
+  }, [sub, settings.gatewayUrl]);
+
+  // Test a tool
+  const testTool = async () => {
+    if (!selectedTool) return;
+    setTestingTool(true);
+    setToolTestResult(null);
+    const gwUrl = settings.gatewayUrl || 'http://localhost:3001';
+    try {
+      let input = {};
+      try { input = JSON.parse(toolTestInput); } catch { input = {}; }
+      const resp = await fetch(`${gwUrl}/gateway/tools/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tool: selectedTool.name, input }),
+      });
+      const data = await resp.json();
+      setToolTestResult(data);
+    } catch (e) {
+      setToolTestResult({ success: false, error: e.message });
+    }
+    setTestingTool(false);
+  };
 
   // Save updated rate limits
   const saveLimits = async () => {
@@ -6807,6 +6869,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       {[
         {id:"connections",icon:"📡",label:"Connections"},
         {id:"agents",icon:"🧠",label:"Agents"},
+        {id:"mcptools",icon:"🔧",label:"MCP Tools"},
         {id:"dataimport",icon:"📥",label:"Data Import"},
         {id:"equipment",icon:"⚙️",label:"Equipment"},
         {id:"categories",icon:"📦",label:"Categories"},
@@ -7021,6 +7084,142 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       {/* ══ AGENTS ══ */}
       {sub==="agents"&&(
         <AgentsPanel settings={settings} />
+      )}
+
+      {/* ══ MCP TOOLS ══ */}
+      {sub==="mcptools"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:700,color:T.text}}>MCP Tools & Agent Configurations</div>
+              <div style={{fontSize:11,color:T.textMuted}}>Browse tools, test them, and see which agents use what</div>
+            </div>
+            <button onClick={loadMcpData} disabled={loadingMcp}
+              style={{background:T.blue,border:"none",borderRadius:8,padding:"8px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:loadingMcp?0.6:1}}>
+              {loadingMcp?"Loading...":"↻ Refresh"}
+            </button>
+          </div>
+
+          {/* Sub-navigation */}
+          <div style={{display:"flex",gap:8}}>
+            {[{id:"tools",label:`Tools (${mcpTools.length})`},{id:"agents",label:`Agents (${mcpAgents.length})`},{id:"tester",label:"Tool Tester"}].map(v=>(
+              <button key={v.id} onClick={()=>setMcpView(v.id)}
+                style={{background:mcpView===v.id?T.blueDark:"transparent",border:`1px solid ${mcpView===v.id?T.blue:T.border}`,
+                borderRadius:6,padding:"8px 16px",color:mcpView===v.id?T.blue:T.textMuted,fontSize:12,fontWeight:600,cursor:"pointer",fontFamily:mono}}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Tools List */}
+          {mcpView==="tools"&&(
+            <div>
+              <div style={{display:"flex",gap:10,marginBottom:12}}>
+                <input placeholder="Search tools..." value={mcpFilter.search} onChange={e=>setMcpFilter(f=>({...f,search:e.target.value}))}
+                  style={{flex:1,background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 12px",color:T.text,fontSize:12}}/>
+                <select value={mcpFilter.category} onChange={e=>setMcpFilter(f=>({...f,category:e.target.value}))}
+                  style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 12px",color:T.text,fontSize:12}}>
+                  <option value="all">All Categories</option>
+                  {[...new Set(mcpTools.map(t=>t.category))].map(c=>(
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <Card style={{padding:0,maxHeight:500,overflowY:"auto"}}>
+                {mcpTools
+                  .filter(t=>mcpFilter.category==="all"||t.category===mcpFilter.category)
+                  .filter(t=>!mcpFilter.search||t.name.toLowerCase().includes(mcpFilter.search.toLowerCase())||t.description.toLowerCase().includes(mcpFilter.search.toLowerCase()))
+                  .map(tool=>(
+                  <div key={tool.name} style={{borderBottom:`1px solid ${T.border}`,padding:"12px 16px",cursor:"pointer",background:selectedTool?.name===tool.name?`${T.blue}15`:"transparent"}}
+                    onClick={()=>{setSelectedTool(tool);setMcpView("tester");setToolTestInput(JSON.stringify(tool.inputSchema?.properties?Object.fromEntries(Object.keys(tool.inputSchema.properties).map(k=>[k,""])):{},null,2));}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <span style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:mono}}>{tool.name}</span>
+                          <span style={{fontSize:9,background:`${T.blue}20`,color:T.blue,padding:"2px 6px",borderRadius:4,fontFamily:mono}}>{tool.category}</span>
+                        </div>
+                        <div style={{fontSize:11,color:T.textMuted,marginTop:4,lineHeight:1.4}}>{tool.description.split('\n')[0].slice(0,120)}...</div>
+                      </div>
+                      <span style={{fontSize:10,color:T.textDim}}>→ Test</span>
+                    </div>
+                  </div>
+                ))}
+              </Card>
+            </div>
+          )}
+
+          {/* Agents List */}
+          {mcpView==="agents"&&(
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:12}}>
+              {mcpAgents.map(agent=>(
+                <Card key={agent.name} style={{padding:16}}>
+                  <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>
+                    <div style={{width:36,height:36,borderRadius:8,background:agent.department?`${T.blue}20`:`${T.purple}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:16}}>
+                      {agent.department?"🏭":"🤖"}
+                    </div>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:700,color:T.text}}>{agent.name}</div>
+                      <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{agent.department?`Dept ${agent.department}`:"Cross-department"}</div>
+                    </div>
+                  </div>
+                  <div style={{fontSize:11,color:T.textMuted,marginBottom:10}}>{agent.description}</div>
+                  <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>
+                    <span style={{fontWeight:600}}>{agent.tools.length} tools:</span>{" "}
+                    {agent.tools.slice(0,5).join(", ")}{agent.tools.length>5?`, +${agent.tools.length-5} more`:""}
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* Tool Tester */}
+          {mcpView==="tester"&&(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+              <Card style={{padding:16}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:12}}>Select Tool & Input</div>
+                <select value={selectedTool?.name||""} onChange={e=>{const t=mcpTools.find(x=>x.name===e.target.value);setSelectedTool(t);if(t)setToolTestInput(JSON.stringify(t.inputSchema?.properties?Object.fromEntries(Object.keys(t.inputSchema.properties).map(k=>[k,""])):{},null,2));}}
+                  style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:"10px 12px",color:T.text,fontSize:12,marginBottom:12}}>
+                  <option value="">Choose a tool...</option>
+                  {mcpTools.map(t=><option key={t.name} value={t.name}>{t.name}</option>)}
+                </select>
+                {selectedTool&&(
+                  <>
+                    <div style={{fontSize:11,color:T.textMuted,marginBottom:8,padding:10,background:`${T.blue}10`,borderRadius:6}}>{selectedTool.description.split('\n')[0]}</div>
+                    <div style={{fontSize:10,fontWeight:600,color:T.textDim,marginBottom:6,fontFamily:mono}}>INPUT (JSON)</div>
+                    <textarea value={toolTestInput} onChange={e=>setToolTestInput(e.target.value)} rows={8}
+                      style={{width:"100%",background:T.surface,border:`1px solid ${T.border}`,borderRadius:6,padding:10,color:T.text,fontSize:11,fontFamily:mono,resize:"vertical"}}/>
+                    <button onClick={testTool} disabled={testingTool}
+                      style={{marginTop:12,width:"100%",background:T.green,border:"none",borderRadius:8,padding:"10px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:testingTool?0.6:1}}>
+                      {testingTool?"Running...":"▶ Run Tool"}
+                    </button>
+                  </>
+                )}
+              </Card>
+              <Card style={{padding:16}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.text,marginBottom:12}}>Result</div>
+                {toolTestResult?(
+                  <div>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                      <span style={{fontSize:16}}>{toolTestResult.success?"✅":"❌"}</span>
+                      <span style={{fontSize:12,fontWeight:600,color:toolTestResult.success?T.green:T.red}}>{toolTestResult.success?"Success":"Error"}</span>
+                      {toolTestResult.durationMs&&<span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{toolTestResult.durationMs}ms</span>}
+                    </div>
+                    <div style={{background:T.surface,borderRadius:6,padding:12,maxHeight:350,overflowY:"auto"}}>
+                      <pre style={{margin:0,fontSize:10,color:T.text,fontFamily:mono,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>
+                        {JSON.stringify(toolTestResult.result||toolTestResult.error,null,2)}
+                      </pre>
+                    </div>
+                  </div>
+                ):(
+                  <div style={{padding:40,textAlign:"center",color:T.textDim}}>
+                    <div style={{fontSize:32,marginBottom:10}}>🧪</div>
+                    <div style={{fontSize:12}}>Select a tool and run it to see results</div>
+                  </div>
+                )}
+              </Card>
+            </div>
+          )}
+        </div>
       )}
 
       {/* ══ DATA IMPORT ══ */}
