@@ -1290,9 +1290,62 @@ function parseXMLToJobs(xmlContent: string): { jobs: Record<string, any>[], colu
       job.operator = orderDataAttrs.operator;
       job.entry_date = orderDataAttrs.entrydate;
       job.ship_date = orderDataAttrs.shipdate;
-      job.stage = rxAttrs.department || 'UNKNOWN';
       job.days_in_lab = rxAttrs.daysinlab;
       job.rx_number = orderDataAttrs.rxnumber;
+      job.lens_material = rxAttrs.department;  // Store material code separately
+
+      // Determine actual workflow stage
+      // Valid workflow stages: S (Surfacing), C (Coating), E (Edging), A (Assembly), Q (QC), O (Office)
+      const validStages = ['S', 'C', 'E', 'A', 'Q', 'O'];
+      let determinedStage = 'UNKNOWN';
+
+      // Check if RxOrder Department is a valid stage code
+      if (rxAttrs.department && validStages.includes(rxAttrs.department.toUpperCase())) {
+        determinedStage = rxAttrs.department.toUpperCase();
+      } else {
+        // RxOrder Department is a material code (POLY, HIRES, etc.) - determine stage from other fields
+
+        // Look for Wait elements to determine current stage
+        const waitMatches = orderXml.match(/<Wait[^>]*Name="([^"]+)"[^>]*>/gi);
+        if (waitMatches && waitMatches.length > 0) {
+          // Get the last Wait element (most recent)
+          const lastWait = waitMatches[waitMatches.length - 1];
+          const waitNameMatch = lastWait.match(/Name="([^"]+)"/i);
+          if (waitNameMatch) {
+            const waitName = waitNameMatch[1].toUpperCase();
+            if (waitName.includes('COATING') || waitName.includes('COAT')) {
+              determinedStage = 'C';
+            } else if (waitName.includes('SURFACE') || waitName.includes('GEN')) {
+              determinedStage = 'S';
+            } else if (waitName.includes('EDGE') || waitName.includes('CUT')) {
+              determinedStage = 'E';
+            } else if (waitName.includes('ASSEM')) {
+              determinedStage = 'A';
+            } else if (waitName.includes('QC') || waitName.includes('INSPECT')) {
+              determinedStage = 'Q';
+            }
+          }
+        }
+
+        // If still unknown, check BreakageItem Department for most recent department
+        if (determinedStage === 'UNKNOWN') {
+          const breakageMatches = orderXml.match(/<BreakageItem[^>]*Department="([^"]+)"[^>]*>/gi);
+          if (breakageMatches && breakageMatches.length > 0) {
+            const lastBreakage = breakageMatches[breakageMatches.length - 1];
+            const deptMatch = lastBreakage.match(/Department="([^"]+)"/i);
+            if (deptMatch && validStages.includes(deptMatch[1].toUpperCase())) {
+              determinedStage = deptMatch[1].toUpperCase();
+            }
+          }
+        }
+
+        // If still unknown and job is active (no ShipDate), default to Surfacing (entry point)
+        if (determinedStage === 'UNKNOWN' && !orderDataAttrs.shipdate) {
+          determinedStage = 'S';
+        }
+      }
+
+      job.stage = determinedStage;
 
       // Determine status based on ship date
       const hasShipDate = orderDataAttrs.shipdate && orderDataAttrs.shiptime;
