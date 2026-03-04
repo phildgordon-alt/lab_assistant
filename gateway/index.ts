@@ -1027,6 +1027,112 @@ app.post('/api/slack/send', async (req: Request, res: Response) => {
   }
 });
 
+// Delete bot messages from a Slack channel
+// ?all=true uses SLACK_USER_TOKEN to delete ALL messages (user + bot)
+app.delete('/api/slack/messages', async (req: Request, res: Response) => {
+  const deleteAll = req.query.all === 'true';
+  const userToken = process.env.SLACK_USER_TOKEN;
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  const channel = (req.query.channel as string) || process.env.SLACK_CHANNEL_ID || 'C07RZ2DLHGZ';
+
+  // For deleting all messages, we need a user token
+  if (deleteAll && !userToken) {
+    return res.status(400).json({
+      ok: false,
+      error: 'SLACK_USER_TOKEN not configured. Add a user OAuth token (xoxp-...) to gateway/.env to delete user messages.'
+    });
+  }
+
+  const slackToken = deleteAll ? userToken : botToken;
+  if (!slackToken) {
+    return res.status(400).json({ ok: false, error: 'No Slack token configured' });
+  }
+
+  try {
+    // First get the bot's own ID (for bot-only deletion)
+    let botUserId: string | null = null;
+    let botId: string | null = null;
+
+    if (!deleteAll && botToken) {
+      const authResp = await fetch('https://slack.com/api/auth.test', {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${botToken}` },
+        signal: AbortSignal.timeout(10000)
+      });
+      const authData = await authResp.json() as any;
+      if (authData.ok) {
+        botUserId = authData.user_id;
+        botId = authData.bot_id;
+      }
+    }
+
+    // Get channel history
+    const historyResp = await fetch(`https://slack.com/api/conversations.history?channel=${channel}&limit=200`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${slackToken}` },
+      signal: AbortSignal.timeout(15000)
+    });
+    const historyData = await historyResp.json() as any;
+
+    if (!historyData.ok) {
+      return res.status(400).json({ ok: false, error: historyData.error });
+    }
+
+    // Filter messages based on mode
+    let messagesToDelete = historyData.messages || [];
+    if (!deleteAll && botUserId) {
+      // Bot-only mode: filter for bot messages
+      messagesToDelete = messagesToDelete.filter((m: any) =>
+        m.user === botUserId || m.bot_id === botId || (m.bot_profile && m.bot_profile.app_id)
+      );
+    }
+
+    log.info(`[Slack] Found ${messagesToDelete.length} messages to delete (mode: ${deleteAll ? 'all' : 'bot-only'})`);
+
+    // Delete each message
+    let deleted = 0;
+    const errors: string[] = [];
+    for (const msg of messagesToDelete) {
+      try {
+        const deleteResp = await fetch('https://slack.com/api/chat.delete', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${slackToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ channel, ts: msg.ts }),
+          signal: AbortSignal.timeout(5000)
+        });
+        const deleteData = await deleteResp.json() as any;
+        if (deleteData.ok) {
+          deleted++;
+        } else {
+          errors.push(`${msg.ts}: ${deleteData.error}`);
+        }
+        // Small delay to avoid rate limiting
+        await new Promise(r => setTimeout(r, 200));
+      } catch (e) {
+        errors.push(`${msg.ts}: ${e instanceof Error ? e.message : 'unknown'}`);
+      }
+    }
+
+    // Also clear local message cache
+    slackMessages = slackMessages.filter(m => m.source !== 'local');
+
+    res.json({
+      ok: true,
+      found: messagesToDelete.length,
+      deleted,
+      mode: deleteAll ? 'all' : 'bot-only',
+      errors: errors.length > 0 ? errors.slice(0, 5) : undefined // Return first 5 errors
+    });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to delete messages';
+    log.error('Slack delete error:', msg);
+    res.status(500).json({ ok: false, error: msg });
+  }
+});
+
 // Mock data generators for when APIs aren't configured
 function generateMockInventory() {
   const coatings = ['AR', 'BLUE_CUT', 'HARD_COAT', 'TRANSITIONS', 'POLARIZED', 'MIRROR'];
@@ -1399,12 +1505,17 @@ async function pollDviSoapOrders(): Promise<void> {
   }
 }
 
-// Start SOAP polling - delay initial poll to not block server startup
-setTimeout(() => {
+// Start SOAP polling - moved to after server starts (in start() function)
+// This prevents blocking server startup
+function startSoapPolling(): void {
+  if (process.env.DISABLE_SOAP_POLLING === 'true') {
+    log.info('[DVI] SOAP polling disabled via DISABLE_SOAP_POLLING env');
+    return;
+  }
   pollDviSoapOrders().catch(err => log.warn('[DVI] Initial SOAP poll failed:', err.message));
   setInterval(pollDviSoapOrders, SOAP_POLL_INTERVAL);
   log.info(`[DVI] SOAP polling started (every ${SOAP_POLL_INTERVAL / 1000}s)`);
-}, 5000); // Wait 5s after module load
+}
 
 // DVI MegaTransfer XML parser - extracts RxOrder records with nested data
 function parseXMLToJobs(xmlContent: string): { jobs: Record<string, any>[], columns: string[] } {
@@ -2213,19 +2324,26 @@ app.get('/api/dvi/data', async (req: Request, res: Response) => {
     return res.json({ mock: true, jobs: generateMockDVIJobs(), message: 'Mock data (requested via ?mock=true)' });
   }
 
-  // Get shipped counts from database
+  // Get shipped counts from database - use shipped_at timestamp and status check
   let shippedStats = { today: 0, yesterday: 0, thisWeek: 0 };
   const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
   if (existsSync(dbPath)) {
     try {
       const db = new Database(dbPath);
-      const today = new Date().toISOString().split('T')[0];
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-
-      const todayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(today) as any;
-      const yesterdayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(yesterday) as any;
-      const weekCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date >= ?`).get(weekAgo) as any;
+      // Query based on shipped_at date, not data_date (file upload date)
+      // Jobs are shipped when archived=1 AND (status='SHIPPED' OR shipped_at is set)
+      const todayCount = db.prepare(`
+        SELECT COUNT(*) as cnt FROM dvi_jobs
+        WHERE status = 'SHIPPED' AND date(shipped_at) = date('now')
+      `).get() as any;
+      const yesterdayCount = db.prepare(`
+        SELECT COUNT(*) as cnt FROM dvi_jobs
+        WHERE status = 'SHIPPED' AND date(shipped_at) = date('now', '-1 day')
+      `).get() as any;
+      const weekCount = db.prepare(`
+        SELECT COUNT(*) as cnt FROM dvi_jobs
+        WHERE status = 'SHIPPED' AND shipped_at >= datetime('now', '-7 days')
+      `).get() as any;
 
       shippedStats = {
         today: todayCount?.cnt || 0,
@@ -2339,20 +2457,25 @@ app.get('/api/dvi/stats', (req: Request, res: Response) => {
     if (job.rush === 'Y' || job.Rush === 'Y' || job.priority === 'RUSH') stats.rushJobs++;
   });
 
-  // Get shipped counts from database history
+  // Get shipped counts from database history - use shipped_at timestamp
   let shippedStats = { today: 0, yesterday: 0, thisWeek: 0 };
   const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
   if (existsSync(dbPath)) {
     try {
       const db = new Database(dbPath);
-      const today = new Date().toISOString().split('T')[0];
-      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
-      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-
-      // Count shipped jobs by data_date (the date in the source file)
-      const todayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(today) as any;
-      const yesterdayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(yesterday) as any;
-      const weekCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date >= ?`).get(weekAgo) as any;
+      // Query based on shipped_at date, not data_date (file upload date)
+      const todayCount = db.prepare(`
+        SELECT COUNT(*) as cnt FROM dvi_jobs
+        WHERE status = 'SHIPPED' AND date(shipped_at) = date('now')
+      `).get() as any;
+      const yesterdayCount = db.prepare(`
+        SELECT COUNT(*) as cnt FROM dvi_jobs
+        WHERE status = 'SHIPPED' AND date(shipped_at) = date('now', '-1 day')
+      `).get() as any;
+      const weekCount = db.prepare(`
+        SELECT COUNT(*) as cnt FROM dvi_jobs
+        WHERE status = 'SHIPPED' AND shipped_at >= datetime('now', '-7 days')
+      `).get() as any;
 
       shippedStats = {
         today: todayCount?.cnt || 0,
@@ -2732,6 +2855,9 @@ async function start(): Promise<void> {
       .catch((err) => {
         log.error('Slack initialization failed:', err);
       });
+
+    // Start SOAP polling AFTER server is listening
+    setTimeout(startSoapPolling, 5000);
   });
 }
 

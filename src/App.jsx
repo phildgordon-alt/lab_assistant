@@ -1,5 +1,67 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
 import WIPFeed from "./components/WIPFeed";
+
+// ── Error Boundary — catches render errors and shows fallback UI ───────────────
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('React Error Boundary caught:', error, errorInfo);
+    this.setState({ errorInfo });
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{
+          minHeight: '100vh', background: '#080C18', color: '#F1F5F9',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+          padding: 40, fontFamily: 'system-ui, sans-serif'
+        }}>
+          <div style={{ fontSize: 48, marginBottom: 20 }}>⚠️</div>
+          <h1 style={{ fontSize: 24, marginBottom: 12, color: '#EF4444' }}>Something went wrong</h1>
+          <p style={{ color: '#94A3B8', marginBottom: 20, textAlign: 'center', maxWidth: 500 }}>
+            The app encountered an error. Click below to reload, or check the console for details.
+          </p>
+          <div style={{
+            background: '#1E293B', padding: 16, borderRadius: 8, marginBottom: 20,
+            maxWidth: 600, overflow: 'auto', fontSize: 13, fontFamily: 'monospace', color: '#F87171'
+          }}>
+            {this.state.error?.toString()}
+          </div>
+          <button
+            onClick={() => window.location.reload()}
+            style={{
+              background: '#3B82F6', color: '#fff', border: 'none', padding: '12px 24px',
+              borderRadius: 8, fontSize: 15, cursor: 'pointer', fontWeight: 600
+            }}
+          >
+            Reload App
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// Global error handlers to prevent blank screen
+if (typeof window !== 'undefined') {
+  window.onerror = (msg, url, line, col, error) => {
+    console.error('Global error:', msg, url, line, col, error);
+    return false; // Let default handler run too
+  };
+  window.onunhandledrejection = (event) => {
+    console.error('Unhandled promise rejection:', event.reason);
+  };
+}
 
 const T = {
   bg: "#080C18", surface: "#0F1629", card: "#141B2D", cardHover: "#1A2340",
@@ -985,7 +1047,7 @@ const KPICard = ({label,value,sub,trend,accent,onRemove,editable,onClick,clickab
     {editable&&onRemove&&(
       <button onClick={e=>{e.stopPropagation();onRemove();}} style={{position:'absolute',top:6,right:6,background:'transparent',border:'none',color:T.textDim,fontSize:14,cursor:'pointer',opacity:0.5,padding:2}} title="Remove KPI">×</button>
     )}
-    <div style={{fontSize:12,color:T.textDim,textTransform:"uppercase",letterSpacing:1.5,fontFamily:mono}}>{label}</div>
+    <div style={{fontSize:14,color:T.textMuted,textTransform:"uppercase",letterSpacing:1.5,fontFamily:mono,fontWeight:600}}>{label}</div>
     <div style={{fontSize:36,fontWeight:800,color:T.text,marginTop:4,fontFamily:mono}}>{value}</div>
     <div style={{display:"flex",alignItems:"center",gap:6,marginTop:4}}>
       {trend!=null&&<span style={{fontSize:13,color:trend>0?T.green:T.red,fontFamily:mono}}>{trend>0?"▲":"▼"}{Math.abs(trend)}%</span>}
@@ -1090,7 +1152,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     switch(kpiId){
       case 'incoming_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('INITIATE')||s.includes('NEW WORK')||s.includes('INCOMING');}).length,sub:"incoming"};
       case 'total_wip': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"in queues"};
-      case 'shipped_jobs': return {value:shippedStats.yesterday||0,sub:"yesterday"};
+      case 'shipped_jobs': return {value:shippedStats.today||0,sub:"today"};
       case 'coating_wip': return {value:dviByStage('COAT')+dviJobs.filter(j=>(j.station||'').includes('CCL')||(j.station||'').includes('CCP')).length,sub:"in coating"};
       case 'cutting_wip': return {value:dviByStage('CUT')+dviJobs.filter(j=>(j.station||'').includes('EDGER')||(j.station||'').includes('LCU')).length,sub:"in cutting"};
       case 'assembly_wip': return {value:dviByStage('ASSEMBL'),sub:"in assembly"};
@@ -4435,17 +4497,18 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 // ── Shipping Tab ──────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function ShippingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
+function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
 
-  // Filter DVI jobs in shipping (SH CONVEY stations)
+  // Filter DVI jobs in shipping (SH CONVEY stations) - exclude already shipped jobs (they're in DB)
   const shippingJobs = useMemo(() => {
     return dviJobs.filter(j => {
       const stage = (j.stage || j.Stage || '').toUpperCase();
       const station = (j.station || '').toUpperCase();
-      return stage === 'SHIPPING' || station.includes('SH CONVEY') || j.status === 'SHIPPED';
+      // Only include jobs in shipping stage that haven't been shipped yet
+      return (stage === 'SHIPPING' || station.includes('SH CONVEY')) && j.status !== 'SHIPPED';
     });
   }, [dviJobs]);
 
@@ -4461,16 +4524,14 @@ function ShippingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   }, [shippingJobs, search]);
 
   const rushJobs = shippingJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
-  const shippedJobs = shippingJobs.filter(j => j.status === 'SHIPPED');
-  const inProcessJobs = shippingJobs.filter(j => j.status !== 'SHIPPED');
 
   const contextData = {
     jobs: shippingJobs,
-    readyCount: inProcessJobs.length,
-    inProcessCount: inProcessJobs.length,
+    readyCount: shippingJobs.length,
+    inProcessCount: shippingJobs.length,
     rushCount: rushJobs.length,
     overdueCount: 0,
-    shippedToday: shippedJobs.length,
+    shippedToday: shippedStats.today || 0,
   };
 
   return (
@@ -4484,11 +4545,15 @@ function ShippingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
         <div style={{ display: "flex", gap: 16 }}>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IN QUEUE</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inProcessJobs.length}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{shippingJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SHIPPED</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{shippedJobs.length}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SHIPPED TODAY</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{shippedStats.today || 0}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>YESTERDAY</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: T.textMuted, fontFamily: mono }}>{shippedStats.yesterday || 0}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
@@ -6581,6 +6646,11 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
   const [loadingConnections,setLoadingConnections]=useState(false);
   const [expandedService,setExpandedService]=useState(null);
   const [showApiKeys,setShowApiKeys]=useState({});
+  // Slack cleanup state
+  const [cleaningSlack,setCleaningSlack]=useState(false);
+  const [slackCleanResult,setSlackCleanResult]=useState(null);
+  const [deleteAllSlackMsgs,setDeleteAllSlackMsgs]=useState(false);
+
   // MCP Tools state
   const [mcpTools,setMcpTools]=useState([]);
   const [mcpAgents,setMcpAgents]=useState([]);
@@ -6636,6 +6706,30 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       setGatewayStatus({ ok: false, message: e.message || 'Connection failed' });
     }
     setTestingGateway(false);
+  };
+
+  // Clean up Slack messages (bot-only or all)
+  const cleanupSlackMessages = async () => {
+    setCleaningSlack(true);
+    setSlackCleanResult(null);
+    try {
+      const gwUrl = settings.gatewayUrl || 'http://localhost:3001';
+      const url = deleteAllSlackMsgs ? `${gwUrl}/api/slack/messages?all=true` : `${gwUrl}/api/slack/messages`;
+      const resp = await fetch(url, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(60000) // 60s timeout for batch delete
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        const modeLabel = data.mode === 'all' ? 'messages' : 'bot messages';
+        setSlackCleanResult({ ok: true, message: `Deleted ${data.deleted} of ${data.found} ${modeLabel}` });
+      } else {
+        setSlackCleanResult({ ok: false, message: data.error || 'Failed to delete messages' });
+      }
+    } catch (e) {
+      setSlackCleanResult({ ok: false, message: e.message || 'Request failed' });
+    }
+    setCleaningSlack(false);
   };
 
   // Load gateway dashboard data
@@ -7050,6 +7144,37 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
                             <div style={{fontSize:10,color:T.textDim,marginTop:4}}>
                               💡 Changes are saved automatically. Gateway uses env vars from <code style={{background:T.surface,padding:"2px 4px",borderRadius:3}}>gateway/.env</code> — update there for production.
                             </div>
+                            {/* Slack-specific cleanup action */}
+                            {key === 'slack' && conn.status === 'connected' && (
+                              <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${T.border}`}}>
+                                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+                                  <div>
+                                    <div style={{fontSize:11,fontWeight:600,color:T.text}}>🧹 Clean Up Messages</div>
+                                    <div style={{fontSize:10,color:T.textMuted}}>
+                                      {deleteAllSlackMsgs ? "Delete ALL messages (requires user token)" : "Delete bot messages only"}
+                                    </div>
+                                  </div>
+                                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                                    <label style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:T.textMuted,cursor:"pointer"}}>
+                                      <input type="checkbox" checked={deleteAllSlackMsgs} onChange={e=>setDeleteAllSlackMsgs(e.target.checked)}
+                                        style={{width:14,height:14,cursor:"pointer"}} />
+                                      Include user msgs
+                                    </label>
+                                    <button onClick={cleanupSlackMessages} disabled={cleaningSlack}
+                                      style={{background:T.red,border:"none",borderRadius:6,padding:"8px 16px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",opacity:cleaningSlack?0.6:1,whiteSpace:"nowrap"}}>
+                                      {cleaningSlack ? "Deleting..." : "Delete"}
+                                    </button>
+                                  </div>
+                                </div>
+                                {slackCleanResult && (
+                                  <div style={{marginTop:8,padding:"8px 10px",borderRadius:6,fontSize:11,
+                                    background:slackCleanResult.ok?`${T.green}15`:`${T.red}15`,
+                                    color:slackCleanResult.ok?T.green:T.red,fontFamily:mono}}>
+                                    {slackCleanResult.ok ? "✓" : "✗"} {slackCleanResult.message}
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -9218,7 +9343,7 @@ function CorporateViewer({trays,batches,events,settings}){
 }
 
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
-export default function LabAssistantV2(){
+function LabAssistantV2(){
   const appMode=getMode(); // "desktop" | "tablet" | "corporate"
   const [view,setView]=useState("overview");
   const [trays,setTrays]=useState(()=>initTrays(120));
@@ -9491,7 +9616,7 @@ export default function LabAssistantV2(){
         {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="cutting"&&<CuttingTab trays={trays} dviJobs={mergedJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="assembly"&&<AssemblyTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="shipping"&&<ShippingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="shipping"&&<ShippingTab trays={trays} dviJobs={mergedJobs} shippedStats={shippedStats} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="inventory"&&<InventoryTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
@@ -9534,5 +9659,14 @@ export default function LabAssistantV2(){
         ${isTablet?`button{min-height:44px;} input,select{min-height:44px;font-size:16px!important;}`:""}
       `}</style>
     </div>
+  );
+}
+
+// Wrap the entire app in ErrorBoundary at export level
+export default function App() {
+  return (
+    <ErrorBoundary>
+      <LabAssistantV2 />
+    </ErrorBoundary>
   );
 }
