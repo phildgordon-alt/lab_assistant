@@ -1584,10 +1584,24 @@ app.post('/api/dvi/upload', express.text({ limit: '50mb', type: '*/*' }), (req: 
         return res.status(400).json({ error: 'File must have header row and at least one data row' });
       }
 
-      // Check if this is a Looker pivot table (row 2 contains "Jobs Count")
-      const isLookerPivot = lines.length > 1 && lines[1].includes('Jobs Count');
+      // Check if this is DVI Status Detail pivot format (has "DVI Status Detail" in header)
+      const isDviStatusDetail = lines[0].includes('DVI Status Detail');
 
-      if (isLookerPivot) {
+      // Check if this is a Looker pivot table (row 2 contains "Jobs Count" but not DVI Status Detail)
+      const isLookerPivot = !isDviStatusDetail && lines.length > 1 && lines[1].includes('Jobs Count');
+
+      if (isDviStatusDetail) {
+        // DVI Status Detail format - job-level pivot with station columns
+        const parsed = parseDviStatusDetailCSV(rawData);
+        if (parsed) {
+          // Use WIP jobs (active, not shipped/canceled)
+          jobs = parsed.wip;
+          header = parsed.columns;
+          log.info(`[DVI] Status Detail: ${parsed.jobs.length} total jobs, ${parsed.wip.length} WIP jobs`);
+        } else {
+          return res.status(400).json({ error: 'Failed to parse DVI Status Detail CSV' });
+        }
+      } else if (isLookerPivot) {
         log.info(`[DVI] Detected Looker pivot table format`);
         const parsed = parseLookerPivotCSV(rawData);
         jobs = parsed.jobs;
@@ -1836,8 +1850,113 @@ const STATION_TO_STAGE: Record<string, string> = {
   'NEW WORKTICKET': 'INCOMING', 'INITIATE': 'INCOMING',
   'FRAME LOGGED': 'INCOMING',
   'SH CONVEY CTRL 1': 'SHIPPING', 'SH CONVEY CTRL 2': 'SHIPPING', 'SH CONVEY KCKOUT': 'SHIPPING',
+  'SHIPPED': 'SHIPPING',
   'SENT TO HKO': 'OUTSOURCED',
+  // Hold/Office stations
+  'CBOB - INHSE FIN': 'HOLD', 'CBOB - INHSE SF': 'HOLD', 'CBOB - NE LENS': 'HOLD',
+  'CBOB - NE FRMS': 'HOLD', 'CBOB - FRMHOLD': 'HOLD', 'CBOB - AT KARDEX': 'HOLD',
+  'CBOB - DIG CALC': 'HOLD', 'CBOB - INFLUENCE': 'HOLD', 'CBOB - INTL ACCT': 'HOLD',
+  'CBOB - MAN2KARDX': 'HOLD', 'CBOB - SUBHKO': 'HOLD', 'CBOB - UNCATEGOR': 'HOLD',
+  'EDIT-DESK': 'OFFICE', 'RECOMBOBULATE': 'OFFICE',
+  'LOG LENSES SF': 'SURFACING', 'MODULO CTRL CNTR': 'SURFACING', 'LASER REJECT': 'QC_FAIL',
+  'CCP #3': 'COATING',
 };
+
+// Parse DVI Status Detail CSV - pivot table with job-level data
+// Format: Date, DVI ID, then station columns with 1's indicating job was at that station
+function parseDviStatusDetailCSV(rawData: string): { jobs: Record<string, any>[], columns: string[], wip: Record<string, any>[] } | null {
+  const lines = rawData.split('\n').filter(l => l.trim());
+  if (lines.length < 3) return null;
+
+  // Check if this is DVI Status Detail format
+  // Header row has: [blank or date label], DVI Status Detail, station names...
+  const header = parseCSVLine(lines[0]);
+  if (!header.some(h => h.includes('DVI Status Detail'))) {
+    return null; // Not this format
+  }
+
+  log.info(`[DVI] Detected DVI Status Detail pivot format`);
+
+  // Find station columns (skip first two columns: date and DVI ID)
+  const stations = header.slice(2).map(s => s.trim());
+  log.info(`[DVI] Stations in CSV: ${stations.slice(0, 10).join(', ')}${stations.length > 10 ? '...' : ''}`);
+
+  // Track each job's transitions: dvi_id -> {date, station, stage}[]
+  const jobHistory: Map<string, { date: string; station: string; stage: string }[]> = new Map();
+
+  // Parse data rows (skip header and "Count Jobs" row)
+  for (let i = 2; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    if (values.length < 3) continue;
+
+    const date = values[0].replace(/^'/, ''); // Remove leading quote if present
+    const dviId = values[1];
+
+    if (!dviId || !date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
+
+    // Find which station(s) have a 1 for this row
+    for (let j = 2; j < values.length && j - 2 < stations.length; j++) {
+      const val = values[j].trim();
+      if (val === '1' || val === '1.0') {
+        const station = stations[j - 2];
+        const stage = STATION_TO_STAGE[station] || 'OTHER';
+
+        if (!jobHistory.has(dviId)) {
+          jobHistory.set(dviId, []);
+        }
+        jobHistory.get(dviId)!.push({ date, station, stage });
+      }
+    }
+  }
+
+  log.info(`[DVI] Parsed ${jobHistory.size} unique jobs from status detail CSV`);
+
+  // Determine current state for each job (most recent entry)
+  const jobs: Record<string, any>[] = [];
+  const wip: Record<string, any>[] = [];
+
+  for (const [dviId, history] of jobHistory) {
+    // Sort by date descending to get most recent
+    history.sort((a, b) => b.date.localeCompare(a.date));
+    const latest = history[0];
+
+    const job: Record<string, any> = {
+      job_id: dviId,
+      invoice: dviId,
+      rx_number: dviId,
+      tray: dviId,
+      stage: latest.stage === 'SHIPPING' ? 'SHIPPED' : latest.stage,
+      station: latest.station,
+      status: latest.stage === 'SHIPPING' ? 'SHIPPED' : 'In Progress',
+      last_update: latest.date,
+      history_count: history.length,
+    };
+
+    jobs.push(job);
+
+    // WIP = not shipped and not canceled
+    if (latest.stage !== 'SHIPPING' && latest.station !== 'CANCELED') {
+      wip.push(job);
+    }
+  }
+
+  // Sort WIP by date (oldest first for aging)
+  wip.sort((a, b) => a.last_update.localeCompare(b.last_update));
+
+  // Stage breakdown
+  const byStage: Record<string, number> = {};
+  wip.forEach(j => {
+    byStage[j.stage] = (byStage[j.stage] || 0) + 1;
+  });
+
+  log.info(`[DVI] Status Detail WIP: ${wip.length} jobs, stages: ${JSON.stringify(byStage)}`);
+
+  return {
+    jobs,
+    columns: ['job_id', 'invoice', 'rx_number', 'stage', 'station', 'status', 'last_update'],
+    wip,
+  };
+}
 
 function parseLookerPivotCSV(rawData: string): { jobs: Record<string, any>[], columns: string[], summary: Record<string, any> } {
   const lines = rawData.split('\n').filter(l => l.trim());
