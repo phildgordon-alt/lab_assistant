@@ -7823,16 +7823,17 @@ function InventoryTab({ovenServerUrl,settings}){
                     <div style={{fontFamily:mono,fontSize:11,fontWeight:700,color:color,marginBottom:4}}>{wh}</div>
                     <div style={{display:"flex",gap:2,alignItems:"flex-end",height:50,paddingTop:16}}>
                       {Array.from({length:24},(_, h)=>{
-                        const val=hourData[h]||hourData[String(h)]||0;
+                        const isFuture=h>currentHour;
+                        const val=isFuture?0:(hourData[h]||hourData[String(h)]||0);
                         const barHeight=val>0?Math.max(6,Math.round((val/maxVal)*34)):2;
                         const isNow=h===currentHour;
                         return(
-                          <div key={h} style={{flex:1,position:"relative"}}>
+                          <div key={h} style={{flex:1,position:"relative",opacity:isFuture?0.3:1}}>
                             {val>0&&<div style={{position:"absolute",bottom:barHeight+2,left:"50%",transform:"translateX(-50%)",fontSize:9,fontWeight:700,color:color,fontFamily:mono,whiteSpace:"nowrap"}}>{val}</div>}
                             <div style={{
                               width:"100%",
-                              height:barHeight,
-                              background:val>0?color:`${color}30`,
+                              height:isFuture?2:barHeight,
+                              background:isFuture?`${color}15`:val>0?color:`${color}30`,
                               borderRadius:2,
                               border:isNow?`2px solid ${T.amber}`:'none'
                             }}/>

@@ -99,20 +99,22 @@ const DEFAULT_AGENT = 'LabAgent';
 
 // Map classifier agent names to MCP agent config names
 const AGENT_CONFIG_MAP: Record<string, string> = {
+  // Department agents
   SurfacingAgent: 'surface',
   CoatingAgent: 'coating',
   EdgingAgent: 'edge',
   AssemblyAgent: 'assembly',
   QCAgent: 'qc',
   OfficeAgent: 'office',
+  // Cross-department agents
   DirectorAgent: 'director',
   LabAgent: 'lab',
-  // Agents without scoped MCP configs use LabAgent tools
-  DevOpsAgent: 'lab',
-  CodingAgent: 'lab',
-  PickingAgent: 'lab',
-  MaintenanceAgent: 'lab',
-  ShiftReportAgent: 'lab',
+  // Specialized agents (now have their own MCP configs)
+  DevOpsAgent: 'devops',
+  CodingAgent: 'lab',  // Coding uses lab tools for now
+  PickingAgent: 'picking',
+  MaintenanceAgent: 'maintenance',
+  ShiftReportAgent: 'shiftreport',
 };
 
 /**

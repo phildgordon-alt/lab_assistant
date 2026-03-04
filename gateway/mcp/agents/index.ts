@@ -38,6 +38,10 @@ import {
   QC_AGENT_PROMPT,
   DIRECTOR_AGENT_PROMPT,
   LAB_AGENT_PROMPT,
+  DEVOPS_AGENT_PROMPT,
+  MAINTENANCE_AGENT_PROMPT,
+  SHIFT_REPORT_AGENT_PROMPT,
+  PICKING_AGENT_PROMPT,
 } from '../prompts.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -229,10 +233,81 @@ export const LAB_AGENT: AgentConfig = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Specialized Agents
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const DEVOPS_AGENT: AgentConfig = {
+  name: 'DevOpsAgent',
+  description: 'System administration: connections, health, configuration',
+  department: undefined,
+  systemPrompt: DEVOPS_AGENT_PROMPT,
+  tools: [
+    // DevOps needs API access and settings, not production data tools
+    get_settings,
+    call_api,
+    think_aloud,
+  ],
+  defaultFilters: {},
+};
+
+export const MAINTENANCE_AGENT: AgentConfig = {
+  name: 'MaintenanceAgent',
+  description: 'Equipment maintenance: work orders, uptime, parts',
+  department: undefined,
+  systemPrompt: MAINTENANCE_AGENT_PROMPT,
+  tools: [
+    get_maintenance_summary,
+    get_maintenance_tasks,
+    get_wip_snapshot,  // For production impact context
+    get_breakage_summary,  // Breakage often relates to equipment issues
+    get_settings,
+    think_aloud,
+  ],
+  defaultFilters: {},
+};
+
+export const SHIFT_REPORT_AGENT: AgentConfig = {
+  name: 'ShiftReportAgent',
+  description: 'Shift summaries: cross-department reports, KPIs',
+  department: undefined,
+  systemPrompt: SHIFT_REPORT_AGENT_PROMPT,
+  tools: [
+    // Summary and report tools only - no raw data
+    get_wip_snapshot,
+    get_aging_report,
+    get_throughput_trend,
+    get_breakage_summary,
+    get_coating_wait_summary,
+    get_inventory_summary,
+    get_maintenance_summary,
+    get_settings,
+    think_aloud,
+  ],
+  defaultFilters: {},
+};
+
+export const PICKING_AGENT: AgentConfig = {
+  name: 'PickingAgent',
+  description: 'Picking/inventory: Kardex, put wall, lens blanks',
+  department: undefined,
+  systemPrompt: PICKING_AGENT_PROMPT,
+  tools: [
+    get_wip_snapshot,
+    get_inventory_summary,
+    get_inventory_detail,
+    get_lens_catalog,
+    get_settings,
+    think_aloud,
+  ],
+  defaultFilters: {},
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Agent Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const AGENT_REGISTRY: Record<string, AgentConfig> = {
+  // Department agents
   surface: SURFACE_AGENT,
   surfacing: SURFACE_AGENT,
   coating: COATING_AGENT,
@@ -241,8 +316,15 @@ export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   edging: EDGE_AGENT,
   assembly: ASSEMBLY_AGENT,
   qc: QC_AGENT,
+  // Cross-department agents
   director: DIRECTOR_AGENT,
   lab: LAB_AGENT,
+  // Specialized agents
+  devops: DEVOPS_AGENT,
+  maintenance: MAINTENANCE_AGENT,
+  shiftreport: SHIFT_REPORT_AGENT,
+  shift: SHIFT_REPORT_AGENT,
+  picking: PICKING_AGENT,
   // Default fallback
   default: LAB_AGENT,
 };
