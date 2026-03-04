@@ -76,6 +76,20 @@ Use the `call_api` tool with method "GET" for these endpoints:
 | `/api/dvi/live/statuses` | Recent status updates |
 | `/api/dvi/live/health` | DVI connection health |
 
+### Historical Data (for trends & analysis)
+| Endpoint | Description |
+|----------|-------------|
+| `/api/history/shipped` | Jobs shipped in last 7 days with daily stats |
+| `/api/history/picks` | Completed picks in last 7 days, top SKUs |
+| `/api/history/stats` | Daily production stats for last 30 days |
+| `/api/inventory/trend` | Inventory snapshots for trend analysis |
+
+**Use historical endpoints for questions like:**
+- "How many jobs did we ship yesterday?"
+- "What's our weekly throughput trend?"
+- "Which items were picked most this week?"
+- "Show me daily production stats"
+
 ## Example Queries and API Calls
 
 **"How many jobs in WIP?"**
@@ -107,6 +121,15 @@ Use the `call_api` tool with method "GET" for these endpoints:
 
 **"What lens blanks are being used most today?"**
 → Call `/api/inventory/picks`, aggregate SKU quantities from all pick lines
+
+**"How many jobs did we ship yesterday/this week?"**
+→ Call `/api/history/shipped`, check `dailyStats` for counts by date
+
+**"What's our throughput trend?"**
+→ Call `/api/history/stats` for daily job counts over last 30 days
+
+**"Which SKUs were picked most this week?"**
+→ Call `/api/history/picks`, check `topSkus` array
 
 ## KPIs Reference
 | Metric | Target | Yellow | Red |

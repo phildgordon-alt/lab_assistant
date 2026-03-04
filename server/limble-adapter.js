@@ -680,6 +680,17 @@ async function poll() {
     await sendSlackAlerts(tasks, assets);
     console.log(`[Limble] ✓ Sync: ${assets.length} assets, ${tasks.length} tasks, ${downtime.length} downtime records`);
 
+    // Write to SQLite for AI agent queries
+    try {
+      const db = require('./db');
+      db.upsertAssets(assets);
+      db.upsertTasks(tasks);
+      db.upsertParts(parts);
+      console.log(`[Limble] ✓ SQLite snapshot saved`);
+    } catch (dbErr) {
+      console.error('[Limble] SQLite write failed:', dbErr.message);
+    }
+
   } catch (err) {
     cache.syncStatus = 'error';
     cache.syncError  = err.message;

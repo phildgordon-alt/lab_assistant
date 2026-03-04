@@ -486,6 +486,17 @@ async function poll() {
     updatePreviousQty(materials);  // Track for next poll's drop detection
     console.log(`[ItemPath] ✓ Sync: ${materials.length} SKUs, ${activePicks.length} active orders, ${alerts.length} alerts`);
 
+    // Write to SQLite for AI agent queries
+    try {
+      const db = require('./db');
+      db.upsertInventory(materials);
+      db.upsertAlerts(alerts);
+      db.upsertPicks(activePicks);
+      console.log(`[ItemPath] ✓ SQLite snapshot saved`);
+    } catch (dbErr) {
+      console.error('[ItemPath] SQLite write failed:', dbErr.message);
+    }
+
   } catch (err) {
     cache.syncStatus = 'error';
     cache.syncError  = err.message;

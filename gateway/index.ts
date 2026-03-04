@@ -6,9 +6,10 @@
 import 'dotenv/config';
 import express, { Request, Response } from 'express';
 import cors from 'cors';
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import Database from 'better-sqlite3';
 import { initCircuitBreaker, getState as getCircuitState, forceHealthCheck } from './circuit-breaker.js';
 import { requestTimingMiddleware, log } from './logger.js';
 import { getRecentRequests, getRequestStats, healthCheck as dbHealthCheck } from './db/client.js';
@@ -1048,11 +1049,13 @@ function saveDviData(): void {
     // Ensure data directory exists
     const dataDir = dirname(DVI_DATA_FILE);
     if (!existsSync(dataDir)) {
-      const { mkdirSync } = require('fs');
       mkdirSync(dataDir, { recursive: true });
     }
     writeFileSync(DVI_DATA_FILE, JSON.stringify(dviDataStore, null, 2));
     log.info(`[DVI] Saved ${dviDataStore.current?.rowCount || 0} jobs to disk`);
+
+    // Sync to SQLite with soft-update (preserves history)
+    syncDviToSqlite();
   } catch (e) {
     log.error('[DVI] Failed to save data to disk:', e);
   }
@@ -1065,11 +1068,108 @@ function loadDviData(): void {
       const parsed = JSON.parse(data);
       dviDataStore = parsed;
       log.info(`[DVI] Loaded ${dviDataStore.current?.rowCount || 0} jobs from disk (uploaded: ${dviDataStore.current?.uploadedAt || 'never'})`);
+
+      // Sync to SQLite on load for AI agents
+      syncDviToSqlite();
     } else {
       log.info('[DVI] No persisted data file found, starting fresh');
     }
   } catch (e) {
     log.error('[DVI] Failed to load data from disk:', e);
+  }
+}
+
+function syncDviToSqlite(): void {
+  try {
+    const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+    if (!existsSync(dbPath)) {
+      log.warn('[DVI] SQLite database not found, skipping sync');
+      return;
+    }
+
+    const db = new Database(dbPath);
+    const jobs = dviDataStore.current?.jobs || [];
+    const dataDate = dviDataStore.current?.dataDate || '';
+
+    // Build set of current job IDs
+    const currentIds = new Set<string>();
+    for (const j of jobs) {
+      const id = j.job_id || j.invoice || `${dataDate}-${j.station}-${Math.random()}`;
+      currentIds.add(id);
+    }
+
+    // Get existing active jobs to detect shipped/completed
+    const existingJobs = db.prepare(`
+      SELECT id, invoice, tray, stage, coating, rush, entry_date, days_in_lab FROM dvi_jobs WHERE archived = 0
+    `).all() as { id: string; invoice: string; tray: string; stage: string; coating: string; rush: string; entry_date: string; days_in_lab: number }[];
+
+    // Archive jobs that are no longer in the current set (they were shipped/completed)
+    const archiveStmt = db.prepare(`UPDATE dvi_jobs SET archived = 1, shipped_at = datetime('now') WHERE id = ?`);
+    const historyStmt = db.prepare(`
+      INSERT INTO dvi_jobs_history (job_id, invoice, tray, stage, coating, rush, entry_date, days_in_lab, shipped_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `);
+
+    let shippedCount = 0;
+    const archiveCompleted = db.transaction(() => {
+      for (const existing of existingJobs) {
+        if (!currentIds.has(existing.id)) {
+          archiveStmt.run(existing.id);
+          historyStmt.run(
+            existing.id,
+            existing.invoice,
+            existing.tray,
+            existing.stage,
+            existing.coating,
+            existing.rush,
+            existing.entry_date,
+            existing.days_in_lab
+          );
+          shippedCount++;
+        }
+      }
+    });
+    archiveCompleted();
+
+    // Upsert current jobs (soft-update)
+    const upsertStmt = db.prepare(`
+      INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, archived, last_sync)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+      ON CONFLICT(id) DO UPDATE SET
+        stage = excluded.stage,
+        station = excluded.station,
+        status = excluded.status,
+        days_in_lab = excluded.days_in_lab,
+        data_date = excluded.data_date,
+        archived = 0,
+        shipped_at = NULL,
+        last_sync = datetime('now')
+    `);
+
+    const upsertMany = db.transaction((items: any[]) => {
+      for (const j of items) {
+        upsertStmt.run(
+          j.job_id || j.invoice || `${dataDate}-${j.station}-${Math.random()}`,
+          j.invoice,
+          j.tray,
+          j.stage || j.Stage,
+          j.station,
+          j.status,
+          j.rush || j.Rush,
+          j.entryDate || j.entry_date || j.date,
+          j.daysInLab || j.days_in_lab,
+          j.coating || j.coatR,
+          j.frameName || j.frame_name,
+          dataDate
+        );
+      }
+    });
+
+    upsertMany(jobs);
+    db.close();
+    log.info(`[DVI] SQLite sync complete: ${jobs.length} active, ${shippedCount} shipped to history`);
+  } catch (dbErr: any) {
+    log.error('[DVI] SQLite sync failed:', dbErr.message);
   }
 }
 

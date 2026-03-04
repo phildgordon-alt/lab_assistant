@@ -1,22 +1,36 @@
 /**
  * MCP Server
  * Wraps Lab Assistant REST API as MCP tools for agents
+ *
+ * Uses SQLite for fast AI queries - data synced from ItemPath, Limble, DVI
  */
 
 import { log } from '../logger.js';
-import { readFileSync, existsSync } from 'fs';
+import { existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import Database from 'better-sqlite3';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Use lab server (3002) for inventory/maintenance to avoid gateway calling itself
-// DVI data is loaded directly from the persisted JSON file
+// SQLite database for AI queries (populated by adapters)
+const DB_FILE = join(__dirname, '..', '..', 'data', 'lab_assistant.db');
+let db: Database.Database | null = null;
+
+function getDb(): Database.Database {
+  if (!db) {
+    if (!existsSync(DB_FILE)) {
+      log.warn('[MCP] SQLite database not found, queries will return empty results');
+      throw new Error('Database not initialized. Lab server must run first to create it.');
+    }
+    db = new Database(DB_FILE, { readonly: true });
+  }
+  return db;
+}
+
+// Fallback to lab server for endpoints not in SQLite
 const LAB_SERVER_URL = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:3002';
 const LAB_ASSISTANT_KEY = process.env.LAB_ASSISTANT_API_KEY;
-
-// Path to persisted DVI data (same as gateway uses)
-const DVI_DATA_FILE = join(__dirname, '..', '..', 'data', 'dvi-jobs.json');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool Definitions (for Claude API tools parameter)
@@ -149,133 +163,345 @@ async function handleQueryDatabase(query: string): Promise<unknown> {
     }
   }
 
-  // Forward to Lab Assistant API (which would have a /api/query endpoint)
-  // For now, return a stub
-  log.warn('query_database: Not yet connected to real database');
-  return {
-    success: false,
-    error: 'Database query endpoint not yet implemented',
-    query,
-  };
-}
-
-// Load DVI data directly from file (avoids gateway calling itself)
-function loadDviData(): { current: any | null; archive: any[] } {
+  // Execute query against SQLite
   try {
-    if (existsSync(DVI_DATA_FILE)) {
-      const data = readFileSync(DVI_DATA_FILE, 'utf-8');
-      return JSON.parse(data);
-    }
-  } catch (e) {
-    log.error('Failed to load DVI data from disk:', e);
+    const database = getDb();
+    const rows = database.prepare(query).all();
+    return {
+      success: true,
+      rowCount: rows.length,
+      rows,
+    };
+  } catch (e: any) {
+    log.error('query_database failed:', e.message);
+    return {
+      success: false,
+      error: e.message,
+      query,
+    };
   }
-  return { current: null, archive: [] };
 }
 
-// Handle DVI/WIP endpoints locally (without HTTP call to gateway)
-function handleDviEndpoint(endpoint: string): unknown {
-  const dviData = loadDviData();
-  const current = dviData.current;
+// Handle data endpoints using SQLite (fast, no HTTP calls)
+function handleDataEndpoint(endpoint: string): unknown {
+  try {
+    const database = getDb();
 
-  if (endpoint === '/api/wip/summary') {
-    if (!current) {
-      return { totalWIP: 0, byStage: {}, rushJobs: 0, oldestJobs: [], message: 'No DVI data uploaded' };
+    if (endpoint === '/api/wip/summary') {
+      const total = database.prepare(`
+        SELECT COUNT(*) as count FROM dvi_jobs
+        WHERE stage NOT IN ('CANCELED', 'SHIPPED') AND (status IS NULL OR status != 'CANCELED')
+      `).get() as { count: number };
+
+      const byStageRows = database.prepare(`
+        SELECT stage, COUNT(*) as count FROM dvi_jobs
+        WHERE stage NOT IN ('CANCELED', 'SHIPPED') AND (status IS NULL OR status != 'CANCELED')
+        GROUP BY stage ORDER BY count DESC
+      `).all() as { stage: string; count: number }[];
+
+      const rushCount = database.prepare(`
+        SELECT COUNT(*) as count FROM dvi_jobs
+        WHERE rush = 'Y' AND stage NOT IN ('CANCELED', 'SHIPPED')
+      `).get() as { count: number };
+
+      const oldest = database.prepare(`
+        SELECT * FROM dvi_jobs
+        WHERE stage NOT IN ('CANCELED', 'SHIPPED') AND (status IS NULL OR status != 'CANCELED')
+        ORDER BY days_in_lab DESC, entry_date ASC
+        LIMIT 20
+      `).all();
+
+      const byStage: Record<string, number> = {};
+      byStageRows.forEach(r => { byStage[r.stage] = r.count; });
+
+      return {
+        totalWIP: total.count,
+        byStage,
+        rushJobs: rushCount.count,
+        oldestJobs: oldest,
+        stageSummary: byStageRows.slice(0, 10).map(r => `${r.stage}: ${r.count}`).join(', '),
+        source: 'sqlite'
+      };
     }
-    const jobs = current.jobs || [];
-    const byStage: Record<string, number> = {};
-    let rushCount = 0;
 
-    jobs.forEach((job: any) => {
-      const stage = (job.stage || job.Stage || job.station || 'UNKNOWN').toUpperCase();
-      if (stage === 'CANCELED' || stage === 'SHIPPED' || job.status === 'CANCELED' || job.status === 'SHIPPED') return;
-      byStage[stage] = (byStage[stage] || 0) + 1;
-      if (job.rush === 'Y' || job.Rush === 'Y') rushCount++;
-    });
+    if (endpoint === '/api/production/status') {
+      const stages = ['SURFACING', 'CUTTING', 'COATING', 'ASSEMBLY', 'SHIPPING'];
+      const status: Record<string, { count: number; rush: number }> = {};
 
-    const activeJobs = jobs.filter((j: any) => {
-      const stage = (j.stage || j.Stage || j.station || '').toUpperCase();
-      return stage !== 'CANCELED' && stage !== 'SHIPPED' && j.status !== 'CANCELED' && j.status !== 'SHIPPED';
-    });
-
-    const sortedByAge = [...activeJobs].sort((a: any, b: any) => {
-      const daysA = parseInt(a.daysInLab) || 0;
-      const daysB = parseInt(b.daysInLab) || 0;
-      return daysB - daysA;
-    });
-
-    return {
-      totalWIP: activeJobs.length,
-      byStage,
-      rushJobs: rushCount,
-      dataDate: current.dataDate,
-      uploadedAt: current.uploadedAt,
-      oldestJobs: sortedByAge.slice(0, 20).map((j: any) => ({
-        job_id: j.job_id || j.invoice || j.tray || 'unknown',
-        invoice: j.invoice,
-        tray: j.tray,
-        stage: j.stage || j.Stage || j.station,
-        station: j.station,
-        date: j.date || j.entryDate || j.entry_date,
-        daysInLab: j.daysInLab || j.days_in_lab,
-        status: j.status,
-        rush: j.rush || j.Rush,
-      })),
-      stageSummary: Object.entries(byStage)
-        .sort(([,a], [,b]) => (b as number) - (a as number))
-        .slice(0, 10)
-        .map(([stage, count]) => `${stage}: ${count}`)
-        .join(', ')
-    };
-  }
-
-  if (endpoint === '/api/production/status') {
-    if (!current) {
-      return { status: 'no_data', message: 'No DVI data uploaded' };
-    }
-    const jobs = current.jobs || [];
-    const stages = ['SURFACING', 'CUTTING', 'COATING', 'ASSEMBLY', 'SHIPPING'];
-    const status: Record<string, { count: number; rush: number }> = {};
-    stages.forEach(s => status[s] = { count: 0, rush: 0 });
-
-    jobs.forEach((job: any) => {
-      const stage = (job.stage || job.Stage || job.station || '').toUpperCase();
-      if (stage === 'CANCELED' || job.status === 'CANCELED') return;
       for (const s of stages) {
-        if (stage.includes(s) || (job.station || '').toUpperCase().includes(s)) {
-          status[s].count++;
-          if (job.rush === 'Y' || job.Rush === 'Y') status[s].rush++;
-          break;
-        }
+        const count = database.prepare(`
+          SELECT COUNT(*) as c FROM dvi_jobs
+          WHERE UPPER(stage) LIKE ? AND stage != 'CANCELED'
+        `).get(`%${s}%`) as { c: number };
+
+        const rush = database.prepare(`
+          SELECT COUNT(*) as c FROM dvi_jobs
+          WHERE UPPER(stage) LIKE ? AND rush = 'Y' AND stage != 'CANCELED'
+        `).get(`%${s}%`) as { c: number };
+
+        status[s] = { count: count.c, rush: rush.c };
       }
-    });
 
-    return {
-      status: 'ok',
-      dataDate: current.dataDate,
-      totalActive: jobs.filter((j: any) => j.status !== 'CANCELED' && j.status !== 'SHIPPED').length,
-      stages: status
-    };
-  }
+      const totalActive = database.prepare(`
+        SELECT COUNT(*) as c FROM dvi_jobs
+        WHERE stage NOT IN ('CANCELED', 'SHIPPED')
+      `).get() as { c: number };
 
-  if (endpoint === '/api/dvi/stats') {
-    if (!current) {
-      return { mock: false, stats: { totalJobs: 0, byStatus: {}, byStage: {}, noData: true } };
+      return {
+        status: 'ok',
+        totalActive: totalActive.c,
+        stages: status,
+        source: 'sqlite'
+      };
     }
-    const jobs = current.jobs || [];
-    const stats = {
-      totalJobs: jobs.length,
-      byStatus: {} as Record<string, number>,
-      byStage: {} as Record<string, number>,
-      rushJobs: 0,
-    };
-    jobs.forEach((job: any) => {
-      const status = job.status || job.Status || 'unknown';
-      const stage = job.stage || job.Stage || job.station || 'unknown';
-      stats.byStatus[status] = (stats.byStatus[status] || 0) + 1;
-      stats.byStage[stage] = (stats.byStage[stage] || 0) + 1;
-      if (job.rush === 'Y' || job.Rush === 'Y') stats.rushJobs++;
-    });
-    return { mock: false, stats, uploadedAt: current.uploadedAt, dataDate: current.dataDate };
+
+    if (endpoint === '/api/dvi/stats') {
+      const total = database.prepare('SELECT COUNT(*) as c FROM dvi_jobs').get() as { c: number };
+      const byStatus = database.prepare(`
+        SELECT status, COUNT(*) as count FROM dvi_jobs GROUP BY status
+      `).all() as { status: string; count: number }[];
+      const byStage = database.prepare(`
+        SELECT stage, COUNT(*) as count FROM dvi_jobs GROUP BY stage
+      `).all() as { stage: string; count: number }[];
+      const rush = database.prepare(`SELECT COUNT(*) as c FROM dvi_jobs WHERE rush = 'Y'`).get() as { c: number };
+
+      return {
+        stats: {
+          totalJobs: total.c,
+          byStatus: Object.fromEntries(byStatus.map(r => [r.status, r.count])),
+          byStage: Object.fromEntries(byStage.map(r => [r.stage, r.count])),
+          rushJobs: rush.c,
+        },
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/inventory' || endpoint === '/api/inventory/summary') {
+      const total = database.prepare('SELECT COUNT(*) as count, SUM(qty) as qty FROM inventory').get() as { count: number; qty: number };
+      const lowStock = database.prepare('SELECT COUNT(*) as c FROM inventory WHERE qty <= 5').get() as { c: number };
+      const outOfStock = database.prepare('SELECT COUNT(*) as c FROM inventory WHERE qty = 0').get() as { c: number };
+      const alerts = database.prepare('SELECT * FROM inventory_alerts ORDER BY severity, qty LIMIT 15').all();
+
+      // Get top items by coating type for context
+      const byCoating = database.prepare(`
+        SELECT coating_type, COUNT(*) as sku_count, SUM(qty) as total_qty
+        FROM inventory
+        WHERE coating_type IS NOT NULL AND coating_type != ''
+        GROUP BY coating_type
+        ORDER BY total_qty DESC
+        LIMIT 10
+      `).all();
+
+      // Get critical low stock items
+      const criticalItems = database.prepare(`
+        SELECT sku, name, qty, coating_type, location
+        FROM inventory
+        WHERE qty <= 5 AND qty > 0
+        ORDER BY qty ASC
+        LIMIT 20
+      `).all();
+
+      return {
+        totalSkus: total.count,
+        totalUnits: total.qty || 0,
+        lowStock: lowStock.c,
+        outOfStock: outOfStock.c,
+        alerts,
+        byCoatingType: byCoating,
+        criticalItems,
+        note: 'Summary for AI context - use query_database for specific searches',
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/inventory/alerts') {
+      const alerts = database.prepare(`
+        SELECT * FROM inventory_alerts ORDER BY severity, qty LIMIT 50
+      `).all();
+
+      return {
+        alerts,
+        count: alerts.length,
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/inventory/picks') {
+      const picks = database.prepare(`
+        SELECT sku, name, SUM(qty) as total_qty, SUM(picked) as total_picked, SUM(pending) as total_pending
+        FROM picks
+        GROUP BY sku
+        ORDER BY total_qty DESC
+        LIMIT 50
+      `).all();
+
+      const stats = database.prepare(`
+        SELECT COUNT(DISTINCT order_id) as orders, COUNT(*) as lines, SUM(qty) as qty FROM picks
+      `).get() as { orders: number; lines: number; qty: number };
+
+      return {
+        picks,
+        totalOrders: stats.orders,
+        totalLines: stats.lines,
+        totalQty: stats.qty || 0,
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/maintenance/summary' || endpoint === '/api/maintenance/stats') {
+      const open = database.prepare(`
+        SELECT COUNT(*) as c FROM maintenance_tasks WHERE status NOT IN ('Complete', 'Closed', 'Completed')
+      `).get() as { c: number };
+
+      const critical = database.prepare(`
+        SELECT COUNT(*) as c FROM maintenance_tasks
+        WHERE priority IN ('Critical', 'High', 'Urgent') AND status NOT IN ('Complete', 'Closed', 'Completed')
+      `).get() as { c: number };
+
+      const overdue = database.prepare(`
+        SELECT COUNT(*) as c FROM maintenance_tasks
+        WHERE status NOT IN ('Complete', 'Closed', 'Completed') AND due_date < datetime('now')
+      `).get() as { c: number };
+
+      const lowParts = database.prepare(`SELECT COUNT(*) as c FROM spare_parts WHERE qty <= min_qty`).get() as { c: number };
+      const totalAssets = database.prepare(`SELECT COUNT(*) as c FROM maintenance_assets`).get() as { c: number };
+
+      const criticalTasks = database.prepare(`
+        SELECT id, title, asset_name, priority, status, due_date FROM maintenance_tasks
+        WHERE priority IN ('Critical', 'High', 'Urgent') AND status NOT IN ('Complete', 'Closed', 'Completed')
+        ORDER BY priority, due_date
+        LIMIT 15
+      `).all();
+
+      return {
+        openTaskCount: open.c,
+        criticalTaskCount: critical.c,
+        overdueTaskCount: overdue.c,
+        lowStockParts: lowParts.c,
+        totalAssets: totalAssets.c,
+        urgentTasks: criticalTasks,
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/maintenance/tasks') {
+      // Return only open tasks, limited for AI context
+      const tasks = database.prepare(`
+        SELECT id, title, asset_name, priority, status, type, assigned_to, due_date, created_at
+        FROM maintenance_tasks
+        WHERE status NOT IN ('Complete', 'Closed', 'Completed')
+        ORDER BY
+          CASE priority WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Urgent' THEN 3 ELSE 4 END,
+          due_date
+        LIMIT 50
+      `).all();
+
+      const total = database.prepare(`
+        SELECT COUNT(*) as c FROM maintenance_tasks WHERE status NOT IN ('Complete', 'Closed', 'Completed')
+      `).get() as { c: number };
+
+      return {
+        tasks,
+        totalOpen: total.c,
+        showing: tasks.length,
+        note: 'Limited to 50 highest priority open tasks for AI context',
+        source: 'sqlite'
+      };
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // HISTORICAL DATA ENDPOINTS
+    // ─────────────────────────────────────────────────────────────────────────
+
+    if (endpoint === '/api/history/shipped' || endpoint === '/api/dvi/shipped') {
+      const daily = database.prepare(`
+        SELECT date(shipped_at) as ship_date, COUNT(*) as count,
+               SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush_count,
+               AVG(days_in_lab) as avg_days
+        FROM dvi_jobs_history
+        WHERE shipped_at >= datetime('now', '-7 days')
+        GROUP BY date(shipped_at)
+        ORDER BY ship_date DESC
+      `).all();
+
+      const total = database.prepare(`
+        SELECT COUNT(*) as c FROM dvi_jobs_history WHERE shipped_at >= datetime('now', '-7 days')
+      `).get() as { c: number };
+
+      const recentJobs = database.prepare(`
+        SELECT job_id, invoice, stage, coating, rush, days_in_lab, shipped_at
+        FROM dvi_jobs_history
+        WHERE shipped_at >= datetime('now', '-24 hours')
+        ORDER BY shipped_at DESC
+        LIMIT 50
+      `).all();
+
+      return {
+        dailyStats: daily,
+        totalShipped7Days: total.c,
+        recentJobs,
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/history/picks' || endpoint === '/api/picks/history') {
+      const daily = database.prepare(`
+        SELECT date(completed_at) as pick_date, COUNT(*) as order_count,
+               SUM(qty) as total_qty, COUNT(DISTINCT sku) as unique_skus
+        FROM picks_history
+        WHERE completed_at >= datetime('now', '-7 days')
+        GROUP BY date(completed_at)
+        ORDER BY pick_date DESC
+      `).all();
+
+      const topSkus = database.prepare(`
+        SELECT sku, name, SUM(qty) as total_qty, COUNT(*) as pick_count
+        FROM picks_history
+        WHERE completed_at >= datetime('now', '-7 days')
+        GROUP BY sku
+        ORDER BY total_qty DESC
+        LIMIT 20
+      `).all();
+
+      return {
+        dailyStats: daily,
+        topSkus,
+        note: 'Last 7 days of completed picks',
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/history/stats' || endpoint === '/api/daily-stats') {
+      const stats = database.prepare(`
+        SELECT * FROM daily_stats
+        WHERE stat_date >= date('now', '-30 days')
+        ORDER BY stat_date DESC
+      `).all();
+
+      return {
+        stats,
+        days: 30,
+        source: 'sqlite'
+      };
+    }
+
+    if (endpoint === '/api/history/inventory' || endpoint === '/api/inventory/trend') {
+      const trend = database.prepare(`
+        SELECT * FROM inventory_snapshots
+        WHERE snapshot_date >= date('now', '-30 days')
+        ORDER BY snapshot_date DESC
+      `).all();
+
+      return {
+        snapshots: trend,
+        days: 30,
+        source: 'sqlite'
+      };
+    }
+
+  } catch (e: any) {
+    log.error(`SQLite query failed for ${endpoint}:`, e.message);
+    return { error: e.message, source: 'sqlite' };
   }
 
   return null;
@@ -286,12 +512,32 @@ async function handleCallApi(
   endpoint: string,
   body?: Record<string, unknown>
 ): Promise<unknown> {
-  // Handle DVI/WIP endpoints locally to avoid gateway calling itself
-  const dviEndpoints = ['/api/wip/summary', '/api/production/status', '/api/dvi/stats'];
-  if (method === 'GET' && dviEndpoints.includes(endpoint)) {
-    const result = handleDviEndpoint(endpoint);
+  // Handle data endpoints locally via SQLite to avoid gateway calling itself
+  const dataEndpoints = [
+    '/api/wip/summary',
+    '/api/production/status',
+    '/api/dvi/stats',
+    '/api/inventory',
+    '/api/inventory/summary',
+    '/api/inventory/picks',
+    '/api/inventory/alerts',
+    '/api/maintenance/summary',
+    '/api/maintenance/stats',
+    '/api/maintenance/tasks',
+    // Historical data endpoints
+    '/api/history/shipped',
+    '/api/dvi/shipped',
+    '/api/history/picks',
+    '/api/picks/history',
+    '/api/history/stats',
+    '/api/daily-stats',
+    '/api/history/inventory',
+    '/api/inventory/trend'
+  ];
+  if (method === 'GET' && dataEndpoints.includes(endpoint)) {
+    const result = handleDataEndpoint(endpoint);
     if (result) {
-      log.debug(`call_api ${endpoint} handled locally`);
+      log.debug(`call_api ${endpoint} handled via SQLite`);
       return result;
     }
   }
