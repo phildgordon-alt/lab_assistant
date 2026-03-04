@@ -1084,13 +1084,13 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
 
   // Compute KPI values from data
   const getKPIValue=(kpiId)=>{
-    const {trays=[],batches=[],dviJobs=[],breakage=[],maintenance={}}=data||{};
+    const {trays=[],batches=[],dviJobs=[],breakage=[],maintenance={},shippedStats={}}=data||{};
     const dviByStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||'').toLowerCase().includes(stage.toLowerCase())).length;
 
     switch(kpiId){
-      case 'incoming_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('INITIATE')||s.includes('NEW WORK');}).length,sub:"incoming"};
+      case 'incoming_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('INITIATE')||s.includes('NEW WORK')||s.includes('INCOMING');}).length,sub:"incoming"};
       case 'total_wip': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"in queues"};
-      case 'shipped_jobs': return {value:dviJobs.filter(j=>(j.status==='SHIPPED'||j.stage==='SHIP')).length,sub:"today"};
+      case 'shipped_jobs': return {value:shippedStats.yesterday||0,sub:"yesterday"};
       case 'coating_wip': return {value:dviByStage('COAT')+dviJobs.filter(j=>(j.station||'').includes('CCL')||(j.station||'').includes('CCP')).length,sub:"in coating"};
       case 'cutting_wip': return {value:dviByStage('CUT')+dviJobs.filter(j=>(j.station||'').includes('EDGER')||(j.station||'').includes('LCU')).length,sub:"in cutting"};
       case 'assembly_wip': return {value:dviByStage('ASSEMBL'),sub:"in assembly"};
@@ -2157,7 +2157,7 @@ function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendM
 
       case "kpi_row": return(
         <ConfigurableKPIRow
-          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs}}
+          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats}}
           settings={settings}
           cardConfig={card.config}
           onConfigChange={(cfg)=>updateCardConfig(card.id,cfg)}
@@ -9032,8 +9032,9 @@ export default function LabAssistantV2(){
   const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||"http://localhost:3002";}catch{return "http://localhost:3002";} });
   const [clock,setClock]=useState(new Date());
 
-  // DVI jobs from gateway + WIP data from localStorage
+  // DVI jobs from gateway + shipped stats
   const [dviJobs,setDviJobs]=useState([]);
+  const [shippedStats,setShippedStats]=useState({today:0,yesterday:0,thisWeek:0});
   const [wipJobs,setWipJobs]=useState([]);
 
   // Load WIP data from localStorage (populated by WIPFeed component)
@@ -9070,6 +9071,10 @@ export default function LabAssistantV2(){
           // Filter out CANCELED jobs
           const jobs=(data?.jobs||[]).filter(j=>j.stage!=='CANCELED'&&j.station!=='CANCELED');
           setDviJobs(jobs);
+          // Update shipped stats if available
+          if(data.shipped){
+            setShippedStats(data.shipped);
+          }
         }
       }catch(e){ console.warn("DVI fetch:",e.message); }
     };

@@ -2080,6 +2080,31 @@ app.get('/api/dvi/data', async (req: Request, res: Response) => {
     return res.json({ mock: true, jobs: generateMockDVIJobs(), message: 'Mock data (requested via ?mock=true)' });
   }
 
+  // Get shipped counts from database
+  let shippedStats = { today: 0, yesterday: 0, thisWeek: 0 };
+  const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+  if (existsSync(dbPath)) {
+    try {
+      const db = new Database(dbPath);
+      const today = new Date().toISOString().split('T')[0];
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+
+      const todayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(today) as any;
+      const yesterdayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(yesterday) as any;
+      const weekCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date >= ?`).get(weekAgo) as any;
+
+      shippedStats = {
+        today: todayCount?.cnt || 0,
+        yesterday: yesterdayCount?.cnt || 0,
+        thisWeek: weekCount?.cnt || 0
+      };
+      db.close();
+    } catch (e) {
+      log.error('[Data] Shipped count error:', e);
+    }
+  }
+
   // Uploaded data exists - return it
   res.json({
     mock: false,
@@ -2089,7 +2114,8 @@ app.get('/api/dvi/data', async (req: Request, res: Response) => {
     rowCount: current!.rowCount,
     uploadedAt: current!.uploadedAt,
     dataDate: current!.dataDate,
-    archiveCount: dviDataStore.archive.length
+    archiveCount: dviDataStore.archive.length,
+    shipped: shippedStats
   });
 });
 
@@ -2180,9 +2206,36 @@ app.get('/api/dvi/stats', (req: Request, res: Response) => {
     if (job.rush === 'Y' || job.Rush === 'Y' || job.priority === 'RUSH') stats.rushJobs++;
   });
 
+  // Get shipped counts from database history
+  let shippedStats = { today: 0, yesterday: 0, thisWeek: 0 };
+  const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+  if (existsSync(dbPath)) {
+    try {
+      const db = new Database(dbPath);
+      const today = new Date().toISOString().split('T')[0];
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+
+      // Count shipped jobs by data_date (the date in the source file)
+      const todayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(today) as any;
+      const yesterdayCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date = ?`).get(yesterday) as any;
+      const weekCount = db.prepare(`SELECT COUNT(*) as cnt FROM dvi_jobs WHERE archived = 1 AND data_date >= ?`).get(weekAgo) as any;
+
+      shippedStats = {
+        today: todayCount?.cnt || 0,
+        yesterday: yesterdayCount?.cnt || 0,
+        thisWeek: weekCount?.cnt || 0
+      };
+      db.close();
+    } catch (e) {
+      log.error('[Stats] Shipped count error:', e);
+    }
+  }
+
   res.json({
     mock: isMock,
     stats,
+    shipped: shippedStats,
     uploadedAt: current?.uploadedAt || null,
     dataDate: current?.dataDate || null
   });
