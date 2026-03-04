@@ -1176,14 +1176,15 @@ function syncDviToSqlite(): void {
 
     // Upsert only ACTIVE jobs (not shipped)
     const upsertStmt = db.prepare(`
-      INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, archived, last_sync)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
+      INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, rx_number, archived, last_sync)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
       ON CONFLICT(id) DO UPDATE SET
         stage = excluded.stage,
         station = excluded.station,
         status = excluded.status,
         days_in_lab = excluded.days_in_lab,
         data_date = excluded.data_date,
+        rx_number = excluded.rx_number,
         archived = 0,
         shipped_at = NULL,
         last_sync = datetime('now')
@@ -1211,7 +1212,8 @@ function syncDviToSqlite(): void {
           daysInLab,
           j.coating || j.coatR,
           j.frameName || j.frame_name,
-          dataDate
+          dataDate,
+          j.rx_number || j.rxnumber
         );
       }
     });
@@ -1531,6 +1533,66 @@ app.post('/api/dvi/upload', express.text({ limit: '50mb', type: '*/*' }), (req: 
           header.forEach((col: string, idx: number) => {
             job[col] = values[idx];
           });
+
+          // Normalize CSV columns to standard job fields
+          // Map common CSV column names to standardized fields
+          job.job_id = job['dvi id'] || job['order id'] || job['invoice'] || job['order number'] || `csv-${i}`;
+          job.invoice = job['dvi id'] || job['invoice'] || job['order number'];
+          job.tray = job['tray'] || job.invoice;
+          job.reference = job['order number'] || job['poms order id'] || job['reference'];
+
+          // Calculate days_in_lab from Hours In Progress if available
+          if (job['hours in progress']) {
+            const hours = parseFloat(job['hours in progress']) || 0;
+            job.days_in_lab = Math.floor(hours / 24);
+          }
+
+          // Determine stage from DVI Status or station columns
+          // Look for station-like columns that indicate current position
+          let stage = 'UNKNOWN';
+          const lowerCols = Object.keys(job).map(k => k.toLowerCase());
+
+          // Check for DVI status columns that indicate stage
+          if (job['dvi status'] || job['status']) {
+            const statusVal = (job['dvi status'] || job['status'] || '').toUpperCase();
+            if (statusVal.includes('ASSEMBLY') || statusVal.includes('ASSEM')) stage = 'A';
+            else if (statusVal.includes('EDGER') || statusVal.includes('EDGE') || statusVal.includes('CUT')) stage = 'E';
+            else if (statusVal.includes('COAT') || statusVal.includes('CCL') || statusVal.includes('CCP')) stage = 'C';
+            else if (statusVal.includes('SURF') || statusVal.includes('GEN') || statusVal.includes('LOG LENSES')) stage = 'S';
+            else if (statusVal.includes('QC') || statusVal.includes('INSPECT')) stage = 'Q';
+            else if (statusVal.includes('OFFICE') || statusVal.includes('EDIT')) stage = 'O';
+            else if (statusVal.includes('SHIP')) stage = 'SHIPPED';
+          }
+
+          // If still unknown, check for station presence in any column
+          if (stage === 'UNKNOWN') {
+            const allVals = Object.values(job).join(' ').toUpperCase();
+            if (allVals.includes('ASSEMBLY')) stage = 'A';
+            else if (allVals.includes('EDGER')) stage = 'E';
+            else if (allVals.includes('COATING') || allVals.includes('CCL') || allVals.includes('CCP')) stage = 'C';
+            else if (allVals.includes('SURFACING') || allVals.includes('GENERATOR')) stage = 'S';
+          }
+
+          // For late jobs, mark them as in-progress at unknown stage if not determined
+          // This ensures they show in WIP counts
+          job.stage = stage;
+
+          // Determine status from Job Risk or other columns
+          const risk = (job['job risk'] || job['status'] || '').toLowerCase();
+          if (risk.includes('missed') || risk.includes('late')) {
+            job.status = 'LATE';
+          } else if (risk.includes('risk')) {
+            job.status = 'AT_RISK';
+          } else if (risk.includes('ship')) {
+            job.status = 'SHIPPED';
+          } else {
+            job.status = 'In Progress';
+          }
+
+          // Store SLA info
+          if (job['job sla']) job.sla_hours = parseFloat(job['job sla']) || 48;
+          if (job['vs sla']) job.vs_sla = parseFloat(job['vs sla']) || 0;
+
           jobs.push(job);
         }
       }
@@ -1538,6 +1600,70 @@ app.post('/api/dvi/upload', express.text({ limit: '50mb', type: '*/*' }), (req: 
 
     if (jobs.length === 0) {
       return res.status(400).json({ error: 'No valid job records found in file' });
+    }
+
+    // For CSV jobs with UNKNOWN stage, look up from existing XML data
+    const unknownStageJobs = jobs.filter(j => j.stage === 'UNKNOWN');
+    if (unknownStageJobs.length > 0) {
+      log.info(`[DVI] Looking up stage for ${unknownStageJobs.length} jobs with UNKNOWN stage`);
+
+      // Build lookup map from database (active + history)
+      const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+      if (existsSync(dbPath)) {
+        const lookupDb = new Database(dbPath);
+
+        // Get stages from active jobs (include rx_number for DVI ID matching)
+        const activeStages = lookupDb.prepare(`
+          SELECT invoice, stage, rx_number FROM dvi_jobs WHERE stage IS NOT NULL AND stage != '' AND stage != 'UNKNOWN'
+        `).all() as { invoice: string; stage: string; rx_number?: string }[];
+
+        // Get stages from history
+        const historyStages = lookupDb.prepare(`
+          SELECT invoice, stage FROM dvi_jobs_history WHERE stage IS NOT NULL AND stage != '' AND stage != 'UNKNOWN'
+        `).all() as { invoice: string; stage: string }[];
+
+        lookupDb.close();
+
+        // Build lookup maps: invoice/rx_number -> stage (prefer active over history)
+        const stageMap = new Map<string, string>();
+        for (const h of historyStages) {
+          if (h.invoice && h.stage) stageMap.set(h.invoice, h.stage);
+        }
+        for (const a of activeStages) {
+          if (a.invoice && a.stage) stageMap.set(a.invoice, a.stage);
+          // Also map rx_number (DVI ID format like D929816119)
+          if (a.rx_number && a.stage) stageMap.set(a.rx_number, a.stage);
+        }
+
+        // Also check archived uploads in memory
+        for (const archive of dviDataStore.archive) {
+          for (const archiveJob of archive.jobs) {
+            if (archiveJob.stage && archiveJob.stage !== 'UNKNOWN') {
+              if (archiveJob.invoice) stageMap.set(archiveJob.invoice, archiveJob.stage);
+              if (archiveJob.rx_number) stageMap.set(archiveJob.rx_number, archiveJob.stage);
+              if (archiveJob.rxnumber) stageMap.set(archiveJob.rxnumber, archiveJob.stage);
+            }
+          }
+        }
+
+        log.info(`[DVI] Stage lookup map has ${stageMap.size} entries`);
+
+        // Update jobs with looked-up stages
+        let foundCount = 0;
+        for (const job of unknownStageJobs) {
+          const lookupKeys = [job.invoice, job.job_id, job['dvi id']].filter(Boolean);
+          for (const key of lookupKeys) {
+            const foundStage = stageMap.get(key);
+            if (foundStage) {
+              job.stage = foundStage;
+              foundCount++;
+              break;
+            }
+          }
+        }
+
+        log.info(`[DVI] Found stage for ${foundCount}/${unknownStageJobs.length} jobs from existing data`);
+      }
     }
 
     // Try to extract data date from filename (e.g., "DVI_2026-03-02.xml" or "dvi_export_20260302.xml")
