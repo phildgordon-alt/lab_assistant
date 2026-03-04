@@ -10,7 +10,14 @@ import { fileURLToPath } from 'url';
 import { log } from '../logger.js';
 import { incrementConcurrent, decrementConcurrent } from '../limiter.js';
 import { withCircuitBreaker } from '../circuit-breaker.js';
-import { MCP_TOOLS, handleToolCall } from '../mcp/server.js';
+import {
+  MCP_TOOLS,
+  handleToolCall,
+  handleAgentToolCall,
+  getToolsForAgent,
+  getAgentSystemPrompt as getMcpAgentPrompt,
+} from '../mcp/server.js';
+import { getAgentConfigName } from './classifier.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -129,7 +136,17 @@ export async function runAgent(
   incrementConcurrent(agentName);
 
   try {
-    const systemPrompt = loadAgentPrompt(agentName);
+    // Get MCP agent config name and scoped tools
+    const mcpAgentName = getAgentConfigName(agentName);
+    const agentTools = getToolsForAgent(mcpAgentName);
+
+    // Use MCP agent prompt if available, otherwise load from disk
+    let systemPrompt: string;
+    try {
+      systemPrompt = getMcpAgentPrompt(mcpAgentName);
+    } catch {
+      systemPrompt = loadAgentPrompt(agentName);
+    }
 
     const result = await withCircuitBreaker(async () => {
       // Build messages array for agentic loop
@@ -149,7 +166,7 @@ export async function runAgent(
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: systemPrompt,
-          tools: MCP_TOOLS as Anthropic.Tool[],
+          tools: agentTools as Anthropic.Tool[],
           messages,
         });
 
@@ -169,15 +186,20 @@ export async function runAgent(
           break;
         }
 
-        // Handle tool calls
+        // Handle tool calls with agent context (applies department defaults)
         const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
         for (const toolUse of toolUseBlocks) {
           if (toolUse.type === 'tool_use') {
-            log.info(`MCP Tool call: ${toolUse.name}`, { source, userId, agentName });
+            log.info(`MCP Tool call: ${toolUse.name}`, { source, userId, agentName, mcpAgent: mcpAgentName });
 
             try {
-              const result = await handleToolCall(toolUse.name, toolUse.input as Record<string, unknown>);
+              // Use agent-aware handler to apply department defaults
+              const result = await handleAgentToolCall(
+                mcpAgentName,
+                toolUse.name,
+                toolUse.input as Record<string, unknown>
+              );
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
@@ -230,7 +252,18 @@ export async function runAgentStreaming(
   incrementConcurrent(agentName);
 
   try {
-    const basePrompt = loadAgentPrompt(agentName);
+    // Get MCP agent config name and scoped tools
+    const mcpAgentName = getAgentConfigName(agentName);
+    const agentTools = getToolsForAgent(mcpAgentName);
+
+    // Use MCP agent prompt if available, otherwise load from disk
+    let basePrompt: string;
+    try {
+      basePrompt = getMcpAgentPrompt(mcpAgentName);
+    } catch {
+      basePrompt = loadAgentPrompt(agentName);
+    }
+
     // If context is provided, prepend it to the system prompt
     const systemPrompt = context
       ? `${basePrompt}\n\n--- LIVE LAB CONTEXT ---\n${context}`
@@ -256,7 +289,7 @@ export async function runAgentStreaming(
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: systemPrompt,
-          tools: MCP_TOOLS as Anthropic.Tool[],
+          tools: agentTools as Anthropic.Tool[],
           messages,
         });
 
@@ -281,16 +314,21 @@ export async function runAgentStreaming(
           break;
         }
 
-        // Handle tool calls
+        // Handle tool calls with agent context (applies department defaults)
         onChunk('\n\n_Using tools..._\n\n');
         const toolResults: Anthropic.ToolResultBlockParam[] = [];
 
         for (const toolUse of toolUseBlocks) {
           if (toolUse.type === 'tool_use') {
-            log.info(`MCP Tool call (streaming): ${toolUse.name}`, { source, userId, agentName });
+            log.info(`MCP Tool call (streaming): ${toolUse.name}`, { source, userId, agentName, mcpAgent: mcpAgentName });
 
             try {
-              const result = await handleToolCall(toolUse.name, toolUse.input as Record<string, unknown>);
+              // Use agent-aware handler to apply department defaults
+              const result = await handleAgentToolCall(
+                mcpAgentName,
+                toolUse.name,
+                toolUse.input as Record<string, unknown>
+              );
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,

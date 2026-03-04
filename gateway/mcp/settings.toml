@@ -1,0 +1,68 @@
+# Lab_Assistant MCP Settings
+# Runtime-configurable thresholds and defaults
+# Changes hot-reload without server restart
+
+[thresholds]
+# Aging thresholds (days in lab)
+aging_warn_days = 5
+aging_critical_days = 10
+
+# Breakage rate thresholds (percentage)
+breakage_rate_warn_pct = 5.0
+breakage_rate_critical_pct = 8.0
+
+# Remake rate thresholds (percentage)
+remake_rate_warn_pct = 3.0
+remake_rate_critical_pct = 5.0
+
+# Coating queue thresholds (wait days)
+coating_wait_warn_days = 2
+coating_wait_critical_days = 4
+
+# Critical job count thresholds (per department)
+critical_jobs_warn = 15
+critical_jobs_critical = 25
+
+[mcp]
+# Tool result limits
+max_rows_default = 50
+max_rows_absolute = 100
+
+# Cache settings
+cache_ttl_seconds = 60
+
+[departments]
+# Department codes and names
+S = "Surfacing"
+C = "Coating"
+O = "Office"
+E = "Edging"
+A = "Assembly"
+Q = "QC"
+P = "Picking"
+
+[reason_codes]
+# Breakage reason codes
+03 = "Scratch"
+04 = "Chip"
+08 = "Power Error"
+18 = "Cosmetic"
+NF = "Not Found"
+BR = "Broken"
+CR = "Crack"
+WP = "Wrong Power"
+
+[escalation]
+# Department supervisors for escalation
+S = "Imran"
+C = "Imran"
+O = "Front Office"
+E = "Imran"
+A = "Assembly Lead"
+Q = "QC Lead"
+
+[retention]
+# Data retention periods (days)
+hot_layer_days = 30
+warm_layer_days = 90
+cold_layer_days = 365

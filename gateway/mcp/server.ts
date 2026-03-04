@@ -2,18 +2,93 @@
  * MCP Server
  * Wraps Lab Assistant REST API as MCP tools for agents
  *
- * Uses SQLite for fast AI queries - data synced from ItemPath, Limble, DVI
+ * Architecture:
+ * - Tools defined in tools/definitions.ts with WHEN/WHAT/HOW/NOT descriptions
+ * - Agent configs in agents/index.ts define tool subsets per department
+ * - System prompts in prompts.ts with department-specific behavioral rules
+ * - This file handles tool execution and SQLite queries
  */
 
 import { log } from '../logger.js';
-import { existsSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 
+// Import from new modular structure
+import { ALL_TOOLS } from './tools/definitions.js';
+import {
+  getAgentConfig,
+  getAgentTools,
+  getAgentSystemPrompt,
+  applyAgentDefaults,
+  getAvailableAgents,
+  type AgentConfig,
+} from './agents/index.js';
+import { AGENT_PROMPTS } from './prompts.js';
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// SQLite database for AI queries (populated by adapters)
+// ─────────────────────────────────────────────────────────────────────────────
+// Settings (loaded from settings.toml)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SETTINGS_FILE = join(__dirname, 'settings.toml');
+let settings: Record<string, any> = {};
+
+function loadSettings(): void {
+  try {
+    if (existsSync(SETTINGS_FILE)) {
+      const content = readFileSync(SETTINGS_FILE, 'utf-8');
+      // Simple TOML parser for our flat structure
+      const lines = content.split('\n');
+      let currentSection = '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+          currentSection = trimmed.slice(1, -1);
+          settings[currentSection] = settings[currentSection] || {};
+        } else if (trimmed.includes('=')) {
+          const [key, ...valueParts] = trimmed.split('=');
+          let value: any = valueParts.join('=').trim();
+          // Parse value type
+          if (value.startsWith('"') && value.endsWith('"')) {
+            value = value.slice(1, -1);
+          } else if (value === 'true') {
+            value = true;
+          } else if (value === 'false') {
+            value = false;
+          } else if (!isNaN(parseFloat(value))) {
+            value = parseFloat(value);
+          }
+          if (currentSection) {
+            settings[currentSection][key.trim()] = value;
+          } else {
+            settings[key.trim()] = value;
+          }
+        }
+      }
+      log.info('[MCP] Settings loaded from settings.toml');
+    }
+  } catch (e: any) {
+    log.warn('[MCP] Failed to load settings.toml:', e.message);
+  }
+}
+
+loadSettings();
+
+export function getSettings(section?: string): Record<string, any> {
+  if (section) {
+    return settings[section] || {};
+  }
+  return settings;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SQLite Database
+// ─────────────────────────────────────────────────────────────────────────────
+
 const DB_FILE = join(__dirname, '..', '..', 'data', 'lab_assistant.db');
 let db: Database.Database | null = null;
 
@@ -33,194 +108,50 @@ const LAB_SERVER_URL = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:30
 const LAB_ASSISTANT_KEY = process.env.LAB_ASSISTANT_API_KEY;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tool Definitions (for Claude API tools parameter)
+// Re-export from new modular structure
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const MCP_TOOLS = [
-  // ─────────────────────────────────────────────────────────────────────────────
-  // NARROW SEMANTIC TOOLS (agent-sized results, predicate-based)
-  // ─────────────────────────────────────────────────────────────────────────────
-  {
-    name: 'get_wip_snapshot',
-    description: 'Get current WIP summary with counts by stage. Returns ~10 rows. Use for "how many jobs in WIP?" questions.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        summary_only: {
-          type: 'boolean',
-          description: 'If true, returns counts only. Default true.',
-          default: true,
-        },
-      },
-    },
-  },
-  {
-    name: 'get_coating_queue_aged',
-    description: 'Get jobs in coating stages, optionally filtered by minimum age. Returns max 25 rows.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        min_days: {
-          type: 'number',
-          description: 'Minimum days in lab to filter by. Default 0 (all).',
-          default: 0,
-        },
-      },
-    },
-  },
-  {
-    name: 'get_breakage_summary',
-    description: 'Get breakage summary by department/reason with top 5 recent events. Use for breakage analysis.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        department: {
-          type: 'string',
-          description: 'Filter by department: S=Surfacing, C=Coating, E=Edging, A=Assembly. Optional.',
-        },
-        since_days: {
-          type: 'number',
-          description: 'Look back N days. Default 7.',
-          default: 7,
-        },
-      },
-    },
-  },
-  {
-    name: 'get_job_detail',
-    description: 'Get full detail for a single job by invoice number. Includes breakage history.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        invoice: {
-          type: 'string',
-          description: 'Invoice number to look up.',
-        },
-      },
-      required: ['invoice'],
-    },
-  },
-  {
-    name: 'get_aging_report',
-    description: 'Get WIP aging report with bucketed counts and jobs over threshold. Use for "show me old jobs" questions.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        threshold_hours: {
-          type: 'number',
-          description: 'Age threshold in hours for flagging. Default 48.',
-          default: 48,
-        },
-      },
-    },
-  },
-  {
-    name: 'get_throughput_trend',
-    description: 'Get daily throughput trend (shipped, by stage). Use for trend/historical questions.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        days: {
-          type: 'number',
-          description: 'Number of days to look back. Default 7.',
-          default: 7,
-        },
-      },
-    },
-  },
-  {
-    name: 'get_inventory_summary',
-    description: 'Get inventory summary with low stock alerts. Use for "what is inventory status?" questions.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  {
-    name: 'get_maintenance_summary',
-    description: 'Get maintenance summary with open tasks and critical items. Use for "how is maintenance?" questions.',
-    input_schema: {
-      type: 'object',
-      properties: {},
-    },
-  },
-  // ─────────────────────────────────────────────────────────────────────────────
-  // GENERIC TOOLS (for flexibility, use narrow tools when possible)
-  // ─────────────────────────────────────────────────────────────────────────────
-  {
-    name: 'query_database',
-    description: 'Run a custom read-only SQL query. Use narrow tools above when possible. This is for complex queries not covered by other tools.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        query: {
-          type: 'string',
-          description: 'SQL SELECT query to run. Must be read-only.',
-        },
-      },
-      required: ['query'],
-    },
-  },
-  {
-    name: 'call_api',
-    description: 'Call a Lab Assistant REST API endpoint. Use for real-time data (DVI SOAP) or endpoints not in SQLite.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        method: {
-          type: 'string',
-          enum: ['GET', 'POST'],
-          description: 'HTTP method',
-        },
-        endpoint: {
-          type: 'string',
-          description: 'API endpoint path',
-        },
-        body: {
-          type: 'object',
-          description: 'Request body for POST requests (optional)',
-        },
-      },
-      required: ['method', 'endpoint'],
-    },
-  },
-  {
-    name: 'take_action',
-    description: 'Execute a write operation in the lab system. Requires confirmation. All actions are audit logged.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        action: {
-          type: 'string',
-          description: 'Action to take, e.g. "bind_tray", "complete_batch", "log_defect"',
-        },
-        params: {
-          type: 'object',
-          description: 'Parameters for the action',
-        },
-        reason: {
-          type: 'string',
-          description: 'Reason for taking this action (for audit log)',
-        },
-      },
-      required: ['action', 'params', 'reason'],
-    },
-  },
-  {
-    name: 'think_aloud',
-    description: 'Structure your reasoning before responding. Use this to break down complex problems. Has no side effects.',
-    input_schema: {
-      type: 'object',
-      properties: {
-        thought: {
-          type: 'string',
-          description: 'Your reasoning or analysis',
-        },
-      },
-      required: ['thought'],
-    },
-  },
-];
+export {
+  getAgentConfig,
+  getAgentTools,
+  getAgentSystemPrompt,
+  applyAgentDefaults,
+  getAvailableAgents,
+  AGENT_PROMPTS,
+};
+export type { AgentConfig };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool Definitions (for Claude API tools parameter)
+// Now imported from tools/definitions.ts with WHEN/WHAT/HOW/NOT descriptions
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Legacy export for backwards compatibility
+export const MCP_TOOLS = ALL_TOOLS;
+
+/**
+ * Get tools for a specific agent (department-scoped)
+ * This is the preferred way to get tools - each agent sees only relevant tools
+ */
+export function getToolsForAgent(agentName: string): any[] {
+  return getAgentTools(agentName);
+}
+
+/**
+ * Handle tool call with agent context
+ * Applies department defaults from agent config before execution
+ */
+export async function handleAgentToolCall(
+  agentName: string,
+  toolName: string,
+  toolInput: Record<string, unknown>
+): Promise<unknown> {
+  // Apply agent defaults (e.g., department filter)
+  const augmentedInput = applyAgentDefaults(agentName, toolName, toolInput as Record<string, any>);
+  log.debug(`[MCP] Agent ${agentName} calling ${toolName}`, augmentedInput);
+
+  return handleToolCall(toolName, augmentedInput);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool Handlers
@@ -234,34 +165,103 @@ export async function handleToolCall(
 
   switch (toolName) {
     // ─────────────────────────────────────────────────────────────────────────
-    // NARROW SEMANTIC TOOLS (preferred - agent-sized results)
+    // WIP & JOB TOOLS
     // ─────────────────────────────────────────────────────────────────────────
     case 'get_wip_snapshot':
       return handleGetWipSnapshot(toolInput.summary_only as boolean ?? true);
 
-    case 'get_coating_queue_aged':
-      return handleGetCoatingQueueAged(toolInput.min_days as number ?? 0);
-
-    case 'get_breakage_summary':
-      return handleGetBreakageSummary(
-        toolInput.department as string | undefined,
-        toolInput.since_days as number ?? 7
-      );
+    case 'get_wip_jobs':
+      return handleGetWipJobs(toolInput);
 
     case 'get_job_detail':
       return handleGetJobDetail(toolInput.invoice as string);
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // AGING & THROUGHPUT REPORTS
+    // ─────────────────────────────────────────────────────────────────────────
     case 'get_aging_report':
       return handleGetAgingReport(toolInput.threshold_hours as number ?? 48);
 
     case 'get_throughput_trend':
       return handleGetThroughputTrend(toolInput.days as number ?? 7);
 
+    case 'get_remake_rate':
+      return handleGetRemakeRate(
+        toolInput.period as string ?? 'week',
+        toolInput.group_by as string ?? 'department'
+      );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // BREAKAGE TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'get_breakage_summary':
+      return handleGetBreakageSummary(
+        toolInput.department as string | undefined,
+        toolInput.since_days as number ?? 7
+      );
+
+    case 'get_breakage_events':
+      return handleGetBreakageEvents(toolInput);
+
+    case 'get_breakage_by_position':
+      return handleGetBreakageByPosition(
+        toolInput.department as string,
+        toolInput.since_days as number ?? 7
+      );
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // COATING TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'get_coating_queue':
+    case 'get_coating_queue_aged':
+      return handleGetCoatingQueueAged(toolInput.min_wait_days as number ?? toolInput.min_days as number ?? 0);
+
+    case 'get_coating_wait_summary':
+      return handleGetCoatingWaitSummary();
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // INVENTORY TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
     case 'get_inventory_summary':
       return handleGetInventorySummary();
 
+    case 'get_inventory_detail':
+      return handleGetInventoryDetail(toolInput);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MAINTENANCE TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
     case 'get_maintenance_summary':
       return handleGetMaintenanceSummary();
+
+    case 'get_maintenance_tasks':
+      return handleGetMaintenanceTasks(toolInput);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CATALOG TOOLS (SCD Type 2)
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'get_lens_catalog':
+      return handleGetLensCatalog(toolInput);
+
+    case 'get_frame_catalog':
+      return handleGetFrameCatalog(toolInput);
+
+    case 'get_opc_history':
+      return handleGetOpcHistory(toolInput.opc as string);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // SETTINGS TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'get_settings':
+      return handleGetSettings(toolInput.section as string | undefined);
+
+    case 'update_setting':
+      return handleUpdateSetting(
+        toolInput.section as string,
+        toolInput.key as string,
+        toolInput.value as string,
+        toolInput.confirm as boolean ?? false
+      );
 
     // ─────────────────────────────────────────────────────────────────────────
     // GENERIC TOOLS (fallback)
@@ -633,6 +633,386 @@ function handleGetMaintenanceSummary(): unknown {
   } catch (e: any) {
     return { error: e.message, source: 'sqlite' };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NEW TOOL HANDLERS (from definitions.ts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function handleGetWipJobs(input: Record<string, unknown>): unknown {
+  try {
+    const database = getDb();
+    const limit = Math.min((input.limit as number) || 50, 100);
+
+    let whereClause = "archived = 0 AND stage NOT IN ('CANCELED', 'SHIPPED')";
+    const params: any[] = [];
+
+    if (input.department) {
+      whereClause += ` AND stage LIKE ?`;
+      params.push(`%${input.department}%`);
+    }
+    if (input.invoice) {
+      whereClause += ` AND invoice = ?`;
+      params.push(input.invoice);
+    }
+    if (input.frame_name) {
+      whereClause += ` AND frame_name LIKE ?`;
+      params.push(`%${input.frame_name}%`);
+    }
+    if (input.entry_date) {
+      whereClause += ` AND entry_date = ?`;
+      params.push(input.entry_date);
+    }
+
+    const jobs = database.prepare(`
+      SELECT id, invoice, tray, stage, station, status, rush, entry_date,
+             days_in_lab, coating, frame_name
+      FROM dvi_jobs
+      WHERE ${whereClause}
+      ORDER BY days_in_lab DESC
+      LIMIT ?
+    `).all(...params, limit);
+
+    return { jobs, count: jobs.length, source: 'sqlite' };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetRemakeRate(period: string, groupBy: string): unknown {
+  try {
+    const database = getDb();
+    const days = period === 'day' ? 1 : period === 'month' ? 30 : 7;
+
+    // Count remakes (jobs with original_invoice)
+    const remakes = database.prepare(`
+      SELECT COUNT(*) as count FROM dvi_jobs_history
+      WHERE shipped_at >= datetime('now', '-${days} days')
+    `).get() as { count: number };
+
+    // For now return placeholder - remake tracking needs additional schema
+    return {
+      period,
+      groupBy,
+      days,
+      totalShipped: remakes.count,
+      remakeCount: 0,
+      remakeRate: 0,
+      note: 'Remake tracking requires OriginalInvoice field in DVI data',
+      source: 'sqlite'
+    };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetBreakageEvents(input: Record<string, unknown>): unknown {
+  try {
+    const database = getDb();
+    const limit = Math.min((input.limit as number) || 50, 100);
+
+    let whereClause = '1=1';
+    const params: any[] = [];
+
+    if (input.department) {
+      whereClause += ` AND department = ?`;
+      params.push(input.department);
+    }
+    if (input.reason_code) {
+      whereClause += ` AND reason = ?`;
+      params.push(input.reason_code);
+    }
+    if (input.since_date) {
+      whereClause += ` AND occurred_at >= ?`;
+      params.push(input.since_date);
+    }
+
+    const events = database.prepare(`
+      SELECT id, job_id, invoice, department, reason, stage, operator, occurred_at, notes
+      FROM breakage_events
+      WHERE ${whereClause}
+      ORDER BY occurred_at DESC
+      LIMIT ?
+    `).all(...params, limit);
+
+    return { events, count: events.length, source: 'sqlite' };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetBreakageByPosition(department: string, sinceDays: number): unknown {
+  try {
+    const database = getDb();
+
+    const byPosition = database.prepare(`
+      SELECT stage as position, reason, COUNT(*) as count
+      FROM breakage_events
+      WHERE department = ? AND occurred_at >= datetime('now', '-${sinceDays} days')
+      GROUP BY stage, reason
+      ORDER BY count DESC
+      LIMIT 20
+    `).all(department);
+
+    const total = database.prepare(`
+      SELECT COUNT(*) as c FROM breakage_events
+      WHERE department = ? AND occurred_at >= datetime('now', '-${sinceDays} days')
+    `).get(department) as { c: number };
+
+    return {
+      department,
+      sinceDays,
+      byPosition,
+      totalEvents: total.c,
+      source: 'sqlite'
+    };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetCoatingWaitSummary(): unknown {
+  try {
+    const database = getDb();
+    const thresholds = getSettings('thresholds');
+    const warnDays = thresholds.coating_wait_warn_days || 2;
+    const criticalDays = thresholds.coating_wait_critical_days || 4;
+
+    const total = database.prepare(`
+      SELECT COUNT(*) as c FROM dvi_jobs
+      WHERE archived = 0 AND (stage LIKE '%COAT%' OR stage LIKE '%AR%' OR stage LIKE '%BLU%')
+    `).get() as { c: number };
+
+    const avgWait = database.prepare(`
+      SELECT AVG(days_in_lab) as avg FROM dvi_jobs
+      WHERE archived = 0 AND (stage LIKE '%COAT%' OR stage LIKE '%AR%' OR stage LIKE '%BLU%')
+    `).get() as { avg: number };
+
+    const pastWarn = database.prepare(`
+      SELECT COUNT(*) as c FROM dvi_jobs
+      WHERE archived = 0 AND (stage LIKE '%COAT%' OR stage LIKE '%AR%' OR stage LIKE '%BLU%')
+        AND days_in_lab >= ?
+    `).get(warnDays) as { c: number };
+
+    const pastCritical = database.prepare(`
+      SELECT COUNT(*) as c FROM dvi_jobs
+      WHERE archived = 0 AND (stage LIKE '%COAT%' OR stage LIKE '%AR%' OR stage LIKE '%BLU%')
+        AND days_in_lab >= ?
+    `).get(criticalDays) as { c: number };
+
+    const byCoatType = database.prepare(`
+      SELECT coating, COUNT(*) as count, AVG(days_in_lab) as avg_wait
+      FROM dvi_jobs
+      WHERE archived = 0 AND (stage LIKE '%COAT%' OR stage LIKE '%AR%' OR stage LIKE '%BLU%')
+      GROUP BY coating
+      ORDER BY count DESC
+    `).all();
+
+    return {
+      totalInQueue: total.c,
+      avgWaitDays: avgWait.avg ? Math.round(avgWait.avg * 10) / 10 : 0,
+      pastWarnThreshold: pastWarn.c,
+      pastCriticalThreshold: pastCritical.c,
+      byCoatType,
+      thresholds: { warnDays, criticalDays },
+      source: 'sqlite'
+    };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetInventoryDetail(input: Record<string, unknown>): unknown {
+  try {
+    const database = getDb();
+    const limit = Math.min((input.limit as number) || 50, 100);
+
+    let whereClause = '1=1';
+    const params: any[] = [];
+
+    if (input.sku) {
+      whereClause += ` AND sku LIKE ?`;
+      params.push(`%${input.sku}%`);
+    }
+    if (input.coating_type) {
+      whereClause += ` AND coating_type = ?`;
+      params.push(input.coating_type);
+    }
+    if (input.low_stock_only) {
+      whereClause += ` AND qty <= 5`;
+    }
+
+    const items = database.prepare(`
+      SELECT sku, name, qty, qty_available, location, warehouse, coating_type
+      FROM inventory
+      WHERE ${whereClause}
+      ORDER BY qty ASC
+      LIMIT ?
+    `).all(...params, limit);
+
+    return { items, count: items.length, source: 'sqlite' };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetMaintenanceTasks(input: Record<string, unknown>): unknown {
+  try {
+    const database = getDb();
+    const limit = Math.min((input.limit as number) || 50, 100);
+
+    let whereClause = "status NOT IN ('Complete', 'Closed', 'Completed')";
+    const params: any[] = [];
+
+    if (input.asset_name) {
+      whereClause += ` AND asset_name LIKE ?`;
+      params.push(`%${input.asset_name}%`);
+    }
+    if (input.priority) {
+      whereClause += ` AND priority = ?`;
+      params.push(input.priority);
+    }
+    if (input.status) {
+      whereClause += ` AND status = ?`;
+      params.push(input.status);
+    }
+
+    const tasks = database.prepare(`
+      SELECT id, title, asset_name, priority, status, type, assigned_to, due_date, created_at
+      FROM maintenance_tasks
+      WHERE ${whereClause}
+      ORDER BY CASE priority WHEN 'Critical' THEN 1 WHEN 'High' THEN 2 WHEN 'Urgent' THEN 3 ELSE 4 END
+      LIMIT ?
+    `).all(...params, limit);
+
+    return { tasks, count: tasks.length, source: 'sqlite' };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetLensCatalog(input: Record<string, unknown>): unknown {
+  try {
+    const database = getDb();
+    const activeOnly = input.active_only !== false;
+
+    let whereClause = activeOnly ? 'valid_to IS NULL' : '1=1';
+    const params: any[] = [];
+
+    if (input.opc) {
+      whereClause += ` AND opc = ?`;
+      params.push(input.opc);
+    }
+    if (input.material) {
+      whereClause += ` AND material = ?`;
+      params.push(input.material);
+    }
+    if (input.style) {
+      whereClause += ` AND style = ?`;
+      params.push(input.style);
+    }
+
+    const lenses = database.prepare(`
+      SELECT opc, material, style, coating_type, base_curve, diameter, manufacturer, cost, valid_from, valid_to
+      FROM lens_catalog
+      WHERE ${whereClause}
+      ORDER BY opc
+      LIMIT 50
+    `).all(...params);
+
+    return { lenses, count: lenses.length, activeOnly, source: 'sqlite' };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetFrameCatalog(input: Record<string, unknown>): unknown {
+  try {
+    const database = getDb();
+    const activeOnly = input.active_only !== false;
+
+    let whereClause = activeOnly ? 'valid_to IS NULL' : '1=1';
+    const params: any[] = [];
+
+    if (input.frame_name) {
+      whereClause += ` AND frame_name LIKE ?`;
+      params.push(`%${input.frame_name}%`);
+    }
+    if (input.material) {
+      whereClause += ` AND material = ?`;
+      params.push(input.material);
+    }
+
+    const frames = database.prepare(`
+      SELECT frame_code, frame_name, brand, style, color, size, material, cost, valid_from, valid_to
+      FROM frame_catalog
+      WHERE ${whereClause}
+      ORDER BY frame_name
+      LIMIT 50
+    `).all(...params);
+
+    return { frames, count: frames.length, activeOnly, source: 'sqlite' };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetOpcHistory(opc: string): unknown {
+  try {
+    const database = getDb();
+
+    const history = database.prepare(`
+      SELECT opc, material, style, coating_type, valid_from, valid_to, deprecated_reason
+      FROM lens_catalog
+      WHERE opc = ?
+      ORDER BY valid_from DESC
+    `).all(opc);
+
+    if (history.length === 0) {
+      return { opc, found: false, source: 'sqlite' };
+    }
+
+    return {
+      opc,
+      found: true,
+      history,
+      currentlyActive: (history[0] as any).valid_to === null,
+      source: 'sqlite'
+    };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetSettings(section: string | undefined): unknown {
+  const allSettings = getSettings();
+  if (section) {
+    return { section, settings: allSettings[section] || {}, source: 'settings.toml' };
+  }
+  return { settings: allSettings, source: 'settings.toml' };
+}
+
+function handleUpdateSetting(section: string, key: string, value: string, confirm: boolean): unknown {
+  // Preview mode
+  if (!confirm) {
+    return {
+      preview: true,
+      section,
+      key,
+      newValue: value,
+      currentValue: settings[section]?.[key],
+      message: 'Call with confirm=true to apply this change'
+    };
+  }
+
+  // For now, settings are read-only (would need fs.writeFileSync to update)
+  return {
+    success: false,
+    error: 'Runtime settings update not yet implemented. Edit settings.toml manually.',
+    section,
+    key,
+    value
+  };
 }
 
 // Handle data endpoints using SQLite (fast, no HTTP calls)
