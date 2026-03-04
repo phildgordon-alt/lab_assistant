@@ -373,6 +373,74 @@ export async function downloadJobMessages(fromDate?: Date): Promise<any[]> {
 }
 
 /**
+ * Get order detail by order number - includes current station/status
+ */
+export async function getOrderDetail(orderNumber: string): Promise<any> {
+  if (!CONFIG.password) {
+    log.info('[DVI] No password configured - returning empty');
+    return null;
+  }
+
+  const body = `${buildLoginXml()}
+<OrdNum>${orderNumber}</OrdNum>`;
+
+  try {
+    const response = await callSoap('GetOrderDetail', body);
+    log.info(`[DVI] GetOrderDetail response length: ${response.length}`);
+
+    // Return raw response for analysis
+    return {
+      orderNumber,
+      rawResponse: response,
+      // Try to extract key fields
+      status: extractTag(response, 'Status') || extractTag(response, 'StatDesc'),
+      station: extractTag(response, 'Station') || extractTag(response, 'Department'),
+    };
+  } catch (error) {
+    log.info(`[DVI] Error getting order detail: ${error}`);
+    throw error;
+  }
+}
+
+/**
+ * Lookup jobs by account, tray, or Rx number
+ */
+export async function lookupByAccount(query: string, searchType: 'account' | 'tray' | 'rxnum' = 'rxnum'): Promise<any[]> {
+  if (!CONFIG.password) {
+    log.info('[DVI] No password configured - returning empty');
+    return [];
+  }
+
+  const searchTag = searchType === 'account' ? 'Account' : searchType === 'tray' ? 'Tray' : 'RxNum';
+  const body = `${buildLoginXml()}
+<${searchTag}>${query}</${searchTag}>`;
+
+  try {
+    const response = await callSoap('LookupByAccount', body);
+    log.info(`[DVI] LookupByAccount response length: ${response.length}`);
+
+    // Parse results - format TBD based on actual response
+    const results: any[] = [];
+
+    // Try to find Order or Rx elements
+    const orderMatches = response.matchAll(/<Order[^>]*>([\s\S]*?)<\/Order>/gi);
+    for (const match of orderMatches) {
+      results.push({
+        rawXml: match[0],
+        orderNumber: extractTag(match[1], 'OrdNum'),
+        status: extractTag(match[1], 'Status') || extractTag(match[1], 'StatDesc'),
+        station: extractTag(match[1], 'Station') || extractTag(match[1], 'Department'),
+      });
+    }
+
+    return results;
+  } catch (error) {
+    log.info(`[DVI] Error in lookup: ${error}`);
+    throw error;
+  }
+}
+
+/**
  * Check if DVI connection is configured and working
  */
 export async function healthCheck(): Promise<{ ok: boolean; message: string }> {
@@ -424,6 +492,8 @@ export default {
   downloadOrders,
   downloadStatuses,
   downloadJobMessages,
+  getOrderDetail,
+  lookupByAccount,
   healthCheck,
   getAIContext,
 };

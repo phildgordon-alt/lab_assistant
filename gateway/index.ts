@@ -2184,6 +2184,33 @@ app.get('/api/dvi/live/context', async (_req: Request, res: Response) => {
   }
 });
 
+// Get order detail by order number (includes current station)
+app.get('/api/dvi/live/order/:orderNumber', async (req: Request, res: Response) => {
+  try {
+    const detail = await dviSoap.getOrderDetail(req.params.orderNumber);
+    res.json({ mock: false, detail });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to fetch';
+    res.status(500).json({ error: msg });
+  }
+});
+
+// Lookup jobs by Rx number, tray, or account
+app.get('/api/dvi/live/lookup', async (req: Request, res: Response) => {
+  try {
+    const query = req.query.q as string;
+    const type = (req.query.type as 'account' | 'tray' | 'rxnum') || 'rxnum';
+    if (!query) {
+      return res.status(400).json({ error: 'Missing query parameter ?q=' });
+    }
+    const results = await dviSoap.lookupByAccount(query, type);
+    res.json({ mock: false, query, type, results, count: results.length });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'Failed to fetch';
+    res.status(500).json({ error: msg });
+  }
+});
+
 function generateMockDVIJobs() {
   const stages = ['SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'QC', 'SHIP'];
   const statuses = ['In Progress', 'Completed', 'On Hold', 'Pending'];
