@@ -9078,24 +9078,18 @@ export default function LabAssistantV2(){
     return()=>clearInterval(iv);
   },[]);
 
-  // Merge WIP + DVI: combine both, deduplicate by invoice
+  // Use DVI jobs as single source of truth (from /api/dvi/data)
+  // localStorage WIP data is deprecated - API now handles all WIP
   const mergedJobs=useMemo(()=>{
-    // Start with WIP jobs (have detailed data like invoice, frame, Rx)
-    const merged = [...wipJobs];
-    const wipInvoices = new Set(wipJobs.map(j => j.invoice).filter(Boolean));
-
-    // Add DVI jobs that aren't already in WIP (by invoice or job_id)
-    dviJobs.forEach(j => {
-      // Skip if we already have this invoice from WIP
-      if (j.invoice && wipInvoices.has(j.invoice)) return;
-      // Skip CANCELED jobs
-      if (j.station === 'CANCELED' || j.stage === 'CANCELED') return;
-      merged.push(j);
+    // Filter out CANCELED and SHIPPED jobs for WIP display
+    const wip = dviJobs.filter(j => {
+      if (j.station === 'CANCELED' || j.stage === 'CANCELED') return false;
+      if (j.status === 'SHIPPED' || j.stage === 'SHIPPED') return false;
+      return true;
     });
-
-    console.log(`[App] Merged jobs: ${wipJobs.length} WIP + ${dviJobs.length} DVI = ${merged.length} total`);
-    return merged;
-  },[wipJobs,dviJobs]);
+    console.log(`[App] WIP jobs from API: ${wip.length} (total dviJobs: ${dviJobs.length})`);
+    return wip;
+  },[dviJobs]);
 
   // Settings state with localStorage persistence
   const [settings,setSettings]=useState(()=>{
