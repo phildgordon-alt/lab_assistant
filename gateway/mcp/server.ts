@@ -296,8 +296,15 @@ async function handleCallApi(
     }
   }
 
+  // Redirect full inventory to summary endpoint (avoid 10K+ items)
+  let actualEndpoint = endpoint;
+  if (endpoint === '/api/inventory') {
+    log.info('Redirecting /api/inventory to /api/inventory/ai-context for AI use');
+    actualEndpoint = '/api/inventory/ai-context';
+  }
+
   // For other endpoints, call the lab server (3002)
-  const url = `${LAB_SERVER_URL}${endpoint}`;
+  const url = `${LAB_SERVER_URL}${actualEndpoint}`;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
