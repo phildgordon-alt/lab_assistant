@@ -1091,11 +1091,25 @@ function syncDviToSqlite(): void {
     const jobs = dviDataStore.current?.jobs || [];
     const dataDate = dviDataStore.current?.dataDate || '';
 
-    // Build set of current job IDs
-    const currentIds = new Set<string>();
+    // Separate active jobs from shipped jobs
+    // Jobs with status='SHIPPED' or ship_date populated should be archived, not in WIP
+    const activeJobs: any[] = [];
+    const shippedJobs: any[] = [];
+
     for (const j of jobs) {
+      const hasShipped = j.status === 'SHIPPED' || (j.ship_date && j.ship_date.trim() !== '');
+      if (hasShipped) {
+        shippedJobs.push(j);
+      } else {
+        activeJobs.push(j);
+      }
+    }
+
+    // Build set of current ACTIVE job IDs (not shipped)
+    const currentActiveIds = new Set<string>();
+    for (const j of activeJobs) {
       const id = j.job_id || j.invoice || `${dataDate}-${j.station}-${Math.random()}`;
-      currentIds.add(id);
+      currentActiveIds.add(id);
     }
 
     // Get existing active jobs to detect shipped/completed
@@ -1103,17 +1117,17 @@ function syncDviToSqlite(): void {
       SELECT id, invoice, tray, stage, coating, rush, entry_date, days_in_lab FROM dvi_jobs WHERE archived = 0
     `).all() as { id: string; invoice: string; tray: string; stage: string; coating: string; rush: string; entry_date: string; days_in_lab: number }[];
 
-    // Archive jobs that are no longer in the current set (they were shipped/completed)
+    // Archive jobs that are no longer in the active set (they were shipped/completed)
     const archiveStmt = db.prepare(`UPDATE dvi_jobs SET archived = 1, shipped_at = datetime('now') WHERE id = ?`);
     const historyStmt = db.prepare(`
-      INSERT INTO dvi_jobs_history (job_id, invoice, tray, stage, coating, rush, entry_date, days_in_lab, shipped_at)
+      INSERT OR IGNORE INTO dvi_jobs_history (job_id, invoice, tray, stage, coating, rush, entry_date, days_in_lab, shipped_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `);
 
     let shippedCount = 0;
     const archiveCompleted = db.transaction(() => {
       for (const existing of existingJobs) {
-        if (!currentIds.has(existing.id)) {
+        if (!currentActiveIds.has(existing.id)) {
           archiveStmt.run(existing.id);
           historyStmt.run(
             existing.id,
@@ -1131,7 +1145,36 @@ function syncDviToSqlite(): void {
     });
     archiveCompleted();
 
-    // Upsert current jobs (soft-update)
+    // Also archive jobs that are in the XML with ShipDate (explicitly shipped in this file)
+    const archiveShippedFromXml = db.transaction(() => {
+      for (const j of shippedJobs) {
+        const jobId = j.job_id || j.invoice || `${dataDate}-${j.station}-${Math.random()}`;
+        const entryDate = j.entryDate || j.entry_date || j.date;
+        let daysInLab = j.daysInLab || j.days_in_lab;
+        if (!daysInLab && entryDate) {
+          const entry = new Date(entryDate);
+          const now = new Date();
+          daysInLab = Math.floor((now.getTime() - entry.getTime()) / (1000 * 60 * 60 * 24));
+        }
+
+        // Archive this job
+        archiveStmt.run(jobId);
+        historyStmt.run(
+          jobId,
+          j.invoice,
+          j.tray,
+          j.stage || j.Stage,
+          j.coating || j.coatR,
+          j.rush || j.Rush,
+          entryDate,
+          daysInLab
+        );
+        shippedCount++;
+      }
+    });
+    archiveShippedFromXml();
+
+    // Upsert only ACTIVE jobs (not shipped)
     const upsertStmt = db.prepare(`
       INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, archived, last_sync)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
@@ -1173,9 +1216,9 @@ function syncDviToSqlite(): void {
       }
     });
 
-    upsertMany(jobs);
+    upsertMany(activeJobs);
     db.close();
-    log.info(`[DVI] SQLite sync complete: ${jobs.length} active, ${shippedCount} shipped to history`);
+    log.info(`[DVI] SQLite sync complete: ${activeJobs.length} active, ${shippedCount} shipped to history`);
   } catch (dbErr: any) {
     log.error('[DVI] SQLite sync failed:', dbErr.message);
   }
