@@ -6657,7 +6657,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
     setLoadingConnections(true);
     const gwUrl = settings.gatewayUrl || 'http://localhost:3001';
     try {
-      const resp = await fetch(`${gwUrl}/gateway/connections`, { signal: AbortSignal.timeout(5000) });
+      const resp = await fetch(`${gwUrl}/gateway/connections`, { signal: AbortSignal.timeout(15000) });
       if (resp.ok) {
         const data = await resp.json();
         setConnections(data);
