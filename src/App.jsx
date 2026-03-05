@@ -2070,6 +2070,106 @@ const DEFAULT_CARDS = [
 
 function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36).slice(2,6)); }
 
+// ── Put Wall Tab ─────────────────────────────────────────────
+function PutWallTab({putWall,setPutWall,events}){
+  const [selectedSlot,setSelectedSlot]=useState(null);
+  const [scanTrayInput,setScanTrayInput]=useState("");
+  const [scanJobInput,setScanJobInput]=useState("");
+  const [bindSource,setBindSource]=useState("DVI");
+  const pwOcc=putWall.filter(s=>s.trayId).length;
+
+  const handleBind=()=>{
+    if(selectedSlot===null||!scanTrayInput.trim())return;
+    setPutWall(prev=>{const next=[...prev];next[selectedSlot]={...next[selectedSlot],trayId:scanTrayInput.trim(),job:scanJobInput.trim()||null,rush:false,since:Date.now(),source:bindSource,coatingType:pick(COATING_TYPES)};return next;});
+    setScanTrayInput("");setScanJobInput("");
+  };
+  const handleUnbind=(idx)=>{
+    setPutWall(prev=>{const next=[...prev];next[idx]={...next[idx],trayId:null,job:null,rush:false,since:null,source:null,coatingType:null};return next;});
+    setSelectedSlot(null);
+  };
+  const selected=selectedSlot!==null?putWall[selectedSlot]:null;
+
+  return(
+    <div style={{display:"grid",gridTemplateColumns:"1fr 340px",gap:20}}>
+      <div>
+        <Card>
+          <SectionHeader right={`${pwOcc}/20 occupied`}>Rush Put Wall — 20 Slots</SectionHeader>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
+            {putWall.map((slot,i)=>{
+              const bg=!slot.trayId?T.bg:slot.rush?T.redDark:T.blueDark;
+              const border=selectedSlot===i?T.cyan:!slot.trayId?T.border:slot.rush?T.red:T.blue;
+              const age=slot.since?Math.floor((Date.now()-slot.since)/60000):null;
+              return(
+                <div key={i} onClick={()=>setSelectedSlot(i)} style={{background:bg,border:`2px solid ${border}`,borderRadius:8,padding:10,textAlign:"center",cursor:"pointer",position:"relative",minHeight:88,display:"flex",flexDirection:"column",justifyContent:"center",boxShadow:selectedSlot===i?`0 0 16px ${T.cyan}40`:"none",transform:selectedSlot===i?"scale(1.02)":"scale(1)",transition:"all 0.15s"}}>
+                  <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginBottom:3}}>SLOT {String(slot.position).padStart(2,"0")}</div>
+                  {slot.trayId?(<>
+                    <div style={{fontSize:13,color:T.text,fontWeight:800,fontFamily:mono}}>{slot.job||"—"}</div>
+                    <div style={{fontSize:9,color:T.textMuted,marginTop:1}}>{slot.trayId}</div>
+                    {slot.coatingType&&<div style={{fontSize:8,color:T.blue,marginTop:1}}>{slot.coatingType}</div>}
+                    {slot.source&&<div style={{marginTop:2}}><Pill color={T.textMuted}>{slot.source}</Pill></div>}
+                    {slot.rush&&<div style={{position:"absolute",top:3,right:3,fontSize:7,background:T.red,color:"#fff",borderRadius:3,padding:"1px 5px",fontWeight:800}}>RUSH</div>}
+                    {age!==null&&<div style={{fontSize:8,color:age>90?T.red:T.textDim,fontFamily:mono,marginTop:2}}>{age}m ago</div>}
+                  </>):<div style={{fontSize:20,color:T.border}}>+</div>}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+        <div style={{marginTop:16}}><EventLog events={events}/></div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        <Card style={{borderTop:`3px solid ${T.cyan}`}}>
+          <SectionHeader>{selectedSlot!==null?`Slot ${String(selectedSlot+1).padStart(2,"00")} Details`:"Select a Slot"}</SectionHeader>
+          {selected?(selected.trayId?(
+            <div>
+              <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:"5px 12px",fontSize:12}}>
+                {[["Tray",selected.trayId,T.text],["Job",selected.job||"No job",T.text],["Source",selected.source,T.cyan],["Coating",selected.coatingType||"—",T.amber],["Parked",selected.since?`${Math.floor((Date.now()-selected.since)/60000)}m ago`:"—",T.textMuted]].map(([l,v,c])=>(
+                  <><span key={l+"l"} style={{color:T.textDim,fontFamily:mono}}>{l}:</span><span key={l+"v"} style={{color:c,fontWeight:700,fontFamily:mono}}>{v}</span></>
+                ))}
+              </div>
+              <button onClick={()=>handleUnbind(selectedSlot)} style={{width:"100%",marginTop:14,background:T.redDark,border:`1px solid ${T.red}`,borderRadius:6,padding:"9px",color:T.red,fontWeight:700,fontSize:12,cursor:"pointer",fontFamily:mono}}>UNBIND TRAY</button>
+            </div>
+          ):(
+            <div>
+              <div style={{fontSize:11,color:T.green,marginBottom:10,fontFamily:mono}}>● EMPTY — Ready to bind</div>
+              {[["SCAN TRAY ID",scanTrayInput,setScanTrayInput,"T-001"],["JOB NUMBER",scanJobInput,setScanJobInput,"J12345"]].map(([lbl,val,set,ph])=>(
+                <div key={lbl} style={{marginBottom:10}}>
+                  <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:4}}>{lbl}</label>
+                  <input value={val} onChange={e=>set(e.target.value)} placeholder={ph} style={{width:"100%",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 12px",color:T.text,fontSize:13,fontFamily:mono,outline:"none",boxSizing:"border-box"}}/>
+                </div>
+              ))}
+              <div style={{marginBottom:12}}>
+                <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:4}}>SOURCE</label>
+                <div style={{display:"flex",gap:4}}>
+                  {["DVI","Lab Assistant","Kardex"].map(src=>(
+                    <button key={src} onClick={()=>setBindSource(src)} style={{flex:1,padding:"6px 4px",borderRadius:5,fontSize:9,fontWeight:700,fontFamily:mono,cursor:"pointer",background:bindSource===src?T.blueDark:T.bg,border:`1px solid ${bindSource===src?T.blue:T.border}`,color:bindSource===src?T.blue:T.textDim}}>{src}</button>
+                  ))}
+                </div>
+              </div>
+              <button onClick={handleBind} disabled={!scanTrayInput.trim()} style={{width:"100%",background:scanTrayInput.trim()?T.green:T.border,border:"none",borderRadius:6,padding:"10px",color:scanTrayInput.trim()?"#000":T.textDim,fontWeight:800,fontSize:12,cursor:scanTrayInput.trim()?"pointer":"default",fontFamily:mono}}>BIND → SLOT {String((selectedSlot||0)+1).padStart(2,"0")}</button>
+            </div>
+          )):<div style={{fontSize:12,color:T.textDim,textAlign:"center",padding:24}}>Click a slot to view details or bind a tray</div>}
+        </Card>
+        <Card>
+          <SectionHeader>Source Breakdown</SectionHeader>
+          {["DVI","Lab Assistant","Kardex"].map(src=>{
+            const count=putWall.filter(s=>s.source===src).length;
+            return(
+              <div key={src} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                <span style={{fontSize:11,color:T.textMuted}}>{src}</span>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:80,height:4,background:T.bg,borderRadius:2,overflow:"hidden"}}><div style={{height:"100%",width:`${(count/20)*100}%`,background:T.blue,borderRadius:2}}/></div>
+                  <span style={{fontSize:11,color:T.text,fontFamily:mono,width:20,textAlign:"right"}}>{count}</span>
+                </div>
+              </div>
+            );
+          })}
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenServerUrl,settings}){
   const [subView,setSubView]=useState("predictive");
   // Get coater machines from settings
