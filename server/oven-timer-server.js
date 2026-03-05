@@ -41,6 +41,17 @@ limble.start();
 const som = require('./som-adapter');
 som.start();
 
+// ── DVI File Sync integration ─────────────────────────────────
+const dviSync = require('./dvi-sync');
+// Only start if configured (env vars set)
+if (process.env.DVI_SYNC_USER) {
+  dviSync.start().then(started => {
+    if (started) console.log('[DVI-Sync] File sync service started');
+  });
+} else {
+  console.log('[DVI-Sync] Skipped (DVI_SYNC_USER not set)');
+}
+
 const PORT      = parseInt(process.env.PORT || '3002', 10);
 const DATA_FILE = path.join(__dirname, 'oven-runs.json');
 const MAX_RUNS  = 20000;
@@ -458,6 +469,37 @@ const server = http.createServer(async (req, res) => {
     return json(res, som.getOEE());
   }
 
+  // ── DVI File Sync endpoints ───────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/dvi-sync/status') {
+    return json(res, dviSync.getStatus());
+  }
+  if (req.method==='POST' && url.pathname==='/api/dvi-sync/poll') {
+    try {
+      const body = await readBody(req);
+      const syncId = body.syncId || 'jobs';
+      const result = await dviSync.forcePoll(syncId);
+      return json(res, result);
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+  if (req.method==='POST' && url.pathname==='/api/dvi-sync/start') {
+    try {
+      const started = await dviSync.start();
+      return json(res, { ok: started, message: started ? 'Sync service started' : 'Failed to start or already running' });
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+  if (req.method==='POST' && url.pathname==='/api/dvi-sync/stop') {
+    try {
+      await dviSync.stop();
+      return json(res, { ok: true, message: 'Sync service stopped' });
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+
   // Slack test endpoint
   if (req.method==='POST' && url.pathname==='/api/slack/test') {
     try {
@@ -850,6 +892,8 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     GET  /api/som/conveyors        ← Conveyor belt positions`);
   console.log(`     GET  /api/som/orders           ← Jobs by department`);
   console.log(`     GET  /api/som/alerts           ← Machine/conveyor alerts`);
+  console.log(`     GET  /api/dvi-sync/status      ← DVI file sync status`);
+  console.log(`     POST /api/dvi-sync/poll        ← Force sync poll`);
   console.log(`     POST /api/ai/query             ← AI query with lab context`);
   console.log(`     POST /api/slack/ai-respond     ← Process Slack AI query`);
 

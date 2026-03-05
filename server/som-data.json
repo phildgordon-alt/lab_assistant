@@ -103,7 +103,7 @@
       "counts": {
         "count1": 8159,
         "count2": 0,
-        "count3": "B;0;53;200;Temperature Tank1;2026-03-05 15:24:16\r\nB;1;0;200;Temperature Tank2;2026-03-05 15:24:16"
+        "count3": "B;0;53;200;Temperature Tank1;2026-03-05 15:33:06\r\nB;1;0;200;Temperature Tank2;2026-03-05 15:33:06"
       },
       "cycleTime": "60.00",
       "isActive": 1
@@ -126,9 +126,9 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10903173",
+      "lastOrder": "            10903269",
       "counts": {
-        "count1": 228031,
+        "count1": 228049,
         "count2": 0,
         "count3": 0
       },
@@ -146,16 +146,16 @@
       "statusLabel": "Engaged",
       "statusColor": "green",
       "severity": "ok",
-      "event": "Waiting for trays",
-      "eventOriginal": "Waiting for trays",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "            10903254",
+      "lastOrder": "         10000037924",
       "counts": {
-        "count1": 58012,
+        "count1": 58023,
         "count2": 0,
         "count3": 0
       },
@@ -335,18 +335,18 @@
       "statusLabel": "Blocked",
       "statusColor": "amber",
       "severity": "warning",
-      "event": "Tray(s) in process",
-      "eventOriginal": "Tray(s) in process",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
       "led": {
         "green": true,
-        "red": false,
-        "status": "running"
+        "red": true,
+        "status": "warning"
       },
-      "lastOrder": "            10903346",
+      "lastOrder": "            10903349",
       "counts": {
-        "count1": 81621,
+        "count1": 81627,
         "count2": 0,
-        "count3": "B;0;7;10;Blockpiece magazine;2026-03-05 15:24:32\r\nB;1;64;100;Fillinglevel Tank;2026-03-05 15:24:32"
+        "count3": "B;0;6;10;Blockpiece magazine;2026-03-05 15:41:18\r\nB;1;63;100;Fillinglevel Tank;2026-03-05 15:41:18"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -396,11 +396,11 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10903276",
+      "lastOrder": "            10903319",
       "counts": {
-        "count1": 79739,
+        "count1": 79757,
         "count2": 0,
-        "count3": "B;0;9418;12000;S+_U_L;2026-03-05 15:22:20\r\nB;1;9144;12000;S+_U_R;2026-03-05 15:22:20\r\nB;2;3410;6000;B_D_L;2026-03-05 15:22:20\r\nB;3;3338;6000;B_D_R;2026-03-05 15:22:20"
+        "count3": "B;0;10026;12000;S+_U_L;2026-03-05 15:40:19\r\nB;1;9752;12000;S+_U_R;2026-03-05 15:40:19\r\nB;2;3506;6000;B_D_L;2026-03-05 15:40:19\r\nB;3;3434;6000;B_D_R;2026-03-05 15:40:19"
       },
       "cycleTime": "69.23",
       "isActive": 1
@@ -416,18 +416,18 @@
       "statusLabel": "SPOL",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Waiting for trays",
-      "eventOriginal": "Waiting for trays",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "            10903254",
+      "lastOrder": "            10903294",
       "counts": {
-        "count1": 93081,
+        "count1": 93092,
         "count2": 0,
-        "count3": "B;0;6032;12000;S+_U_L;2026-03-05 14:39:37\r\nB;1;5947;12000;S+_U_R;2026-03-05 14:39:37\r\nB;2;3218;6000;B_D_L;2026-03-05 14:39:37\r\nB;3;3166;6000;B_D_R;2026-03-05 14:39:37"
+        "count3": "B;0;6632;12000;S+_U_L;2026-03-05 15:42:48\r\nB;1;6464;12000;S+_U_R;2026-03-05 15:42:48\r\nB;2;3288;6000;B_D_L;2026-03-05 15:42:48\r\nB;3;3226;6000;B_D_R;2026-03-05 15:42:48"
       },
       "cycleTime": "69.23",
       "isActive": 1
@@ -450,11 +450,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10903240",
+      "lastOrder": "            10903268",
       "counts": {
-        "count1": 51809,
+        "count1": 51816,
         "count2": 0,
-        "count3": "B;0;2461;12000;S+_U_L;2026-03-05 14:30:14\r\nB;1;2461;12000;S+_U_R;2026-03-05 14:30:14\r\nB;2;20;6000;B_D_L;2026-03-05 14:30:14\r\nB;3;20;6000;B_D_R;2026-03-05 14:30:14"
+        "count3": "B;0;2727;12000;S+_U_L;2026-03-05 15:41:39\r\nB;1;2696;12000;S+_U_R;2026-03-05 15:41:39\r\nB;2;60;6000;B_D_L;2026-03-05 15:41:39\r\nB;3;50;6000;B_D_R;2026-03-05 15:41:39"
       },
       "cycleTime": "69.23",
       "isActive": 1
@@ -477,11 +477,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10903331",
+      "lastOrder": "            10903350",
       "counts": {
         "count1": 146391,
         "count2": 0,
-        "count3": "B;0;3;10;Unempty magazine tubes;2026-03-05 14:18:46\r\nB;1;45;100;Tank level;2026-03-05 15:15:06"
+        "count3": "B;0;2;10;Unempty magazine tubes;2026-03-05 15:35:39\r\nB;1;44;100;Tank level;2026-03-05 15:35:06"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -551,16 +551,16 @@
       "statusLabel": "SDBA",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Waiting for trays ...",
-      "eventOriginal": "Waiting for trays ...",
+      "event": "Tray(s) in process ...",
+      "eventOriginal": "Tray(s) in process ...",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
       "lastOrder": "              XXXXXX",
       "counts": {
-        "count1": 431187,
+        "count1": 431206,
         "count2": 0,
         "count3": 0
       },
@@ -697,7 +697,7 @@
       "counts": {
         "count1": 0,
         "count2": 0,
-        "count3": "B;0;0;0;Traycount;2026-03-05 15:23:53"
+        "count3": "B;0;0;0;Traycount;2026-03-05 15:41:53"
       },
       "cycleTime": "0.00",
       "isActive": 1
@@ -713,18 +713,18 @@
       "statusLabel": "Unknown",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Error 804: GERR#4  NO SF LENSES",
-      "eventOriginal": "Error 804: GERR#4  NO SF LENSES",
+      "event": "BDEL timeout",
+      "eventOriginal": "BDEL timeout",
       "led": {
         "green": true,
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10903348",
+      "lastOrder": "            10898439",
       "counts": {
         "count1": 0,
         "count2": 0,
-        "count3": "B;0;4;35;Traycount;2026-03-05 15:24:14"
+        "count3": "B;0;5;35;Traycount;2026-03-05 15:42:14"
       },
       "cycleTime": "0.00",
       "isActive": 1
@@ -747,11 +747,11 @@
         "red": false,
         "status": "idle"
       },
-      "lastOrder": "              ZZZZZZ",
+      "lastOrder": "            10903354",
       "counts": {
         "count1": 0,
         "count2": 0,
-        "count3": "B;0;0;20;Traycount;2026-03-05 15:23:42"
+        "count3": "B;0;0;20;Traycount;2026-03-05 15:41:43"
       },
       "cycleTime": "0.00",
       "isActive": 1
@@ -929,14 +929,14 @@
       "statusLabel": "ACOT",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Maintenance interval is reached or exceeded for: Cleaning sheets. Please clean or replace the mentioned part!",
-      "eventOriginal": "Maintenance interval is reached or exceeded for: Cleaning sheets. Please clean or replace the mentioned part!",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "            10902521",
+      "lastOrder": "            10902583",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -1010,18 +1010,18 @@
       "statusLabel": "SEDG",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Waiting for trays",
-      "eventOriginal": "Waiting for trays",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "            10903344",
+      "lastOrder": "             1601459",
       "counts": {
-        "count1": 451463,
+        "count1": 451473,
         "count2": 0,
-        "count3": "B;1;1525;2200;Rough Cut Tool_1_L;2026-03-05 15:37:51\r\nB;2;0;0;Empty;2026-03-05 12:47:52\r\nB;3;0;1000;Combi Tool_Drill1.2_3_L;2026-03-05 12:47:52\r\nB;4;7;2000;Combi Tool_Groove_3_L;2026-03-05 12:47:52\r\nB;5;13;2000;Universal Polish 100 Plastic_4_L;2026-03-05 12:47:52\r\nB;6;6085;7200;Combi Tool_SFB_5_L;2026-03-05 15:37:51\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-05 12:47:52\r\nB;8;390;8000;Combi Tool_Flat_6_L;2026-03-05 12:47:52\r\nB;9;1630;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 15:37:51\r\nB;10;1396;2200;Rough Cut Tool_1_R;2026-03-05 15:37:51\r\nB;11;0;0;Empty;2026-03-05 12:47:52\r\nB;12;10;1000;Combi Tool_Drill1.2_3_R;2026-03-05 12:47:52\r\nB;13;3;2000;Combi Tool_Groove_3_R;2026-03-05 12:47:52\r\nB;14;20;2000;Universal Polish 100 Plastic_4_R;2026-03-05 12:47:52\r\nB;15;1494;7200;Combi Tool_SFB_5_R;2026-03-05 15:37:51\r\nB;16;4;4000;Combi Tool_Shelf_5_R;2026-03-05 12:47:52\r\nB;17;245;8000;Combi Tool_Flat_6_R;2026-03-05 12:47:52\r\nB;18;5651;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 15:37:51"
+        "count3": "B;1;1528;2200;Rough Cut Tool_1_L;2026-03-05 15:51:38\r\nB;2;0;0;Empty;2026-03-05 12:47:52\r\nB;3;0;1000;Combi Tool_Drill1.2_3_L;2026-03-05 12:47:52\r\nB;4;7;2000;Combi Tool_Groove_3_L;2026-03-05 12:47:52\r\nB;5;13;2000;Universal Polish 100 Plastic_4_L;2026-03-05 12:47:52\r\nB;6;6088;7200;Combi Tool_SFB_5_L;2026-03-05 15:51:38\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-05 12:47:52\r\nB;8;390;8000;Combi Tool_Flat_6_L;2026-03-05 12:47:52\r\nB;9;1633;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 15:51:38\r\nB;10;1400;2200;Rough Cut Tool_1_R;2026-03-05 15:52:21\r\nB;11;0;0;Empty;2026-03-05 12:47:52\r\nB;12;10;1000;Combi Tool_Drill1.2_3_R;2026-03-05 12:47:52\r\nB;13;3;2000;Combi Tool_Groove_3_R;2026-03-05 12:47:52\r\nB;14;20;2000;Universal Polish 100 Plastic_4_R;2026-03-05 12:47:52\r\nB;15;1498;7200;Combi Tool_SFB_5_R;2026-03-05 15:52:21\r\nB;16;4;4000;Combi Tool_Shelf_5_R;2026-03-05 12:47:52\r\nB;17;245;8000;Combi Tool_Flat_6_R;2026-03-05 12:47:52\r\nB;18;5655;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 15:52:21"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1037,18 +1037,18 @@
       "statusLabel": "SEDG",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "SEDG",
-      "eventOriginal": "SEDG",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
       "led": {
-        "green": false,
+        "green": true,
         "red": true,
-        "status": "error"
+        "status": "warning"
       },
-      "lastOrder": "            10903347",
+      "lastOrder": "              XXXXXX",
       "counts": {
-        "count1": 468904,
+        "count1": 468908,
         "count2": 0,
-        "count3": "B;1;100143;2200;Rough Cut Tool_1_L;2026-03-05 12:43:45\r\nB;2;0;0;Empty;2026-03-05 12:43:45\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-05 12:43:45\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-05 12:43:45\r\nB;5;9;2000;Universal Polish 100 Plastic_4_L;2026-03-05 12:43:45\r\nB;6;77;7200;Combi Tool_SFB_5_L;2026-03-05 12:43:45\r\nB;7;5;4000;Combi Tool_Shelf_5_L;2026-03-05 12:43:45\r\nB;8;307;8000;Combi Tool_Flat_6_L;2026-03-05 12:43:45\r\nB;9;1484;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 12:43:45\r\nB;10;843;2200;Rough Cut Tool_1_R;2026-03-05 15:17:55\r\nB;11;0;0;Empty;2026-03-05 12:43:45\r\nB;12;11;1000;Combi Tool_Drill1.2_3_R;2026-03-05 12:43:45\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-05 12:43:45\r\nB;14;6;2000;Universal Polish 100 Plastic_4_R;2026-03-05 12:43:45\r\nB;15;828;7200;Combi Tool_SFB_5_R;2026-03-05 15:17:55\r\nB;16;5;4000;Combi Tool_Shelf_5_R;2026-03-05 12:43:45\r\nB;17;503;8000;Combi Tool_Flat_6_R;2026-03-05 12:43:45\r\nB;18;4717;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 15:17:55"
+        "count3": "B;1;100143;2200;Rough Cut Tool_1_L;2026-03-05 12:43:45\r\nB;2;0;0;Empty;2026-03-05 12:43:45\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-05 12:43:45\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-05 12:43:45\r\nB;5;9;2000;Universal Polish 100 Plastic_4_L;2026-03-05 12:43:45\r\nB;6;77;7200;Combi Tool_SFB_5_L;2026-03-05 12:43:45\r\nB;7;5;4000;Combi Tool_Shelf_5_L;2026-03-05 12:43:45\r\nB;8;307;8000;Combi Tool_Flat_6_L;2026-03-05 12:43:45\r\nB;9;1484;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 12:43:45\r\nB;10;846;2200;Rough Cut Tool_1_R;2026-03-05 15:35:33\r\nB;11;0;0;Empty;2026-03-05 12:43:45\r\nB;12;11;1000;Combi Tool_Drill1.2_3_R;2026-03-05 12:43:45\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-05 12:43:45\r\nB;14;6;2000;Universal Polish 100 Plastic_4_R;2026-03-05 12:43:45\r\nB;15;831;7200;Combi Tool_SFB_5_R;2026-03-05 15:35:33\r\nB;16;5;4000;Combi Tool_Shelf_5_R;2026-03-05 12:43:45\r\nB;17;503;8000;Combi Tool_Flat_6_R;2026-03-05 12:43:45\r\nB;18;4720;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 15:35:33"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1064,14 +1064,14 @@
       "statusLabel": "SEDG",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Waiting for trays",
-      "eventOriginal": "Waiting for trays",
+      "event": "SEDG",
+      "eventOriginal": "SEDG",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "         10000037917",
+      "lastOrder": "         10000037937",
       "counts": {
         "count1": 333830,
         "count2": 0,
@@ -1179,11 +1179,11 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10903282",
+      "lastOrder": "            10903304",
       "counts": {
-        "count1": 217910,
+        "count1": 217934,
         "count2": 0,
-        "count3": "B;0;449;35000;Generating Tool;2026-03-05 15:24:29\r\nB;1;157;5000;Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;2;9;2000;Fine Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;4;454;3500;Fine Cutting Tool V-Axis;2026-03-05 15:24:29"
+        "count3": "B;0;473;35000;Generating Tool;2026-03-05 15:42:07\r\nB;1;157;5000;Cutting Tool Z-Axis;2026-03-05 15:42:07\r\nB;2;9;2000;Fine Cutting Tool Z-Axis;2026-03-05 15:42:07\r\nB;4;478;3500;Fine Cutting Tool V-Axis;2026-03-05 15:42:07"
       },
       "cycleTime": "45.00",
       "isActive": 1
@@ -1199,18 +1199,18 @@
       "statusLabel": "SGEN",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Tray(s) in process",
-      "eventOriginal": "Tray(s) in process",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
       "led": {
         "green": true,
-        "red": false,
-        "status": "running"
+        "red": true,
+        "status": "warning"
       },
-      "lastOrder": "            10903273",
+      "lastOrder": "            10903303",
       "counts": {
-        "count1": 201245,
+        "count1": 201261,
         "count2": 0,
-        "count3": "B;0;3362;35000;Generating Tool;2026-03-05 15:24:29\r\nB;1;521;5000;Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;2;6;2000;Fine Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;4;3364;4500;Fine Cutting Tool V-Axis;2026-03-05 15:24:29"
+        "count3": "B;0;3378;35000;Generating Tool;2026-03-05 15:38:45\r\nB;1;521;5000;Cutting Tool Z-Axis;2026-03-05 15:38:45\r\nB;2;6;2000;Fine Cutting Tool Z-Axis;2026-03-05 15:38:45\r\nB;4;3380;4500;Fine Cutting Tool V-Axis;2026-03-05 15:38:45"
       },
       "cycleTime": "45.00",
       "isActive": 1
@@ -1233,11 +1233,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10903207",
+      "lastOrder": "            10903284",
       "counts": {
-        "count1": 85015,
+        "count1": 85019,
         "count2": 0,
-        "count3": "B;0;16172;35000;Generating Tool;2026-03-05 14:17:33\r\nB;1;199;5000;Cutting Tool Z-Axis;2026-03-05 14:17:33\r\nB;2;0;2000;Fine Cutting Tool Z-Axis;2026-03-05 14:17:33\r\nB;4;2681;4500;Fine Cutting Tool V-Axis;2026-03-05 14:17:33"
+        "count3": "B;0;16176;35000;Generating Tool;2026-03-05 15:30:30\r\nB;1;199;5000;Cutting Tool Z-Axis;2026-03-05 15:30:30\r\nB;2;0;2000;Fine Cutting Tool Z-Axis;2026-03-05 15:30:30\r\nB;4;2685;4500;Fine Cutting Tool V-Axis;2026-03-05 15:30:30"
       },
       "cycleTime": "45.00",
       "isActive": 1
@@ -1253,16 +1253,16 @@
       "statusLabel": "SLCU",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Waiting for trays",
-      "eventOriginal": "Waiting for trays",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "            10903254",
+      "lastOrder": "            10903224",
       "counts": {
-        "count1": 276,
+        "count1": 282,
         "count2": 0,
         "count3": 0
       },
@@ -1370,7 +1370,7 @@
       },
       "lastOrder": "              XXXXXX",
       "counts": {
-        "count1": 64748,
+        "count1": 64750,
         "count2": 0,
         "count3": 0
       },
@@ -1523,25 +1523,25 @@
   "oee": [
     {
       "DeviceID": "CU1001",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.10",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.17",
       "Availability": "1.00",
-      "Performance": "0.10",
-      "Quality": "1.00",
-      "Lenses": 12
+      "Performance": "0.18",
+      "Quality": "0.95",
+      "Lenses": 22
     },
     {
       "DeviceID": "DBA001",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.24",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.17",
       "Availability": "1.00",
-      "Performance": "0.24",
+      "Performance": "0.17",
       "Quality": "1.00",
-      "Lenses": 44
+      "Lenses": 30
     },
     {
       "DeviceID": "TSA001",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": null,
       "Performance": null,
@@ -1550,7 +1550,16 @@
     },
     {
       "DeviceID": "TSA002",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.01",
+      "Availability": "1.00",
+      "Performance": "0.01",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "HSQ005",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -1558,17 +1567,8 @@
       "Lenses": 0
     },
     {
-      "DeviceID": "HSQ005",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.07",
-      "Availability": "0.85",
-      "Performance": "0.14",
-      "Quality": "0.57",
-      "Lenses": 14
-    },
-    {
       "DeviceID": "HSQ006",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -1577,7 +1577,7 @@
     },
     {
       "DeviceID": "CBB001",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -1586,7 +1586,7 @@
     },
     {
       "DeviceID": "HSQ001",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "0.00",
       "Performance": null,
@@ -1595,7 +1595,7 @@
     },
     {
       "DeviceID": "CP1001",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "0.00",
       "Performance": null,
@@ -1604,70 +1604,70 @@
     },
     {
       "DeviceID": "LC1001",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.60",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.57",
       "Availability": "0.97",
-      "Performance": "0.62",
-      "Quality": "1.00",
-      "Lenses": 143
+      "Performance": "0.60",
+      "Quality": "0.99",
+      "Lenses": 139
     },
     {
       "DeviceID": "HXS003",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": null,
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.05",
       "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
+      "Performance": "0.05",
+      "Quality": "1.00",
+      "Lenses": 4
     },
     {
       "DeviceID": "CCL001",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.17",
-      "Availability": "1.00",
-      "Performance": "0.18",
-      "Quality": "1.00",
-      "Lenses": 21
-    },
-    {
-      "DeviceID": "CCU001",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.17",
-      "Availability": "0.54",
-      "Performance": "0.33",
-      "Quality": "0.93",
-      "Lenses": 27
-    },
-    {
-      "DeviceID": "HSQ003",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.17",
-      "Availability": "0.99",
-      "Performance": "0.26",
-      "Quality": "0.68",
-      "Lenses": 31
-    },
-    {
-      "DeviceID": "HXS002",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.06",
-      "Availability": "1.00",
-      "Performance": "0.06",
-      "Quality": "1.00",
-      "Lenses": 5
-    },
-    {
-      "DeviceID": "CCL002",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": "0.15",
-      "Availability": "0.58",
-      "Performance": "0.27",
+      "Availability": "1.00",
+      "Performance": "0.15",
       "Quality": "1.00",
       "Lenses": 18
     },
     {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.21",
+      "Availability": "0.67",
+      "Performance": "0.35",
+      "Quality": "0.93",
+      "Lenses": 28
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.13",
+      "Availability": "0.98",
+      "Performance": "0.24",
+      "Quality": "0.57",
+      "Lenses": 28
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.25",
+      "Availability": "1.00",
+      "Performance": "0.25",
+      "Quality": "1.00",
+      "Lenses": 20
+    },
+    {
+      "DeviceID": "CCL002",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.08",
+      "Availability": "0.59",
+      "Performance": "0.13",
+      "Quality": "1.00",
+      "Lenses": 9
+    },
+    {
       "DeviceID": "DBA002",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -1676,7 +1676,7 @@
     },
     {
       "DeviceID": "HSQ007",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -1685,52 +1685,52 @@
     },
     {
       "DeviceID": "HXS001",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.16",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.39",
       "Availability": "1.00",
-      "Performance": "0.16",
+      "Performance": "0.39",
       "Quality": "1.00",
-      "Lenses": 13
+      "Lenses": 31
     },
     {
       "DeviceID": "CP1002",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.29",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.31",
       "Availability": "1.00",
-      "Performance": "0.29",
+      "Performance": "0.31",
       "Quality": "1.00",
-      "Lenses": 15
+      "Lenses": 16
     },
     {
       "DeviceID": "CP1003",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.35",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.15",
       "Availability": "1.00",
-      "Performance": "0.35",
+      "Performance": "0.15",
       "Quality": "1.00",
-      "Lenses": 18
+      "Lenses": 8
     },
     {
       "DeviceID": "HSQ002",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.31",
-      "Availability": "0.88",
-      "Performance": "0.50",
-      "Quality": "0.70",
-      "Lenses": 53
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.23",
+      "Availability": "0.91",
+      "Performance": "0.37",
+      "Quality": "0.68",
+      "Lenses": 40
     },
     {
       "DeviceID": "HSQ004",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.16",
-      "Availability": "0.57",
-      "Performance": "0.88",
-      "Quality": "0.32",
-      "Lenses": 60
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.11",
+      "Availability": "0.58",
+      "Performance": "0.62",
+      "Quality": "0.30",
+      "Lenses": 43
     },
     {
       "DeviceID": "CCS001",
-      "Time": "2026-03-05T22:22:18.000Z",
+      "Time": "2026-03-05T22:40:18.000Z",
       "OEE": null,
       "Availability": "0.00",
       "Performance": null,
@@ -1739,12 +1739,12 @@
     },
     {
       "DeviceID": "CP1004",
-      "Time": "2026-03-05T22:22:18.000Z",
-      "OEE": "0.04",
+      "Time": "2026-03-05T22:40:18.000Z",
+      "OEE": "0.10",
       "Availability": "1.00",
-      "Performance": "0.04",
+      "Performance": "0.10",
       "Quality": "1.00",
-      "Lenses": 2
+      "Lenses": 5
     },
     {
       "DeviceID": "DBA001",
@@ -2423,20 +2423,20 @@
     }
   ],
   "orders": {
-    "total": 84337,
-    "todayTotal": 1585,
+    "total": 84347,
+    "todayTotal": 1595,
     "byDepartment": [
       {
         "departmentId": 9,
         "departmentName": "Complete",
         "zone": "ship",
-        "jobs": 57716
+        "jobs": 57723
       },
       {
         "departmentId": 4,
         "departmentName": "Production",
         "zone": "surfacing",
-        "jobs": 18802
+        "jobs": 18805
       },
       {
         "departmentId": null,
@@ -2448,13 +2448,13 @@
         "departmentId": 10,
         "departmentName": "Control",
         "zone": "control",
-        "jobs": 3049
+        "jobs": 3050
       },
       {
         "departmentId": -1,
         "departmentName": "Error",
         "zone": "error",
-        "jobs": 315
+        "jobs": 314
       },
       {
         "departmentId": 8,
@@ -2468,13 +2468,13 @@
         "departmentId": 9,
         "departmentName": "Complete",
         "zone": "ship",
-        "jobs": 989
+        "jobs": 996
       },
       {
         "departmentId": 4,
         "departmentName": "Production",
         "zone": "surfacing",
-        "jobs": 411
+        "jobs": 414
       },
       {
         "departmentId": null,
@@ -2506,7 +2506,7 @@
       "category": "blocking",
       "severity": "warning",
       "message": "Waiting for trays ...",
-      "timestamp": "2026-03-05T23:23:25.761Z"
+      "timestamp": "2026-03-05T23:41:25.862Z"
     },
     {
       "id": "dev-CCU001",
@@ -2515,8 +2515,8 @@
       "model": "CCU",
       "category": "cleaning",
       "severity": "warning",
-      "message": "Tray(s) in process",
-      "timestamp": "2026-03-05T23:23:25.761Z"
+      "message": "Waiting for trays",
+      "timestamp": "2026-03-05T23:41:25.862Z"
     },
     {
       "id": "dev-CU1001",
@@ -2526,7 +2526,7 @@
       "category": "cleaning",
       "severity": "warning",
       "message": "Waiting for trays",
-      "timestamp": "2026-03-05T23:23:25.761Z"
+      "timestamp": "2026-03-05T23:41:25.862Z"
     },
     {
       "id": "conv-L000_SP001_003",
@@ -2537,6 +2537,6 @@
       "timestamp": "2026-03-05T22:21:53.000Z"
     }
   ],
-  "lastSuccessfulPoll": "2026-03-05T23:23:25.761Z",
-  "savedAt": "2026-03-05T23:23:26.064Z"
+  "lastSuccessfulPoll": "2026-03-05T23:41:25.862Z",
+  "savedAt": "2026-03-05T23:41:26.097Z"
 }

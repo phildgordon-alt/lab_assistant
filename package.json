@@ -10,6 +10,7 @@
     "server:dev": "nodemon server/oven-timer-server.js"
   },
   "dependencies": {
+    "@marsaud/smb2": "^0.18.0",
     "better-sqlite3": "^12.6.2",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",

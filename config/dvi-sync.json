@@ -1,0 +1,81 @@
+{
+  "enabled": true,
+  "logLevel": "info",
+
+  "connection": {
+    "type": "smb",
+    "host": "${DVI_SYNC_HOST:-Pairtcpmain-at}",
+    "port": 445,
+    "user": "${DVI_SYNC_USER}",
+    "password": "${DVI_SYNC_PASSWORD}",
+    "domain": "${DVI_SYNC_DOMAIN:-WORKGROUP}"
+  },
+
+  "syncs": [
+    {
+      "id": "breakage",
+      "name": "Breakage Reports (LDS)",
+      "enabled": true,
+      "source": {
+        "share": "visdir",
+        "path": "/vision/LDS"
+      },
+      "dest": "./data/dvi/breakage",
+      "action": "copy",
+      "patterns": ["*.csv", "*.xlsx", "*.txt"],
+      "pollInterval": 60000,
+      "archiveSource": false
+    },
+    {
+      "id": "jobs",
+      "name": "Job Export (XML/JSON)",
+      "enabled": true,
+      "source": {
+        "share": "visdir",
+        "path": "/VISION/Q/jobexport"
+      },
+      "dest": "./data/dvi/jobs",
+      "action": "move",
+      "patterns": ["*.xml", "*.json"],
+      "pollInterval": 30000,
+      "processJson": true,
+      "processXml": true
+    },
+    {
+      "id": "shipped",
+      "name": "Shipped Invoices (PDF)",
+      "enabled": true,
+      "source": {
+        "share": "visdir",
+        "path": "/VISION/invoices"
+      },
+      "dest": "./data/dvi/shipped",
+      "action": "move",
+      "patterns": ["*.pdf"],
+      "pollInterval": 60000,
+      "archiveDest": true
+    }
+  ],
+
+  "processing": {
+    "onJobXml": "parseAndStore",
+    "onJobJson": "applyChanges",
+    "onShippedPdf": "archiveAndNotify",
+    "onBreakage": "importReport"
+  },
+
+  "notifications": {
+    "slack": {
+      "enabled": false,
+      "channel": "#lab-alerts",
+      "onError": true,
+      "onShipped": false
+    }
+  },
+
+  "retry": {
+    "maxAttempts": 3,
+    "delayMs": 5000,
+    "backoffMultiplier": 2
+  }
+}
