@@ -1068,6 +1068,8 @@ const KPICard = ({label,value,sub,trend,accent,onRemove,editable,onClick,clickab
 const KPI_METRICS = {
   incoming_jobs:     { label: "Incoming Jobs",    desc: "Yesterday's incoming work",      accent: T.blue,   category: "Production" },
   total_wip:         { label: "Total WIP",        desc: "Jobs in all queues",            accent: T.cyan,   category: "Production" },
+  nel_jobs:          { label: "NEL",              desc: "Not Enough Lens - awaiting stock", accent: T.amber, category: "Production" },
+  at_kardex:         { label: "At Kardex",        desc: "Jobs at Kardex pickup",         accent: T.orange, category: "Production" },
   shipped_jobs:      { label: "Shipped Jobs",     desc: "Jobs shipped today",            accent: T.green,  category: "Production" },
   coating_wip:       { label: "Coating WIP",      desc: "Jobs in coating",               accent: T.amber,  category: "Department" },
   cutting_wip:       { label: "Cutting WIP",      desc: "Jobs in cutting/edging",        accent: T.purple, category: "Department" },
@@ -1085,12 +1087,14 @@ const KPI_METRICS = {
 };
 
 // Default KPI configuration (user's requested defaults)
-const DEFAULT_KPIS = ['incoming_jobs', 'total_wip', 'shipped_jobs', 'coating_wip', 'cutting_wip', 'assembly_wip', 'breakage'];
+const DEFAULT_KPIS = ['incoming_jobs', 'total_wip', 'nel_jobs', 'at_kardex', 'shipped_jobs', 'surfacing_wip', 'coating_wip', 'cutting_wip', 'assembly_wip', 'breakage'];
 
 // KPI to AI Agent mapping
 const KPI_AGENTS = {
   incoming_jobs: 'ShiftReportAgent',
   total_wip: 'ShiftReportAgent',
+  nel_jobs: 'PickingAgent',
+  at_kardex: 'PickingAgent',
   shipped_jobs: 'ShiftReportAgent',
   coating_wip: 'CoatingAgent',
   cutting_wip: 'CuttingAgent',
@@ -1133,6 +1137,8 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
         return station.includes('INITIATE')||station.includes('NEW WORK')||station.includes('RECEIVED');
       });
       case 'total_wip': return jobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED');
+      case 'nel_jobs': return jobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('NE LENS')||s.includes('NEL')||s.includes('NOT ENOUGH');});
+      case 'at_kardex': return jobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('AT KARDEX')||s.includes('MAN2KARDX');});
       case 'shipped_jobs': return jobs.filter(j=>(j.status==='SHIPPED'||j.stage==='SHIP'));
       case 'coating_wip':
         // WIP XML has inCoatingQueue flag
@@ -1158,6 +1164,8 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     switch(kpiId){
       case 'incoming_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('INITIATE')||s.includes('NEW WORK')||s.includes('INCOMING');}).length,sub:"incoming"};
       case 'total_wip': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"in queues"};
+      case 'nel_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('NE LENS')||s.includes('NEL')||s.includes('NOT ENOUGH');}).length,sub:"awaiting lens"};
+      case 'at_kardex': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('AT KARDEX')||s.includes('MAN2KARDX');}).length,sub:"at pickup"};
       case 'shipped_jobs': return {value:shippedStats.today||0,sub:"today"};
       case 'coating_wip': return {value:dviByStage('COAT')+dviJobs.filter(j=>(j.station||'').includes('CCL')||(j.station||'').includes('CCP')).length,sub:"in coating"};
       case 'cutting_wip': return {value:dviByStage('CUT')+dviJobs.filter(j=>(j.station||'').includes('EDGER')||(j.station||'').includes('LCU')).length,sub:"in cutting"};
@@ -1238,7 +1246,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
           const metric=KPI_METRICS[kpiId];
           if(!metric)return null;
           const val=getKPIValue(kpiId);
-          const hasJobs=['incoming_jobs','total_wip','shipped_jobs','coating_wip','cutting_wip','assembly_wip','surfacing_wip','qc_wip','breakage','rush_jobs'].includes(kpiId);
+          const hasJobs=['incoming_jobs','total_wip','nel_jobs','at_kardex','shipped_jobs','coating_wip','cutting_wip','assembly_wip','surfacing_wip','qc_wip','breakage','rush_jobs'].includes(kpiId);
           return(
             <KPICard
               key={kpiId}
