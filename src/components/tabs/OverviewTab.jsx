@@ -148,11 +148,12 @@ const CARD_REGISTRY = [
 
 const DEFAULT_CARDS = [
   { id:"c1", type:"kpi_row",          title:"KPI Row",             config:{} },
-  { id:"c2", type:"slack_feed",       title:"Slack Messages",      config:{} },
-  { id:"c3", type:"coating_machines", title:"Coating Machines",    config:{} },
-  { id:"c4", type:"putwall_dual",     title:"Put Wall (Live)",     config:{} },
-  { id:"c5", type:"event_feed",       title:"Event Feed",          config:{} },
-  { id:"c6", type:"fleet_dept",       title:"Fleet by Department", config:{} },
+  { id:"c2", type:"inventory",        title:"Lens Inventory",      config:{size:'half'} },
+  { id:"c3", type:"slack_feed",       title:"Slack Messages",      config:{size:'half'} },
+  { id:"c4", type:"coating_machines", title:"Coating Machines",    config:{} },
+  { id:"c5", type:"putwall_dual",     title:"Put Wall (Live)",     config:{} },
+  { id:"c6", type:"event_feed",       title:"Event Feed",          config:{size:'half'} },
+  { id:"c7", type:"fleet_dept",       title:"Fleet by Department", config:{size:'half'} },
 ];
 
 function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36).slice(2,6)); }
@@ -1558,6 +1559,12 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     </div>
   );
 
+  // Toggle card size between full and half
+  const toggleCardSize = (cardId) => {
+    setCards(prev => prev.map(c => c.id === cardId ? { ...c, config: { ...c.config, size: c.config?.size === 'half' ? 'full' : 'half' } } : c));
+    setCardMenu(null);
+  };
+
   return(
     <div style={{display:"flex",flexDirection:"column",gap:20}} onDragEnd={handleDragEnd}>
       <div style={{display:"flex",justifyContent:"flex-end",gap:10,alignItems:"center"}}>
@@ -1567,44 +1574,63 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           + ADD CARD
         </button>
       </div>
-      {cards.map(card=>(
-        <div key={card.id} draggable
-          onDragStart={()=>handleDragStart(card.id)}
-          onDragOver={e=>{e.preventDefault();handleDragOver(card.id);}}
-          onDrop={()=>handleDrop(card.id)}
-          style={{opacity:drag.dragging===card.id?0.4:1,outline:drag.over===card.id&&drag.dragging!==card.id?`2px dashed ${T.blue}`:"none",borderRadius:14,transition:"opacity 0.15s"}}>
-          <Card style={{borderTop:`3px solid ${T.border}`}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,cursor:"grab",userSelect:"none"}}>
-              <span style={{color:T.textDim,fontSize:16}}>⠿</span>
-              <span style={{flex:1,fontSize:11,fontWeight:700,color:T.dim,fontFamily:mono,letterSpacing:1,textTransform:"uppercase"}}>{card.title}</span>
-              <div style={{position:"relative"}}>
-                <button onClick={e=>{e.stopPropagation();setCardMenu(cardMenu===card.id?null:card.id);}}
-                  style={{background:"transparent",border:"none",color:T.textDim,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}
-                  title="Card menu"
-                  onMouseEnter={e=>e.currentTarget.style.color=T.text}
-                  onMouseLeave={e=>e.currentTarget.style.color=T.textDim}>⋮</button>
-                {cardMenu===card.id&&(
-                  <div style={{position:"absolute",right:0,top:"100%",marginTop:4,background:T.cardBg,border:`1px solid ${T.border}`,borderRadius:8,boxShadow:"0 4px 12px rgba(0,0,0,0.3)",zIndex:100,minWidth:140,overflow:"hidden"}}>
-                    <button onClick={()=>{setEditCard(card.id);setCardMenu(null);}}
-                      style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:T.text,fontSize:12,fontFamily:mono,cursor:"pointer",textAlign:"left"}}
-                      onMouseEnter={e=>e.currentTarget.style.background=T.bg}
-                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <span>⚙</span> Configure
-                    </button>
-                    <button onClick={()=>{removeCard(card.id);setCardMenu(null);}}
-                      style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:T.red,fontSize:12,fontFamily:mono,cursor:"pointer",textAlign:"left"}}
-                      onMouseEnter={e=>e.currentTarget.style.background=T.bg}
-                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                      <span>×</span> Remove
-                    </button>
+      <div style={{display:"flex",flexWrap:"wrap",gap:20}}>
+        {cards.map(card=>{
+          const isHalf = card.config?.size === 'half';
+          return (
+            <div key={card.id} draggable
+              onDragStart={()=>handleDragStart(card.id)}
+              onDragOver={e=>{e.preventDefault();handleDragOver(card.id);}}
+              onDrop={()=>handleDrop(card.id)}
+              style={{
+                width: isHalf ? 'calc(50% - 10px)' : '100%',
+                minWidth: isHalf ? 320 : 'auto',
+                opacity:drag.dragging===card.id?0.4:1,
+                outline:drag.over===card.id&&drag.dragging!==card.id?`2px dashed ${T.blue}`:"none",
+                borderRadius:14,
+                transition:"opacity 0.15s, width 0.2s"
+              }}>
+              <Card style={{borderTop:`3px solid ${T.border}`,height:'100%'}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,cursor:"grab",userSelect:"none"}}>
+                  <span style={{color:T.textDim,fontSize:16}}>⠿</span>
+                  <span style={{flex:1,fontSize:11,fontWeight:700,color:T.dim,fontFamily:mono,letterSpacing:1,textTransform:"uppercase"}}>{card.title}</span>
+                  {isHalf && <span style={{fontSize:9,color:T.blue,fontFamily:mono,padding:"2px 6px",background:`${T.blue}20`,borderRadius:4}}>½</span>}
+                  <div style={{position:"relative"}}>
+                    <button onClick={e=>{e.stopPropagation();setCardMenu(cardMenu===card.id?null:card.id);}}
+                      style={{background:"transparent",border:"none",color:T.textDim,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}
+                      title="Card menu"
+                      onMouseEnter={e=>e.currentTarget.style.color=T.text}
+                      onMouseLeave={e=>e.currentTarget.style.color=T.textDim}>⋮</button>
+                    {cardMenu===card.id&&(
+                      <div style={{position:"absolute",right:0,top:"100%",marginTop:4,background:T.cardBg,border:`1px solid ${T.border}`,borderRadius:8,boxShadow:"0 4px 12px rgba(0,0,0,0.3)",zIndex:100,minWidth:160,overflow:"hidden"}}>
+                        <button onClick={()=>toggleCardSize(card.id)}
+                          style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:T.text,fontSize:12,fontFamily:mono,cursor:"pointer",textAlign:"left"}}
+                          onMouseEnter={e=>e.currentTarget.style.background=T.bg}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <span>{isHalf ? '⬜' : '◧'}</span> {isHalf ? 'Full Width' : 'Half Width'}
+                        </button>
+                        <button onClick={()=>{setEditCard(card.id);setCardMenu(null);}}
+                          style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:T.text,fontSize:12,fontFamily:mono,cursor:"pointer",textAlign:"left"}}
+                          onMouseEnter={e=>e.currentTarget.style.background=T.bg}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <span>⚙</span> Configure
+                        </button>
+                        <button onClick={()=>{removeCard(card.id);setCardMenu(null);}}
+                          style={{display:"flex",alignItems:"center",gap:8,width:"100%",padding:"10px 14px",background:"transparent",border:"none",color:T.red,fontSize:12,fontFamily:mono,cursor:"pointer",textAlign:"left"}}
+                          onMouseEnter={e=>e.currentTarget.style.background=T.bg}
+                          onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                          <span>×</span> Remove
+                        </button>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                </div>
+                {renderCardContent(card)}
+              </Card>
             </div>
-            {renderCardContent(card)}
-          </Card>
-        </div>
-      ))}
+          );
+        })}
+      </div>
       {cards.length===0&&(
         <div style={{textAlign:"center",padding:"60px 20px",border:`2px dashed ${T.border}`,borderRadius:16}}>
           <div style={{fontSize:36,marginBottom:12}}>✦</div>
