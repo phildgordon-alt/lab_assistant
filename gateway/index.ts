@@ -1872,7 +1872,58 @@ app.post('/api/dvi/upload', express.text({ limit: '50mb', type: '*/*' }), (req: 
       // Check if this is a Looker pivot table (row 2 contains "Jobs Count" but not DVI Status Detail)
       const isLookerPivot = !isDviStatusDetail && lines.length > 1 && lines[1].includes('Jobs Count');
 
-      if (isDviStatusDetail) {
+      // Check if this is Inprocess Jobs format (has TRAY#, STATION, DAYS columns)
+      const headerUpper = lines[0].toUpperCase();
+      const isInprocessJobs = headerUpper.includes('TRAY#') && headerUpper.includes('STATION') && headerUpper.includes('DAYS');
+
+      if (isInprocessJobs) {
+        // Inprocess Jobs format - direct job list with tray, station, days
+        const parsed = parseInprocessJobsCSV(rawData);
+        if (parsed) {
+          jobs = parsed.wip;
+          header = parsed.columns;
+          log.info(`[DVI] Inprocess Jobs: ${parsed.jobs.length} total, ${parsed.wip.length} WIP jobs`);
+
+          // Sync to SQLite
+          const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+          if (existsSync(dbPath)) {
+            const db = new Database(dbPath);
+            const upsertStmt = db.prepare(`
+              INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, rx_number, archived, last_sync)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 0, datetime('now'))
+              ON CONFLICT(id) DO UPDATE SET
+                stage = excluded.stage,
+                station = excluded.station,
+                status = excluded.status,
+                days_in_lab = excluded.days_in_lab,
+                data_date = excluded.data_date,
+                last_sync = datetime('now')
+            `);
+            db.transaction(() => {
+              for (const j of parsed.jobs) {
+                upsertStmt.run(
+                  j.job_id,
+                  j.invoice,
+                  j.tray,
+                  j.stage,
+                  j.station,
+                  j.status,
+                  j.rush,
+                  j.entry_date,
+                  j.days_in_lab,
+                  j.coating,
+                  j.data_date,
+                  j.rx_number
+                );
+              }
+            })();
+            db.close();
+            log.info(`[DVI] Inprocess Jobs: Synced ${parsed.jobs.length} jobs to SQLite`);
+          }
+        } else {
+          return res.status(400).json({ error: 'Failed to parse Inprocess Jobs CSV' });
+        }
+      } else if (isDviStatusDetail) {
         // DVI Status Detail format - job-level pivot with station columns
         const parsed = parseDviStatusDetailCSV(rawData);
         if (parsed) {
@@ -2145,34 +2196,39 @@ function parseCSVLine(line: string): string[] {
   return result;
 }
 
-// Station to stage mapping for Looker pivot tables
+// Station to stage mapping for DVI/Looker data
 const STATION_TO_STAGE: Record<string, string> = {
+  // Surfacing
   'GENERATOR #1': 'SURFACING', 'GENERATOR #2': 'SURFACING',
-  'AUTO BLKER #2': 'SURFACING',
-  'DIGITAL CALC': 'SURFACING',
-  'Coating': 'COATING', 'RECEIVED COAT': 'COATING',
+  'AUTO BLKER #1': 'SURFACING', 'AUTO BLKER #2': 'SURFACING',
+  'DIGITAL CALC': 'SURFACING', 'SENT TO LAB': 'SURFACING',
+  'LOG LENSES SF': 'SURFACING', 'MODULO CTRL CNTR': 'SURFACING',
+  // Coating
+  'Coating': 'COATING', 'RECEIVED COAT': 'COATING', 'SENT TO COAT': 'COATING',
   'CCL #1': 'COATING', 'CCL #2': 'COATING',
-  'CCP #1': 'COATING', 'CCP #2': 'COATING',
+  'CCP #1': 'COATING', 'CCP #2': 'COATING', 'CCP #3': 'COATING',
+  // Cutting/Edging
   'EDGER #1': 'CUTTING', 'EDGER #2': 'CUTTING', 'EDGER #4': 'CUTTING',
   'EDGER #5': 'CUTTING', 'EDGER #6': 'CUTTING', 'EDGER #7': 'CUTTING',
   'EDGERKCKOT2LINE2': 'CUTTING', 'LCU #1': 'CUTTING',
+  // Assembly
   'ASSEMBLY #1': 'ASSEMBLY', 'ASSEMBLY #6': 'ASSEMBLY', 'ASSEMBLY #7': 'ASSEMBLY',
   'ASSEMBLY #14': 'ASSEMBLY', 'ASSEMBLY #15': 'ASSEMBLY',
   'ASSEMBLY PASS': 'ASSEMBLY', 'ASSEMBLY FAIL': 'QC_FAIL',
-  'BREAKAGE': 'BREAKAGE', 'CANCELED': 'CANCELED',
-  'NEW WORKTICKET': 'INCOMING', 'INITIATE': 'INCOMING',
-  'FRAME LOGGED': 'INCOMING',
+  // Status
+  'BREAKAGE': 'BREAKAGE', 'CANCELED': 'CANCELED', 'LASER REJECT': 'QC_FAIL',
+  'NEW WORKTICKET': 'INCOMING', 'INITIATE': 'INCOMING', 'FRAME LOGGED': 'INCOMING',
+  // Shipping
   'SH CONVEY CTRL 1': 'SHIPPING', 'SH CONVEY CTRL 2': 'SHIPPING', 'SH CONVEY KCKOUT': 'SHIPPING',
   'SHIPPED': 'SHIPPING',
+  // Outsourced
   'SENT TO HKO': 'OUTSOURCED',
-  // Hold/Office stations
+  // Hold/Office stations (CBOB = Came Back Off Belt)
   'CBOB - INHSE FIN': 'HOLD', 'CBOB - INHSE SF': 'HOLD', 'CBOB - NE LENS': 'HOLD',
   'CBOB - NE FRMS': 'HOLD', 'CBOB - FRMHOLD': 'HOLD', 'CBOB - AT KARDEX': 'HOLD',
   'CBOB - DIG CALC': 'HOLD', 'CBOB - INFLUENCE': 'HOLD', 'CBOB - INTL ACCT': 'HOLD',
   'CBOB - MAN2KARDX': 'HOLD', 'CBOB - SUBHKO': 'HOLD', 'CBOB - UNCATEGOR': 'HOLD',
   'EDIT-DESK': 'OFFICE', 'RECOMBOBULATE': 'OFFICE',
-  'LOG LENSES SF': 'SURFACING', 'MODULO CTRL CNTR': 'SURFACING', 'LASER REJECT': 'QC_FAIL',
-  'CCP #3': 'COATING',
 };
 
 // Parse DVI Status Detail CSV - pivot table with job-level data
@@ -2267,6 +2323,99 @@ function parseDviStatusDetailCSV(rawData: string): { jobs: Record<string, any>[]
   return {
     jobs,
     columns: ['job_id', 'invoice', 'rx_number', 'stage', 'station', 'status', 'last_update'],
+    wip,
+  };
+}
+
+// Parse Inprocess Jobs CSV - direct job list with tray, Rx, station, days
+// Format: TRAY#,RX#,ENTR DATE,INV#,STATION,DAYS,PATIENT,RT_LENSOPC,LT_LENSOPC,RXCNT,SHIPDATE
+function parseInprocessJobsCSV(rawData: string): { jobs: Record<string, any>[], columns: string[], wip: Record<string, any>[] } | null {
+  const lines = rawData.split('\n').filter(l => l.trim());
+  if (lines.length < 2) return null;
+
+  // Check if this is Inprocess Jobs format by looking for header columns
+  const headerLine = lines[0].toUpperCase();
+  if (!headerLine.includes('TRAY#') || !headerLine.includes('STATION') || !headerLine.includes('DAYS')) {
+    return null;
+  }
+
+  const header = parseCSVLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim().toUpperCase());
+  const colIndex: Record<string, number> = {};
+  header.forEach((col, idx) => colIndex[col] = idx);
+
+  log.info(`[DVI] Detected Inprocess Jobs format, columns: ${header.join(', ')}`);
+
+  const jobs: Record<string, any>[] = [];
+  const wip: Record<string, any>[] = [];
+  const today = new Date().toISOString().split('T')[0];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    if (values.length < 5) continue;
+
+    const tray = values[colIndex['TRAY#']]?.replace(/^"|"$/g, '') || '';
+    const rxNumber = values[colIndex['RX#']]?.replace(/^"|"$/g, '') || '';
+    const entryDate = values[colIndex['ENTR DATE']]?.replace(/^"|"$/g, '') || '';
+    const invoice = values[colIndex['INV#']]?.replace(/^"|"$/g, '') || tray;
+    const station = values[colIndex['STATION']]?.replace(/^"|"$/g, '') || '';
+    const days = parseFloat(values[colIndex['DAYS']]?.replace(/^"|"$/g, '') || '0');
+    const patient = values[colIndex['PATIENT']]?.replace(/^"|"$/g, '') || '';
+    const rtLensOpc = values[colIndex['RT_LENSOPC']]?.replace(/^"|"$/g, '') || '';
+    const ltLensOpc = values[colIndex['LT_LENSOPC']]?.replace(/^"|"$/g, '') || '';
+    const shipDate = values[colIndex['SHIPDATE']]?.replace(/^"|"$/g, '') || '';
+
+    // Convert MM/DD/YY to YYYY-MM-DD
+    let entryDateNorm = entryDate;
+    const dateMatch = entryDate.match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
+    if (dateMatch) {
+      const year = parseInt(dateMatch[3]) > 50 ? `19${dateMatch[3]}` : `20${dateMatch[3]}`;
+      entryDateNorm = `${year}-${dateMatch[1]}-${dateMatch[2]}`;
+    }
+
+    // Map station to stage
+    const stage = STATION_TO_STAGE[station] || 'OTHER';
+    const isShipped = shipDate.trim() !== '' || station === 'SHIPPED';
+
+    const job: Record<string, any> = {
+      job_id: invoice || tray,
+      invoice,
+      tray,
+      rx_number: rxNumber,
+      stage: isShipped ? 'SHIPPED' : stage,
+      station,
+      status: isShipped ? 'SHIPPED' : 'In Progress',
+      entry_date: entryDateNorm,
+      days_in_lab: days,
+      patient_id: patient,
+      rt_lens_opc: rtLensOpc,
+      lt_lens_opc: ltLensOpc,
+      rush: 'N',
+      coating: '', // OPC codes contain coating info but need mapping
+      data_date: today,
+    };
+
+    jobs.push(job);
+
+    // WIP = not shipped
+    if (!isShipped) {
+      wip.push(job);
+    }
+  }
+
+  // Sort WIP by days descending (oldest first for aging visibility)
+  wip.sort((a, b) => b.days_in_lab - a.days_in_lab);
+
+  // Stage breakdown
+  const byStage: Record<string, number> = {};
+  wip.forEach(j => {
+    byStage[j.stage] = (byStage[j.stage] || 0) + 1;
+  });
+
+  log.info(`[DVI] Inprocess Jobs: ${jobs.length} total, ${wip.length} WIP, stages: ${JSON.stringify(byStage)}`);
+
+  return {
+    jobs,
+    columns: ['job_id', 'invoice', 'tray', 'rx_number', 'stage', 'station', 'status', 'entry_date', 'days_in_lab', 'patient_id', 'rt_lens_opc', 'lt_lens_opc'],
     wip,
   };
 }
