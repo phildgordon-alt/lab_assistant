@@ -2072,21 +2072,22 @@ function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36)
 
 // ── Put Wall Tab ─────────────────────────────────────────────
 function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
-  const [selectedPos,setSelectedPos]=useState(null);
   const [activeWall,setActiveWall]=useState('WH1');
+  const [selectedOrder,setSelectedOrder]=useState(null);
 
   // Fetch live Put Wall data from ItemPath
-  const [putWallData,setPutWallData]=useState({WH1:{positions:[],activeCount:0},WH2:{positions:[],activeCount:0},status:"pending",lastSync:null});
+  const [putWallData,setPutWallData]=useState({WH1:{putWallCount:0,laptopCount:0,manualCount:0,totalOrders:0,putWallOrders:[]},WH2:{putWallCount:0,laptopCount:0,manualCount:0,totalOrders:0,putWallOrders:[]},status:"pending",lastSync:null});
   useEffect(()=>{
     const fetchPutWall=async()=>{
       try{
         const res=await fetch("http://localhost:3002/api/inventory/putwall");
         const data=await res.json();
         setPutWallData({
-          WH1:data.WH1||{positions:[],activeCount:0,totalOrders:0},
-          WH2:data.WH2||{positions:[],activeCount:0,totalOrders:0},
+          WH1:data.WH1||{putWallCount:0,laptopCount:0,manualCount:0,totalOrders:0,putWallOrders:[]},
+          WH2:data.WH2||{putWallCount:0,laptopCount:0,manualCount:0,totalOrders:0,putWallOrders:[]},
           status:data.status||"ok",
-          lastSync:data.lastSync
+          lastSync:data.lastSync,
+          note:data.note
         });
       }catch(e){
         setPutWallData(prev=>({...prev,status:"error"}));
@@ -2104,20 +2105,9 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
   });
   const atKardexCount = atKardexJobs.length;
 
-  // Build position lookup for active wall
+  // Get current warehouse data
   const currentData = activeWall === 'WH1' ? putWallData.WH1 : putWallData.WH2;
-  const posLookup = {};
-  (currentData?.positions || []).forEach(p => { posLookup[p.position] = p; });
-
-  // Generate 75 positions
-  const positions = Array.from({ length: 75 }, (_, i) => {
-    const posNum = i + 1;
-    const posKey = `P${String(posNum).padStart(2, '0')}`;
-    const posData = posLookup[posKey] || posLookup[String(posNum)] || posLookup[posNum] || null;
-    return { num: posNum, key: posKey, data: posData };
-  });
-
-  const selectedPosData = selectedPos !== null ? positions[selectedPos] : null;
+  const putWallOrders = currentData?.putWallOrders || [];
 
   return(
     <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:20}}>
@@ -2138,128 +2128,136 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
 
         {/* Wall selector tabs */}
         <div style={{display:"flex",gap:8,marginBottom:12}}>
-          {['WH1','WH2'].map(wh=>(
-            <button key={wh} onClick={()=>{setActiveWall(wh);setSelectedPos(null);}} style={{
-              flex:1,padding:"10px 16px",borderRadius:6,fontSize:12,fontWeight:700,fontFamily:mono,cursor:"pointer",
-              background:activeWall===wh?T.blueDark:T.bg,
-              border:`1px solid ${activeWall===wh?T.blue:T.border}`,
-              color:activeWall===wh?T.blue:T.textMuted
-            }}>
-              {wh === 'WH1' ? 'WALL 1' : 'WALL 2'} ({wh === 'WH1' ? putWallData.WH1?.activeCount : putWallData.WH2?.activeCount || 0} active)
-            </button>
-          ))}
+          {['WH1','WH2'].map(wh=>{
+            const data = wh === 'WH1' ? putWallData.WH1 : putWallData.WH2;
+            return(
+              <button key={wh} onClick={()=>{setActiveWall(wh);setSelectedOrder(null);}} style={{
+                flex:1,padding:"10px 16px",borderRadius:6,fontSize:12,fontWeight:700,fontFamily:mono,cursor:"pointer",
+                background:activeWall===wh?T.blueDark:T.bg,
+                border:`1px solid ${activeWall===wh?T.blue:T.border}`,
+                color:activeWall===wh?T.blue:T.textMuted
+              }}>
+                {wh === 'WH1' ? 'WALL 1' : 'WALL 2'} ({data?.totalOrders || 0} orders)
+              </button>
+            );
+          })}
         </div>
 
-        {/* 75-position grid (15 cols x 5 rows) */}
+        {/* Order breakdown by type */}
         <Card>
-          <SectionHeader right={<span style={{color:T.green,fontFamily:mono}}>{currentData?.activeCount||0}/75 active</span>}>
-            {activeWall === 'WH1' ? 'Wall 1' : 'Wall 2'} — Position Map
+          <SectionHeader right={<span style={{color:T.green,fontFamily:mono}}>{currentData?.totalOrders||0} total</span>}>
+            {activeWall === 'WH1' ? 'Wall 1' : 'Wall 2'} — Active Orders
           </SectionHeader>
-          <div style={{display:"flex",justifyContent:"flex-end",gap:12,marginBottom:10}}>
-            <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:10,height:10,background:T.greenDark,border:`1px solid ${T.green}`,borderRadius:2}}/><span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Mapped</span></div>
-            <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:10,height:10,background:T.bg,border:`1px solid ${T.border}`,borderRadius:2}}/><span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Empty</span></div>
-            <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:10,height:10,background:T.amberDark,border:`1px solid ${T.amber}`,borderRadius:2}}/><span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Active scan</span></div>
-          </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(15,1fr)",gap:4}}>
-            {positions.map((p,idx)=>{
-              const hasOrder = !!p.data;
-              const isSelected = selectedPos === idx;
-              const bg = hasOrder ? T.greenDark : T.bg;
-              const border = isSelected ? T.cyan : hasOrder ? T.green : T.border;
-              return(
-                <div
-                  key={p.num}
-                  onClick={()=>setSelectedPos(idx)}
-                  style={{
-                    background:bg,
-                    border:`1px solid ${border}`,
-                    borderRadius:4,
-                    aspectRatio:"1",
-                    display:"flex",
-                    alignItems:"center",
-                    justifyContent:"center",
-                    fontSize:10,
-                    color:hasOrder?T.green:T.textDim,
-                    fontFamily:mono,
-                    cursor:"pointer",
-                    minHeight:32,
-                    boxShadow:isSelected?`0 0 8px ${T.cyan}50`:"none",
-                    transform:isSelected?"scale(1.1)":"scale(1)",
-                    transition:"all 0.1s",
-                    position:"relative",
-                    zIndex:isSelected?10:1
-                  }}
-                >
-                  {p.num}
-                </div>
-              );
-            })}
-          </div>
-          {putWallData.lastSync && (
-            <div style={{fontSize:9,color:T.textDim,textAlign:"center",marginTop:10,fontFamily:mono}}>
-              Click any mapped position to clear it · {currentData?.activeCount||0} positions remaining on {activeWall === 'WH1' ? 'Wall 1' : 'Wall 2'}
+
+          {/* Stats row */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12,marginBottom:16}}>
+            <div style={{background:T.bg,borderRadius:8,padding:12,border:`1px solid ${T.green}30`,textAlign:"center"}}>
+              <div style={{fontSize:24,fontWeight:800,color:T.green,fontFamily:mono}}>{currentData?.putWallCount||0}</div>
+              <div style={{fontSize:10,color:T.textMuted,fontFamily:mono,marginTop:4}}>PUT WALL</div>
             </div>
-          )}
+            <div style={{background:T.bg,borderRadius:8,padding:12,border:`1px solid ${T.blue}30`,textAlign:"center"}}>
+              <div style={{fontSize:24,fontWeight:800,color:T.blue,fontFamily:mono}}>{currentData?.laptopCount||0}</div>
+              <div style={{fontSize:10,color:T.textMuted,fontFamily:mono,marginTop:4}}>LAPTOP</div>
+            </div>
+            <div style={{background:T.bg,borderRadius:8,padding:12,border:`1px solid ${T.amber}30`,textAlign:"center"}}>
+              <div style={{fontSize:24,fontWeight:800,color:T.amber,fontFamily:mono}}>{currentData?.manualCount||0}</div>
+              <div style={{fontSize:10,color:T.textMuted,fontFamily:mono,marginTop:4}}>MANUAL</div>
+            </div>
+          </div>
+
+          {/* Put Wall orders list */}
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:11,color:T.textMuted,fontFamily:mono,marginBottom:8}}>PUT WALL ORDERS ({putWallOrders.length})</div>
+            <div style={{maxHeight:300,overflowY:"auto"}}>
+              {putWallOrders.length > 0 ? putWallOrders.slice(0,20).map((o,i)=>(
+                <div key={o.orderId} onClick={()=>setSelectedOrder(o)} style={{
+                  display:"flex",justifyContent:"space-between",alignItems:"center",
+                  padding:"8px 10px",background:selectedOrder?.orderId===o.orderId?T.blueDark:T.bg,
+                  borderRadius:6,marginBottom:4,cursor:"pointer",
+                  border:`1px solid ${selectedOrder?.orderId===o.orderId?T.blue:T.border}`
+                }}>
+                  <div>
+                    <div style={{fontSize:12,fontWeight:600,color:T.text,fontFamily:mono}}>{o.reference}</div>
+                    <div style={{fontSize:10,color:T.textDim}}>{o.lineCount} lines · {o.totalQty} qty</div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:11,color:o.pendingQty>0?T.amber:T.green,fontFamily:mono}}>{o.pendingQty} pending</div>
+                  </div>
+                </div>
+              )) : (
+                <div style={{textAlign:"center",padding:24,color:T.textDim,fontSize:12}}>No Put Wall orders in queue</div>
+              )}
+              {putWallOrders.length > 20 && (
+                <div style={{textAlign:"center",padding:8,color:T.textMuted,fontSize:10,fontFamily:mono}}>
+                  +{putWallOrders.length - 20} more orders
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Kardex integration note */}
+          <div style={{padding:"10px 12px",background:`${T.blue}10`,borderRadius:6,border:`1px dashed ${T.blue}40`,marginTop:12}}>
+            <div style={{fontSize:10,color:T.blue,fontFamily:mono,textAlign:"center"}}>
+              Position grid requires Kardex API integration
+            </div>
+          </div>
         </Card>
         <div style={{marginTop:16}}><EventLog events={events}/></div>
       </div>
 
-      {/* Right sidebar - position details */}
+      {/* Right sidebar - order details */}
       <div style={{display:"flex",flexDirection:"column",gap:12}}>
         <Card style={{borderTop:`3px solid ${T.cyan}`}}>
-          <SectionHeader>{selectedPos!==null?`Position ${String(selectedPosData?.num||0).padStart(2,"0")} Details`:"Select a Position"}</SectionHeader>
-          {selectedPosData?(selectedPosData.data?(
+          <SectionHeader>{selectedOrder?`Order ${selectedOrder.reference}`:"Select an Order"}</SectionHeader>
+          {selectedOrder?(
             <div>
-              <div style={{fontSize:11,color:T.green,marginBottom:10,fontFamily:mono}}>● ACTIVE — Has pending orders</div>
+              <div style={{fontSize:11,color:T.green,marginBottom:10,fontFamily:mono}}>● PUT WALL ORDER</div>
               <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:"5px 12px",fontSize:12}}>
-                <span style={{color:T.textDim,fontFamily:mono}}>Position:</span>
-                <span style={{color:T.text,fontWeight:700,fontFamily:mono}}>{selectedPosData.key}</span>
-                <span style={{color:T.textDim,fontFamily:mono}}>Orders:</span>
-                <span style={{color:T.cyan,fontWeight:700,fontFamily:mono}}>{selectedPosData.data.orders?.length||0}</span>
+                <span style={{color:T.textDim,fontFamily:mono}}>Reference:</span>
+                <span style={{color:T.text,fontWeight:700,fontFamily:mono}}>{selectedOrder.reference}</span>
+                <span style={{color:T.textDim,fontFamily:mono}}>Lines:</span>
+                <span style={{color:T.cyan,fontWeight:700,fontFamily:mono}}>{selectedOrder.lineCount}</span>
                 <span style={{color:T.textDim,fontFamily:mono}}>Total Qty:</span>
-                <span style={{color:T.amber,fontWeight:700,fontFamily:mono}}>{selectedPosData.data.totalQty||0}</span>
+                <span style={{color:T.amber,fontWeight:700,fontFamily:mono}}>{selectedOrder.totalQty}</span>
                 <span style={{color:T.textDim,fontFamily:mono}}>Pending:</span>
-                <span style={{color:T.red,fontWeight:700,fontFamily:mono}}>{selectedPosData.data.pendingQty||0}</span>
+                <span style={{color:selectedOrder.pendingQty>0?T.red:T.green,fontWeight:700,fontFamily:mono}}>{selectedOrder.pendingQty}</span>
+                <span style={{color:T.textDim,fontFamily:mono}}>Started:</span>
+                <span style={{color:T.text,fontFamily:mono,fontSize:10}}>{selectedOrder.startedAt?new Date(selectedOrder.startedAt).toLocaleString():'-'}</span>
               </div>
-              {selectedPosData.data.orders && selectedPosData.data.orders.length > 0 && (
-                <div style={{marginTop:12,maxHeight:200,overflowY:"auto"}}>
-                  <div style={{fontSize:10,color:T.textMuted,marginBottom:6,fontFamily:mono}}>ORDER DETAILS</div>
-                  {selectedPosData.data.orders.map((o,i)=>(
-                    <div key={i} style={{padding:"6px 8px",background:T.bg,borderRadius:4,marginBottom:4,fontSize:11}}>
-                      <div style={{color:T.text,fontWeight:600,fontFamily:mono}}>{o.reference||o.orderId}</div>
-                      <div style={{color:T.textMuted,fontSize:10}}>{o.sku} × {o.qty}</div>
-                    </div>
-                  ))}
+              <div style={{marginTop:12,padding:10,background:`${T.amber}10`,borderRadius:6,border:`1px solid ${T.amber}30`}}>
+                <div style={{fontSize:10,color:T.amber,fontFamily:mono,textAlign:"center"}}>
+                  Position assignment requires Kardex
                 </div>
-              )}
-            </div>
-          ):(
-            <div>
-              <div style={{fontSize:11,color:T.textDim,marginBottom:10,fontFamily:mono}}>○ EMPTY — No orders at this position</div>
-              <div style={{fontSize:12,color:T.textDim,textAlign:"center",padding:16}}>
-                This position has no active pick orders from ItemPath.
               </div>
             </div>
-          )):<div style={{fontSize:12,color:T.textDim,textAlign:"center",padding:24}}>Click a position to view details</div>}
+          ):<div style={{fontSize:12,color:T.textDim,textAlign:"center",padding:24}}>Click an order to view details</div>}
         </Card>
 
         <Card>
           <SectionHeader>Warehouse Summary</SectionHeader>
           {['WH1','WH2'].map(wh=>{
             const data = wh === 'WH1' ? putWallData.WH1 : putWallData.WH2;
-            const active = data?.activeCount || 0;
+            const total = data?.totalOrders || 0;
+            const putWallPct = total > 0 ? ((data?.putWallCount || 0) / total) * 100 : 0;
             return(
-              <div key={wh} style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                <span style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{wh === 'WH1' ? 'Wall 1' : 'Wall 2'}</span>
-                <div style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:100,height:5,background:T.bg,borderRadius:2,overflow:"hidden"}}>
-                    <div style={{height:"100%",width:`${(active/75)*100}%`,background:T.green,borderRadius:2}}/>
-                  </div>
-                  <span style={{fontSize:11,color:T.text,fontFamily:mono,width:30,textAlign:"right"}}>{active}/75</span>
+              <div key={wh} style={{marginBottom:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                  <span style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{wh === 'WH1' ? 'Wall 1' : 'Wall 2'}</span>
+                  <span style={{fontSize:14,fontWeight:700,color:T.text,fontFamily:mono}}>{total}</span>
+                </div>
+                <div style={{display:"flex",gap:4}}>
+                  <div style={{flex:data?.putWallCount||1,height:6,background:T.green,borderRadius:2}} title={`Put Wall: ${data?.putWallCount||0}`}/>
+                  <div style={{flex:data?.laptopCount||0,height:6,background:T.blue,borderRadius:2}} title={`Laptop: ${data?.laptopCount||0}`}/>
+                  <div style={{flex:data?.manualCount||0,height:6,background:T.amber,borderRadius:2}} title={`Manual: ${data?.manualCount||0}`}/>
                 </div>
               </div>
             );
           })}
+          <div style={{display:"flex",gap:12,marginTop:8,justifyContent:"center"}}>
+            <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,background:T.green,borderRadius:2}}/><span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Put Wall</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,background:T.blue,borderRadius:2}}/><span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Laptop</span></div>
+            <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,background:T.amber,borderRadius:2}}/><span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Manual</span></div>
+          </div>
         </Card>
 
         {putWallData.lastSync && (

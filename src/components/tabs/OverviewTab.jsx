@@ -1090,57 +1090,46 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         });
         const atKardexCount = atKardexJobs.length;
 
-        // Build position lookup for each warehouse
-        const wh1Lookup = {};
-        const wh2Lookup = {};
-        (putWallData.WH1?.positions || []).forEach(p => { wh1Lookup[p.position] = p; });
-        (putWallData.WH2?.positions || []).forEach(p => { wh2Lookup[p.position] = p; });
+        // Get order counts by category from ItemPath
+        const wh1 = putWallData.WH1 || {};
+        const wh2 = putWallData.WH2 || {};
 
-        // Generate 75 positions grid (15 cols x 5 rows)
-        const renderWallGrid = (whName, lookup, activeCount) => {
-          const positions = Array.from({ length: 75 }, (_, i) => {
-            const posNum = i + 1;
-            const posKey = `P${String(posNum).padStart(2, '0')}`;
-            const posData = lookup[posKey] || lookup[String(posNum)] || lookup[posNum] || null;
-            return { num: posNum, key: posKey, data: posData };
-          });
+        // Render warehouse stats card
+        const renderWarehouseStats = (whName, whData) => {
+          const putWallCount = whData.putWallCount || 0;
+          const laptopCount = whData.laptopCount || 0;
+          const manualCount = whData.manualCount || 0;
+          const total = whData.totalOrders || 0;
 
           return (
-            <div style={{ flex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, fontFamily: mono, letterSpacing: 1 }}>{whName}</span>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <span style={{ fontSize: 10, color: T.green, fontFamily: mono }}>{activeCount} active</span>
-                </div>
+            <div style={{ flex: 1, background: T.surface, borderRadius: 8, padding: 12, border: `1px solid ${T.border}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: mono }}>{whName}</span>
+                <span style={{ fontSize: 18, fontWeight: 800, color: T.green, fontFamily: mono }}>{total}</span>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(15, 1fr)', gap: 2 }}>
-                {positions.map(p => {
-                  const hasOrder = !!p.data;
-                  const bg = hasOrder ? T.greenDark : T.bg;
-                  const border = hasOrder ? T.green : T.border;
-                  return (
-                    <div
-                      key={p.num}
-                      title={hasOrder ? `${p.key}: ${p.data.totalOrders || 1} order(s), ${p.data.pendingQty || 0} pending` : `${p.key}: Empty`}
-                      style={{
-                        background: bg,
-                        border: `1px solid ${border}`,
-                        borderRadius: 3,
-                        aspectRatio: '1',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        fontSize: 8,
-                        color: hasOrder ? T.green : T.textDim,
-                        fontFamily: mono,
-                        cursor: 'default',
-                        minHeight: 20,
-                      }}
-                    >
-                      {p.num}
-                    </div>
-                  );
-                })}
+              {/* Order breakdown by type */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 8, height: 8, background: T.green, borderRadius: 2 }} />
+                    <span style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Put Wall</span>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: putWallCount > 0 ? T.green : T.textDim, fontFamily: mono }}>{putWallCount}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 8, height: 8, background: T.blue, borderRadius: 2 }} />
+                    <span style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Laptop</span>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: laptopCount > 0 ? T.blue : T.textDim, fontFamily: mono }}>{laptopCount}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 8, height: 8, background: T.amber, borderRadius: 2 }} />
+                    <span style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Manual</span>
+                  </div>
+                  <span style={{ fontSize: 14, fontWeight: 700, color: manualCount > 0 ? T.amber : T.textDim, fontFamily: mono }}>{manualCount}</span>
+                </div>
               </div>
             </div>
           );
@@ -1157,24 +1146,19 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
               <div style={{ fontSize: 22, fontWeight: 800, color: atKardexCount > 0 ? T.amber : T.textDim, fontFamily: mono }}>{atKardexCount}</div>
             </div>
             {/* Both warehouses side by side */}
-            <div style={{ display: 'flex', gap: 16 }}>
-              {renderWallGrid('WALL 1 (WH1)', wh1Lookup, putWallData.WH1?.activeCount || 0)}
-              {renderWallGrid('WALL 2 (WH2)', wh2Lookup, putWallData.WH2?.activeCount || 0)}
+            <div style={{ display: 'flex', gap: 12 }}>
+              {renderWarehouseStats('WH1', wh1)}
+              {renderWarehouseStats('WH2', wh2)}
             </div>
-            {/* Legend */}
-            <div style={{ display: 'flex', gap: 16, marginTop: 10, justifyContent: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <div style={{ width: 10, height: 10, background: T.greenDark, border: `1px solid ${T.green}`, borderRadius: 2 }} />
-                <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Active</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                <div style={{ width: 10, height: 10, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 2 }} />
-                <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Empty</span>
+            {/* Position grid note */}
+            <div style={{ marginTop: 12, padding: '8px 10px', background: `${T.blue}10`, borderRadius: 6, border: `1px dashed ${T.blue}40` }}>
+              <div style={{ fontSize: 10, color: T.blue, fontFamily: mono, textAlign: 'center' }}>
+                Position grid requires Kardex API integration
               </div>
             </div>
             {putWallData.lastSync && (
-              <div style={{ fontSize: 9, color: T.textDim, textAlign: 'center', marginTop: 6, fontFamily: mono }}>
-                Last sync: {new Date(putWallData.lastSync).toLocaleTimeString()}
+              <div style={{ fontSize: 9, color: T.textDim, textAlign: 'center', marginTop: 8, fontFamily: mono }}>
+                ItemPath sync: {new Date(putWallData.lastSync).toLocaleTimeString()}
               </div>
             )}
           </div>

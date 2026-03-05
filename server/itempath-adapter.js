@@ -377,6 +377,7 @@ async function poll() {
     // Filter orders by "In Process" status (active picks)
     const allOrders   = (ordersResp.orders || ordersResp.data || ordersResp || []);
     const activeOrders = allOrders.filter(o => o.status === 'In Process');
+
     const activePicks = activeOrders.map(normalizeOrder);
 
     const recentTx    = (txResp.transactions || txResp.data || txResp || []).map(normalizeTransaction);
@@ -630,63 +631,72 @@ function getAlerts() {
 }
 
 /**
- * Put Wall status - aggregates active picks by destination position
- * Returns positions by warehouse (WH1: 75 positions, WH2: 75 positions)
+ * Put Wall status - categorizes active picks by destination type
+ * ItemPath doesn't provide Put Wall position assignments (that comes from Kardex)
+ * but we can categorize orders by destination type:
+ *   - Put Wall: stationName is null (routed to Put Wall for automated dispensing)
+ *   - Laptop: stationName contains "LAPTOP" (manual pick via laptop)
+ *   - Manual: other non-null stationName values
  */
 function getPutWall() {
-  // Group by warehouse and then by put wall position
-  const byWarehouse = { WH1: {}, WH2: {}, Unknown: {} };
+  // Categorize orders by warehouse and destination type
+  const stats = {
+    WH1: { putWall: [], laptop: [], manual: [], total: 0 },
+    WH2: { putWall: [], laptop: [], manual: [], total: 0 },
+  };
 
   for (const pick of cache.activePicks) {
     const wh = pick.warehouse || 'Unknown';
-    if (!byWarehouse[wh]) byWarehouse[wh] = {};
+    if (!stats[wh]) continue;  // Only track WH1 and WH2
 
-    for (const line of pick.lines) {
-      // putLocation or putBinName contains the position (e.g., "P01", "P23")
-      const position = line.putLocation || line.putBinName || null;
-      if (position) {
-        if (!byWarehouse[wh][position]) {
-          byWarehouse[wh][position] = {
-            position,
-            orders: [],
-            totalQty: 0,
-            pendingQty: 0,
-          };
-        }
-        byWarehouse[wh][position].orders.push({
-          orderId: pick.orderId,
-          reference: pick.reference,
-          sku: line.sku,
-          name: line.name,
-          qty: line.qty,
-          pending: line.pending,
-          status: pick.status,
-        });
-        byWarehouse[wh][position].totalQty += line.qty;
-        byWarehouse[wh][position].pendingQty += line.pending;
-      }
+    const station = pick.station || '';
+    const orderSummary = {
+      orderId: pick.orderId,
+      reference: pick.reference,
+      station: pick.station,
+      lineCount: pick.lines.length,
+      totalQty: pick.lines.reduce((sum, l) => sum + l.qty, 0),
+      pendingQty: pick.lines.reduce((sum, l) => sum + l.pending, 0),
+      startedAt: pick.startedAt,
+    };
+
+    stats[wh].total++;
+
+    if (!station || station === '') {
+      // No station = Put Wall destination (automated Kardex dispensing)
+      stats[wh].putWall.push(orderSummary);
+    } else if (station.toUpperCase().includes('LAPTOP')) {
+      // Laptop pick station
+      stats[wh].laptop.push(orderSummary);
+    } else {
+      // Other manual station
+      stats[wh].manual.push(orderSummary);
     }
   }
 
-  // Convert to arrays sorted by position
-  const wh1Positions = Object.values(byWarehouse.WH1).sort((a, b) =>
-    (a.position || '').localeCompare(b.position || ''));
-  const wh2Positions = Object.values(byWarehouse.WH2).sort((a, b) =>
-    (a.position || '').localeCompare(b.position || ''));
-
   return {
     WH1: {
-      positions: wh1Positions,
-      activeCount: wh1Positions.length,
-      totalOrders: wh1Positions.reduce((sum, p) => sum + p.orders.length, 0),
+      putWallCount: stats.WH1.putWall.length,
+      laptopCount: stats.WH1.laptop.length,
+      manualCount: stats.WH1.manual.length,
+      totalOrders: stats.WH1.total,
+      putWallOrders: stats.WH1.putWall,
+      // Position data not available from ItemPath - requires Kardex integration
+      positions: [],
+      positionsAvailable: false,
     },
     WH2: {
-      positions: wh2Positions,
-      activeCount: wh2Positions.length,
-      totalOrders: wh2Positions.reduce((sum, p) => sum + p.orders.length, 0),
+      putWallCount: stats.WH2.putWall.length,
+      laptopCount: stats.WH2.laptop.length,
+      manualCount: stats.WH2.manual.length,
+      totalOrders: stats.WH2.total,
+      putWallOrders: stats.WH2.putWall,
+      positions: [],
+      positionsAvailable: false,
     },
     lastSync: cache.lastSync,
     status: cache.syncStatus,
+    note: 'Put Wall position assignments require Kardex integration',
   };
 }
 
