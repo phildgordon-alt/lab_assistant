@@ -1574,27 +1574,33 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           + ADD CARD
         </button>
       </div>
-      <div style={{display:"flex",flexWrap:"wrap",gap:20}}>
-        {cards.map(card=>{
+      <div style={{display:"flex",flexWrap:"wrap",gap:16,alignItems:"stretch"}}>
+        {cards.map((card,idx)=>{
           const isHalf = card.config?.size === 'half';
+          // Check if previous or next card is also half-width for pairing hint
+          const prevHalf = idx > 0 && cards[idx-1].config?.size === 'half';
+          const nextHalf = idx < cards.length-1 && cards[idx+1].config?.size === 'half';
+          const isPaired = isHalf && (prevHalf || nextHalf);
           return (
             <div key={card.id} draggable
               onDragStart={()=>handleDragStart(card.id)}
               onDragOver={e=>{e.preventDefault();handleDragOver(card.id);}}
               onDrop={()=>handleDrop(card.id)}
               style={{
-                width: isHalf ? 'calc(50% - 10px)' : '100%',
-                minWidth: isHalf ? 320 : 'auto',
+                flex: isHalf ? '0 0 calc(50% - 8px)' : '0 0 100%',
+                maxWidth: isHalf ? 'calc(50% - 8px)' : '100%',
+                minWidth: isHalf ? 300 : 'auto',
+                boxSizing: 'border-box',
                 opacity:drag.dragging===card.id?0.4:1,
                 outline:drag.over===card.id&&drag.dragging!==card.id?`2px dashed ${T.blue}`:"none",
                 borderRadius:14,
-                transition:"opacity 0.15s, width 0.2s"
+                transition:"opacity 0.15s"
               }}>
               <Card style={{borderTop:`3px solid ${T.border}`,height:'100%'}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,cursor:"grab",userSelect:"none"}}>
                   <span style={{color:T.textDim,fontSize:16}}>⠿</span>
                   <span style={{flex:1,fontSize:11,fontWeight:700,color:T.dim,fontFamily:mono,letterSpacing:1,textTransform:"uppercase"}}>{card.title}</span>
-                  {isHalf && <span style={{fontSize:9,color:T.blue,fontFamily:mono,padding:"2px 6px",background:`${T.blue}20`,borderRadius:4}}>½</span>}
+                  {isHalf && <span title={isPaired ? "Paired with adjacent half-width card" : "Drag another ½ card adjacent to pair"} style={{fontSize:9,color:isPaired?T.green:T.amber,fontFamily:mono,padding:"2px 6px",background:isPaired?`${T.green}20`:`${T.amber}20`,borderRadius:4,cursor:"help"}}>½{!isPaired && ' ↔'}</span>}
                   <div style={{position:"relative"}}>
                     <button onClick={e=>{e.stopPropagation();setCardMenu(cardMenu===card.id?null:card.id);}}
                       style={{background:"transparent",border:"none",color:T.textDim,cursor:"pointer",fontSize:18,lineHeight:1,padding:"0 4px"}}
