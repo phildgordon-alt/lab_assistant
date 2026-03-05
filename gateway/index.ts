@@ -3,7 +3,10 @@
  * Main Express server that mounts all source handlers
  */
 
+console.log('[DEBUG] Gateway starting - loading imports...');
+
 import 'dotenv/config';
+console.log('[DEBUG] dotenv loaded');
 import express, { Request, Response } from 'express';
 import cors from 'cors';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'fs';
@@ -20,12 +23,16 @@ import { initWebRouter } from './sources/web.js';
 import { getAgentPromptInfo } from './agents/runner.js';
 import { getAllToolDefinitions, getAllAgentConfigs, handleToolCall } from './mcp/server.js';
 
+console.log('[DEBUG] All imports loaded');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PROMPTS_DIR = join(__dirname, 'agents', 'prompts');
 
+console.log('[DEBUG] Creating express app...');
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
+console.log('[DEBUG] Express app created, PORT=', PORT);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Middleware
@@ -87,16 +94,11 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
   // 1. Gateway (always connected if you can call this)
   connections.gateway = { status: 'connected', message: 'Running', latency: 0 };
 
-  // 2. Database
+  // 2. Database (SQLite)
   const dbOk = await dbHealthCheck();
-  const dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) {
-    connections.database = { status: 'mock', message: 'Running in mock mode (no DATABASE_URL)' };
-  } else {
-    connections.database = dbOk
-      ? { status: 'connected', message: 'PostgreSQL connected' }
-      : { status: 'disconnected', message: 'Failed to connect to PostgreSQL' };
-  }
+  connections.database = dbOk
+    ? { status: 'connected', message: 'SQLite connected (data/gateway.db)' }
+    : { status: 'disconnected', message: 'Failed to connect to SQLite' };
 
   // 3. Lab Backend (port 3002)
   const labUrl = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:3002';
@@ -419,6 +421,73 @@ app.get('/gateway/mcp/agents', (_req: Request, res: Response) => {
   } catch (error) {
     res.status(500).json({ error: 'Failed to get agent configs', message: String(error) });
   }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom Tools Management
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CUSTOM_TOOLS_FILE = join(__dirname, 'mcp', 'custom-tools.json');
+
+function loadCustomTools(): any[] {
+  if (existsSync(CUSTOM_TOOLS_FILE)) {
+    try {
+      return JSON.parse(readFileSync(CUSTOM_TOOLS_FILE, 'utf-8'));
+    } catch { return []; }
+  }
+  return [];
+}
+
+function saveCustomTools(tools: any[]): void {
+  writeFileSync(CUSTOM_TOOLS_FILE, JSON.stringify(tools, null, 2));
+}
+
+// Get custom tools
+app.get('/gateway/tools/custom', (_req: Request, res: Response) => {
+  const tools = loadCustomTools();
+  res.json({ tools, count: tools.length });
+});
+
+// Add custom tool
+app.post('/gateway/tools/custom', (req: Request, res: Response) => {
+  const { name, description, category, input_schema } = req.body;
+  if (!name || !description) {
+    return res.status(400).json({ error: 'Name and description are required' });
+  }
+
+  const tools = loadCustomTools();
+  const existing = tools.findIndex(t => t.name === name);
+
+  const newTool = {
+    name,
+    description,
+    category: category || 'custom',
+    input_schema: input_schema || { type: 'object', properties: {} },
+    custom: true,
+    created_at: new Date().toISOString(),
+  };
+
+  if (existing >= 0) {
+    tools[existing] = { ...tools[existing], ...newTool, updated_at: new Date().toISOString() };
+  } else {
+    tools.push(newTool);
+  }
+
+  saveCustomTools(tools);
+  res.json({ success: true, tool: newTool });
+});
+
+// Delete custom tool
+app.delete('/gateway/tools/custom/:name', (req: Request, res: Response) => {
+  const tools = loadCustomTools();
+  const filtered = tools.filter(t => t.name !== req.params.name);
+
+  if (filtered.length === tools.length) {
+    return res.status(404).json({ error: 'Tool not found' });
+  }
+
+  saveCustomTools(filtered);
+  res.json({ success: true });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2721,7 +2790,7 @@ app.get('/api/dvi/live/context', async (_req: Request, res: Response) => {
 // Get order detail by order number (includes current station)
 app.get('/api/dvi/live/order/:orderNumber', async (req: Request, res: Response) => {
   try {
-    const detail = await dviSoap.getOrderDetail(req.params.orderNumber);
+    const detail = await dviSoap.getOrderDetail(req.params.orderNumber as string);
     res.json({ mock: false, detail });
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to fetch';
@@ -2796,16 +2865,23 @@ app.get('/gateway/stats/detailed', async (req: Request, res: Response) => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // REST API endpoints
+console.log('[DEBUG] Mounting REST router...');
 app.use('/api', initRestRouter());
+console.log('[DEBUG] REST router mounted');
 
 // Web SSE endpoints
+console.log('[DEBUG] Mounting Web router...');
 app.use('/web', initWebRouter());
+console.log('[DEBUG] Web router mounted');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Startup
 // ─────────────────────────────────────────────────────────────────────────────
 
+console.log('[DEBUG] About to define start function...');
+
 async function start(): Promise<void> {
+  console.log('[DEBUG] Inside start function...');
   log.info('Starting Lab Assistant Agentic Gateway...');
 
   // Initialize circuit breaker (non-blocking - don't wait for DB)
@@ -2861,7 +2937,9 @@ async function start(): Promise<void> {
   });
 }
 
+console.log('[DEBUG] Calling start()...');
 start().catch((error) => {
+  console.error('[DEBUG] start() failed:', error);
   log.error('Failed to start gateway:', error);
   process.exit(1);
 });

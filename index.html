@@ -7,7 +7,7 @@
     <style>
       * { box-sizing: border-box; margin: 0; padding: 0; }
       body { background: #070A0F; }
-      /* Loading state - shown while React loads/reloads */
+      /* Loading state - only shows after 500ms delay to avoid flashing on quick reloads */
       #root:empty {
         display: flex;
         align-items: center;
@@ -22,10 +22,14 @@
         border: 3px solid #1a1f2e;
         border-top-color: #3b82f6;
         border-radius: 50%;
-        animation: spin 0.8s linear infinite;
+        animation: spin 0.8s linear infinite, fadeIn 0.5s ease-out 0.5s both;
+        opacity: 0;
       }
       @keyframes spin {
         to { transform: rotate(360deg); }
+      }
+      @keyframes fadeIn {
+        to { opacity: 1; }
       }
     </style>
   </head>

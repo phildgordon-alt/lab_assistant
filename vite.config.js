@@ -4,9 +4,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [
     react({
-      // Disable Fast Refresh boundary checks - keeps content visible during updates
       fastRefresh: true,
-      // Don't require consistent exports for refresh
       include: '**/*.{jsx,tsx}',
     })
   ],
@@ -17,11 +15,22 @@ export default defineConfig({
     },
     hmr: {
       overlay: true,
-      // Don't reload on error - keep showing current content
-      protocol: 'ws',
+      // Prevent full page reloads - show overlay instead
+      timeout: 60000,
     },
     watch: {
-      ignored: ['**/node_modules/**', '**/.git/**']
+      ignored: [
+        '**/node_modules/**',
+        '**/.git/**',
+        '**/vite.config.js',
+        '**/vite.config.ts',
+        '**/.env',
+        '**/.env.*',
+        '**/package.json',
+        '**/package-lock.json',
+        '**/tsconfig.json',
+      ],
+      usePolling: false,
     }
   },
   build: {
@@ -29,5 +38,9 @@ export default defineConfig({
   },
   optimizeDeps: {
     holdUntilCrawlEnd: true
+  },
+  // Experimental: Don't invalidate on circular deps
+  experimental: {
+    hmrPartialAccept: true
   }
 })

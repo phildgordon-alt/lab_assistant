@@ -131,12 +131,14 @@ export const MCP_TOOLS = ALL_TOOLS;
 
 /**
  * Get all tool definitions with metadata for UI
+ * Includes both built-in and custom tools
  */
 export function getAllToolDefinitions(): Array<{
   name: string;
   description: string;
   category: string;
   inputSchema: any;
+  custom?: boolean;
 }> {
   const categories: Record<string, string[]> = {
     'WIP & Jobs': ['get_wip_snapshot', 'get_wip_jobs', 'get_job_detail'],
@@ -155,12 +157,30 @@ export function getAllToolDefinitions(): Array<{
     for (const t of tools) categoryMap[t] = cat;
   }
 
-  return ALL_TOOLS.map(tool => ({
+  const builtInTools = ALL_TOOLS.map(tool => ({
     name: tool.name,
     description: tool.description,
     category: categoryMap[tool.name] || 'Other',
     inputSchema: tool.input_schema,
+    custom: false,
   }));
+
+  // Load custom tools from file
+  const customToolsFile = join(__dirname, 'custom-tools.json');
+  let customTools: any[] = [];
+  if (existsSync(customToolsFile)) {
+    try {
+      customTools = JSON.parse(readFileSync(customToolsFile, 'utf-8')).map((t: any) => ({
+        name: t.name,
+        description: t.description,
+        category: t.category || 'Custom',
+        inputSchema: t.input_schema,
+        custom: true,
+      }));
+    } catch { /* ignore */ }
+  }
+
+  return [...builtInTools, ...customTools];
 }
 
 /**

@@ -1,7 +1,12 @@
 /**
  * MCP Agent Configurations
  * Each department agent gets a scoped tool set + system prompt
+ * Prompts are loaded from MD files in gateway/agents/prompts/
  */
+
+import { readFileSync, existsSync, readdirSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 
 import {
   get_wip_snapshot,
@@ -29,6 +34,7 @@ import {
   ALL_TOOLS,
 } from '../tools/definitions.js';
 
+// Fallback prompts for agents without MD files
 import {
   SURFACE_AGENT_PROMPT,
   COATING_AGENT_PROMPT,
@@ -43,6 +49,42 @@ import {
   SHIFT_REPORT_AGENT_PROMPT,
   PICKING_AGENT_PROMPT,
 } from '../prompts.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROMPTS_DIR = join(__dirname, '..', '..', 'agents', 'prompts');
+
+// Cache for loaded MD prompts
+const promptCache: Map<string, { content: string; loadedAt: number }> = new Map();
+const CACHE_TTL = 60_000; // 1 minute
+
+/**
+ * Load agent prompt from MD file if it exists, otherwise use fallback
+ */
+function loadAgentPrompt(agentName: string, fallbackPrompt: string): string {
+  const cached = promptCache.get(agentName);
+  if (cached && Date.now() - cached.loadedAt < CACHE_TTL) {
+    return cached.content;
+  }
+
+  const mdFile = join(PROMPTS_DIR, `${agentName}.md`);
+  if (existsSync(mdFile)) {
+    const content = readFileSync(mdFile, 'utf-8');
+    promptCache.set(agentName, { content, loadedAt: Date.now() });
+    return content;
+  }
+
+  return fallbackPrompt;
+}
+
+/**
+ * Get all available MD prompt files
+ */
+export function getAvailableMDPrompts(): string[] {
+  if (!existsSync(PROMPTS_DIR)) return [];
+  return readdirSync(PROMPTS_DIR)
+    .filter(f => f.endsWith('.md'))
+    .map(f => f.replace('.md', ''));
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent Configuration Type
@@ -331,17 +373,47 @@ export const AGENT_REGISTRY: Record<string, AgentConfig> = {
 
 /**
  * Get agent configuration by name
+ * Returns registry config if exists, otherwise creates dynamic config from MD file
  */
 export function getAgentConfig(agentName: string): AgentConfig {
   const normalized = agentName.toLowerCase().replace(/agent$/i, '');
-  return AGENT_REGISTRY[normalized] || AGENT_REGISTRY.default;
+
+  // Check registry first
+  if (AGENT_REGISTRY[normalized]) {
+    return AGENT_REGISTRY[normalized];
+  }
+
+  // Check for MD file-only agent
+  const mdAgents = getAvailableMDPrompts();
+  const mdMatch = mdAgents.find(name =>
+    name.toLowerCase().replace(/agent$/i, '') === normalized
+  );
+
+  if (mdMatch) {
+    // Create dynamic config for MD-only agent
+    const mdFile = join(PROMPTS_DIR, `${mdMatch}.md`);
+    const content = existsSync(mdFile) ? readFileSync(mdFile, 'utf-8') : '';
+    return {
+      name: mdMatch,
+      description: `${mdMatch} - loaded from ${mdMatch}.md`,
+      systemPrompt: content,
+      tools: ALL_TOOLS, // MD-only agents get all tools
+    };
+  }
+
+  return AGENT_REGISTRY.default;
 }
 
 /**
  * Get all available agent names
+ * Merges registry agents with agents that only have MD prompt files
  */
 export function getAvailableAgents(): string[] {
-  return Object.keys(AGENT_REGISTRY).filter(k => k !== 'default');
+  const registryAgents = Object.keys(AGENT_REGISTRY).filter(k => k !== 'default');
+  const mdAgents = getAvailableMDPrompts()
+    .map(name => name.replace(/Agent$/, '').toLowerCase())
+    .filter(name => !registryAgents.includes(name));
+  return [...registryAgents, ...mdAgents];
 }
 
 /**
@@ -354,10 +426,12 @@ export function getAgentTools(agentName: string): any[] {
 
 /**
  * Get system prompt for a specific agent
+ * First checks for MD file in gateway/agents/prompts/, then falls back to inline prompt
  */
 export function getAgentSystemPrompt(agentName: string): string {
   const config = getAgentConfig(agentName);
-  return config.systemPrompt;
+  // Try to load from MD file first (e.g., CoatingAgent.md)
+  return loadAgentPrompt(config.name, config.systemPrompt);
 }
 
 /**
