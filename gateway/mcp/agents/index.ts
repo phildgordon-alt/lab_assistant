@@ -173,9 +173,9 @@ export const OFFICE_AGENT: AgentConfig = {
   },
 };
 
-export const EDGE_AGENT: AgentConfig = {
-  name: 'EdgingAgent',
-  description: 'Edging/Cutting department: lens cutting, frame mounting prep',
+export const CUTTING_AGENT: AgentConfig = {
+  name: 'CuttingAgent',
+  description: 'Cutting/Edging department: lens cutting, edging, frame mounting prep',
   department: 'E',
   systemPrompt: EDGE_AGENT_PROMPT,
   tools: [
@@ -195,6 +195,9 @@ export const EDGE_AGENT: AgentConfig = {
     department: 'E',
   },
 };
+
+// Alias for backward compatibility
+export const EDGE_AGENT = CUTTING_AGENT;
 
 export const ASSEMBLY_AGENT: AgentConfig = {
   name: 'AssemblyAgent',
@@ -344,20 +347,63 @@ export const PICKING_AGENT: AgentConfig = {
   defaultFilters: {},
 };
 
+export const CODING_AGENT: AgentConfig = {
+  name: 'CodingAgent',
+  description: 'Lens marking/coding: laser engraving, data matrix codes, traceability',
+  department: undefined,
+  systemPrompt: '', // Loaded from CodingAgent.md
+  tools: [
+    get_wip_snapshot,
+    get_wip_jobs,
+    get_job_detail,
+    get_aging_report,
+    get_breakage_summary,
+    get_breakage_events,
+    get_maintenance_summary,
+    get_settings,
+    call_api,
+    think_aloud,
+  ],
+  defaultFilters: {},
+};
+
+export const SHIPPING_AGENT: AgentConfig = {
+  name: 'ShippingAgent',
+  description: 'Shipping department: final pack, carrier selection, tracking',
+  department: undefined,
+  systemPrompt: '', // Loaded from ShippingAgent.md
+  tools: [
+    get_wip_snapshot,
+    get_wip_jobs,
+    get_job_detail,
+    get_aging_report,
+    get_throughput_trend,
+    get_settings,
+    call_api,
+    think_aloud,
+  ],
+  defaultFilters: {},
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const AGENT_REGISTRY: Record<string, AgentConfig> = {
-  // Department agents
+  // Department agents (production flow order)
   surface: SURFACE_AGENT,
   surfacing: SURFACE_AGENT,
+  cutting: CUTTING_AGENT,
+  edge: CUTTING_AGENT,      // alias
+  edging: CUTTING_AGENT,    // alias
+  coding: CODING_AGENT,     // laser marking
   coating: COATING_AGENT,
-  office: OFFICE_AGENT,
-  edge: EDGE_AGENT,
-  edging: EDGE_AGENT,
   assembly: ASSEMBLY_AGENT,
   qc: QC_AGENT,
+  shipping: SHIPPING_AGENT,
+  // Office/support agents
+  office: OFFICE_AGENT,
+  picking: PICKING_AGENT,
   // Cross-department agents
   director: DIRECTOR_AGENT,
   lab: LAB_AGENT,
@@ -366,7 +412,6 @@ export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   maintenance: MAINTENANCE_AGENT,
   shiftreport: SHIFT_REPORT_AGENT,
   shift: SHIFT_REPORT_AGENT,
-  picking: PICKING_AGENT,
   // Default fallback
   default: LAB_AGENT,
 };
@@ -405,15 +450,29 @@ export function getAgentConfig(agentName: string): AgentConfig {
 }
 
 /**
- * Get all available agent names
- * Merges registry agents with agents that only have MD prompt files
+ * Get all available agent names (deduplicated)
+ * Returns unique agent names by config.name, merging registry and MD-only agents
  */
 export function getAvailableAgents(): string[] {
-  const registryAgents = Object.keys(AGENT_REGISTRY).filter(k => k !== 'default');
+  // Get unique agent names from registry (not aliases)
+  const seenNames = new Set<string>();
+  const uniqueKeys: string[] = [];
+
+  for (const key of Object.keys(AGENT_REGISTRY)) {
+    if (key === 'default') continue;
+    const config = AGENT_REGISTRY[key];
+    if (!seenNames.has(config.name)) {
+      seenNames.add(config.name);
+      uniqueKeys.push(key);
+    }
+  }
+
+  // Add MD-only agents not already in registry (case-insensitive check)
+  const seenNamesLower = new Set([...seenNames].map(n => n.toLowerCase()));
   const mdAgents = getAvailableMDPrompts()
     .map(name => name.replace(/Agent$/, '').toLowerCase())
-    .filter(name => !registryAgents.includes(name));
-  return [...registryAgents, ...mdAgents];
+    .filter(name => !seenNamesLower.has(name + 'agent') && !uniqueKeys.includes(name));
+  return [...uniqueKeys, ...mdAgents];
 }
 
 /**

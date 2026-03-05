@@ -35,8 +35,14 @@ export async function initSlack(): Promise<App | null> {
   }
 
   try {
-    // Dynamically import @slack/bolt to prevent blocking on module load
-    const { App, LogLevel } = await import('@slack/bolt');
+    log.debug('[Slack] Loading @slack/bolt module...');
+    // Dynamically import @slack/bolt with timeout to prevent blocking
+    const importPromise = import('@slack/bolt');
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Slack module import timeout (10s)')), 10000)
+    );
+    const { App, LogLevel } = await Promise.race([importPromise, timeoutPromise]);
+    log.debug('[Slack] Module loaded, creating App instance...');
 
     slackApp = new App({
       token,
@@ -45,6 +51,7 @@ export async function initSlack(): Promise<App | null> {
       socketMode: !!appToken,
       logLevel: LogLevel.WARN,
     });
+    log.debug('[Slack] App instance created');
 
     // Register handlers
     registerSlashCommand(slackApp);
@@ -245,12 +252,17 @@ function formatSlackResponse(result: AgentResponse | SlackResponse): SlackRespon
 }
 
 /**
- * Start Slack app (for Socket Mode)
+ * Start Slack app (for Socket Mode) with timeout
  */
 export async function startSlack(): Promise<void> {
   if (slackApp && process.env.SLACK_APP_TOKEN) {
     try {
-      await slackApp.start();
+      // Add timeout to prevent hanging if Socket Mode can't connect
+      const startPromise = slackApp.start();
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Slack Socket Mode connection timeout (30s)')), 30000)
+      );
+      await Promise.race([startPromise, timeoutPromise]);
       log.info('Slack Socket Mode connected');
     } catch (error) {
       log.error('Slack Socket Mode failed to start:', error);

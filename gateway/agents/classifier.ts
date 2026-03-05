@@ -2,15 +2,27 @@
  * Intent Classifier
  * Maps user questions to the appropriate agent
  *
- * Department Agents (scoped tools):
+ * Production Flow Agents (scoped tools):
  * - SurfacingAgent: Dept S - lens generation, freeform cutting
+ * - CuttingAgent: Dept E - lens cutting/edging to frame shape
+ * - CodingAgent: Laser marking, data matrix codes, traceability
  * - CoatingAgent: Dept C - AR, blue cut, hard coat, queue management
- * - EdgingAgent: Dept E - lens cutting to frame shape
  * - AssemblyAgent: Dept A - 8 assembly stations
  * - QCAgent: Dept Q - inspection, pass rates
+ * - ShippingAgent: Final pack, carrier selection, tracking
+ *
+ * Support Agents:
  * - OfficeAgent: Dept O - order entry, remakes, data issues
+ * - PickingAgent: Kardex, put wall, lens blanks
+ *
+ * Cross-department:
  * - DirectorAgent: Cross-department reports, bottleneck identification
  * - LabAgent: General fallback, all tools
+ *
+ * Specialized:
+ * - DevOpsAgent: API connections, gateway config
+ * - MaintenanceAgent: Equipment, work orders, Limble
+ * - ShiftReportAgent: Shift summaries, KPIs
  */
 
 // Keyword-based classification (v1)
@@ -31,7 +43,7 @@ const AGENT_KEYWORDS: Record<string, string[]> = {
     'batch', 'oven', 'cure', 'curing', 'rack', 'coating queue', 'wait time',
     'dept c', 'department c',
   ],
-  EdgingAgent: [
+  CuttingAgent: [
     'cutting', 'edging', 'single vision', 'sv', 'edger', 'lens cut',
     'edge', 'cut', 'shape', 'frame shape', 'dept e', 'department e',
   ],
@@ -92,6 +104,11 @@ const AGENT_KEYWORDS: Record<string, string[]> = {
     'morning', 'evening', 'handoff', 'status', 'overview', 'kpi',
     'throughput', 'performance', 'today', 'yesterday', 'week',
   ],
+  ShippingAgent: [
+    'shipping', 'ship', 'shipped', 'carrier', 'ups', 'fedex', 'usps',
+    'tracking', 'pack', 'packing', 'label', 'manifest', 'cutoff',
+    'delivery', 'outbound',
+  ],
 };
 
 // Default agent when no match is found - LabAgent can answer ANY lab question
@@ -99,20 +116,22 @@ const DEFAULT_AGENT = 'LabAgent';
 
 // Map classifier agent names to MCP agent config names
 const AGENT_CONFIG_MAP: Record<string, string> = {
-  // Department agents
-  SurfacingAgent: 'surface',
+  // Department agents (production flow order)
+  SurfacingAgent: 'surfacing',
+  CuttingAgent: 'cutting',
+  CodingAgent: 'coding',
   CoatingAgent: 'coating',
-  EdgingAgent: 'edge',
   AssemblyAgent: 'assembly',
   QCAgent: 'qc',
+  ShippingAgent: 'shipping',
+  // Support agents
   OfficeAgent: 'office',
+  PickingAgent: 'picking',
   // Cross-department agents
   DirectorAgent: 'director',
   LabAgent: 'lab',
-  // Specialized agents (now have their own MCP configs)
+  // Specialized agents
   DevOpsAgent: 'devops',
-  CodingAgent: 'lab',  // Coding uses lab tools for now
-  PickingAgent: 'picking',
   MaintenanceAgent: 'maintenance',
   ShiftReportAgent: 'shiftreport',
 };

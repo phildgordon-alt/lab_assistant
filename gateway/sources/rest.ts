@@ -126,21 +126,27 @@ router.post('/ask', verifyJwt, async (req: Request, res: Response) => {
 
 /**
  * GET /api/agents
- * List available agents
+ * List available agents - pulls from MCP registry for consistency
  */
-router.get('/agents', (_req: Request, res: Response) => {
-  const agents = [
-    { name: 'DevOpsAgent', description: 'API connections, gateway, server config, troubleshooting' },
-    { name: 'CodingAgent', description: 'Barcode/data matrix coding, job tracking' },
-    { name: 'PickingAgent', description: 'Kardex picks, put wall, tray dispensing' },
-    { name: 'SurfacingAgent', description: 'Coating lines, AR/Blue Light/Photochromic yield' },
-    { name: 'CuttingAgent', description: 'Single vision cutting/edging, edger status' },
-    { name: 'AssemblyAgent', description: 'Final assembly, frame mounting, finishing' },
-    { name: 'MaintenanceAgent', description: 'Equipment status, faults, repairs, uptime' },
-    { name: 'ShiftReportAgent', description: 'Cross-department summaries, shift briefings' },
-  ];
+router.get('/agents', async (_req: Request, res: Response) => {
+  try {
+    // Import dynamically to avoid circular dependencies
+    const { getAllAgentConfigs } = await import('../mcp/server.js');
+    const agentConfigs = getAllAgentConfigs();
 
-  res.json({ agents });
+    // Return simplified agent list with name and description
+    const agents = agentConfigs.map(config => ({
+      name: config.name,
+      description: config.description,
+      department: config.department,
+      toolCount: config.tools.length,
+    }));
+
+    res.json({ agents, count: agents.length });
+  } catch (error: any) {
+    log.error('Failed to get agents:', error);
+    res.status(500).json({ error: 'server_error', message: error.message });
+  }
 });
 
 /**
