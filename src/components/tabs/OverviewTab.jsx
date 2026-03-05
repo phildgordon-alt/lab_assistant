@@ -96,7 +96,7 @@ const KPI_METRICS = {
   breakage:          { label: "Breakage",         desc: "Broken jobs today",             accent: T.red,    category: "Quality" },
   rush_jobs:         { label: "Rush Jobs",        desc: "Rush priority in system",       accent: T.red,    category: "Production" },
   qc_holds:          { label: "QC Holds",         desc: "Jobs held for inspection",      accent: T.orange, category: "Quality" },
-  active_trays:      { label: "Active Trays",     desc: "Trays in production",           accent: T.blue,   category: "Fleet" },
+  active_trays:      { label: "Active Jobs",      desc: "SOM jobs in production",        accent: T.blue,   category: "Fleet" },
   avg_batch_fill:    { label: "Avg Batch Fill",   desc: "Coating batch fill rate",       accent: T.purple, category: "Efficiency" },
   pm_compliance:     { label: "PM Compliance",    desc: "Preventive maintenance rate",   accent: T.green,  category: "Maintenance" },
   open_work_orders:  { label: "Open WOs",         desc: "Open maintenance work orders",  accent: T.amber,  category: "Maintenance" },
@@ -133,7 +133,7 @@ const CARD_REGISTRY = [
   { type:"coating_machines",label:"Coating Machines",      icon:"🌡", desc:"Status of all three coating machines with batch controls" },
   { type:"putwall_dual",    label:"Put Wall (Both Warehouses)", icon:"⬡", desc:"Live Put Wall positions for WH1 and WH2 with At Kardex count" },
   { type:"event_feed",      label:"Event Feed",            icon:"📡", desc:"Live event feed showing recent lab activity" },
-  { type:"fleet_dept",      label:"Fleet by Department",   icon:"◈",  desc:"All trays visualized by department with coating type legend" },
+  { type:"fleet_dept",      label:"SOM Jobs by Zone",      icon:"◈",  desc:"Live job counts by production zone from SOM Control Center" },
   { type:"rush_queue",      label:"Rush Queue",            icon:"🔴", desc:"All active rush jobs with location and time in system" },
   { type:"aging_alert",     label:"WIP Aging Alert",       icon:"⏱", desc:"Jobs in system longer than threshold — configurable hours" },
   { type:"inventory",       label:"Lens Blank Inventory",  icon:"📦", desc:"Lens blank stock levels from Kardex / ItemPath (live when connected)" },
@@ -153,7 +153,7 @@ const DEFAULT_CARDS = [
   { id:"c4", type:"coating_machines", title:"Coating Machines",    config:{} },
   { id:"c5", type:"putwall_dual",     title:"Put Wall (Live)",     config:{} },
   { id:"c6", type:"event_feed",       title:"Event Feed",          config:{size:'half'} },
-  { id:"c7", type:"fleet_dept",       title:"Fleet by Department", config:{size:'half'} },
+  { id:"c7", type:"fleet_dept",       title:"SOM Jobs by Zone", config:{size:'half'} },
 ];
 
 function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36).slice(2,6)); }
@@ -336,7 +336,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
   };
 
   const getKPIValue=(kpiId)=>{
-    const {trays=[],batches=[],dviJobs=[],breakage=[],maintenance={},shippedStats={}}=data||{};
+    const {trays=[],batches=[],dviJobs=[],breakage=[],maintenance={},shippedStats={},somOrders={}}=data||{};
     const dviByStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||'').toLowerCase().includes(stage.toLowerCase())).length;
 
     switch(kpiId){
@@ -353,7 +353,12 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
       case 'breakage': return {value:dviJobs.filter(j=>(j.station||'').toUpperCase().includes('BREAKAGE')).length,sub:"today",accent:T.red};
       case 'rush_jobs': return {value:dviJobs.filter(j=>j.rush==='Y'||j.Rush==='Y'||j.priority==='RUSH').length,sub:"in system"};
       case 'qc_holds': return {value:trays.filter(t=>t.state==='QC_HOLD').length,sub:"held"};
-      case 'active_trays': return {value:trays.filter(t=>t.state!=='IDLE').length,sub:`of ${trays.length}`};
+      case 'active_trays': {
+        // Use SOM orders data - show jobs in production (not complete)
+        const inProd = (somOrders.zones||[]).filter(z=>z.zone!=='ship').reduce((sum,z)=>sum+(z.count||0),0);
+        const total = somOrders.todayTotal||0;
+        return {value:inProd,sub:somOrders.isLive?`of ${total} today`:`of ${total} (cached)`};
+      }
       case 'avg_batch_fill': return {value:`${batches.length>0?Math.round(batches.reduce((s,b)=>s+(b.jobs||0),0)/batches.length/1.4):0}%`,sub:"of capacity"};
       case 'pm_compliance': return {value:maintenance.stats?.pmCompliancePercent!=null?`${maintenance.stats.pmCompliancePercent}%`:'—',sub:"on schedule"};
       case 'open_work_orders': return {value:maintenance.stats?.openWorkOrders||0,sub:"open"};
@@ -914,6 +919,71 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     return()=>clearInterval(iv);
   },[]);
 
+  // SOM data for fleet_dept card - persists data when offline
+  const [somOrders,setSomOrders]=useState({zones:[],devices:{},deviceList:[],allTimeZones:[],total:0,todayTotal:0,isLive:false,lastPoll:null,lastSuccessfulPoll:null,status:"pending"});
+  useEffect(()=>{
+    const fetchSomData=async()=>{
+      try{
+        // Fetch both orders and devices in parallel
+        const [ordersRes, devicesRes]=await Promise.all([
+          fetch("http://localhost:3002/api/som/orders"),
+          fetch("http://localhost:3002/api/som/devices")
+        ]);
+        const ordersData=await ordersRes.json();
+        const devicesData=await devicesRes.json();
+        // Transform today's department data into zones array
+        const zones=(ordersData.orders?.today||[]).map(d=>({
+          departmentId:d.departmentId,
+          name:d.departmentName,
+          zone:d.zone,
+          count:d.jobs
+        }));
+        // Device categories from SOM (generators, polishing, coating, etc.)
+        // Apply equipment overrides from settings
+        const overrides = (() => { try { return JSON.parse(localStorage.getItem('la_som_equipment')||'{}'); } catch { return {}; } })();
+        const allDevices = (devicesData.devices||[]).map(d => {
+          const override = overrides[d.id];
+          if(override) {
+            return { ...d, category: override.category || d.category, displayLabel: override.label || (d.name||d.id||'').trim() };
+          }
+          return { ...d, displayLabel: (d.name||d.id||'').trim() };
+        });
+        // Recalculate categories with overrides applied
+        const deviceCategories = {};
+        allDevices.forEach(d => {
+          const cat = d.category || 'other';
+          deviceCategories[cat] = (deviceCategories[cat] || 0) + 1;
+        });
+        // All-time job counts by zone
+        const allTimeZones=(ordersData.orders?.byDepartment||[]).map(d=>({
+          departmentId:d.departmentId,
+          name:d.departmentName,
+          zone:d.zone,
+          jobs:d.jobs
+        }));
+        setSomOrders(prev=>({
+          zones:zones.length>0?zones:prev.zones, // Keep old data if new is empty
+          devices:Object.keys(deviceCategories).length>0?deviceCategories:prev.devices,
+          deviceList:allDevices.length>0?allDevices:prev.deviceList,
+          allTimeZones:allTimeZones.length>0?allTimeZones:prev.allTimeZones,
+          total:ordersData.orders?.total||prev.total,
+          todayTotal:ordersData.orders?.todayTotal||prev.todayTotal,
+          isLive:ordersData.isLive||false,
+          lastPoll:ordersData.lastPoll,
+          lastSuccessfulPoll:ordersData.lastSuccessfulPoll||prev.lastSuccessfulPoll,
+          connectionError:ordersData.connectionError,
+          status:"ok"
+        }));
+      }catch(e){
+        // Network error - keep all existing data, just mark as not live
+        setSomOrders(prev=>({...prev,status:"error",isLive:false}));
+      }
+    };
+    fetchSomData();
+    const iv=setInterval(fetchSomData,30000); // Poll every 30s to match SOM adapter
+    return()=>clearInterval(iv);
+  },[]);
+
   useEffect(()=>{ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(cards));}catch{} },[cards]);
 
   const addCard=(type)=>{
@@ -990,7 +1060,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     switch(card.type){
       case "kpi_row": return(
         <ConfigurableKPIRow
-          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats}}
+          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats,somOrders}}
           settings={settings}
           cardConfig={card.config}
           onConfigChange={(cfg)=>updateCardConfig(card.id,cfg)}
@@ -1167,45 +1237,112 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
 
       case "event_feed": return <EventLog events={events} />;
 
-      case "fleet_dept": return(
-        <Card style={{padding:20}}>
-          <SectionHeader right={`${trays.length} trays total`}>Fleet by Department</SectionHeader>
-          <div style={{display:"grid",gridTemplateColumns:`repeat(${Object.keys(DEPARTMENTS).length},1fr)`,gap:10}}>
-            {Object.entries(DEPARTMENTS).map(([deptKey,dept])=>{
-              const deptTrays=trays.filter(t=>t.department===deptKey);
-              const rushInDept=deptTrays.filter(t=>t.rush).length;
-              return(
-                <div key={deptKey} style={{display:"flex",flexDirection:"column"}}>
-                  <div style={{textAlign:"center",paddingBottom:8,marginBottom:8,borderBottom:`2px solid ${dept.color}`}}>
-                    <div style={{fontSize:12,fontWeight:700,color:dept.color,fontFamily:mono}}>{dept.label}</div>
-                    <div style={{fontSize:22,fontWeight:800,color:T.text,fontFamily:mono}}>{deptTrays.length}</div>
-                    <Pill color={rushInDept>0?T.red:T.textDim} bg={rushInDept>0?`${T.red}20`:`${T.textDim}15`}>{rushInDept} RUSH</Pill>
-                  </div>
-                  <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(16px,1fr))",gap:3,flex:1}}>
-                    {deptTrays.map(t=>{
-                      const ct=t.coatingType&&COATING_COLORS[t.coatingType]?COATING_COLORS[t.coatingType]:{color:"#475569",bg:"#1E293B"};
-                      return(
-                        <div key={t.id} title={`${t.id}${t.job?` | ${t.job}`:""} | ${t.coatingType||"No coating"}${t.rush?" | RUSH":""}`}
-                          style={{width:"100%",aspectRatio:"1",borderRadius:3,background:ct.bg,border:`1px solid ${ct.color}35`,display:"flex",alignItems:"center",justifyContent:"center",position:"relative"}}>
-                          <div style={{width:5,height:5,borderRadius:"50%",background:ct.color,opacity:0.9}}/>
-                          {t.rush&&<div style={{position:"absolute",top:0,right:0,width:4,height:4,background:T.red,borderRadius:"0 3px 0 2px"}}/>}
-                        </div>
-                      );
-                    })}
-                  </div>
+      case "fleet_dept": {
+        // Equipment category styles
+        const CATEGORY_STYLES = {
+          'generators':  { color: '#3B82F6', label: 'Generators', order: 1 },
+          'cutters':     { color: '#0EA5E9', label: 'Cutters', order: 2 },
+          'blocking':    { color: '#06B6D4', label: 'Blocking', order: 3 },
+          'polishing':   { color: '#8B5CF6', label: 'Polishing', order: 4 },
+          'fining':      { color: '#A855F7', label: 'Fining', order: 5 },
+          'cleaning':    { color: '#22D3EE', label: 'Cleaning', order: 6 },
+          'coating':     { color: '#F59E0B', label: 'Coating', order: 7 },
+          'edging':      { color: '#EC4899', label: 'Edging', order: 8 },
+          'assembly':    { color: '#10B981', label: 'Assembly', order: 9 },
+          'qc':          { color: '#F97316', label: 'QC', order: 10 },
+          'ar_room':     { color: '#6366F1', label: 'AR Room', order: 11 },
+          'detaper':     { color: '#14B8A6', label: 'Detaper', order: 12 },
+          'control':     { color: '#64748B', label: 'Control', order: 13 },
+          'terminal':    { color: '#475569', label: 'Terminals', order: 14 },
+          'other':       { color: '#374151', label: 'Other', order: 99 },
+        };
+        // Department styles for job counts
+        const DEPT_STYLES = {
+          'surfacing':   { color: '#3B82F6', label: 'Production', icon: '🏭' },
+          'ship':        { color: '#22C55E', label: 'Complete', icon: '✅' },
+          'picking':     { color: '#94A3B8', label: 'Unassigned', icon: '📋' },
+          'error':       { color: '#EF4444', label: 'Error', icon: '⚠️' },
+          'coating':     { color: '#F59E0B', label: 'Processing', icon: '⚡' },
+          'control':     { color: '#64748B', label: 'Control', icon: '🖥️' },
+        };
+        // Job counts by department
+        const deptZones = (somOrders.zones || []).map(z => ({
+          ...z,
+          ...DEPT_STYLES[z.zone] || { color: '#64748B', label: z.name, icon: '•' }
+        })).filter(z => z.count > 0);
+        // Equipment counts by category (from device data)
+        const deviceCategories = Object.entries(somOrders.devices || {})
+          .map(([cat, count]) => ({
+            category: cat,
+            count,
+            ...CATEGORY_STYLES[cat] || CATEGORY_STYLES.other
+          }))
+          .filter(c => c.count > 0)
+          .sort((a, b) => a.order - b.order);
+        const totalEquipment = deviceCategories.reduce((s,c)=>s+c.count,0);
+        const lastUpdate = somOrders.lastSuccessfulPoll ? new Date(somOrders.lastSuccessfulPoll) : null;
+        return (
+          <Card style={{padding:20}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{fontSize:13,color:T.textMuted,textTransform:"uppercase",letterSpacing:1.5,fontFamily:mono,fontWeight:600}}>Production Status</div>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:somOrders.isLive?T.green:T.red,boxShadow:somOrders.isLive?`0 0 6px ${T.green}`:`0 0 6px ${T.red}`}}/>
+                  <span style={{fontSize:10,fontFamily:mono,color:somOrders.isLive?T.green:T.red,fontWeight:600}}>{somOrders.isLive?"LIVE":"OFFLINE"}</span>
                 </div>
-              );
-            })}
-          </div>
-          <div style={{display:"flex",flexWrap:"wrap",gap:8,marginTop:12,paddingTop:10,borderTop:`1px solid ${T.border}`,justifyContent:"center"}}>
-            {Object.entries(COATING_COLORS).map(([name,c])=>(
-              <div key={name} style={{display:"flex",alignItems:"center",gap:4,padding:"2px 6px"}}>
-                <div style={{width:7,height:7,borderRadius:"50%",background:c.color}}/><span style={{fontSize:10,color:c.color,fontFamily:mono}}>{name}</span>
               </div>
-            ))}
-          </div>
-        </Card>
-      );
+              <div style={{textAlign:"right"}}>
+                <div style={{fontSize:18,fontWeight:800,color:T.text,fontFamily:mono}}>{somOrders.todayTotal||0}</div>
+                <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>JOBS TODAY</div>
+              </div>
+            </div>
+            {somOrders.status==="pending"?(
+              <div style={{textAlign:"center",padding:"24px 0",fontSize:12,color:T.textDim,fontFamily:mono}}>Loading SOM data...</div>
+            ):(
+              <>
+                {/* Job counts by department (WIP) */}
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>Jobs by Stage (Today)</div>
+                  {deptZones.length > 0 ? (
+                    <div style={{display:"grid",gridTemplateColumns:`repeat(${Math.min(deptZones.length,4)},1fr)`,gap:8}}>
+                      {deptZones.map(zone=>(
+                        <div key={zone.zone} style={{textAlign:"center",padding:10,background:T.bg,borderRadius:8,border:`1px solid ${zone.color}30`}}>
+                          <div style={{fontSize:9,fontWeight:700,color:zone.color,fontFamily:mono}}>{zone.label}</div>
+                          <div style={{fontSize:20,fontWeight:800,color:T.text,fontFamily:mono}}>{zone.count}</div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{textAlign:"center",padding:"12px 0",fontSize:11,color:T.textDim,fontFamily:mono}}>No job data available</div>
+                  )}
+                </div>
+              </>
+            )}
+            {lastUpdate && (
+              <div style={{fontSize:9,color:T.textDim,textAlign:"center",marginTop:10,fontFamily:mono}}>
+                Last updated: {lastUpdate.toLocaleTimeString()} {!somOrders.isLive && "(cached)"}
+              </div>
+            )}
+            {/* All-time jobs by zone */}
+            {(somOrders.allTimeZones || []).length > 0 && (
+              <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${T.border}`}}>
+                <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginBottom:8,textTransform:"uppercase",letterSpacing:1}}>All-Time Jobs ({(somOrders.total||0).toLocaleString()} total)</div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {(somOrders.allTimeZones || []).filter(z=>z.jobs>0).map(zone=>{
+                    const style = DEPT_STYLES[zone.zone] || { color: '#64748B', label: zone.name };
+                    return (
+                      <div key={zone.zone} style={{display:"flex",alignItems:"center",gap:6,padding:"6px 10px",background:T.bg,borderRadius:6,border:`1px solid ${style.color}25`}}>
+                        <span style={{fontSize:10,color:style.color,fontFamily:mono,fontWeight:600}}>{style.label}</span>
+                        <span style={{fontSize:12,fontWeight:800,color:T.text,fontFamily:mono}}>{zone.jobs.toLocaleString()}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </Card>
+        );
+      }
 
       case "rush_queue":{
         const rushJobs=trays.filter(t=>t.rush&&t.state!=="IDLE");

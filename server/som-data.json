@@ -1,0 +1,2542 @@
+{
+  "devices": [
+    {
+      "id": "",
+      "name": "",
+      "model": "TER",
+      "typeDescription": null,
+      "category": "terminal",
+      "departmentId": 10,
+      "status": "MINS",
+      "statusLabel": "Manual Insert",
+      "statusColor": "blue",
+      "severity": "info",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": null,
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": 0,
+      "isActive": 1
+    },
+    {
+      "id": "AR ROOM         ",
+      "name": "AR ROOM         ",
+      "model": "TER",
+      "typeDescription": null,
+      "category": "ar_room",
+      "departmentId": 10,
+      "status": "MINS",
+      "statusLabel": "Manual Insert",
+      "statusColor": "blue",
+      "severity": "info",
+      "event": "NOGO",
+      "eventOriginal": "NOGO",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "             1601305",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": 0,
+      "isActive": 1
+    },
+    {
+      "id": "ASSEMBLY        ",
+      "name": "ASSEMBLY        ",
+      "model": "TER",
+      "typeDescription": null,
+      "category": "assembly",
+      "departmentId": 10,
+      "status": "MINS",
+      "statusLabel": "Manual Insert",
+      "statusColor": "blue",
+      "severity": "info",
+      "event": "NOGO",
+      "eventOriginal": "NOGO",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "             1600688",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": 0,
+      "isActive": 1
+    },
+    {
+      "id": "CBB001",
+      "name": "CBB001",
+      "model": "CCU",
+      "typeDescription": "CB-Bond E",
+      "category": "blocking",
+      "departmentId": 4,
+      "status": "SBLK",
+      "statusLabel": "Blocked",
+      "statusColor": "amber",
+      "severity": "warning",
+      "event": "Waiting for trays ...",
+      "eventOriginal": "Waiting for trays ...",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10850937",
+      "counts": {
+        "count1": 8159,
+        "count2": 0,
+        "count3": "B;0;53;200;Temperature Tank1;2026-03-05 15:24:16\r\nB;1;0;200;Temperature Tank2;2026-03-05 15:24:16"
+      },
+      "cycleTime": "60.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCL001",
+      "name": "CCL001",
+      "model": "CCL",
+      "typeDescription": "CCL modulo",
+      "category": "coating",
+      "departmentId": 4,
+      "status": "SENG",
+      "statusLabel": "Engaged",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10903173",
+      "counts": {
+        "count1": 228031,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCL002",
+      "name": "CCL002",
+      "model": "CCL",
+      "typeDescription": "CCL modulo",
+      "category": "coating",
+      "departmentId": 4,
+      "status": "SENG",
+      "statusLabel": "Engaged",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903254",
+      "counts": {
+        "count1": 58012,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCM001",
+      "name": "CCM001",
+      "model": "DNL",
+      "typeDescription": "ControlCenter Modulo",
+      "category": "control",
+      "departmentId": 7,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": null,
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCM002",
+      "name": "CCM002",
+      "model": "DNL",
+      "typeDescription": "ControlCenter Modulo",
+      "category": "control",
+      "departmentId": 8,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": null,
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCM003",
+      "name": "CCM003",
+      "model": "DNL",
+      "typeDescription": "ControlCenter Modulo",
+      "category": "control",
+      "departmentId": 4,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "              XXXXXX",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": "B;0;0;20;Traycount;2022-09-14 13:23:45"
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCM004",
+      "name": "CCM004",
+      "model": "DNL",
+      "typeDescription": "ControlCenter Modulo",
+      "category": "control",
+      "departmentId": 10,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": null,
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCM006",
+      "name": "CCM006",
+      "model": "DNL",
+      "typeDescription": "ControlCenter Modulo",
+      "category": "control",
+      "departmentId": 9,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10039064",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": "B;0;0;20;Traycount;2022-09-05 09:37:02"
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCS001",
+      "name": "CCS001",
+      "model": "CCS",
+      "typeDescription": "CCS modulo",
+      "category": "cleaning",
+      "departmentId": 4,
+      "status": "STAC",
+      "statusLabel": "STAC",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": null,
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": "B;0;0;0;Cooldown time;2024-09-10 11:35:29"
+      },
+      "cycleTime": "20.00",
+      "isActive": 1
+    },
+    {
+      "id": "CCU001",
+      "name": "CCU001",
+      "model": "CCU",
+      "typeDescription": "CCU modulo",
+      "category": "cleaning",
+      "departmentId": 4,
+      "status": "SBLK",
+      "statusLabel": "Blocked",
+      "statusColor": "amber",
+      "severity": "warning",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10903346",
+      "counts": {
+        "count1": 81621,
+        "count2": 0,
+        "count3": "B;0;7;10;Blockpiece magazine;2026-03-05 15:24:32\r\nB;1;64;100;Fillinglevel Tank;2026-03-05 15:24:32"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "CP1001",
+      "name": "CP1001",
+      "model": "CCP",
+      "typeDescription": "CCP #1",
+      "category": "polishing",
+      "departmentId": 4,
+      "status": "SPOL",
+      "statusLabel": "SPOL",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Close and lock safety screens",
+      "eventOriginal": "Close and lock safety screens",
+      "led": {
+        "green": false,
+        "red": true,
+        "status": "error"
+      },
+      "lastOrder": "         10000037677",
+      "counts": {
+        "count1": 164642,
+        "count2": 0,
+        "count3": "B;0;2344;12000;S+_U_L;2026-03-04 09:18:42\r\nB;1;2502;12000;S+_U_R;2026-03-04 09:18:42\r\nB;2;2192;6000;B_D_L;2026-03-04 09:18:42\r\nB;3;2246;6000;B_D_R;2026-03-04 09:18:42"
+      },
+      "cycleTime": "69.23",
+      "isActive": 1
+    },
+    {
+      "id": "CP1002",
+      "name": "CP1002",
+      "model": "CCP",
+      "typeDescription": "CCP #2",
+      "category": "polishing",
+      "departmentId": 4,
+      "status": "SPOL",
+      "statusLabel": "SPOL",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "SPOL",
+      "eventOriginal": "SPOL",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10903276",
+      "counts": {
+        "count1": 79739,
+        "count2": 0,
+        "count3": "B;0;9418;12000;S+_U_L;2026-03-05 15:22:20\r\nB;1;9144;12000;S+_U_R;2026-03-05 15:22:20\r\nB;2;3410;6000;B_D_L;2026-03-05 15:22:20\r\nB;3;3338;6000;B_D_R;2026-03-05 15:22:20"
+      },
+      "cycleTime": "69.23",
+      "isActive": 1
+    },
+    {
+      "id": "CP1003",
+      "name": "CP1003",
+      "model": "CCP",
+      "typeDescription": "CCP #3",
+      "category": "polishing",
+      "departmentId": 4,
+      "status": "SPOL",
+      "statusLabel": "SPOL",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903254",
+      "counts": {
+        "count1": 93081,
+        "count2": 0,
+        "count3": "B;0;6032;12000;S+_U_L;2026-03-05 14:39:37\r\nB;1;5947;12000;S+_U_R;2026-03-05 14:39:37\r\nB;2;3218;6000;B_D_L;2026-03-05 14:39:37\r\nB;3;3166;6000;B_D_R;2026-03-05 14:39:37"
+      },
+      "cycleTime": "69.23",
+      "isActive": 1
+    },
+    {
+      "id": "CP1004",
+      "name": "CP1004",
+      "model": "CCP",
+      "typeDescription": "CCP #4",
+      "category": "polishing",
+      "departmentId": 4,
+      "status": "SPOL",
+      "statusLabel": "SPOL",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903240",
+      "counts": {
+        "count1": 51809,
+        "count2": 0,
+        "count3": "B;0;2461;12000;S+_U_L;2026-03-05 14:30:14\r\nB;1;2461;12000;S+_U_R;2026-03-05 14:30:14\r\nB;2;20;6000;B_D_L;2026-03-05 14:30:14\r\nB;3;20;6000;B_D_R;2026-03-05 14:30:14"
+      },
+      "cycleTime": "69.23",
+      "isActive": 1
+    },
+    {
+      "id": "CU1001",
+      "name": "CU1001",
+      "model": "CCU",
+      "typeDescription": "CCU Modulo ONE",
+      "category": "cleaning",
+      "departmentId": 4,
+      "status": "SBLK",
+      "statusLabel": "Blocked",
+      "statusColor": "amber",
+      "severity": "warning",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903331",
+      "counts": {
+        "count1": 146391,
+        "count2": 0,
+        "count3": "B;0;3;10;Unempty magazine tubes;2026-03-05 14:18:46\r\nB;1;45;100;Tank level;2026-03-05 15:15:06"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "D2H001",
+      "name": "D2H001",
+      "model": "COA",
+      "typeDescription": "DHC 200",
+      "category": "coating",
+      "departmentId": 7,
+      "status": "SDHC",
+      "statusLabel": "SDHC",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "              XXXXXX",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "D2H002",
+      "name": "D2H002",
+      "model": "COA",
+      "typeDescription": "DHC 200",
+      "category": "coating",
+      "departmentId": 7,
+      "status": "SDHC",
+      "statusLabel": "SDHC",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "              XXXXXX",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DBA001",
+      "name": "DBA001",
+      "model": "DBA",
+      "typeDescription": "DBA modulo",
+      "category": "generators",
+      "departmentId": 4,
+      "status": "SDBA",
+      "statusLabel": "SDBA",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays ...",
+      "eventOriginal": "Waiting for trays ...",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "              XXXXXX",
+      "counts": {
+        "count1": 431187,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "20.00",
+      "isActive": 1
+    },
+    {
+      "id": "DBA002",
+      "name": "DBA002",
+      "model": "DBA",
+      "typeDescription": "DBA modulo",
+      "category": "generators",
+      "departmentId": 4,
+      "status": "SDBA",
+      "statusLabel": "SDBA",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays ...",
+      "eventOriginal": "Waiting for trays ...",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "              XXXXXX",
+      "counts": {
+        "count1": 66432,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "20.00",
+      "isActive": 1
+    },
+    {
+      "id": "DEFECTIVE       ",
+      "name": "DEFECTIVE       ",
+      "model": "TER",
+      "typeDescription": null,
+      "category": "qc",
+      "departmentId": 10,
+      "status": "MINS",
+      "statusLabel": "Manual Insert",
+      "statusColor": "blue",
+      "severity": "info",
+      "event": "NOGO",
+      "eventOriginal": "NOGO",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "             1600992",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": 0,
+      "isActive": 1
+    },
+    {
+      "id": "DNL001",
+      "name": "DNL001",
+      "model": "CLI",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 9,
+      "status": "CNEW",
+      "statusLabel": "CNEW",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10126244",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL002",
+      "name": "DNL002",
+      "model": "CLI",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 4,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "         10000009875",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL003",
+      "name": "DNL003",
+      "model": "DNL",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 9,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "BDEL timeout",
+      "eventOriginal": "BDEL timeout",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10898412",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": "B;0;0;0;Traycount;2026-03-05 15:23:53"
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL004",
+      "name": "DNL004",
+      "model": "DNL",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 4,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Error 804: GERR#4  NO SF LENSES",
+      "eventOriginal": "Error 804: GERR#4  NO SF LENSES",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10903348",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": "B;0;4;35;Traycount;2026-03-05 15:24:14"
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL005",
+      "name": "DNL005",
+      "model": "DNL",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 9,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Rueckstau vor Maschine! Pos: 89",
+      "eventOriginal": "Rueckstau vor Maschine! Pos: 89",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "              ZZZZZZ",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": "B;0;0;20;Traycount;2026-03-05 15:23:42"
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL006",
+      "name": "DNL006",
+      "model": "CLI",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 9,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10584214",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL007",
+      "name": "DNL007",
+      "model": "CLI",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 4,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Position 1 status changed from Error to Polished",
+      "eventOriginal": "Position 1 status changed from Error to Polished",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10903254",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL008",
+      "name": "DNL008",
+      "model": "CLI",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 9,
+      "status": "CNEW",
+      "statusLabel": "CNEW",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10137826",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "DNL009",
+      "name": "DNL009",
+      "model": "CLI",
+      "typeDescription": "DNL modulo",
+      "category": "fining",
+      "departmentId": 9,
+      "status": null,
+      "statusLabel": "Unknown",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10584470",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "E14001",
+      "name": "E14001",
+      "model": "EBC",
+      "typeDescription": "EBC 400",
+      "category": "coating",
+      "departmentId": 8,
+      "status": "ACOT",
+      "statusLabel": "ACOT",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10902583",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "EB9001",
+      "name": "EB9001",
+      "model": "EBC",
+      "typeDescription": "EBC 900",
+      "category": "coating",
+      "departmentId": 8,
+      "status": "ACOT",
+      "statusLabel": "ACOT",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "            10600256",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "EB9002",
+      "name": "EB9002",
+      "model": "EBC",
+      "typeDescription": "EBC 900",
+      "category": "coating",
+      "departmentId": 8,
+      "status": "ACOT",
+      "statusLabel": "ACOT",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Maintenance interval is reached or exceeded for: Cleaning sheets. Please clean or replace the mentioned part!",
+      "eventOriginal": "Maintenance interval is reached or exceeded for: Cleaning sheets. Please clean or replace the mentioned part!",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10902521",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "0.00",
+      "isActive": 1
+    },
+    {
+      "id": "EDGING          ",
+      "name": "EDGING          ",
+      "model": "TER",
+      "typeDescription": null,
+      "category": "terminal",
+      "departmentId": 10,
+      "status": "MINS",
+      "statusLabel": "Manual Insert",
+      "statusColor": "blue",
+      "severity": "info",
+      "event": "NOGO",
+      "eventOriginal": "NOGO",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "         10000037702",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": 0,
+      "isActive": 1
+    },
+    {
+      "id": "HSQ001",
+      "name": "HSQ001",
+      "model": "HSE",
+      "typeDescription": "HSE modulo QS",
+      "category": "cutters",
+      "departmentId": 9,
+      "status": "SEDG",
+      "statusLabel": "SEDG",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Close and lock safety screens",
+      "eventOriginal": "Close and lock safety screens",
+      "led": {
+        "green": false,
+        "red": true,
+        "status": "error"
+      },
+      "lastOrder": "             1599613",
+      "counts": {
+        "count1": 374371,
+        "count2": 0,
+        "count3": "B;1;0;2200;Rough Cut Tool_1_L;2026-03-02 10:13:24\r\nB;2;0;0;Empty;2026-03-02 10:13:24\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-02 10:13:24\r\nB;4;19;2000;Combi Tool_Groove_3_L;2026-03-02 10:13:24\r\nB;5;0;2000;Universal Polish 100 Plastic_4_L;2026-03-02 10:13:24\r\nB;6;2003;7200;Combi Tool_SFB_5_L;2026-03-02 10:13:24\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-02 10:13:24\r\nB;8;366;8000;Combi Tool_Flat_6_L;2026-03-02 10:13:24\r\nB;9;3108;8000;Combi Tool_VBevelPlastic_6_L;2026-03-02 10:13:24\r\nB;10;1799;2200;Rough Cut Tool_1_R;2026-03-02 10:13:24\r\nB;11;0;0;Empty;2026-03-02 10:13:24\r\nB;12;16;1000;Combi Tool_Drill1.2_3_R;2026-03-02 10:13:24\r\nB;13;9;2000;Combi Tool_Groove_3_R;2026-03-02 10:13:24\r\nB;14;11;2000;Universal Polish 100 Plastic_4_R;2026-03-02 10:13:24\r\nB;15;2614;7200;Combi Tool_SFB_5_R;2026-03-02 10:13:24\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-02 10:13:24\r\nB;17;282;8000;Combi Tool_Flat_6_R;2026-03-02 10:13:24\r\nB;18;5728;8000;Combi Tool_VBevelPlastic_6_R;2026-03-02 10:13:24"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "HSQ002",
+      "name": "HSQ002",
+      "model": "HSE",
+      "typeDescription": "HSE modulo QS",
+      "category": "cutters",
+      "departmentId": 9,
+      "status": "SEDG",
+      "statusLabel": "SEDG",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903344",
+      "counts": {
+        "count1": 451463,
+        "count2": 0,
+        "count3": "B;1;1525;2200;Rough Cut Tool_1_L;2026-03-05 15:37:51\r\nB;2;0;0;Empty;2026-03-05 12:47:52\r\nB;3;0;1000;Combi Tool_Drill1.2_3_L;2026-03-05 12:47:52\r\nB;4;7;2000;Combi Tool_Groove_3_L;2026-03-05 12:47:52\r\nB;5;13;2000;Universal Polish 100 Plastic_4_L;2026-03-05 12:47:52\r\nB;6;6085;7200;Combi Tool_SFB_5_L;2026-03-05 15:37:51\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-05 12:47:52\r\nB;8;390;8000;Combi Tool_Flat_6_L;2026-03-05 12:47:52\r\nB;9;1630;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 15:37:51\r\nB;10;1396;2200;Rough Cut Tool_1_R;2026-03-05 15:37:51\r\nB;11;0;0;Empty;2026-03-05 12:47:52\r\nB;12;10;1000;Combi Tool_Drill1.2_3_R;2026-03-05 12:47:52\r\nB;13;3;2000;Combi Tool_Groove_3_R;2026-03-05 12:47:52\r\nB;14;20;2000;Universal Polish 100 Plastic_4_R;2026-03-05 12:47:52\r\nB;15;1494;7200;Combi Tool_SFB_5_R;2026-03-05 15:37:51\r\nB;16;4;4000;Combi Tool_Shelf_5_R;2026-03-05 12:47:52\r\nB;17;245;8000;Combi Tool_Flat_6_R;2026-03-05 12:47:52\r\nB;18;5651;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 15:37:51"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "HSQ003",
+      "name": "HSQ003",
+      "model": "HSE",
+      "typeDescription": "HSE modulo QS",
+      "category": "cutters",
+      "departmentId": 9,
+      "status": "SEDG",
+      "statusLabel": "SEDG",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "SEDG",
+      "eventOriginal": "SEDG",
+      "led": {
+        "green": false,
+        "red": true,
+        "status": "error"
+      },
+      "lastOrder": "            10903347",
+      "counts": {
+        "count1": 468904,
+        "count2": 0,
+        "count3": "B;1;100143;2200;Rough Cut Tool_1_L;2026-03-05 12:43:45\r\nB;2;0;0;Empty;2026-03-05 12:43:45\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-05 12:43:45\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-05 12:43:45\r\nB;5;9;2000;Universal Polish 100 Plastic_4_L;2026-03-05 12:43:45\r\nB;6;77;7200;Combi Tool_SFB_5_L;2026-03-05 12:43:45\r\nB;7;5;4000;Combi Tool_Shelf_5_L;2026-03-05 12:43:45\r\nB;8;307;8000;Combi Tool_Flat_6_L;2026-03-05 12:43:45\r\nB;9;1484;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 12:43:45\r\nB;10;843;2200;Rough Cut Tool_1_R;2026-03-05 15:17:55\r\nB;11;0;0;Empty;2026-03-05 12:43:45\r\nB;12;11;1000;Combi Tool_Drill1.2_3_R;2026-03-05 12:43:45\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-05 12:43:45\r\nB;14;6;2000;Universal Polish 100 Plastic_4_R;2026-03-05 12:43:45\r\nB;15;828;7200;Combi Tool_SFB_5_R;2026-03-05 15:17:55\r\nB;16;5;4000;Combi Tool_Shelf_5_R;2026-03-05 12:43:45\r\nB;17;503;8000;Combi Tool_Flat_6_R;2026-03-05 12:43:45\r\nB;18;4717;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 15:17:55"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "HSQ004",
+      "name": "HSQ004",
+      "model": "HSE",
+      "typeDescription": "HSE modulo QS",
+      "category": "cutters",
+      "departmentId": 9,
+      "status": "SEDG",
+      "statusLabel": "SEDG",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "         10000037917",
+      "counts": {
+        "count1": 333830,
+        "count2": 0,
+        "count3": "B;1;2627;3000;Rough Cut Tool_1_L;2026-03-05 15:35:32\r\nB;2;0;0;Empty;2026-03-05 13:36:44\r\nB;3;4;1000;Combi Tool_Drill1.2_3_L;2026-03-05 13:36:44\r\nB;4;0;2000;Combi Tool_Groove_3_L;2026-03-05 13:36:44\r\nB;5;0;2000;Universal Polish 100 Plastic_4_L;2026-03-05 13:36:44\r\nB;6;1454;7200;Combi Tool_SFB_5_L;2026-03-05 15:35:32\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-05 13:36:44\r\nB;8;1;8000;Combi Tool_Flat_6_L;2026-03-05 13:36:44\r\nB;9;179;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 15:35:32\r\nB;10;2304;3000;Rough Cut Tool_1_R;2026-03-05 15:29:21\r\nB;11;0;0;Empty;2026-03-05 13:36:44\r\nB;12;2;1000;Combi Tool_Drill1.2_3_R;2026-03-05 13:36:44\r\nB;13;0;2000;Combi Tool_Groove_3_R;2026-03-05 13:36:44\r\nB;14;0;2000;Universal Polish 100 Plastic_4_R;2026-03-05 13:36:44\r\nB;15;1977;7200;Combi Tool_SFB_5_R;2026-03-05 15:29:21\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-05 13:36:44\r\nB;17;258;8000;Combi Tool_Flat_6_R;2026-03-05 13:36:44\r\nB;18;6408;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 15:29:21"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "HSQ005",
+      "name": "HSQ005",
+      "model": "HSE",
+      "typeDescription": "HSE modulo QS",
+      "category": "cutters",
+      "departmentId": 9,
+      "status": "SEDG",
+      "statusLabel": "SEDG",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903314",
+      "counts": {
+        "count1": 66381,
+        "count2": 0,
+        "count3": "B;1;1561;2200;Rough Cut Tool_1_L;2026-03-05 14:36:31\r\nB;2;0;0;Empty;2026-03-05 14:33:42\r\nB;3;3;1000;Combi Tool_Drill1.2_3_L;2026-03-05 14:33:42\r\nB;4;1;2000;Combi Tool_Groove_3_L;2026-03-05 14:33:42\r\nB;5;18;2000;Universal Polish 100 Plastic_4_L;2026-03-05 14:33:42\r\nB;6;382;7200;Combi Tool_SFB_5_L;2026-03-05 14:36:31\r\nB;7;9;4000;Combi Tool_Shelf_5_L;2026-03-05 14:33:42\r\nB;8;152;8000;Combi Tool_Flat_6_L;2026-03-05 14:33:42\r\nB;9;3664;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 14:36:31\r\nB;10;491;2200;Rough Cut Tool_1_R;2026-03-05 14:36:31\r\nB;11;0;0;Empty;2026-03-05 14:33:42\r\nB;12;3;1000;Combi Tool_Drill1.2_3_R;2026-03-05 14:33:42\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-05 14:33:42\r\nB;14;1;2000;Universal Polish 100 Plastic_4_R;2026-03-05 14:33:42\r\nB;15;1196;7200;Combi Tool_SFB_5_R;2026-03-05 14:36:31\r\nB;16;6;4000;Combi Tool_Shelf_5_R;2026-03-05 14:33:42\r\nB;17;119;8000;Combi Tool_Flat_6_R;2026-03-05 14:33:42\r\nB;18;6427;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 14:36:31"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "HSQ006",
+      "name": "HSQ006",
+      "model": "HSE",
+      "typeDescription": "HSE modulo QS",
+      "category": "cutters",
+      "departmentId": 9,
+      "status": "SEDG",
+      "statusLabel": "SEDG",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10902581",
+      "counts": {
+        "count1": 107465,
+        "count2": 0,
+        "count3": "B;1;6;2200;Rough Cut Tool_1_L;2026-03-05 13:28:01\r\nB;2;0;0;Empty;2026-03-05 13:11:43\r\nB;3;1;1000;Combi Tool_Drill1.2_3_L;2026-03-05 13:11:43\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-05 13:11:43\r\nB;5;16;2000;Universal Polish 100 Plastic_4_L;2026-03-05 13:11:43\r\nB;6;6298;7200;Combi Tool_SFB_5_L;2026-03-05 13:28:01\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-05 13:11:43\r\nB;8;3;8000;Combi Tool_Flat_6_L;2026-03-05 13:11:43\r\nB;9;191;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 13:28:01\r\nB;10;100004;2200;Rough Cut Tool_1_R;2026-03-05 13:11:43\r\nB;11;0;0;Empty;2026-03-05 13:11:43\r\nB;12;0;1000;Combi Tool_Drill1.2_3_R;2026-03-05 13:11:43\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-05 13:11:43\r\nB;14;14;2000;Universal Polish 100 Plastic_4_R;2026-03-05 13:11:43\r\nB;15;1882;7200;Combi Tool_SFB_5_R;2026-03-05 13:11:43\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-05 13:11:43\r\nB;17;20;8000;Combi Tool_Flat_6_R;2026-03-05 13:11:43\r\nB;18;4227;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 13:11:43"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "HSQ007",
+      "name": "HSQ007",
+      "model": "HSE",
+      "typeDescription": "HSE modulo QS",
+      "category": "cutters",
+      "departmentId": 9,
+      "status": "SEDG",
+      "statusLabel": "SEDG",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "         10000037860",
+      "counts": {
+        "count1": 126277,
+        "count2": 0,
+        "count3": "B;1;204;2200;Rough Cut Tool_1_L;2026-03-05 11:24:38\r\nB;2;0;0;Empty;2026-03-05 11:24:38\r\nB;3;3;1000;Combi Tool_Drill1.2_3_L;2026-03-05 11:24:38\r\nB;4;5;2000;Combi Tool_Groove_3_L;2026-03-05 11:24:38\r\nB;5;15;2000;Universal Polish 100 Plastic_4_L;2026-03-05 11:24:38\r\nB;6;2791;7200;Combi Tool_SFB_5_L;2026-03-05 11:24:38\r\nB;7;3;4000;Combi Tool_Shelf_5_L;2026-03-05 11:24:38\r\nB;8;155;8000;Combi Tool_Flat_6_L;2026-03-05 11:24:38\r\nB;9;2788;8000;Combi Tool_VBevelPlastic_6_L;2026-03-05 11:24:38\r\nB;10;186;2200;Rough Cut Tool_1_R;2026-03-05 11:24:38\r\nB;11;0;0;Empty;2026-03-05 11:24:38\r\nB;12;2;1000;Combi Tool_Drill1.2_3_R;2026-03-05 11:24:38\r\nB;13;4;2000;Combi Tool_Groove_3_R;2026-03-05 11:24:38\r\nB;14;11;2000;Universal Polish 100 Plastic_4_R;2026-03-05 11:24:38\r\nB;15;3427;7200;Combi Tool_SFB_5_R;2026-03-05 11:24:38\r\nB;16;2;4000;Combi Tool_Shelf_5_R;2026-03-05 11:24:38\r\nB;17;22;8000;Combi Tool_Flat_6_R;2026-03-05 11:24:38\r\nB;18;5475;8000;Combi Tool_VBevelPlastic_6_R;2026-03-05 11:24:38"
+      },
+      "cycleTime": "30.00",
+      "isActive": 1
+    },
+    {
+      "id": "HXS001",
+      "name": "HXS001",
+      "model": "HSC",
+      "typeDescription": "HSC modulo XTS",
+      "category": "generators",
+      "departmentId": 4,
+      "status": "SGEN",
+      "statusLabel": "SGEN",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10903282",
+      "counts": {
+        "count1": 217910,
+        "count2": 0,
+        "count3": "B;0;449;35000;Generating Tool;2026-03-05 15:24:29\r\nB;1;157;5000;Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;2;9;2000;Fine Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;4;454;3500;Fine Cutting Tool V-Axis;2026-03-05 15:24:29"
+      },
+      "cycleTime": "45.00",
+      "isActive": 1
+    },
+    {
+      "id": "HXS002",
+      "name": "HXS002",
+      "model": "HSC",
+      "typeDescription": "HSC modulo XTS",
+      "category": "generators",
+      "departmentId": 4,
+      "status": "SGEN",
+      "statusLabel": "SGEN",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10903273",
+      "counts": {
+        "count1": 201245,
+        "count2": 0,
+        "count3": "B;0;3362;35000;Generating Tool;2026-03-05 15:24:29\r\nB;1;521;5000;Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;2;6;2000;Fine Cutting Tool Z-Axis;2026-03-05 15:24:29\r\nB;4;3364;4500;Fine Cutting Tool V-Axis;2026-03-05 15:24:29"
+      },
+      "cycleTime": "45.00",
+      "isActive": 1
+    },
+    {
+      "id": "HXS003",
+      "name": "HXS003",
+      "model": "HSC",
+      "typeDescription": "HSC modulo XTS",
+      "category": "generators",
+      "departmentId": 4,
+      "status": "SGEN",
+      "statusLabel": "SGEN",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903207",
+      "counts": {
+        "count1": 85015,
+        "count2": 0,
+        "count3": "B;0;16172;35000;Generating Tool;2026-03-05 14:17:33\r\nB;1;199;5000;Cutting Tool Z-Axis;2026-03-05 14:17:33\r\nB;2;0;2000;Fine Cutting Tool Z-Axis;2026-03-05 14:17:33\r\nB;4;2681;4500;Fine Cutting Tool V-Axis;2026-03-05 14:17:33"
+      },
+      "cycleTime": "45.00",
+      "isActive": 1
+    },
+    {
+      "id": "LC1001",
+      "name": "LC1001",
+      "model": "LCU",
+      "typeDescription": "LCU Modulo ONE",
+      "category": "cleaning",
+      "departmentId": 4,
+      "status": "SLCU",
+      "statusLabel": "SLCU",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "            10903254",
+      "counts": {
+        "count1": 276,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "15.00",
+      "isActive": 1
+    },
+    {
+      "id": "STOCK ROOM      ",
+      "name": "STOCK ROOM      ",
+      "model": "TER",
+      "typeDescription": null,
+      "category": "terminal",
+      "departmentId": 10,
+      "status": "MINS",
+      "statusLabel": "Manual Insert",
+      "statusColor": "blue",
+      "severity": "info",
+      "event": "NOGO",
+      "eventOriginal": "NOGO",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10902628",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": 0,
+      "isActive": 1
+    },
+    {
+      "id": "SURFACE         ",
+      "name": "SURFACE         ",
+      "model": "TER",
+      "typeDescription": null,
+      "category": "generators",
+      "departmentId": 10,
+      "status": "MINS",
+      "statusLabel": "Manual Insert",
+      "statusColor": "blue",
+      "severity": "info",
+      "event": "NOGO",
+      "eventOriginal": "NOGO",
+      "led": {
+        "green": true,
+        "red": false,
+        "status": "running"
+      },
+      "lastOrder": "            10900926",
+      "counts": {
+        "count1": 0,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": 0,
+      "isActive": 1
+    },
+    {
+      "id": "TSA001",
+      "name": "TSA001",
+      "model": "TSA",
+      "typeDescription": "TSA modulo",
+      "category": "detaper",
+      "departmentId": 4,
+      "status": "STSA",
+      "statusLabel": "STSA",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Reset by DeviceServer",
+      "eventOriginal": "Reset by DeviceServer",
+      "led": {
+        "green": false,
+        "red": false,
+        "status": "idle"
+      },
+      "lastOrder": "              XXXXXX",
+      "counts": {
+        "count1": 141521,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "20.00",
+      "isActive": 1
+    },
+    {
+      "id": "TSA002",
+      "name": "TSA002",
+      "model": "TSA",
+      "typeDescription": "TSA modulo",
+      "category": "detaper",
+      "departmentId": 4,
+      "status": "STSA",
+      "statusLabel": "STSA",
+      "statusColor": "gray",
+      "severity": "unknown",
+      "event": "Waiting for trays ...",
+      "eventOriginal": "Waiting for trays ...",
+      "led": {
+        "green": true,
+        "red": true,
+        "status": "warning"
+      },
+      "lastOrder": "              XXXXXX",
+      "counts": {
+        "count1": 64748,
+        "count2": 0,
+        "count3": 0
+      },
+      "cycleTime": "20.00",
+      "isActive": 1
+    }
+  ],
+  "conveyors": [
+    {
+      "id": "L000_SP001_003",
+      "position": "L000_SP001_003",
+      "status": 4,
+      "statusLabel": "Error",
+      "statusColor": "red",
+      "severity": "critical",
+      "event": "Error, backup at belt 1 - PositionÂ: 003",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_004",
+      "position": "L000_SP001_004",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_005",
+      "position": "L000_SP001_005",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_006",
+      "position": "L000_SP001_006",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_007",
+      "position": "L000_SP001_007",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_009",
+      "position": "L000_SP001_009",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_010",
+      "position": "L000_SP001_010",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_011",
+      "position": "L000_SP001_011",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_012",
+      "position": "L000_SP001_012",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP001_013",
+      "position": "L000_SP001_013",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP003_008",
+      "position": "L000_SP003_008",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP003_014",
+      "position": "L000_SP003_014",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP010_001",
+      "position": "L000_SP010_001",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    },
+    {
+      "id": "L000_SP010_002",
+      "position": "L000_SP010_002",
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-05T22:21:53.000Z"
+    }
+  ],
+  "oee": [
+    {
+      "DeviceID": "CU1001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.10",
+      "Availability": "1.00",
+      "Performance": "0.10",
+      "Quality": "1.00",
+      "Lenses": 12
+    },
+    {
+      "DeviceID": "DBA001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.24",
+      "Availability": "1.00",
+      "Performance": "0.24",
+      "Quality": "1.00",
+      "Lenses": 44
+    },
+    {
+      "DeviceID": "TSA001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": null,
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "TSA002",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ005",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.07",
+      "Availability": "0.85",
+      "Performance": "0.14",
+      "Quality": "0.57",
+      "Lenses": 14
+    },
+    {
+      "DeviceID": "HSQ006",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CBB001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "LC1001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.60",
+      "Availability": "0.97",
+      "Performance": "0.62",
+      "Quality": "1.00",
+      "Lenses": 143
+    },
+    {
+      "DeviceID": "HXS003",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCL001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.17",
+      "Availability": "1.00",
+      "Performance": "0.18",
+      "Quality": "1.00",
+      "Lenses": 21
+    },
+    {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.17",
+      "Availability": "0.54",
+      "Performance": "0.33",
+      "Quality": "0.93",
+      "Lenses": 27
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.17",
+      "Availability": "0.99",
+      "Performance": "0.26",
+      "Quality": "0.68",
+      "Lenses": 31
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.06",
+      "Availability": "1.00",
+      "Performance": "0.06",
+      "Quality": "1.00",
+      "Lenses": 5
+    },
+    {
+      "DeviceID": "CCL002",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.15",
+      "Availability": "0.58",
+      "Performance": "0.27",
+      "Quality": "1.00",
+      "Lenses": 18
+    },
+    {
+      "DeviceID": "DBA002",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ007",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HXS001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.16",
+      "Availability": "1.00",
+      "Performance": "0.16",
+      "Quality": "1.00",
+      "Lenses": 13
+    },
+    {
+      "DeviceID": "CP1002",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.29",
+      "Availability": "1.00",
+      "Performance": "0.29",
+      "Quality": "1.00",
+      "Lenses": 15
+    },
+    {
+      "DeviceID": "CP1003",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.35",
+      "Availability": "1.00",
+      "Performance": "0.35",
+      "Quality": "1.00",
+      "Lenses": 18
+    },
+    {
+      "DeviceID": "HSQ002",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.31",
+      "Availability": "0.88",
+      "Performance": "0.50",
+      "Quality": "0.70",
+      "Lenses": 53
+    },
+    {
+      "DeviceID": "HSQ004",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.16",
+      "Availability": "0.57",
+      "Performance": "0.88",
+      "Quality": "0.32",
+      "Lenses": 60
+    },
+    {
+      "DeviceID": "CCS001",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1004",
+      "Time": "2026-03-05T22:22:18.000Z",
+      "OEE": "0.04",
+      "Availability": "1.00",
+      "Performance": "0.04",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "DBA001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.39",
+      "Availability": "1.00",
+      "Performance": "0.39",
+      "Quality": "1.00",
+      "Lenses": 70
+    },
+    {
+      "DeviceID": "CP1002",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.58",
+      "Availability": "1.00",
+      "Performance": "0.60",
+      "Quality": "0.97",
+      "Lenses": 31
+    },
+    {
+      "DeviceID": "CU1001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.31",
+      "Availability": "1.00",
+      "Performance": "0.33",
+      "Quality": "0.93",
+      "Lenses": 40
+    },
+    {
+      "DeviceID": "HSQ006",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.29",
+      "Availability": "0.92",
+      "Performance": "0.43",
+      "Quality": "0.74",
+      "Lenses": 47
+    },
+    {
+      "DeviceID": "LC1001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.55",
+      "Availability": "1.00",
+      "Performance": "0.55",
+      "Quality": "1.00",
+      "Lenses": 133
+    },
+    {
+      "DeviceID": "CBB001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ005",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.17",
+      "Availability": "0.76",
+      "Performance": "0.30",
+      "Quality": "0.77",
+      "Lenses": 26
+    },
+    {
+      "DeviceID": "CP1001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ002",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.57",
+      "Availability": "0.81",
+      "Performance": "0.97",
+      "Quality": "0.72",
+      "Lenses": 94
+    },
+    {
+      "DeviceID": "DBA002",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ004",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.32",
+      "Availability": "0.85",
+      "Performance": "1.04",
+      "Quality": "0.38",
+      "Lenses": 107
+    },
+    {
+      "DeviceID": "CCL001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.26",
+      "Availability": "1.00",
+      "Performance": "0.26",
+      "Quality": "1.00",
+      "Lenses": 31
+    },
+    {
+      "DeviceID": "HXS001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.39",
+      "Availability": "0.93",
+      "Performance": "0.42",
+      "Quality": "1.00",
+      "Lenses": 31
+    },
+    {
+      "DeviceID": "TSA002",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.04",
+      "Availability": "1.00",
+      "Performance": "0.04",
+      "Quality": "1.00",
+      "Lenses": 8
+    },
+    {
+      "DeviceID": "HXS003",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.05",
+      "Availability": "0.93",
+      "Performance": "0.05",
+      "Quality": "1.00",
+      "Lenses": 4
+    },
+    {
+      "DeviceID": "HSQ001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCL002",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.21",
+      "Availability": "0.62",
+      "Performance": "0.34",
+      "Quality": "1.00",
+      "Lenses": 25
+    },
+    {
+      "DeviceID": "CP1004",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.04",
+      "Availability": "1.00",
+      "Performance": "0.04",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "HSQ007",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "TSA001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": null,
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCS001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1003",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.46",
+      "Availability": "1.00",
+      "Performance": "0.46",
+      "Quality": "1.00",
+      "Lenses": 24
+    },
+    {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.14",
+      "Availability": "0.54",
+      "Performance": "0.31",
+      "Quality": "0.84",
+      "Lenses": 20
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-05T22:00:00.000Z",
+      "OEE": "0.25",
+      "Availability": "0.94",
+      "Performance": "0.28",
+      "Quality": "0.95",
+      "Lenses": 21
+    },
+    {
+      "DeviceID": "CP1002",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.56",
+      "Availability": "0.97",
+      "Performance": "0.64",
+      "Quality": "0.91",
+      "Lenses": 32
+    },
+    {
+      "DeviceID": "HXS003",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "DBA002",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.74",
+      "Availability": "1.00",
+      "Performance": "0.74",
+      "Quality": "1.00",
+      "Lenses": 134
+    },
+    {
+      "DeviceID": "HSQ005",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.09",
+      "Availability": "0.95",
+      "Performance": "0.11",
+      "Quality": "0.92",
+      "Lenses": 12
+    },
+    {
+      "DeviceID": "CBB001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "DBA001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.19",
+      "Availability": "1.00",
+      "Performance": "0.19",
+      "Quality": "1.00",
+      "Lenses": 34
+    },
+    {
+      "DeviceID": "CP1003",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.81",
+      "Availability": "1.00",
+      "Performance": "0.81",
+      "Quality": "1.00",
+      "Lenses": 42
+    },
+    {
+      "DeviceID": "HSQ004",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.31",
+      "Availability": "0.98",
+      "Performance": "0.72",
+      "Quality": "0.44",
+      "Lenses": 61
+    },
+    {
+      "DeviceID": "HSQ002",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.76",
+      "Availability": "0.90",
+      "Performance": "1.04",
+      "Quality": "0.84",
+      "Lenses": 113
+    },
+    {
+      "DeviceID": "TSA001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": null,
+      "Availability": null,
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCL001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.65",
+      "Availability": "1.00",
+      "Performance": "0.65",
+      "Quality": "1.00",
+      "Lenses": 78
+    },
+    {
+      "DeviceID": "CU1001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.48",
+      "Availability": "1.00",
+      "Performance": "0.53",
+      "Quality": "0.89",
+      "Lenses": 64
+    },
+    {
+      "DeviceID": "HXS001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.33",
+      "Availability": "1.00",
+      "Performance": "0.35",
+      "Quality": "0.93",
+      "Lenses": 28
+    },
+    {
+      "DeviceID": "HSQ001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.29",
+      "Availability": "1.00",
+      "Performance": "0.30",
+      "Quality": "0.96",
+      "Lenses": 24
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.55",
+      "Availability": "0.80",
+      "Performance": "0.85",
+      "Quality": "0.80",
+      "Lenses": 82
+    },
+    {
+      "DeviceID": "HSQ006",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.02",
+      "Availability": "0.82",
+      "Performance": "0.02",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "CCL002",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.28",
+      "Availability": "0.74",
+      "Performance": "0.38",
+      "Quality": "1.00",
+      "Lenses": 34
+    },
+    {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.03",
+      "Availability": "0.38",
+      "Performance": "0.20",
+      "Quality": "0.44",
+      "Lenses": 9
+    },
+    {
+      "DeviceID": "LC1001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.12",
+      "Availability": "1.00",
+      "Performance": "0.12",
+      "Quality": "1.00",
+      "Lenses": 29
+    },
+    {
+      "DeviceID": "CP1004",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.19",
+      "Availability": "0.57",
+      "Performance": "0.33",
+      "Quality": "1.00",
+      "Lenses": 10
+    },
+    {
+      "DeviceID": "TSA002",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": "0.82",
+      "Availability": "1.00",
+      "Performance": "0.82",
+      "Quality": "1.00",
+      "Lenses": 148
+    },
+    {
+      "DeviceID": "HSQ007",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCS001",
+      "Time": "2026-03-05T21:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.13",
+      "Availability": "0.72",
+      "Performance": "0.21",
+      "Quality": "0.89",
+      "Lenses": 18
+    },
+    {
+      "DeviceID": "TSA002",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.31",
+      "Availability": "1.00",
+      "Performance": "0.31",
+      "Quality": "1.00",
+      "Lenses": 56
+    },
+    {
+      "DeviceID": "DBA002",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.37",
+      "Availability": "1.00",
+      "Performance": "0.37",
+      "Quality": "1.00",
+      "Lenses": 66
+    },
+    {
+      "DeviceID": "CBB001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ007",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HXS001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.35",
+      "Availability": "0.41",
+      "Performance": "0.85",
+      "Quality": "1.00",
+      "Lenses": 28
+    },
+    {
+      "DeviceID": "CU1001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.32",
+      "Availability": "1.00",
+      "Performance": "0.32",
+      "Quality": "1.00",
+      "Lenses": 38
+    },
+    {
+      "DeviceID": "TSA001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": null,
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1002",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.40",
+      "Availability": "0.40",
+      "Performance": "1.35",
+      "Quality": "1.00",
+      "Lenses": 28
+    },
+    {
+      "DeviceID": "CP1004",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.12",
+      "Availability": "1.00",
+      "Performance": "0.12",
+      "Quality": "1.00",
+      "Lenses": 6
+    },
+    {
+      "DeviceID": "CCL001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.28",
+      "Availability": "0.95",
+      "Performance": "0.30",
+      "Quality": "1.00",
+      "Lenses": 34
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.19",
+      "Availability": "1.00",
+      "Performance": "0.20",
+      "Quality": "0.94",
+      "Lenses": 16
+    },
+    {
+      "DeviceID": "CP1001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ006",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1003",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.46",
+      "Availability": "0.99",
+      "Performance": "0.46",
+      "Quality": "1.00",
+      "Lenses": 24
+    },
+    {
+      "DeviceID": "HSQ002",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.29",
+      "Availability": "0.47",
+      "Performance": "0.65",
+      "Quality": "0.93",
+      "Lenses": 31
+    },
+    {
+      "DeviceID": "HSQ004",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.15",
+      "Availability": "0.88",
+      "Performance": "0.32",
+      "Quality": "0.53",
+      "Lenses": 34
+    },
+    {
+      "DeviceID": "CCL002",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.17",
+      "Availability": "0.17",
+      "Performance": "1.00",
+      "Quality": "1.00",
+      "Lenses": 20
+    },
+    {
+      "DeviceID": "HSQ001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.23",
+      "Availability": "0.80",
+      "Performance": "0.30",
+      "Quality": "0.93",
+      "Lenses": 29
+    },
+    {
+      "DeviceID": "HXS003",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.26",
+      "Availability": "0.60",
+      "Performance": "0.46",
+      "Quality": "0.95",
+      "Lenses": 22
+    },
+    {
+      "DeviceID": "LC1001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.47",
+      "Availability": "1.00",
+      "Performance": "0.47",
+      "Quality": "1.00",
+      "Lenses": 112
+    },
+    {
+      "DeviceID": "DBA001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCS001",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ005",
+      "Time": "2026-03-05T20:00:00.000Z",
+      "OEE": "0.14",
+      "Availability": "0.91",
+      "Performance": "0.26",
+      "Quality": "0.61",
+      "Lenses": 28
+    }
+  ],
+  "orders": {
+    "total": 84337,
+    "todayTotal": 1585,
+    "byDepartment": [
+      {
+        "departmentId": 9,
+        "departmentName": "Complete",
+        "zone": "ship",
+        "jobs": 57716
+      },
+      {
+        "departmentId": 4,
+        "departmentName": "Production",
+        "zone": "surfacing",
+        "jobs": 18802
+      },
+      {
+        "departmentId": null,
+        "departmentName": "Unassigned",
+        "zone": "picking",
+        "jobs": 4286
+      },
+      {
+        "departmentId": 10,
+        "departmentName": "Control",
+        "zone": "control",
+        "jobs": 3049
+      },
+      {
+        "departmentId": -1,
+        "departmentName": "Error",
+        "zone": "error",
+        "jobs": 315
+      },
+      {
+        "departmentId": 8,
+        "departmentName": "Processing",
+        "zone": "coating",
+        "jobs": 169
+      }
+    ],
+    "today": [
+      {
+        "departmentId": 9,
+        "departmentName": "Complete",
+        "zone": "ship",
+        "jobs": 989
+      },
+      {
+        "departmentId": 4,
+        "departmentName": "Production",
+        "zone": "surfacing",
+        "jobs": 411
+      },
+      {
+        "departmentId": null,
+        "departmentName": "Unassigned",
+        "zone": "picking",
+        "jobs": 182
+      },
+      {
+        "departmentId": 8,
+        "departmentName": "Processing",
+        "zone": "coating",
+        "jobs": 2
+      },
+      {
+        "departmentId": 10,
+        "departmentName": "Control",
+        "zone": "control",
+        "jobs": 1
+      }
+    ],
+    "byStation": []
+  },
+  "alerts": [
+    {
+      "id": "dev-CBB001",
+      "type": "device",
+      "source": "CBB001",
+      "model": "CCU",
+      "category": "blocking",
+      "severity": "warning",
+      "message": "Waiting for trays ...",
+      "timestamp": "2026-03-05T23:23:25.761Z"
+    },
+    {
+      "id": "dev-CCU001",
+      "type": "device",
+      "source": "CCU001",
+      "model": "CCU",
+      "category": "cleaning",
+      "severity": "warning",
+      "message": "Tray(s) in process",
+      "timestamp": "2026-03-05T23:23:25.761Z"
+    },
+    {
+      "id": "dev-CU1001",
+      "type": "device",
+      "source": "CU1001",
+      "model": "CCU",
+      "category": "cleaning",
+      "severity": "warning",
+      "message": "Waiting for trays",
+      "timestamp": "2026-03-05T23:23:25.761Z"
+    },
+    {
+      "id": "conv-L000_SP001_003",
+      "type": "conveyor",
+      "source": "L000_SP001_003",
+      "severity": "critical",
+      "message": "Error, backup at belt 1 - PositionÂ: 003",
+      "timestamp": "2026-03-05T22:21:53.000Z"
+    }
+  ],
+  "lastSuccessfulPoll": "2026-03-05T23:23:25.761Z",
+  "savedAt": "2026-03-05T23:23:26.064Z"
+}

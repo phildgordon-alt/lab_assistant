@@ -37,6 +37,10 @@ itempath.start();
 const limble = require('./limble-adapter');
 limble.start();
 
+// ── SOM (Schneider) Control Center integration ────────────────
+const som = require('./som-adapter');
+som.start();
+
 const PORT      = parseInt(process.env.PORT || '3002', 10);
 const DATA_FILE = path.join(__dirname, 'oven-runs.json');
 const MAX_RUNS  = 20000;
@@ -423,6 +427,37 @@ const server = http.createServer(async (req, res) => {
     return json(res, limble.getAIContext());
   }
 
+  // ── SOM (Schneider) Control Center endpoints ─────────────────
+  if (req.method==='GET' && url.pathname==='/api/som/devices') {
+    return json(res, som.getDevices());
+  }
+  if (req.method==='GET' && url.pathname==='/api/som/conveyors') {
+    return json(res, som.getConveyors());
+  }
+  if (req.method==='GET' && url.pathname==='/api/som/alerts') {
+    return json(res, som.getAlerts());
+  }
+  if (req.method==='GET' && url.pathname==='/api/som/health') {
+    return json(res, som.getHealth());
+  }
+  if (req.method==='GET' && url.pathname==='/api/som/ai-context') {
+    return json(res, som.getAIContext());
+  }
+  if (req.method==='POST' && url.pathname==='/api/som/refresh') {
+    try {
+      const result = await som.refresh();
+      return json(res, result);
+    } catch (e) {
+      return json(res, { ok: false, error: e.message }, 500);
+    }
+  }
+  if (req.method==='GET' && url.pathname==='/api/som/orders') {
+    return json(res, som.getOrders());
+  }
+  if (req.method==='GET' && url.pathname==='/api/som/oee') {
+    return json(res, som.getOEE());
+  }
+
   // Slack test endpoint
   if (req.method==='POST' && url.pathname==='/api/slack/test') {
     try {
@@ -506,6 +541,7 @@ const server = http.createServer(async (req, res) => {
       // Gather lab context
       const inventoryCtx = itempath.getAIContext ? itempath.getAIContext() : { summary: 'Inventory data not available' };
       const maintenanceCtx = limble.getAIContext ? limble.getAIContext() : { summary: 'Maintenance data not available' };
+      const somCtx = som.getAIContext ? som.getAIContext() : { machines: {}, conveyors: {} };
       const ovenStats = computeStats ? computeStats() : {};
 
       const systemPrompt = `You are Lab_Assistant AI, an expert assistant for an optical lens laboratory. You have access to live data:
@@ -516,6 +552,11 @@ ${inventoryCtx.alerts ? `- ${inventoryCtx.alerts.length} low stock alerts` : ''}
 
 MAINTENANCE (Limble CMMS):
 ${maintenanceCtx.summary || 'No maintenance data'}
+
+SCHNEIDER MACHINES (SOM Control Center):
+- ${somCtx.machines?.total || 0} machines, ${somCtx.machines?.running || 0} running
+- ${somCtx.conveyors?.errors || 0} conveyor errors
+${somCtx.activeAlerts?.slice(0,3).map(a => `- ${a.source}: ${a.message}`).join('\n') || ''}
 
 OVEN STATUS:
 ${ovenStats.activeTimers || 0} active oven timers, ${ovenStats.totalRuns || 0} runs on record
@@ -805,6 +846,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     GET  /api/maintenance/tasks    ← Work orders & PMs`);
   console.log(`     GET  /api/maintenance/downtime ← Downtime records`);
   console.log(`     GET  /api/maintenance/stats    ← Maintenance KPIs`);
+  console.log(`     GET  /api/som/devices          ← Schneider machine status`);
+  console.log(`     GET  /api/som/conveyors        ← Conveyor belt positions`);
+  console.log(`     GET  /api/som/orders           ← Jobs by department`);
+  console.log(`     GET  /api/som/alerts           ← Machine/conveyor alerts`);
   console.log(`     POST /api/ai/query             ← AI query with lab context`);
   console.log(`     POST /api/slack/ai-respond     ← Process Slack AI query`);
 

@@ -25,17 +25,18 @@ Browser (React SPA)          Server (Node.js)            External APIs
 ─────────────────────        ────────────────────        ──────────────
 src/App.jsx                  server/oven-timer-server.js  ItemPath/Kardex (live, 60s poll)
   ├─ Main app + all tabs       ├─ REST API (:3002)         DVI (jobs, 90s poll)
-  ├─ ?mode=tablet              ├─ WebSocket (timers)       Looker (nightly ETL 2AM)
-  └─ ?mode=corporate           ├─ /api/report (Word gen)   Slack (webhooks)
-                               ├─ /api/dvi/*
+  ├─ ?mode=tablet              ├─ WebSocket (timers)       SOM/Schneider (live, 30s poll)
+  └─ ?mode=corporate           ├─ /api/report (Word gen)   Looker (nightly ETL 2AM)
+                               ├─ /api/dvi/*               Slack (webhooks)
 Standalone HTML                ├─ /api/itempath/*
-─────────────────────          └─ /api/report
-standalone/OvenTimer.html
-standalone/CoatingTimer.html  server/dvi-adapter.js       → DVI API
-standalone/AssemblyDashboard.html  server/itempath-adapter.js  → ItemPath API
+─────────────────────          ├─ /api/som/*
+standalone/OvenTimer.html      └─ /api/report
+standalone/CoatingTimer.html
+standalone/AssemblyDashboard.html  server/dvi-adapter.js       → DVI API
+                              server/itempath-adapter.js  → ItemPath API
+                              server/som-adapter.js       → SOM MySQL (machines/conveyors)
                               server/nightly-etl.js       → Looker + email IMAP
                               server/slack-proxy.js       → Slack webhooks
-                              server/nightly-etl.js       → cron 2AM ETL
 ```
 
 **URL modes (App.jsx):**
@@ -157,6 +158,35 @@ Polls ItemPath/Kardex API every 60 seconds for live lens blank inventory.
 - Mock mode when `ITEMPATH_TOKEN` not set
 - Exports: `start()`, `getInventory()`, `getPicks()`, `getAlerts()`, `findBlank(query)`, `getAIContext()`
 
+### `server/som-adapter.js` — SOM (Schneider) Control Center Adapter
+Connects to Schneider Optical Machines' LMS MySQL database for real-time machine status.
+- **Protocol:** MySQL direct connection to `som_lms` database
+- **Polling:** Every 30 seconds (configurable via `SOM_POLL_INTERVAL`)
+- **Tables queried:**
+  - `production_device` — Machine status (CCL coaters, DBA generators, blockers)
+  - `production_conveyor_device` — Conveyor belt positions and errors
+
+**Lab Server endpoints:**
+- `GET /api/som/devices` — All production machines with status/events
+- `GET /api/som/conveyors` — Conveyor positions with error states
+- `GET /api/som/alerts` — Active machine/conveyor alerts
+- `GET /api/som/health` — Connection health check
+- `GET /api/som/ai-context` — AI-ready context summary
+- `POST /api/som/refresh` — Force refresh data
+
+**Environment variables:**
+```
+SOM_HOST=192.168.0.155
+SOM_PORT=3306
+SOM_USER=root
+SOM_PASSWORD=schneider
+SOM_DATABASE=som_lms
+SOM_POLL_INTERVAL=30000
+```
+
+**Device categories:** blocking, surfacing, coating, edging, conveyor, control
+**Mock mode:** Falls back to mock data when MySQL connection unavailable
+
 ### `server/nightly-etl.js` (19KB)
 Runs at 2:00 AM via cron. Pulls historical data from Looker and/or DVI.
 - Looker: OAuth2 client credentials → fetches 3 Looks (throughput, yield, cycle times)
@@ -225,6 +255,7 @@ Standalone tablet app for individual coaters. One tablet per coater.
 | DVI SOAP API | ✅ LIVE | `gateway/sources/dvi-soap.ts` — real-time orders/statuses |
 | DVI File Upload | ✅ LIVE | `/api/dvi/upload` — manual XML upload + archive |
 | Limble CMMS | ✅ LIVE | Maintenance data via gateway proxy |
+| SOM Control Center | ✅ LIVE | `server/som-adapter.js` — machine status + conveyors |
 | Assembly Dashboard | 🟡 MOCK | Standalone, works. Wire to DVI when ready. |
 | Nightly ETL | 🟡 STUB | Written, not scheduled. Needs Looker credentials. |
 | BLE zone readers | 📋 PLANNED | Hardware BOM done. Raspberry Pi Zero 2W + ASUS USB-BT500. |
@@ -572,6 +603,12 @@ See `.env.example` for full list. Key ones:
 | `LIMBLE_URL` | gateway, server | Limble CMMS base URL |
 | `LIMBLE_CLIENT_ID` | gateway, server | Limble OAuth2 client ID |
 | `LIMBLE_CLIENT_SECRET` | gateway, server | Limble OAuth2 client secret |
+| `SOM_HOST` | server | Schneider SOM MySQL host (192.168.0.155) |
+| `SOM_PORT` | server | Schneider SOM MySQL port (3306) |
+| `SOM_USER` | server | Schneider SOM MySQL user |
+| `SOM_PASSWORD` | server | Schneider SOM MySQL password |
+| `SOM_DATABASE` | server | Schneider SOM database name (som_lms) |
+| `SOM_POLL_INTERVAL` | server | Polling interval in ms (default: 30000) |
 | `LOOKER_URL` | nightly-etl.js | Looker instance URL |
 | `LOOKER_CLIENT_ID` | nightly-etl.js | Looker OAuth2 client ID |
 | `LOOKER_CLIENT_SECRET` | nightly-etl.js | Looker OAuth2 client secret |

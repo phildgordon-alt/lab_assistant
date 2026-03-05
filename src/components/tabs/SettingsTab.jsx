@@ -99,6 +99,189 @@ function DevOpsAICard({settings,connections}){
   );
 }
 
+// ── SOM Equipment Configuration Section ──────────────────────────────────────
+const SOM_CATEGORIES = [
+  { id: 'generators', label: 'Generators', color: '#3B82F6' },
+  { id: 'cutters', label: 'Cutters', color: '#0EA5E9' },
+  { id: 'blocking', label: 'Blocking', color: '#06B6D4' },
+  { id: 'polishing', label: 'Polishing', color: '#8B5CF6' },
+  { id: 'fining', label: 'Fining', color: '#A855F7' },
+  { id: 'cleaning', label: 'Cleaning', color: '#22D3EE' },
+  { id: 'coating', label: 'Coating', color: '#F59E0B' },
+  { id: 'edging', label: 'Edging', color: '#EC4899' },
+  { id: 'assembly', label: 'Assembly', color: '#10B981' },
+  { id: 'qc', label: 'QC', color: '#F97316' },
+  { id: 'ar_room', label: 'AR Room', color: '#6366F1' },
+  { id: 'detaper', label: 'Detaper', color: '#14B8A6' },
+  { id: 'control', label: 'Control', color: '#64748B' },
+  { id: 'terminal', label: 'Terminals', color: '#475569' },
+  { id: 'other', label: 'Other', color: '#374151' },
+];
+
+function SOMEquipmentSection({somDevices,setSomDevices,somDeviceOverrides,setSomDeviceOverrides,loadingSomDevices,setLoadingSomDevices,somEquipSearch,setSomEquipSearch,somEquipCategory,setSomEquipCategory,settings}){
+  const serverUrl = settings?.serverUrl || 'http://localhost:3002';
+
+  // Load SOM devices on mount
+  useEffect(()=>{
+    loadSomDevices();
+  },[]);
+
+  const loadSomDevices = async () => {
+    setLoadingSomDevices(true);
+    try {
+      const resp = await fetch(`${serverUrl}/api/som/devices`);
+      if(resp.ok) {
+        const data = await resp.json();
+        setSomDevices(data.devices || []);
+      }
+    } catch(e) {
+      console.error('Failed to load SOM devices:', e);
+    }
+    setLoadingSomDevices(false);
+  };
+
+  // Save overrides to localStorage
+  const saveOverride = (deviceId, updates) => {
+    const newOverrides = { ...somDeviceOverrides, [deviceId]: { ...(somDeviceOverrides[deviceId]||{}), ...updates } };
+    setSomDeviceOverrides(newOverrides);
+    localStorage.setItem('la_som_equipment', JSON.stringify(newOverrides));
+  };
+
+  // Get effective value (override or original)
+  const getEffective = (device, field) => {
+    const override = somDeviceOverrides[device.id];
+    if(override && override[field] !== undefined) return override[field];
+    if(field === 'label') return (device.name || device.id || '').trim();
+    if(field === 'category') return device.category || 'other';
+    return device[field];
+  };
+
+  // Filter devices
+  const filteredDevices = somDevices.filter(d => {
+    const label = getEffective(d, 'label').toLowerCase();
+    const cat = getEffective(d, 'category');
+    const matchSearch = !somEquipSearch || label.includes(somEquipSearch.toLowerCase()) || (d.id||'').toLowerCase().includes(somEquipSearch.toLowerCase());
+    const matchCategory = somEquipCategory === 'all' || cat === somEquipCategory;
+    return matchSearch && matchCategory;
+  });
+
+  // Category stats
+  const categoryStats = SOM_CATEGORIES.map(c => ({
+    ...c,
+    count: somDevices.filter(d => getEffective(d, 'category') === c.id).length
+  })).filter(c => c.count > 0);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:700,color:T.text}}>SOM Equipment Configuration</div>
+          <div style={{fontSize:11,color:T.textMuted,marginTop:2}}>Configure labels and categories for machines from Schneider SOM</div>
+        </div>
+        <button onClick={loadSomDevices} disabled={loadingSomDevices}
+          style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 16px",color:T.text,fontSize:12,fontWeight:600,cursor:"pointer",display:"flex",alignItems:"center",gap:6}}>
+          {loadingSomDevices ? "Loading..." : "↻ Refresh"}
+        </button>
+      </div>
+
+      {/* Category summary */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+        <button onClick={()=>setSomEquipCategory('all')}
+          style={{background:somEquipCategory==='all'?T.blue:'transparent',border:`1px solid ${somEquipCategory==='all'?T.blue:T.border}`,borderRadius:6,padding:"6px 12px",color:somEquipCategory==='all'?'#fff':T.textMuted,fontSize:11,fontWeight:600,cursor:"pointer"}}>
+          All ({somDevices.length})
+        </button>
+        {categoryStats.map(c=>(
+          <button key={c.id} onClick={()=>setSomEquipCategory(c.id)}
+            style={{background:somEquipCategory===c.id?c.color:'transparent',border:`1px solid ${somEquipCategory===c.id?c.color:T.border}`,borderRadius:6,padding:"6px 12px",color:somEquipCategory===c.id?'#fff':c.color,fontSize:11,fontWeight:600,cursor:"pointer"}}>
+            {c.label} ({c.count})
+          </button>
+        ))}
+      </div>
+
+      {/* Search */}
+      <input
+        value={somEquipSearch}
+        onChange={e=>setSomEquipSearch(e.target.value)}
+        placeholder="Search by name or ID..."
+        style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 14px",color:T.text,fontSize:13,width:"100%"}}
+      />
+
+      {/* Device list */}
+      <Card style={{padding:0}}>
+        <div style={{maxHeight:500,overflowY:"auto"}}>
+          {loadingSomDevices ? (
+            <div style={{padding:40,textAlign:"center",color:T.textDim}}>Loading SOM devices...</div>
+          ) : filteredDevices.length === 0 ? (
+            <div style={{padding:40,textAlign:"center",color:T.textDim}}>
+              <div style={{fontSize:32,marginBottom:10}}>🏭</div>
+              <div style={{fontSize:13}}>No devices found</div>
+            </div>
+          ) : (
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{borderBottom:`1px solid ${T.border}`,background:T.bg}}>
+                  <th style={{padding:"10px 14px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,fontWeight:600}}>DEVICE ID</th>
+                  <th style={{padding:"10px 14px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,fontWeight:600}}>SOM NAME</th>
+                  <th style={{padding:"10px 14px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,fontWeight:600}}>DISPLAY LABEL</th>
+                  <th style={{padding:"10px 14px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,fontWeight:600}}>CATEGORY</th>
+                  <th style={{padding:"10px 14px",textAlign:"center",fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,fontWeight:600}}>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredDevices.map(device => {
+                  const effectiveLabel = getEffective(device, 'label');
+                  const effectiveCategory = getEffective(device, 'category');
+                  const catInfo = SOM_CATEGORIES.find(c=>c.id===effectiveCategory) || SOM_CATEGORIES.find(c=>c.id==='other');
+                  const hasOverride = somDeviceOverrides[device.id];
+                  return (
+                    <tr key={device.id} style={{borderBottom:`1px solid ${T.border}`,background:hasOverride?`${T.blue}08`:'transparent'}}>
+                      <td style={{padding:"10px 14px",fontSize:12,fontFamily:mono,color:T.textMuted}}>{(device.id||'').trim() || '—'}</td>
+                      <td style={{padding:"10px 14px",fontSize:12,color:T.textMuted}}>{(device.name||'').trim() || '—'}</td>
+                      <td style={{padding:"10px 14px"}}>
+                        <input
+                          value={effectiveLabel}
+                          onChange={e=>saveOverride(device.id,{label:e.target.value})}
+                          style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:4,padding:"6px 10px",color:T.text,fontSize:12,width:"100%",maxWidth:180}}
+                        />
+                      </td>
+                      <td style={{padding:"10px 14px"}}>
+                        <select
+                          value={effectiveCategory}
+                          onChange={e=>saveOverride(device.id,{category:e.target.value})}
+                          style={{background:T.surface,border:`1px solid ${catInfo.color}40`,borderRadius:4,padding:"6px 10px",color:catInfo.color,fontSize:12,fontWeight:600}}>
+                          {SOM_CATEGORIES.map(c=>(
+                            <option key={c.id} value={c.id}>{c.label}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={{padding:"10px 14px",textAlign:"center"}}>
+                        <span style={{
+                          display:"inline-block",width:8,height:8,borderRadius:"50%",
+                          background:device.statusColor==='green'?'#22C55E':device.statusColor==='amber'?'#F59E0B':device.statusColor==='red'?'#EF4444':'#64748B'
+                        }} title={device.statusLabel||device.status}/>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </Card>
+
+      {Object.keys(somDeviceOverrides).length > 0 && (
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"12px 16px",background:`${T.amber}10`,borderRadius:8,border:`1px solid ${T.amber}30`}}>
+          <span style={{fontSize:12,color:T.amber}}>{Object.keys(somDeviceOverrides).length} device(s) have custom overrides</span>
+          <button onClick={()=>{setSomDeviceOverrides({});localStorage.removeItem('la_som_equipment');}}
+            style={{background:"transparent",border:`1px solid ${T.amber}`,borderRadius:6,padding:"6px 12px",color:T.amber,fontSize:11,cursor:"pointer"}}>
+            Reset All
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Agents Management Panel ───────────────────────────────────────────────────
 function AgentsPanel({settings}){
   const [agents,setAgents]=useState([]);
@@ -699,6 +882,15 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
   const [newTool,setNewTool]=useState({name:"",description:"",category:"Custom",input_schema:"{}"});
   const [savingTool,setSavingTool]=useState(false);
 
+  // SOM Equipment state
+  const [somDevices,setSomDevices]=useState([]);
+  const [somDeviceOverrides,setSomDeviceOverrides]=useState(()=>{
+    try { return JSON.parse(localStorage.getItem('la_som_equipment')||'{}'); } catch { return {}; }
+  });
+  const [loadingSomDevices,setLoadingSomDevices]=useState(false);
+  const [somEquipSearch,setSomEquipSearch]=useState('');
+  const [somEquipCategory,setSomEquipCategory]=useState('all');
+
   // Check for lockout
   const isLockedOut = lockoutUntil && Date.now() < lockoutUntil;
   const lockoutRemaining = isLockedOut ? Math.ceil((lockoutUntil - Date.now()) / 1000) : 0;
@@ -1002,6 +1194,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
         {id:"agents",icon:"🧠",label:"Agents"},
         {id:"mcptools",icon:"🔧",label:"MCP Tools"},
         {id:"dataimport",icon:"📥",label:"Data Import"},
+        {id:"somequip",icon:"🏭",label:"SOM Equipment"},
         {id:"equipment",icon:"⚙️",label:"Equipment"},
         {id:"categories",icon:"📦",label:"Categories"},
         {id:"server",icon:"🔗",label:"Server"},
@@ -1085,11 +1278,12 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
                     anthropic:"Anthropic Claude API",
                     itempath:"ItemPath/Kardex",
                     dvi:"DVI Lab System",
-                    limble:"Limble CMMS"
+                    limble:"Limble CMMS",
+                    som:"SOM Control Center"
                   };
                   const serviceIcons = {
                     gateway:"🌐",database:"🗄️",lab_backend:"🔧",slack:"💬",
-                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️"
+                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️",som:"⚙️"
                   };
                   const startCommands = {
                     lab_backend: "npm run server",
@@ -1117,6 +1311,13 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
                     limble: [
                       {key:'limbleUrl',label:'LIMBLE_URL',type:'url'},
                       {key:'limbleApiKey',label:'LIMBLE_API_KEY',type:'password'}
+                    ],
+                    som: [
+                      {key:'somHost',label:'SOM_HOST',type:'text'},
+                      {key:'somPort',label:'SOM_PORT',type:'text'},
+                      {key:'somDatabase',label:'SOM_DATABASE',type:'text'},
+                      {key:'somUser',label:'SOM_USER',type:'text'},
+                      {key:'somPassword',label:'SOM_PASSWORD',type:'password'}
                     ]
                   };
                   const isExpanded = expandedService === key;
@@ -1474,6 +1675,22 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       )}
 
       {/* ══ EQUIPMENT ══ */}
+      {sub==="somequip"&&(
+        <SOMEquipmentSection
+          somDevices={somDevices}
+          setSomDevices={setSomDevices}
+          somDeviceOverrides={somDeviceOverrides}
+          setSomDeviceOverrides={setSomDeviceOverrides}
+          loadingSomDevices={loadingSomDevices}
+          setLoadingSomDevices={setLoadingSomDevices}
+          somEquipSearch={somEquipSearch}
+          setSomEquipSearch={setSomEquipSearch}
+          somEquipCategory={somEquipCategory}
+          setSomEquipCategory={setSomEquipCategory}
+          settings={settings}
+        />
+      )}
+
       {sub==="equipment"&&(
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>

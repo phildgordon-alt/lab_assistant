@@ -223,6 +223,25 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     }
   }
 
+  // 9. SOM Control Center (Schneider Optical Machines MySQL database)
+  try {
+    const start = Date.now();
+    const somResp = await fetch(`${labUrl}/api/som/health`, { signal: AbortSignal.timeout(5000) });
+    const latency = Date.now() - start;
+    if (somResp.ok) {
+      const somHealth = await somResp.json();
+      if (somHealth.isLive) {
+        connections.som = { status: 'connected', message: `MySQL connected (${somHealth.devices || 0} devices)`, latency };
+      } else {
+        connections.som = { status: 'disconnected', message: somHealth.connectionError || 'Connection timeout - using cached data' };
+      }
+    } else {
+      connections.som = { status: 'disconnected', message: `Lab server returned ${somResp.status}` };
+    }
+  } catch (e) {
+    connections.som = { status: 'unconfigured', message: 'Lab server not running or SOM not configured' };
+  }
+
   res.json({
     timestamp: new Date().toISOString(),
     connections,
