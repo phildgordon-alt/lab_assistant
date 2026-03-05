@@ -396,6 +396,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method==='GET' && url.pathname==='/api/inventory/vlms') {
     return json(res, itempath.getVLMs());
   }
+  if (req.method==='GET' && url.pathname==='/api/inventory/putwall') {
+    return json(res, itempath.getPutWall());
+  }
   if (req.method==='GET' && url.pathname==='/api/inventory/ai-context') {
     return json(res, itempath.getAIContext());
   }
@@ -797,6 +800,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     GET  /api/inventory/alerts     ← Low stock alerts`);
   console.log(`     GET  /api/inventory/warehouses ← Warehouse breakdown (WH1, WH2, WH3)`);
   console.log(`     GET  /api/inventory/vlms       ← VLM inventory breakdown`);
+  console.log(`     GET  /api/inventory/putwall   ← Put Wall positions by warehouse`);
   console.log(`     GET  /api/maintenance/assets   ← Equipment from Limble CMMS`);
   console.log(`     GET  /api/maintenance/tasks    ← Work orders & PMs`);
   console.log(`     GET  /api/maintenance/downtime ← Downtime records`);

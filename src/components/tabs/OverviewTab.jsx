@@ -131,7 +131,8 @@ const CARD_REGISTRY = [
   { type:"kpi_row",         label:"KPI Row",              icon:"📊", desc:"Key metrics — active trays, rush jobs, coating WIP, batch fill, QC holds" },
   { type:"slack_feed",      label:"Slack Messages",        icon:"💬", desc:"Live Slack channel feed with outgoing message compose and QR code" },
   { type:"coating_machines",label:"Coating Machines",      icon:"🌡", desc:"Status of all three coating machines with batch controls" },
-  { type:"putwall_grid",    label:"Put Wall + Event Log",  icon:"⬡",  desc:"Quick Bind slot grid and live event feed side by side" },
+  { type:"putwall_dual",    label:"Put Wall (Both Warehouses)", icon:"⬡", desc:"Live Put Wall positions for WH1 and WH2 with At Kardex count" },
+  { type:"event_feed",      label:"Event Feed",            icon:"📡", desc:"Live event feed showing recent lab activity" },
   { type:"fleet_dept",      label:"Fleet by Department",   icon:"◈",  desc:"All trays visualized by department with coating type legend" },
   { type:"rush_queue",      label:"Rush Queue",            icon:"🔴", desc:"All active rush jobs with location and time in system" },
   { type:"aging_alert",     label:"WIP Aging Alert",       icon:"⏱", desc:"Jobs in system longer than threshold — configurable hours" },
@@ -149,8 +150,9 @@ const DEFAULT_CARDS = [
   { id:"c1", type:"kpi_row",          title:"KPI Row",             config:{} },
   { id:"c2", type:"slack_feed",       title:"Slack Messages",      config:{} },
   { id:"c3", type:"coating_machines", title:"Coating Machines",    config:{} },
-  { id:"c4", type:"putwall_grid",     title:"Put Wall & Events",   config:{} },
-  { id:"c5", type:"fleet_dept",       title:"Fleet by Department", config:{} },
+  { id:"c4", type:"putwall_dual",     title:"Put Wall (Live)",     config:{} },
+  { id:"c5", type:"event_feed",       title:"Event Feed",          config:{} },
+  { id:"c6", type:"fleet_dept",       title:"Fleet by Department", config:{} },
 ];
 
 function genId(){ return "c"+(Date.now().toString(36)+Math.random().toString(36).slice(2,6)); }
@@ -889,6 +891,28 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     return()=>clearInterval(iv);
   },[]);
 
+  // Live Put Wall data from ItemPath
+  const [putWallData,setPutWallData]=useState({WH1:{positions:[],activeCount:0},WH2:{positions:[],activeCount:0},status:"pending",lastSync:null});
+  useEffect(()=>{
+    const fetchPutWall=async()=>{
+      try{
+        const res=await fetch("http://localhost:3002/api/inventory/putwall");
+        const data=await res.json();
+        setPutWallData({
+          WH1:data.WH1||{positions:[],activeCount:0,totalOrders:0},
+          WH2:data.WH2||{positions:[],activeCount:0,totalOrders:0},
+          status:data.status||"ok",
+          lastSync:data.lastSync
+        });
+      }catch(e){
+        setPutWallData(prev=>({...prev,status:"error"}));
+      }
+    };
+    fetchPutWall();
+    const iv=setInterval(fetchPutWall,15000); // Poll every 15s for near real-time
+    return()=>clearInterval(iv);
+  },[]);
+
   useEffect(()=>{ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(cards));}catch{} },[cards]);
 
   const addCard=(type)=>{
@@ -1057,30 +1081,106 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         </div>
       );
 
-      case "putwall_grid": return(
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-          <Card>
-            <SectionHeader right={`${pwOcc}/20 occupied`}>Quick Bind</SectionHeader>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:6}}>
-              {putWall.map((s,i)=>{
-                const bg=!s.trayId?T.bg:s.rush?T.redDark:T.blueDark;
-                const border=!s.trayId?T.border:s.rush?T.red:T.blue;
-                return(
-                  <div key={i} style={{background:bg,border:`1px solid ${border}`,borderRadius:6,padding:"7px 5px",textAlign:"center",minHeight:60,display:"flex",flexDirection:"column",justifyContent:"center",position:"relative"}}>
-                    <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{String(s.position).padStart(2,"0")}</div>
-                    {s.trayId?(<>
-                      <div style={{fontSize:11,color:T.text,fontWeight:700,fontFamily:mono}}>{s.job}</div>
-                      <div style={{fontSize:9,color:T.textMuted}}>{s.trayId}</div>
-                      {s.rush&&<div style={{position:"absolute",top:2,right:2,fontSize:7,background:T.red,color:"#fff",borderRadius:3,padding:"1px 3px",fontWeight:800}}>R</div>}
-                    </>):<div style={{fontSize:14,color:T.border}}>—</div>}
-                  </div>
-                );
-              })}
+      case "putwall_dual": {
+        // Calculate At Kardex count from wipJobs
+        const atKardexJobs = wipJobs.filter(j => {
+          const s = (j.station || '').toUpperCase();
+          return s.includes('AT KARDEX') || s.includes('MAN2KARDX');
+        });
+        const atKardexCount = atKardexJobs.length;
+
+        // Build position lookup for each warehouse
+        const wh1Lookup = {};
+        const wh2Lookup = {};
+        (putWallData.WH1?.positions || []).forEach(p => { wh1Lookup[p.position] = p; });
+        (putWallData.WH2?.positions || []).forEach(p => { wh2Lookup[p.position] = p; });
+
+        // Generate 75 positions grid (15 cols x 5 rows)
+        const renderWallGrid = (whName, lookup, activeCount) => {
+          const positions = Array.from({ length: 75 }, (_, i) => {
+            const posNum = i + 1;
+            const posKey = `P${String(posNum).padStart(2, '0')}`;
+            const posData = lookup[posKey] || lookup[String(posNum)] || lookup[posNum] || null;
+            return { num: posNum, key: posKey, data: posData };
+          });
+
+          return (
+            <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, fontFamily: mono, letterSpacing: 1 }}>{whName}</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ fontSize: 10, color: T.green, fontFamily: mono }}>{activeCount} active</span>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(15, 1fr)', gap: 2 }}>
+                {positions.map(p => {
+                  const hasOrder = !!p.data;
+                  const bg = hasOrder ? T.greenDark : T.bg;
+                  const border = hasOrder ? T.green : T.border;
+                  return (
+                    <div
+                      key={p.num}
+                      title={hasOrder ? `${p.key}: ${p.data.totalOrders || 1} order(s), ${p.data.pendingQty || 0} pending` : `${p.key}: Empty`}
+                      style={{
+                        background: bg,
+                        border: `1px solid ${border}`,
+                        borderRadius: 3,
+                        aspectRatio: '1',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: 8,
+                        color: hasOrder ? T.green : T.textDim,
+                        fontFamily: mono,
+                        cursor: 'default',
+                        minHeight: 20,
+                      }}
+                    >
+                      {p.num}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </Card>
-          <EventLog events={events}/>
-        </div>
-      );
+          );
+        };
+
+        return (
+          <div>
+            {/* At Kardex header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, padding: '8px 12px', background: atKardexCount > 0 ? `${T.amber}15` : T.bg, borderRadius: 6, border: `1px solid ${atKardexCount > 0 ? T.amber : T.border}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 16 }}>📦</span>
+                <span style={{ fontSize: 12, fontWeight: 600, color: atKardexCount > 0 ? T.amber : T.textMuted, fontFamily: mono }}>AT KARDEX</span>
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: atKardexCount > 0 ? T.amber : T.textDim, fontFamily: mono }}>{atKardexCount}</div>
+            </div>
+            {/* Both warehouses side by side */}
+            <div style={{ display: 'flex', gap: 16 }}>
+              {renderWallGrid('WALL 1 (WH1)', wh1Lookup, putWallData.WH1?.activeCount || 0)}
+              {renderWallGrid('WALL 2 (WH2)', wh2Lookup, putWallData.WH2?.activeCount || 0)}
+            </div>
+            {/* Legend */}
+            <div style={{ display: 'flex', gap: 16, marginTop: 10, justifyContent: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 10, height: 10, background: T.greenDark, border: `1px solid ${T.green}`, borderRadius: 2 }} />
+                <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Active</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 10, height: 10, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 2 }} />
+                <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Empty</span>
+              </div>
+            </div>
+            {putWallData.lastSync && (
+              <div style={{ fontSize: 9, color: T.textDim, textAlign: 'center', marginTop: 6, fontFamily: mono }}>
+                Last sync: {new Date(putWallData.lastSync).toLocaleTimeString()}
+              </div>
+            )}
+          </div>
+        );
+      }
+
+      case "event_feed": return <EventLog events={events} />;
 
       case "fleet_dept": return(
         <Card style={{padding:20}}>

@@ -148,16 +148,24 @@ function normalizeOrder(o) {
     reference: o.reference || o.name,
     status:    o.status,
     warehouse: o.warehouseName || null,
+    station:   o.stationName || null,  // Station/area where order is processed
     startedAt: o.modifiedDate || o.created_at || o.started_at,
     hasStock:  o.hasStock,
     lines:     lines.map(l => ({
-      sku:     l.materialName || l.material_code || l.sku,
-      name:    l.Info3 ? `${l.Info3} ${l.Info1 || ''}`.trim() : (l.materialName || l.material_name || l.name),
-      qty:     parseFloat(l.quantity) || 0,
-      picked:  parseFloat(l.quantity_picked || l.picked || 0),
-      pending: Math.max(0, (parseFloat(l.quantity)||0) - (parseFloat(l.quantity_picked||0))),
-      rxInfo:  l.Info1 || null,  // e.g., "R: -0.88  -0.55  89  225"
-      sizing:  l.Info2 || null,  // e.g., "30.5  28.0  3.4  19.4  -----"
+      sku:         l.materialName || l.material_code || l.sku,
+      name:        l.Info3 ? `${l.Info3} ${l.Info1 || ''}`.trim() : (l.materialName || l.material_name || l.name),
+      qty:         parseFloat(l.quantity) || 0,
+      picked:      parseFloat(l.quantity_picked || l.picked || 0),
+      pending:     Math.max(0, (parseFloat(l.quantity)||0) - (parseFloat(l.quantity_picked||0))),
+      rxInfo:      l.Info1 || null,  // e.g., "R: -0.88  -0.55  89  225"
+      sizing:      l.Info2 || null,  // e.g., "30.5  28.0  3.4  19.4  -----"
+      // Put Wall destination fields
+      putLocation: l.putLocation || null,   // Put Wall position (e.g., "P01", "P23")
+      putBinName:  l.putBinName || null,    // Put Wall bin/slot
+      putHeight:   l.putHeight || null,     // Put Wall height (if multi-level)
+      // Pick source fields
+      pickLocation: l.pickLocation || null,  // Kardex location
+      pickBinName:  l.pickBinName || null,   // Kardex bin
     })),
   };
 }
@@ -622,6 +630,67 @@ function getAlerts() {
 }
 
 /**
+ * Put Wall status - aggregates active picks by destination position
+ * Returns positions by warehouse (WH1: 75 positions, WH2: 75 positions)
+ */
+function getPutWall() {
+  // Group by warehouse and then by put wall position
+  const byWarehouse = { WH1: {}, WH2: {}, Unknown: {} };
+
+  for (const pick of cache.activePicks) {
+    const wh = pick.warehouse || 'Unknown';
+    if (!byWarehouse[wh]) byWarehouse[wh] = {};
+
+    for (const line of pick.lines) {
+      // putLocation or putBinName contains the position (e.g., "P01", "P23")
+      const position = line.putLocation || line.putBinName || null;
+      if (position) {
+        if (!byWarehouse[wh][position]) {
+          byWarehouse[wh][position] = {
+            position,
+            orders: [],
+            totalQty: 0,
+            pendingQty: 0,
+          };
+        }
+        byWarehouse[wh][position].orders.push({
+          orderId: pick.orderId,
+          reference: pick.reference,
+          sku: line.sku,
+          name: line.name,
+          qty: line.qty,
+          pending: line.pending,
+          status: pick.status,
+        });
+        byWarehouse[wh][position].totalQty += line.qty;
+        byWarehouse[wh][position].pendingQty += line.pending;
+      }
+    }
+  }
+
+  // Convert to arrays sorted by position
+  const wh1Positions = Object.values(byWarehouse.WH1).sort((a, b) =>
+    (a.position || '').localeCompare(b.position || ''));
+  const wh2Positions = Object.values(byWarehouse.WH2).sort((a, b) =>
+    (a.position || '').localeCompare(b.position || ''));
+
+  return {
+    WH1: {
+      positions: wh1Positions,
+      activeCount: wh1Positions.length,
+      totalOrders: wh1Positions.reduce((sum, p) => sum + p.orders.length, 0),
+    },
+    WH2: {
+      positions: wh2Positions,
+      activeCount: wh2Positions.length,
+      totalOrders: wh2Positions.reduce((sum, p) => sum + p.orders.length, 0),
+    },
+    lastSync: cache.lastSync,
+    status: cache.syncStatus,
+  };
+}
+
+/**
  * Find blanks matching an Rx spec or coating type
  * Query params: coatingType, index, sphere, cylinder, sku (partial match)
  */
@@ -690,4 +759,4 @@ function start() {
   setInterval(poll, CONFIG.pollInterval);
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getAIContext };
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext };
