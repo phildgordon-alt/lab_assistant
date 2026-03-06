@@ -474,32 +474,19 @@ function reconcileOperatorStats(){
       operators[a.operatorName].jobsPerHour = operators[a.operatorName].todayJobs / shiftH;
     });
 
-    // Also add operator stats from trace (for operators with logged initials like AF)
+    // Also add operator stats from trace (for operators with logged initials)
+    // If initials map to an existing operator (e.g. AF → Andrea), ADD those jobs
     if(assemblyData.operatorStats){
       Object.entries(assemblyData.operatorStats).forEach(([init, stats])=>{
         const name = resolveOperator(init);
-        // If this resolves to someone already counted via station assignment, skip —
-        // station completions already include these jobs
-        const alreadyCounted = Object.values(assignments).some(a => a?.operatorName === name);
-        if(alreadyCounted){
-          // Remove the raw initials entry if it exists (leftover from before merge)
-          if(init !== name && operators[init]) delete operators[init];
-          return;
-        }
+        // Clean up raw initials entry if it resolves to a different name
+        if(init !== name && operators[init]) delete operators[init];
         if(!operators[name]) operators[name] = {color:pickColor(name),name};
         operators[name].todayJobs  = (operators[name].todayJobs || 0) + (stats.jobs || 0);
-        operators[name].jobsPerHour = stats.jobsPerHour || 0;
-        operators[name].initials   = init;
+        operators[name].jobsPerHour = operators[name].todayJobs / shiftH;
+        if(!operators[name].initials) operators[name].initials = init;
       });
     }
-
-    // Clean up any operator entries that are mapped initials of another operator
-    Object.keys(operatorMap).forEach(init => {
-      const fullName = operatorMap[init];
-      if(fullName && operators[init] && operators[fullName]){
-        delete operators[init];
-      }
-    });
   } else {
     // Mock mode: derive from job data
     const completedToday = jobs.filter(j=>j.status==='completed' && isToday(j.completedAt));
