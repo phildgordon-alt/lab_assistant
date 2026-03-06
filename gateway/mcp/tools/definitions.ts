@@ -588,9 +588,96 @@ export const BREAKAGE_TOOLS = [
   get_breakage_by_position,
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// COATING INTELLIGENCE TOOLS (batching, oven tracking, machine optimization)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const get_coating_intelligence = {
+  name: 'get_coating_intelligence',
+  description: `USE THIS as the FIRST call for any coating batching, oven, or scheduling question.
+WHAT: Returns the full coating department state from the lab server: coating queue with every job (coating type, lens type P/S/B, material, eye size, rush, wait time), upstream flow from surfacing with ETA, oven grid (6 ovens × 7 racks with job numbers and timers), coater capacities (E1400: 274L/137 orders, EB9 #1/2: 114L/57 orders each), active coating runs, and jobs finishing in ovens within 30 min.
+HOW: No parameters. Returns a single comprehensive payload from the lab server's /api/coating/intelligence endpoint.
+NOT for historical analysis — use get_coating_batch_history() for past outcomes.
+NOT for simple queue counts — but this includes that data and more.`,
+  input_schema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+export const get_coating_batch_history = {
+  name: 'get_coating_batch_history',
+  description: `USE THIS to learn from past batching decisions and their outcomes.
+WHAT: Returns the last N coating batch recommendations and their outcomes (if feedback was provided). Includes: what was recommended, what was actually run, coating type, coater used, batch size, fill rate, wait time, and any operator feedback.
+HOW: Optional limit parameter (default 50). Returns most recent first.
+USE THIS to improve future recommendations — look for patterns in what worked and what didn't.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      limit: {
+        type: 'number',
+        description: 'Max history entries to return. Default 50.',
+        default: 50,
+      },
+    },
+  },
+};
+
+export const submit_coating_batch_plan = {
+  name: 'submit_coating_batch_plan',
+  description: `USE THIS to record your batch recommendation so it can be tracked against actual outcomes.
+WHAT: Stores a structured batch plan with reasoning. This creates a record that will later be matched with actual run data to measure recommendation quality.
+HOW: Provide the structured plan object with coater assignments, reasoning, and timing advice.
+ALWAYS call this after analyzing the coating queue and making a recommendation.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      plan: {
+        type: 'object',
+        description: 'The batch plan object with coater assignments',
+        properties: {
+          coaters: {
+            type: 'array',
+            description: 'Array of coater assignments: [{coaterId, coaterName, jobs: [jobId,...], coatingType, reasoning}]',
+          },
+          timing: {
+            type: 'string',
+            description: 'Timing recommendation: RUN_NOW, WAIT, RUN_PARTIAL',
+          },
+          timing_reason: {
+            type: 'string',
+            description: 'Why this timing was recommended',
+          },
+          notes: {
+            type: 'string',
+            description: 'Any additional efficiency notes or concerns',
+          },
+        },
+      },
+    },
+    required: ['plan'],
+  },
+};
+
+export const get_oven_rack_status = {
+  name: 'get_oven_rack_status',
+  description: `USE THIS to get detailed oven status including which specific jobs are loaded on which racks.
+WHAT: Returns all 6 ovens × 7 racks with: running state, timer, remaining minutes, and loaded job numbers. Also returns racks finishing within 30 min (these feed back into the coating queue pipeline).
+HOW: No parameters. Data comes from operator-entered job numbers + live timer heartbeats.
+USE THIS to predict when oven space will free up and which jobs are completing curing.`,
+  input_schema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
 export const COATING_TOOLS = [
   get_coating_queue,
   get_coating_wait_summary,
+  get_coating_intelligence,
+  get_coating_batch_history,
+  submit_coating_batch_plan,
+  get_oven_rack_status,
 ];
 
 export const INVENTORY_TOOLS = [
@@ -632,3 +719,10 @@ export const ALL_TOOLS = [
   ...SETTINGS_TOOLS,
   ...GENERIC_TOOLS,
 ];
+
+export {
+  get_coating_intelligence,
+  get_coating_batch_history,
+  submit_coating_batch_plan,
+  get_oven_rack_status,
+};

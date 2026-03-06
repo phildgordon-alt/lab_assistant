@@ -377,7 +377,7 @@ function getTimer(ovenId, rack) {
     ovenId, rack, state:'idle',
     elapsed:0, target:0, startTs:null, pauseAccum:0,
     batchId:'', coating:'', activePresets:[], operator:getOperator(),
-    notes:'', sessionStart:null, alarmFired:false, intervalId:null
+    notes:'', jobs:[], sessionStart:null, alarmFired:false, intervalId:null
   };
   return timers[k];
 }
@@ -443,7 +443,8 @@ function startHeartbeat() {
           ovenId:t.ovenId, ovenName:oven?.name||t.ovenId,
           rack:t.rack, rackLabel:RACK_LABEL(t.rack.replace('rack','')),
           state:t.state, elapsed:t.elapsed, target:t.target,
-          batchId:t.batchId, coating:t.coating, presets:t.activePresets
+          batchId:t.batchId, coating:t.coating, presets:t.activePresets,
+          jobs:t.jobs||[]
         };
       }
     });
@@ -478,16 +479,19 @@ function startTimer(ovenId, rack) {
     const nEl = document.getElementById(`notes-${k}`);
     const tEl = document.getElementById(`target-${k}`);
     const cEl = document.getElementById(`coating-${k}`);
+    const jEl = document.getElementById(`jobs-${k}`);
     t.batchId      = bEl?.value?.trim() || `${ovenId}-${rack}-${Date.now().toString().slice(-4)}`;
     t.notes        = nEl?.value?.trim() || '';
     t.target       = parseInt(tEl?.value||'0') * 60;
     t.coating      = cEl?.value?.trim() || t.activePresets.join('+') || '';
+    t.jobs         = (jEl?.value||'').split(/[,\s]+/).map(s=>s.trim()).filter(Boolean);
     t.operator     = getOperator();
     t.elapsed = t.pauseAccum = 0;
     t.sessionStart = t.startTs = Date.now();
     t.alarmFired   = false;
     if (bEl) bEl.disabled = true;
     if (cEl) cEl.disabled = true;
+    if (jEl) jEl.disabled = true;
   } else if (t.state === 'paused') {
     t.startTs = Date.now();
   }
@@ -518,7 +522,7 @@ function stopTimer(ovenId, rack) {
     id:Date.now(), ovenId, rack,
     ovenName:oven?.name||ovenId,
     rackLabel:RACK_LABEL(rack.replace('rack','')),
-    batchId:t.batchId, coating:t.coating,
+    batchId:t.batchId, coating:t.coating, jobs:t.jobs||[],
     activePresets:t.activePresets, operator:t.operator, notes:t.notes,
     startedAt:t.sessionStart, endedAt:Date.now(),
     targetSecs:t.target, actualSecs:t.elapsed,
@@ -531,11 +535,13 @@ function stopTimer(ovenId, rack) {
   const k = KEY(ovenId, rack);
   const bEl = document.getElementById(`batch-${k}`);
   const cEl = document.getElementById(`coating-${k}`);
+  const jEl = document.getElementById(`jobs-${k}`);
   if (bEl) { bEl.disabled=false; bEl.value=''; }
   if (cEl) { cEl.disabled=false; cEl.value=''; }
+  if (jEl) { jEl.disabled=false; jEl.value=''; }
 
   t.state='idle'; t.elapsed=0; t.startTs=null; t.pauseAccum=0;
-  t.batchId=''; t.coating=''; t.activePresets=[]; t.sessionStart=null; t.alarmFired=false;
+  t.batchId=''; t.coating=''; t.jobs=[]; t.activePresets=[]; t.sessionStart=null; t.alarmFired=false;
   refreshRack(ovenId, rack);
   renderHistory(); renderAnalytics();
   updateOvenTab(ovenId);
@@ -845,6 +851,12 @@ function buildRackCards(oven) {
           <div class="presets-row" id="chips-${k}">${chips}</div>
         </div>
 
+        <div class="form-row">
+          <div class="form-group" style="flex:2;">
+            <label class="form-label">Job Numbers <span style="color:var(--dimmer);font-size:7px;">(comma or space separated)</span></label>
+            <input id="jobs-${k}" class="form-input" placeholder="408201, 408202, 408203..." style="font-size:13px;"/>
+          </div>
+        </div>
         <div class="form-row">
           <div class="form-group">
             <label class="form-label">Batch ID</label>

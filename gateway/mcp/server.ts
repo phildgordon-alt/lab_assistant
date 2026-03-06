@@ -294,6 +294,18 @@ export async function handleToolCall(
     case 'get_coating_wait_summary':
       return handleGetCoatingWaitSummary();
 
+    case 'get_coating_intelligence':
+      return handleGetCoatingIntelligence();
+
+    case 'get_coating_batch_history':
+      return handleGetCoatingBatchHistory(toolInput.limit as number ?? 50);
+
+    case 'submit_coating_batch_plan':
+      return handleSubmitCoatingBatchPlan(toolInput.plan as Record<string, unknown>);
+
+    case 'get_oven_rack_status':
+      return handleGetOvenRackStatus();
+
     // ─────────────────────────────────────────────────────────────────────────
     // INVENTORY TOOLS
     // ─────────────────────────────────────────────────────────────────────────
@@ -1542,5 +1554,182 @@ export async function getOvenContext(): Promise<string> {
     return JSON.stringify(data, null, 2);
   } catch {
     return 'Oven data unavailable';
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COATING INTELLIGENCE TOOLS — Batch optimization + learning loop
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Ensure batch history table exists
+function ensureBatchHistoryTable(): void {
+  try {
+    const DB_PATH = join(__dirname, '..', '..', 'data', 'lab_assistant.db');
+    if (!existsSync(DB_PATH)) return;
+    const writeDb = new Database(DB_PATH);
+    writeDb.exec(`
+      CREATE TABLE IF NOT EXISTS coating_batch_plans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        created_at TEXT DEFAULT (datetime('now')),
+        plan_json TEXT NOT NULL,
+        timing TEXT,
+        timing_reason TEXT,
+        notes TEXT,
+        queue_size INTEGER,
+        surfacing_incoming INTEGER,
+        outcome_json TEXT,
+        operator_feedback TEXT,
+        feedback_rating INTEGER,
+        completed_at TEXT
+      )
+    `);
+    writeDb.close();
+  } catch (e: any) {
+    log.warn('[Coating] Could not ensure batch history table:', e.message);
+  }
+}
+ensureBatchHistoryTable();
+
+async function handleGetCoatingIntelligence(): Promise<unknown> {
+  try {
+    const res = await fetch(`${LAB_SERVER_URL}/api/coating/intelligence`);
+    const data = await res.json() as any;
+    if (!data.ok) throw new Error(data.error || 'Intelligence endpoint failed');
+
+    // Return a focused summary for the AI — not the raw payload
+    const q = data.queue || {};
+    const o = data.ovens || {};
+    const up = data.upstream || {};
+
+    return {
+      timestamp: new Date().toISOString(),
+      totalWip: data.totalWip,
+      coatingQueue: {
+        total: q.total,
+        rushCount: q.rushCount,
+        byType: q.byType,
+        jobs: (q.jobs || []).map((j: any) => ({
+          jobId: j.jobId, coating: j.coating, lensType: j.lensType,
+          lensStyle: j.lensStyle, lensMat: j.lensMat, eyeSize: j.eyeSize,
+          rush: j.rush, station: j.station, waitMin: j.waitMin,
+          daysInLab: j.daysInLab,
+        })),
+      },
+      upstream: {
+        surfacing: up.surfacing,
+        totalUpstream: up.totalUpstream,
+      },
+      coaters: data.coaters,
+      ovens: {
+        racksInUse: o.racksInUse,
+        racksAvailable: o.racksAvailable,
+        ovenIncoming: o.ovenIncoming,
+        layout: (o.layout || []).map((ov: any) => ({
+          ovenId: ov.ovenId,
+          racks: ov.racks.map((r: any) => ({
+            rackIndex: r.rackIndex, state: r.state,
+            remainingMin: r.remainingMin, jobs: r.jobs || [],
+            coating: r.coating,
+          })),
+        })),
+      },
+      avgStageMins: data.avgStageMins,
+      recommendation: data.recommendation,
+      activeCoatingRuns: Object.values(data.coatingRuns || {}),
+    };
+  } catch (e: any) {
+    log.error('[Coating] Intelligence fetch failed:', e.message);
+    return { error: e.message, hint: 'Lab server may not be running on port 3002' };
+  }
+}
+
+async function handleGetCoatingBatchHistory(limit: number): Promise<unknown> {
+  try {
+    const database = getDb();
+    const rows = database.prepare(`
+      SELECT id, created_at, plan_json, timing, timing_reason, notes,
+             queue_size, surfacing_incoming, outcome_json, operator_feedback,
+             feedback_rating, completed_at
+      FROM coating_batch_plans
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(limit);
+
+    return {
+      total: rows.length,
+      plans: rows.map((r: any) => ({
+        ...r,
+        plan: r.plan_json ? JSON.parse(r.plan_json) : null,
+        outcome: r.outcome_json ? JSON.parse(r.outcome_json) : null,
+      })),
+      learnings: rows.length > 5 ? summarizeLearnings(rows as any[]) : 'Not enough history yet. Keep making recommendations and collecting feedback.',
+    };
+  } catch (e: any) {
+    return { total: 0, plans: [], learnings: 'No batch history available yet. This is the first time the coating AI advisor is being used.' };
+  }
+}
+
+function summarizeLearnings(rows: any[]): string {
+  const withFeedback = rows.filter((r: any) => r.feedback_rating !== null);
+  if (withFeedback.length < 3) return `${rows.length} plans recorded, ${withFeedback.length} with feedback. Need more feedback to identify patterns.`;
+
+  const avgRating = withFeedback.reduce((s: number, r: any) => s + (r.feedback_rating || 0), 0) / withFeedback.length;
+  const good = withFeedback.filter((r: any) => r.feedback_rating >= 4).length;
+  const bad = withFeedback.filter((r: any) => r.feedback_rating <= 2).length;
+
+  return `${rows.length} plans, ${withFeedback.length} rated. Avg rating: ${avgRating.toFixed(1)}/5. ${good} good, ${bad} poor. Review poor-rated plans to identify what went wrong.`;
+}
+
+async function handleSubmitCoatingBatchPlan(plan: Record<string, unknown>): Promise<unknown> {
+  try {
+    const DB_PATH = join(__dirname, '..', '..', 'data', 'lab_assistant.db');
+    const writeDb = new Database(DB_PATH);
+
+    const stmt = writeDb.prepare(`
+      INSERT INTO coating_batch_plans (plan_json, timing, timing_reason, notes, queue_size, surfacing_incoming)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      JSON.stringify(plan.coaters || plan),
+      (plan as any).timing || '',
+      (plan as any).timing_reason || '',
+      (plan as any).notes || '',
+      (plan as any).queue_size || 0,
+      (plan as any).surfacing_incoming || 0,
+    );
+
+    writeDb.close();
+
+    log.info(`[Coating] Batch plan recorded: id=${result.lastInsertRowid}`);
+    return {
+      success: true,
+      planId: result.lastInsertRowid,
+      message: 'Batch plan recorded. It will be matched with actual run outcomes for learning.',
+    };
+  } catch (e: any) {
+    log.error('[Coating] Failed to save batch plan:', e.message);
+    return { success: false, error: e.message };
+  }
+}
+
+async function handleGetOvenRackStatus(): Promise<unknown> {
+  try {
+    // Get oven data from lab server
+    const [intelRes, rackJobsRes] = await Promise.all([
+      fetch(`${LAB_SERVER_URL}/api/coating/intelligence`).then(r => r.json()).catch(() => null) as Promise<any>,
+      fetch(`${LAB_SERVER_URL}/api/oven/rack/jobs`).then(r => r.json()).catch(() => null) as Promise<any>,
+    ]);
+
+    const ovens = intelRes?.ovens || {} as any;
+    return {
+      layout: ovens.layout || [],
+      racksInUse: ovens.racksInUse || 0,
+      racksAvailable: ovens.racksAvailable || 0,
+      ovenIncoming: ovens.ovenIncoming || [],
+      trackedRacks: rackJobsRes?.racks || {},
+    };
+  } catch (e: any) {
+    return { error: e.message };
   }
 }

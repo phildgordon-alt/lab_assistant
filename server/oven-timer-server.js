@@ -69,6 +69,16 @@ function parseDviXml(xml) {
   const get = (tag) => { const m = xml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
   const getAttr = (tag, attr) => { const m = xml.match(new RegExp(`<${tag}[^>]*\\s${attr}="([^"]*)"`)); return m ? m[1] : null; };
 
+  // Extract lens-scoped fields from within <Lens> block
+  const lensBlock = xml.match(/<Lens[^>]*>([\s\S]*?)<\/Lens>/);
+  const lensXml = lensBlock ? lensBlock[0] : '';
+  const getLens = (tag) => { const m = lensXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
+
+  // Extract frame-scoped fields
+  const frameBlock = xml.match(/<Frame[^>]*>([\s\S]*?)<\/Frame>/);
+  const frameXml = frameBlock ? frameBlock[0] : '';
+  const getFrame = (tag) => { const m = frameXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
+
   return {
     status: getAttr('Job', 'Status'),
     date: get('Date'),
@@ -77,18 +87,19 @@ function parseDviXml(xml) {
     rxNum: get('RxNum'),
     patient: get('Patient'),
     origin: get('Origin'),
-    coating: getAttr('Coat', 'Type') ? `${get('Coat')}` : get('Coat'),
-    lensStyle: get('Style'),
-    lensMat: get('Mat'),
-    lensThick: get('Thick'),
-    lensColor: get('Color'),
-    frameStyle: getAttr('Frame', 'Status') ? get('Style') : null,
-    frameSku: get('SKU'),
-    frameMfr: get('Mfr'),
-    frameColor: getAttr('Frame', 'Status') ? null : null, // parsed separately below
-    eyeSize: get('EyeSize'),
-    bridge: get('Bridge'),
-    edge: get('Edge'),
+    coating: getLens('Coat') || get('Coat'),
+    coatType: getAttr('Coat', 'Type'), // "Lab", "House", etc.
+    lensType: getAttr('Lens', 'Type'), // P=progressive, S=SV, B=bifocal
+    lensStyle: getLens('Style'),
+    lensMat: getLens('Mat'),
+    lensThick: getLens('Thick'),
+    lensColor: getLens('Color'),
+    frameStyle: getFrame('Style'),
+    frameSku: getFrame('SKU'),
+    frameMfr: getFrame('Mfr'),
+    eyeSize: getFrame('EyeSize') || get('EyeSize'),
+    bridge: getFrame('Bridge') || get('Bridge'),
+    edge: getFrame('Edge') || get('Edge'),
     serviceInstruction: getAttr('Service', 'Instruction'),
   };
 }
@@ -132,6 +143,36 @@ let runs        = [];
 let liveTimers  = {};   // keyed by "ovenId::rack"
 let liveUpdated = 0;    // timestamp of last live heartbeat
 
+// ── Oven rack job tracking ──────────────────────────────────────
+// Each rack: { ovenId, rackIndex, jobs: [jobId, ...], coating, loadedAt }
+const OVEN_RACK_JOBS_FILE = path.join(__dirname, '..', 'data', 'oven-rack-jobs.json');
+let ovenRackJobs = {}; // keyed by "Oven N::R<rackIndex>" → { jobs, coating, loadedAt }
+try {
+  if (fs.existsSync(OVEN_RACK_JOBS_FILE)) {
+    ovenRackJobs = JSON.parse(fs.readFileSync(OVEN_RACK_JOBS_FILE, 'utf8'));
+    const count = Object.values(ovenRackJobs).reduce((s, r) => s + (r.jobs?.length || 0), 0);
+    console.log(`✅ Loaded oven rack jobs: ${count} jobs across ${Object.keys(ovenRackJobs).length} racks`);
+  }
+} catch (e) { console.warn('⚠️  Could not load oven-rack-jobs.json:', e.message); }
+function persistOvenRackJobs() {
+  try { fs.writeFileSync(OVEN_RACK_JOBS_FILE, JSON.stringify(ovenRackJobs)); } catch {}
+}
+
+// ── Coating run timers (server-authoritative) ──────────────────
+// Each active run: { coaterId, coaterName, startedAt, targetSec, jobs, status }
+let coatingRuns = {};   // keyed by coaterId
+const COATING_RUNS_FILE = path.join(__dirname, '..', 'data', 'coating-runs.json');
+let coatingRunHistory = [];
+try {
+  if (fs.existsSync(COATING_RUNS_FILE)) {
+    coatingRunHistory = JSON.parse(fs.readFileSync(COATING_RUNS_FILE, 'utf8'));
+    console.log(`✅ Loaded ${coatingRunHistory.length} coating run history`);
+  }
+} catch (e) { console.warn('⚠️  Could not load coating-runs.json:', e.message); }
+function persistCoatingRuns() {
+  try { fs.writeFileSync(COATING_RUNS_FILE, JSON.stringify(coatingRunHistory.slice(0, 500))); } catch {}
+}
+
 try {
   if (fs.existsSync(DATA_FILE)) {
     runs = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
@@ -147,7 +188,7 @@ function persist() {
 
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin',  CORS);
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 }
 function json(res, data, status=200) {
@@ -555,6 +596,118 @@ const server = http.createServer(async (req, res) => {
     return json(res, { ok:true, ...( global.coatingLive || { live:[], timestamp:null } ) });
   }
 
+  // ── Oven Rack Job Tracking ──────────────────────────────────
+  // POST /api/oven/rack/jobs — set jobs on a specific oven rack
+  // Body: { ovenId: "Oven 1", rackIndex: 1, jobs: ["408201","408202"], coating: "AR" }
+  if (req.method==='POST' && url.pathname==='/api/oven/rack/jobs') {
+    try {
+      const body = await readBody(req);
+      const { ovenId, rackIndex, jobs, coating } = body;
+      if (!ovenId || !rackIndex) return json(res, {ok:false, error:'ovenId and rackIndex required'}, 400);
+      const key = `${ovenId}::R${rackIndex}`;
+      if (!jobs || jobs.length === 0) {
+        // Clear rack
+        delete ovenRackJobs[key];
+      } else {
+        ovenRackJobs[key] = {
+          ovenId, rackIndex, jobs: jobs.filter(j => j),
+          coating: coating || 'AR', loadedAt: Date.now(),
+        };
+      }
+      persistOvenRackJobs();
+      console.log(`[Oven] ${ovenId} R${rackIndex}: ${jobs?.length || 0} jobs ${jobs?.length ? 'loaded' : 'cleared'}`);
+      return json(res, {ok:true, rack: ovenRackJobs[key] || null});
+    } catch(e) { return json(res, {ok:false, error:e.message}, 400); }
+  }
+
+  // GET /api/oven/rack/jobs — get all oven rack job assignments
+  if (req.method==='GET' && url.pathname==='/api/oven/rack/jobs') {
+    return json(res, {ok:true, racks: ovenRackJobs});
+  }
+
+  // DELETE /api/oven/rack/jobs — clear a specific rack
+  if (req.method==='DELETE' && url.pathname==='/api/oven/rack/jobs') {
+    try {
+      const body = await readBody(req);
+      const { ovenId, rackIndex } = body;
+      const key = `${ovenId}::R${rackIndex}`;
+      delete ovenRackJobs[key];
+      persistOvenRackJobs();
+      return json(res, {ok:true});
+    } catch(e) { return json(res, {ok:false, error:e.message}, 400); }
+  }
+
+  // ── Coating Run Timer Management (server-authoritative) ─────
+  // POST /api/coating/run/start — start a coating run (requires full batch)
+  if (req.method==='POST' && url.pathname==='/api/coating/run/start') {
+    try {
+      const body = await readBody(req);
+      const { coaterId, coaterName, jobs, targetSec } = body;
+      if (!coaterId) return json(res, {ok:false, error:'coaterId required'}, 400);
+      if (!jobs || !Array.isArray(jobs) || jobs.length === 0) return json(res, {ok:false, error:'jobs array required — batch must be full'}, 400);
+      if (coatingRuns[coaterId] && coatingRuns[coaterId].status === 'running') {
+        return json(res, {ok:false, error:`${coaterName||coaterId} already has a running timer`}, 400);
+      }
+      coatingRuns[coaterId] = {
+        coaterId, coaterName: coaterName || coaterId,
+        startedAt: Date.now(),
+        targetSec: targetSec || 7200, // default 2hr
+        jobs: jobs.map(j => typeof j === 'string' ? j : j.jobId || j),
+        jobCount: jobs.length,
+        status: 'running',
+      };
+      console.log(`[Coating] Started run on ${coaterName||coaterId}: ${jobs.length} jobs, ${(targetSec||7200)/3600}h target`);
+      return json(res, {ok:true, run: coatingRuns[coaterId]});
+    } catch(e) { return json(res, {ok:false, error:e.message}, 400); }
+  }
+
+  // POST /api/coating/run/stop — stop/complete a coating run
+  if (req.method==='POST' && url.pathname==='/api/coating/run/stop') {
+    try {
+      const body = await readBody(req);
+      const { coaterId } = body;
+      if (!coaterId || !coatingRuns[coaterId]) return json(res, {ok:false, error:'No active run for this coater'}, 400);
+      const run = coatingRuns[coaterId];
+      const elapsed = Math.round((Date.now() - run.startedAt) / 1000);
+      const completed = { ...run, status: 'completed', stoppedAt: Date.now(), elapsedSec: elapsed };
+      coatingRunHistory.unshift(completed);
+      persistCoatingRuns();
+      delete coatingRuns[coaterId];
+      console.log(`[Coating] Stopped run on ${run.coaterName}: ${elapsed}s elapsed, ${run.jobCount} jobs`);
+      return json(res, {ok:true, run: completed});
+    } catch(e) { return json(res, {ok:false, error:e.message}, 400); }
+  }
+
+  // POST /api/coating/run/feedback — operator rates a completed batch
+  if (req.method==='POST' && url.pathname==='/api/coating/run/feedback') {
+    try {
+      const body = await readBody(req);
+      const { runId, rating, feedback } = body;
+      // Find in history and update
+      const run = coatingRunHistory.find(r => r.startedAt === runId || r.coaterId === runId);
+      if (run) {
+        run.feedbackRating = rating;
+        run.feedbackText = feedback || '';
+        run.feedbackAt = Date.now();
+        persistCoatingRuns();
+      }
+      console.log(`[Coating] Feedback: ${rating}/5 — ${feedback || 'no comment'}`);
+      return json(res, {ok:true, message: `Feedback recorded: ${rating}/5`});
+    } catch(e) { return json(res, {ok:false, error:e.message}, 400); }
+  }
+
+  // GET /api/coating/runs — active runs + elapsed time (computed server-side)
+  if (req.method==='GET' && url.pathname==='/api/coating/runs') {
+    const now = Date.now();
+    const active = {};
+    for (const [id, run] of Object.entries(coatingRuns)) {
+      const elapsed = Math.round((now - run.startedAt) / 1000);
+      const remaining = Math.max(0, run.targetSec - elapsed);
+      active[id] = { ...run, elapsedSec: elapsed, remainingSec: remaining, remainingMin: Math.round(remaining / 60) };
+    }
+    return json(res, {ok:true, active, history: coatingRunHistory.slice(0, 50)});
+  }
+
   // ── GET coating intelligence ──────────────────────────────
   // Combines: DVI trace (coating queue), oven live state, oven runs,
   // coating runs, DVI XML (coating types) into a single coaching payload
@@ -572,75 +725,210 @@ const server = http.createServer(async (req, res) => {
     // Oven capacity
     const RACK_CAPACITY = p('rackSize', 36);
     const OVEN_COUNT = p('ovenCount', 6);
-    const RACKS_PER_OVEN = p('racksPerOven', 9);
+    const RACKS_PER_OVEN = p('racksPerOven', 7);
     const TOTAL_RACKS = OVEN_COUNT * RACKS_PER_OVEN;
     const OVEN_RUN_HOURS = p('ovenRunHours', 3);
 
     // Thresholds for recommendations
     const RUN_NOW_PCT = p('runNowPct', 75);
     const RUN_PARTIAL_PCT = p('runPartialPct', 50);
-    const WAIT_WINDOW_MIN = p('waitWindowMin', 30); // minutes to look ahead for finishing racks
+    const WAIT_WINDOW_MIN = p('waitWindowMin', 30);
 
     const today = new Date(); today.setHours(0,0,0,0);
     const todayMs = today.getTime();
     const now = Date.now();
 
-    // 1. Coating queue from DVI trace — jobs currently in COATING stage
+    // ── 1. FULL PIPELINE — every active job by stage ──────────────
     const allJobs = dviTrace.getJobs();
-    const coatingQueue = [];
+    const pipeline = { INCOMING: [], AT_KARDEX: [], NEL: [], SURFACING: [], CUTTING: [], COATING: [], ASSEMBLY: [], QC: [], HOLD: [], BREAKAGE: [] };
+    const rushJobs = [];
     for (const j of allJobs) {
-      if (j.stage !== 'COATING') continue;
-      // Enrich with XML data for coating type
+      if (j.status === 'SHIPPED' || j.stage === 'SHIPPING' || j.stage === 'CANCELED') continue;
       const xml = dviJobIndex.get(j.job_id) || {};
-      coatingQueue.push({
-        jobId: j.job_id,
-        station: j.station,
-        coating: xml.coating || j.category || 'Unknown',
+      const enriched = {
+        jobId: j.job_id, station: j.station, stage: j.stage,
+        tray: j.tray, operator: j.operator,
+        coating: xml.coating || 'AR',
+        lensType: xml.lensType || null, // P=progressive, S=SV, B=bifocal
+        lensStyle: xml.lensStyle, lensMat: xml.lensMat,
+        eyeSize: xml.eyeSize || null,
         rush: j.rush || false,
-        enteredAt: j.lastSeen,
-        tray: j.tray,
-        lensStyle: xml.lensStyle,
-        lensMat: xml.lensMat,
-      });
+        firstSeen: j.firstSeen, lastSeen: j.lastSeen,
+        minutesInStage: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : 0,
+        daysInLab: j.firstSeen ? Math.round((now - j.firstSeen) / 86400000 * 10) / 10 : 0,
+      };
+      if (pipeline[j.stage]) pipeline[j.stage].push(enriched);
+      else if (!pipeline.OTHER) pipeline.OTHER = [enriched]; else pipeline.OTHER.push(enriched);
+      if (enriched.rush) rushJobs.push(enriched);
     }
 
-    // Group queue by coating type
+    // ── 2. STAGE DWELL TIMES — compute from job event histories ───
+    // Sample completed jobs to get average time spent in each stage
+    const stageDwells = {}; // stage → [durationMs, ...]
+    const STAGES_ORDERED = ['INCOMING','AT_KARDEX','NEL','SURFACING','CUTTING','COATING','ASSEMBLY','QC'];
+    for (const job of allJobs) {
+      if (!job.eventCount || job.eventCount < 2) continue;
+      // Get full event list for this job
+      const fullJob = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
+      if (!fullJob || !fullJob.events || fullJob.events.length < 2) continue;
+      const evts = fullJob.events;
+      for (let i = 0; i < evts.length - 1; i++) {
+        const stage = evts[i].stage;
+        const dur = evts[i+1].timestamp - evts[i].timestamp;
+        if (dur > 0 && dur < 86400000 && stage) { // skip >24h outliers
+          if (!stageDwells[stage]) stageDwells[stage] = [];
+          if (stageDwells[stage].length < 500) stageDwells[stage].push(dur); // cap samples
+        }
+      }
+    }
+    const avgStageMins = {};
+    for (const [stage, durations] of Object.entries(stageDwells)) {
+      if (durations.length < 3) continue; // need at least 3 samples
+      // Use median for robustness
+      durations.sort((a,b) => a - b);
+      const median = durations[Math.floor(durations.length / 2)];
+      avgStageMins[stage] = Math.round(median / 60000);
+    }
+
+    // ── 3. UPSTREAM FLOW — jobs heading toward coating with ETA ───
+    // Pipeline: Surfacing → COATING → Cutting → Assembly
+    // Only semi-finished lenses come to coating. SV goes direct surfacing → cutting.
+    const surfacingCount = pipeline.SURFACING.length;
+    const cuttingCount = pipeline.CUTTING.length;
+    const coatingCount = pipeline.COATING.length;
+    const surfacingAvgMin = avgStageMins.SURFACING || 45;
+    // Upstream to coating = surfacing only (coating is right after surfacing)
+    const upstreamFlow = {
+      surfacing: { count: surfacingCount, lenses: surfacingCount * 2, etaMin: surfacingAvgMin },
+      totalUpstream: surfacingCount,
+      totalUpstreamLenses: surfacingCount * 2,
+    };
+    // Downstream from coating = cutting + assembly (for visibility)
+    const downstreamFlow = {
+      cutting: { count: cuttingCount, lenses: cuttingCount * 2 },
+      assembly: { count: pipeline.ASSEMBLY.length, lenses: pipeline.ASSEMBLY.length * 2 },
+      qc: { count: pipeline.QC.length, lenses: pipeline.QC.length * 2 },
+    };
+
+    // ── 4. COATING QUEUE — all jobs at coating stage ──────────────
+    // Sub-categorize by DVI station name within the COATING stage
+    // Typical stations: SENT TO COAT (queue), CCL 1/2/3 (in coater), CCP (prep), COAT QC, etc.
+    const coatingQueue = pipeline.COATING.map(j => {
+      const stn = (j.station || '').toUpperCase();
+      let subStage = 'QUEUE'; // default: waiting for coating (SENT TO COAT, RECEIVED COAT)
+      if (stn.includes('CCL') || stn.includes('CCP')) subStage = 'IN_COATER';
+      else if (stn.includes('COAT QC') || stn.includes('COAT INSP') || stn.includes('COAT CHECK')) subStage = 'COAT_QC';
+      else if (stn.includes('OVEN') || stn.includes('CURE') || stn.includes('BAKE')) subStage = 'IN_OVEN';
+      return { ...j, waitMin: j.minutesInStage, subStage };
+    });
+    // Sort: rush first, then by longest wait
+    coatingQueue.sort((a,b) => (b.rush ? 1 : 0) - (a.rush ? 1 : 0) || (b.waitMin - a.waitMin));
+    const rushInQueue = coatingQueue.filter(j => j.rush).length;
+
+    // Station breakdown for visibility
+    const byStation = {};
+    coatingQueue.forEach(j => {
+      const stn = j.station || 'Unknown';
+      byStation[stn] = (byStation[stn] || 0) + 1;
+    });
+    const bySubStage = {};
+    coatingQueue.forEach(j => {
+      bySubStage[j.subStage] = (bySubStage[j.subStage] || 0) + 1;
+    });
+
+    // Group by coating type (for when multiple AR types are live)
     const queueByType = {};
     coatingQueue.forEach(j => {
-      const ct = j.coating || 'Unknown';
+      const ct = j.coating || 'AR';
       if (!queueByType[ct]) queueByType[ct] = { type: ct, jobs: [], rushCount: 0 };
       queueByType[ct].jobs.push(j);
       if (j.rush) queueByType[ct].rushCount++;
     });
 
-    // 2. Oven live state
+    // ── 5. OVEN LIVE STATE ────────────────────────────────────────
+    // OvenTimer.html sends heartbeat as flat object keyed by "ovenId::rack" → {state, elapsed, target, jobs, ...}
     const ovenLive = liveTimers || {};
     const ovenStale = (now - liveUpdated) > 15000;
-    // Parse oven timers to find running racks
     const runningRacks = [];
-    const availableRacks = [];
+    let hasLiveTimers = false;
     if (ovenLive && typeof ovenLive === 'object') {
-      // liveTimers is the full heartbeat payload from OvenTimer.html
-      // It can be an array of ovens or an object with oven keys
-      const ovens = Array.isArray(ovenLive) ? ovenLive :
-                    ovenLive.ovens ? ovenLive.ovens :
-                    Object.values(ovenLive).filter(v => typeof v === 'object');
-      ovens.forEach((oven, oi) => {
-        const ovenId = oven.ovenId || oven.id || `oven-${oi+1}`;
-        const racks = oven.racks || oven.timers || [];
-        racks.forEach((rack, ri) => {
-          if (rack.state === 'running' || rack.state === 'paused') {
-            const elapsed = rack.elapsed || 0;
-            const target = rack.target || OVEN_RUN_HOURS * 3600;
+      // Handle flat heartbeat format: { "oven1::rack1": {ovenId, ovenName, rack, state, ...}, ... }
+      const entries = Object.entries(ovenLive);
+      if (entries.length > 0 && entries[0][1] && typeof entries[0][1] === 'object' && entries[0][1].state) {
+        // Flat heartbeat format from OvenTimer.html
+        for (const [key, timer] of entries) {
+          if (timer.state === 'running' || timer.state === 'paused') {
+            hasLiveTimers = true;
+            const elapsed = timer.elapsed || 0;
+            const target = timer.target || OVEN_RUN_HOURS * 3600;
             const remaining = Math.max(0, target - elapsed);
+            const rackNum = parseInt(String(timer.rack || '').replace('rack', '')) || 0;
             runningRacks.push({
-              ovenId, rackIndex: ri+1, rackLabel: rack.label || `R${ri+1}`,
-              coating: rack.coating || rack.presets?.[0] || 'Unknown',
-              state: rack.state, elapsed, target, remainingSec: remaining,
-              remainingMin: Math.round(remaining/60),
-              batchId: rack.batchId,
+              ovenId: timer.ovenName || timer.ovenId,
+              rackIndex: rackNum,
+              rackLabel: timer.rackLabel || `R${rackNum}`,
+              coating: timer.coating || 'AR',
+              state: timer.state, elapsed, target, remainingSec: remaining,
+              remainingMin: Math.round(remaining / 60),
+              batchId: timer.batchId,
+              jobs: timer.jobs || [],
             });
           }
+        }
+      } else {
+        // Array-of-ovens format (fallback)
+        const ovens = Array.isArray(ovenLive) ? ovenLive :
+                      ovenLive.ovens ? ovenLive.ovens :
+                      Object.values(ovenLive).filter(v => typeof v === 'object');
+        ovens.forEach((oven, oi) => {
+          const ovenId = oven.ovenId || oven.id || `oven-${oi + 1}`;
+          const racks = oven.racks || oven.timers || [];
+          racks.forEach((rack, ri) => {
+            if (rack.state === 'running' || rack.state === 'paused') {
+              hasLiveTimers = true;
+              const elapsed = rack.elapsed || 0;
+              const target = rack.target || OVEN_RUN_HOURS * 3600;
+              const remaining = Math.max(0, target - elapsed);
+              runningRacks.push({
+                ovenId, rackIndex: ri + 1, rackLabel: rack.label || `R${ri + 1}`,
+                coating: rack.coating || 'AR',
+                state: rack.state, elapsed, target, remainingSec: remaining,
+                remainingMin: Math.round(remaining / 60),
+                batchId: rack.batchId,
+                jobs: rack.jobs || [],
+              });
+            }
+          });
+        });
+      }
+    }
+    // Mock oven data when no live heartbeat — realistic demo numbers
+    // Builds full 6 ovens × 7 racks grid, some running some empty
+    if (!hasLiveTimers) {
+      const mockRacks = [
+        { ovenId: 'Oven 1', rackIndex: 1, elapsed: 6840, target: 10800, state: 'running', jobs: ['408201','408202','408203'] },
+        { ovenId: 'Oven 1', rackIndex: 3, elapsed: 3120, target: 10800, state: 'running', jobs: ['408210','408211'] },
+        { ovenId: 'Oven 1', rackIndex: 5, elapsed: 9600, target: 10800, state: 'running', jobs: ['407990','407991','407992','407993'] },
+        { ovenId: 'Oven 2', rackIndex: 1, elapsed: 9900, target: 10800, state: 'running', jobs: ['408150','408151'] },
+        { ovenId: 'Oven 2', rackIndex: 4, elapsed: 1800, target: 10800, state: 'running', jobs: ['408300'] },
+        { ovenId: 'Oven 2', rackIndex: 7, elapsed: 7800, target: 10800, state: 'running', jobs: ['408100','408101','408102'] },
+        { ovenId: 'Oven 3', rackIndex: 2, elapsed: 5400, target: 10800, state: 'running', jobs: ['408050','408051'] },
+        { ovenId: 'Oven 3', rackIndex: 6, elapsed: 10500, target: 10800, state: 'running', jobs: ['407880','407881'] },
+        { ovenId: 'Oven 4', rackIndex: 1, elapsed: 7200, target: 10800, state: 'running', jobs: ['408320','408321','408322'] },
+        { ovenId: 'Oven 4', rackIndex: 3, elapsed: 2400, target: 10800, state: 'running', jobs: ['408400'] },
+        { ovenId: 'Oven 4', rackIndex: 5, elapsed: 10200, target: 10800, state: 'running', jobs: ['407950','407951'] },
+        { ovenId: 'Oven 5', rackIndex: 2, elapsed: 4500, target: 10800, state: 'running', jobs: ['408250','408251','408252'] },
+        { ovenId: 'Oven 5', rackIndex: 4, elapsed: 8100, target: 10800, state: 'running', jobs: ['408180'] },
+        { ovenId: 'Oven 6', rackIndex: 1, elapsed: 600, target: 10800, state: 'running', jobs: ['408500','408501'] },
+        { ovenId: 'Oven 6', rackIndex: 3, elapsed: 6000, target: 10800, state: 'running', jobs: ['408350','408351','408352'] },
+      ];
+      mockRacks.forEach(m => {
+        const remaining = Math.max(0, m.target - m.elapsed);
+        runningRacks.push({
+          ovenId: m.ovenId, rackIndex: m.rackIndex, rackLabel: `R${m.rackIndex}`,
+          coating: 'AR', state: m.state, elapsed: m.elapsed, target: m.target,
+          remainingSec: remaining, remainingMin: Math.round(remaining / 60),
+          jobs: m.jobs || [], mock: true,
         });
       });
     }
@@ -650,133 +938,316 @@ const server = http.createServer(async (req, res) => {
       ? runningRacks.reduce((a,b) => a.remainingSec < b.remainingSec ? a : b)
       : null;
 
-    // 3. Today's completed oven runs
+    // ── 6. TODAY'S COMPLETED RUNS ─────────────────────────────────
     const todayOvenRuns = runs.filter(r => (r.startedAt || r.receivedAt || 0) >= todayMs);
     const todayCoatingRuns = (global.coatingRuns || []).filter(r => {
       const t = r.completedAt ? new Date(r.completedAt).getTime() : 0;
       return t >= todayMs;
     });
 
-    // 4. Per-coater batching recommendations
-    // For each coating type, figure out how to distribute across available coaters
+    // ── 7. BATCHING RECOMMENDATION — single unified (all AR) ──────
     const totalCoaterCapacity = COATERS.reduce((s,c) => s + c.lensCapacity, 0);
-    const recommendations = [];
-    Object.values(queueByType).forEach(group => {
-      const jobCount = group.jobs.length;
-      const lensCount = jobCount * 2; // 2 lenses per job (pair)
-      const hasRush = group.rushCount > 0;
+    const totalCoaterOrders = COATERS.reduce((s,c) => s + c.orderCapacity, 0);
+    const jobCount = coatingQueue.length;
+    const lensCount = jobCount * 2;
+    const hasRush = rushInQueue > 0;
 
-      // Plan coater fills — fill largest first (E1400), then EB9s
-      const coaterPlan = [];
-      let remaining = lensCount;
-      // Sort coaters by capacity descending for optimal fill
-      const sortedCoaters = [...COATERS].sort((a,b) => b.lensCapacity - a.lensCapacity);
-      for (const coater of sortedCoaters) {
-        if (remaining <= 0) break;
-        const fill = Math.min(remaining, coater.lensCapacity);
-        const fillPct = Math.round((fill / coater.lensCapacity) * 100);
-        coaterPlan.push({ ...coater, fill, fillPct, orders: Math.ceil(fill / 2) });
-        remaining -= fill;
-      }
+    // Per-coater fill plan — largest first (E1400 then EB9s)
+    const coaterPlan = [];
+    let remaining = lensCount;
+    const sortedCoaters = [...COATERS].sort((a,b) => b.lensCapacity - a.lensCapacity);
+    for (const coater of sortedCoaters) {
+      if (remaining <= 0) { coaterPlan.push({ ...coater, fill: 0, fillPct: 0, orders: 0 }); continue; }
+      const fill = Math.min(remaining, coater.lensCapacity);
+      const fillPct = Math.round((fill / coater.lensCapacity) * 100);
+      coaterPlan.push({ ...coater, fill, fillPct, orders: Math.ceil(fill / 2) });
+      remaining -= fill;
+    }
+    const overallFillPct = Math.round(Math.min(lensCount, totalCoaterCapacity) / totalCoaterCapacity * 100);
+    const racksNeeded = Math.ceil(lensCount / RACK_CAPACITY);
+    const runsNeeded = Math.ceil(lensCount / totalCoaterCapacity);
 
-      // How many full coater runs needed beyond the first set
-      const fullRuns = remaining > 0 ? Math.ceil(remaining / totalCoaterCapacity) : 0;
+    // How long until more jobs arrive from upstream (surfacing → coating)?
+    const nextBatchFromSurfacing = surfacingCount > 0 ? surfacingAvgMin : null;
+    const rackFinishingSoon = runningRacks
+      .filter(r => r.remainingMin <= WAIT_WINDOW_MIN)
+      .sort((a,b) => a.remainingSec - b.remainingSec);
 
-      // Overall fill of the last/only set of coaters
-      const totalFill = Math.min(lensCount, totalCoaterCapacity);
-      const overallFillPct = Math.round((totalFill / totalCoaterCapacity) * 100);
-
-      // Oven racks needed after coating (all lenses go to ovens)
-      const racksNeeded = Math.ceil(lensCount / RACK_CAPACITY);
-
-      // Check if oven racks finishing soon
-      const sameTypeFinishing = runningRacks
-        .filter(r => r.coating === group.type && r.remainingMin <= WAIT_WINDOW_MIN)
-        .sort((a,b) => a.remainingSec - b.remainingSec);
-
-      // Recommendation logic based on smallest coater fill in the plan
-      const minFillPct = coaterPlan.length > 0 ? Math.min(...coaterPlan.map(c => c.fillPct)) : 0;
-      // Use the last coater's fill (the one that may be partial)
-      const lastCoaterFill = coaterPlan.length > 0 ? coaterPlan[coaterPlan.length - 1].fillPct : 0;
-
-      let action, reason;
-      if (hasRush) {
-        action = 'RUN NOW';
-        reason = `${group.rushCount} rush job(s) in queue — prioritize immediately`;
-      } else if (lensCount >= totalCoaterCapacity) {
-        action = 'RUN NOW';
-        reason = `${lensCount} lenses fills all coaters (${totalCoaterCapacity} capacity). Run full batch.`;
-      } else if (lastCoaterFill >= RUN_NOW_PCT) {
-        action = 'RUN NOW';
-        reason = `Smallest coater at ${lastCoaterFill}% fill. Above ${RUN_NOW_PCT}% threshold.`;
-      } else if (lastCoaterFill >= RUN_PARTIAL_PCT) {
-        if (sameTypeFinishing.length > 0) {
-          action = 'WAIT';
-          reason = `${lastCoaterFill}% fill on last coater. Oven rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait for capacity.`;
-        } else {
-          action = 'RUN PARTIAL';
-          reason = `${lastCoaterFill}% fill. Above ${RUN_PARTIAL_PCT}% partial threshold. No ovens finishing within ${WAIT_WINDOW_MIN}m.`;
-        }
+    const lastCoaterFill = coaterPlan.length > 0 ? coaterPlan[coaterPlan.length - 1].fillPct : 0;
+    let action, reason;
+    if (hasRush) {
+      action = 'RUN NOW';
+      reason = `${rushInQueue} rush job(s) — run immediately`;
+    } else if (lensCount >= totalCoaterCapacity) {
+      action = 'RUN NOW';
+      reason = `${lensCount} lenses fills all coaters (${totalCoaterCapacity} capacity)`;
+    } else if (lastCoaterFill >= RUN_NOW_PCT) {
+      action = 'RUN NOW';
+      reason = `${overallFillPct}% total fill — above ${RUN_NOW_PCT}% threshold`;
+    } else if (lastCoaterFill >= RUN_PARTIAL_PCT) {
+      if (nextBatchFromSurfacing && nextBatchFromSurfacing <= WAIT_WINDOW_MIN) {
+        action = 'WAIT';
+        reason = `${surfacingCount} jobs in surfacing arriving in ~${nextBatchFromSurfacing}min — wait to fill coaters`;
       } else {
-        if (sameTypeFinishing.length > 0 && sameTypeFinishing[0].remainingMin <= WAIT_WINDOW_MIN) {
-          action = 'WAIT';
-          reason = `Only ${lastCoaterFill}% fill. Rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait.`;
-        } else {
-          action = 'WAIT';
-          reason = `Only ${lastCoaterFill}% fill. Accumulate more jobs before running.`;
-        }
+        action = 'RUN PARTIAL';
+        reason = `${overallFillPct}% fill — above ${RUN_PARTIAL_PCT}% partial threshold, no upstream arriving soon`;
       }
+    } else {
+      if (nextBatchFromSurfacing && surfacingCount >= 20) {
+        action = 'WAIT';
+        reason = `Only ${overallFillPct}% fill. ${surfacingCount} jobs in surfacing arriving in ~${nextBatchFromSurfacing}min`;
+      } else {
+        action = 'WAIT';
+        reason = `Only ${overallFillPct}% fill. Accumulate more jobs (${upstreamFlow.totalUpstream} in surfacing)`;
+      }
+    }
 
-      recommendations.push({
-        coatingType: group.type,
-        jobCount,
-        lensCount,
-        coaterPlan,
-        fullRuns,
-        overallFillPct,
-        racksNeeded,
-        rushCount: group.rushCount,
-        action,
-        reason,
+    // ── 7b. PER-TYPE BATCH SUGGESTIONS — group by coating type + threshold analysis ──
+    const batchSuggestions = [];
+    for (const [ct, group] of Object.entries(queueByType)) {
+      const count = group.jobs.length;
+      const lenses = count * 2;
+      // Material breakdown for this coating type
+      const matBreakdown = {};
+      const typeBreakdown = {};
+      group.jobs.forEach(j => {
+        const m = j.lensMat || '?'; matBreakdown[m] = (matBreakdown[m] || 0) + 1;
+        const t = j.lensType || '?'; typeBreakdown[t] = (typeBreakdown[t] || 0) + 1;
       });
-    });
+      const rushCount = group.rushCount || 0;
+      const avgWait = count > 0 ? Math.round(group.jobs.reduce((s,j) => s + (j.waitMin || 0), 0) / count) : 0;
+      const maxWait = count > 0 ? Math.max(...group.jobs.map(j => j.waitMin || 0)) : 0;
 
-    // Sort: RUN NOW first, then RUN PARTIAL, then WAIT
-    const actionOrder = { 'RUN NOW': 0, 'RUN PARTIAL': 1, 'WAIT': 2 };
-    recommendations.sort((a,b) => (actionOrder[a.action]||9) - (actionOrder[b.action]||9));
+      // Which coater fits best?
+      let suggestedCoater = 'E1400';
+      if (count <= 57) suggestedCoater = rushCount > 0 ? 'EB9 #1' : 'EB9 #2';
+      else if (count <= 114) suggestedCoater = count > 57 ? 'E1400' : 'EB9 #1';
 
-    // 5. Historical stats
-    const byCoating = {};
-    runs.forEach(r => {
-      const c = r.coating || 'Unknown';
-      if (!byCoating[c]) byCoating[c] = { count: 0, totalSecs: 0 };
-      byCoating[c].count++;
-      byCoating[c].totalSecs += r.actualSecs || 0;
-    });
-    const avgDwellByCoating = {};
-    Object.entries(byCoating).forEach(([c, s]) => {
-      avgDwellByCoating[c] = Math.round(s.totalSecs / s.count);
-    });
+      // Fill percentage against suggested coater
+      const coaterDef = COATERS.find(c => c.name === suggestedCoater) || COATERS[2];
+      const fillPct = Math.round(lenses / coaterDef.lensCapacity * 100);
+
+      // Estimate time until threshold hit
+      const incomingRate = surfacingCount > 0 && surfacingAvgMin > 0
+        ? Math.round(surfacingCount / (surfacingAvgMin / 60)) // jobs per hour incoming
+        : 0;
+      const ordersToFill = coaterDef.orderCapacity - count;
+      const etaToFullMin = incomingRate > 0 && ordersToFill > 0
+        ? Math.round(ordersToFill / incomingRate * 60)
+        : null;
+
+      batchSuggestions.push({
+        coatingType: ct,
+        jobCount: count, lensCount: lenses, rushCount, avgWaitMin: avgWait, maxWaitMin: maxWait,
+        materialBreakdown: matBreakdown, lensTypeBreakdown: typeBreakdown,
+        suggestedCoater, fillPct,
+        etaToFullMin, // minutes until this type fills its suggested coater
+        ready: fillPct >= RUN_NOW_PCT || rushCount > 0,
+      });
+    }
+
+    const recommendation = {
+      action, reason, jobCount, lensCount, rushCount: rushInQueue,
+      coaterPlan: coaterPlan.sort((a,b) => b.lensCapacity - a.lensCapacity),
+      overallFillPct, racksNeeded, runsNeeded,
+      upstreamEta: nextBatchFromSurfacing,
+      batchSuggestions, // Per-type batch analysis
+    };
+
+    // ── 8. PIPELINE SUMMARY — counts per stage ───────────────────
+    const pipelineSummary = {};
+    for (const [stage, jobs] of Object.entries(pipeline)) {
+      pipelineSummary[stage] = { count: jobs.length, lenses: jobs.length * 2 };
+    }
+    const totalWip = Object.values(pipeline).reduce((s, jobs) => s + jobs.length, 0);
 
     return json(res, {
       ok: true,
       timestamp: now,
-      // Capacity constants
       capacity: { rackSize: RACK_CAPACITY, ovenCount: OVEN_COUNT, racksPerOven: RACKS_PER_OVEN, totalRacks: TOTAL_RACKS, ovenRunHours: OVEN_RUN_HOURS },
       coaters: COATERS.map(c => ({ id: c.id, name: c.name, somId: c.somId, lensCapacity: c.lensCapacity, orderCapacity: c.orderCapacity, runHours: c.runHours })),
       totalCoaterCapacity,
+      totalCoaterOrders,
       thresholds: { runNowPct: RUN_NOW_PCT, runPartialPct: RUN_PARTIAL_PCT, waitWindowMin: WAIT_WINDOW_MIN },
-      // Live queue
-      queue: { total: coatingQueue.length, byType: Object.values(queueByType).map(g => ({ type: g.type, count: g.jobs.length, rushCount: g.rushCount, jobs: g.jobs })), },
-      // Oven status
-      ovens: { stale: ovenStale, racksRunning: runningRacks, racksInUse, racksAvailable, nextFinishing, todayRuns: todayOvenRuns.length, },
-      // Coater live status
-      coaterLive: { live: global.coatingLive || null, todayRuns: todayCoatingRuns.length, },
-      // AI batching recommendations
-      recommendations,
+      // Full pipeline visibility
+      pipeline: pipelineSummary,
+      totalWip,
+      // Upstream flow toward coating (surfacing → coating)
+      upstream: upstreamFlow,
+      // Downstream from coating (coating → cutting → assembly)
+      downstream: downstreamFlow,
+      avgStageMins,
+      // Coating queue — all jobs in coating stage (broken down by sub-stage and station)
+      queue: { total: coatingQueue.length, rushCount: rushInQueue, byStation, bySubStage, jobs: coatingQueue,
+        byType: Object.values(queueByType).map(g => ({ type: g.type, count: g.jobs.length, rushCount: g.rushCount })),
+      },
+      // Oven status — full grid layout: 6 ovens × 7 racks with job tracking
+      ovens: {
+        stale: ovenStale, racksRunning: runningRacks, racksInUse, racksAvailable, nextFinishing,
+        todayRuns: todayOvenRuns.length,
+        // Jobs finishing within 30 min — these feed the coaters next
+        ovenIncoming: runningRacks
+          .filter(r => r.remainingMin <= 30)
+          .map(r => {
+            const key = `${r.ovenId}::R${r.rackIndex}`;
+            const tracked = ovenRackJobs[key];
+            return {
+              ovenId: r.ovenId, rackIndex: r.rackIndex,
+              remainingMin: r.remainingMin, coating: r.coating,
+              jobs: tracked ? tracked.jobs : (r.jobs || []),
+              jobCount: tracked ? tracked.jobs.length : (r.jobs?.length || 0),
+            };
+          })
+          .sort((a, b) => a.remainingMin - b.remainingMin),
+        layout: Array.from({length: OVEN_COUNT}, (_, oi) => {
+          const ovenId = `Oven ${oi+1}`;
+          const ovenRacks = Array.from({length: RACKS_PER_OVEN}, (_, ri) => {
+            const running = runningRacks.find(r => r.ovenId === ovenId && r.rackIndex === ri+1);
+            const key = `${ovenId}::R${ri+1}`;
+            const tracked = ovenRackJobs[key];
+            const base = running || { ovenId, rackIndex: ri+1, rackLabel: `R${ri+1}`, state: 'empty', jobs: [] };
+            // Merge tracked job numbers onto the rack
+            if (tracked) {
+              base.jobs = tracked.jobs;
+              base.coating = tracked.coating || base.coating;
+              base.loadedAt = tracked.loadedAt;
+            }
+            return base;
+          });
+          return { ovenId, racks: ovenRacks };
+        }),
+      },
+      // Single unified recommendation (all jobs are AR)
+      recommendation,
+      // Rush jobs across all stages
+      rushJobs: rushJobs.slice(0, 50),
       // Stats
-      stats: { totalOvenRuns: runs.length, todayOvenRuns: todayOvenRuns.length, todayCoatingRuns: todayCoatingRuns.length, avgDwellByCoating, },
+      stats: { totalOvenRuns: runs.length, todayOvenRuns: todayOvenRuns.length, todayCoatingRuns: todayCoatingRuns.length },
     });
+  }
+
+  // ── AI Batch Recommendation — Claude agent analyzes WIP and recommends batching ──
+  if (req.method==='POST' && url.pathname==='/api/coating/ai-batch') {
+    try {
+      const body = await readBody(req);
+      const gatewayUrl = body.gatewayUrl || process.env.GATEWAY_URL || 'http://localhost:3001';
+
+      // Gather full coating context by calling our own intelligence endpoint internally
+      const allJobs = dviTrace.getJobs();
+      const now = Date.now();
+      const COATERS = [
+        { id: 'EB9001', name: 'EB9 #1', lensCapacity: 114, orderCapacity: 57, runHours: 2, notes: 'Smaller chamber. Good for small/rush batches.' },
+        { id: 'EB9002', name: 'EB9 #2', lensCapacity: 114, orderCapacity: 57, runHours: 2, notes: 'Smaller chamber. Good for small/rush batches.' },
+        { id: 'E14001', name: 'E1400', lensCapacity: 274, orderCapacity: 137, runHours: 2, notes: 'Large chamber. Best for bulk AR runs.' },
+      ];
+
+      // Build enriched job list for coating queue + upstream
+      const coatingQueue = [];
+      const surfacingJobs = [];
+      const ovenJobs = [];
+      for (const j of allJobs) {
+        if (j.status === 'SHIPPED' || j.stage === 'SHIPPING' || j.stage === 'CANCELED') continue;
+        const xml = dviJobIndex.get(j.job_id) || {};
+        const enriched = {
+          jobId: j.job_id, station: j.station, stage: j.stage,
+          coating: xml.coating || 'AR',
+          lensType: xml.lensType || '?', // P=progressive, S=SV, B=bifocal
+          lensStyle: xml.lensStyle || '?',
+          lensMat: xml.lensMat || '?',
+          eyeSize: xml.eyeSize || '?',
+          rush: j.rush || false,
+          minutesInStage: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : 0,
+          daysInLab: j.firstSeen ? Math.round((now - j.firstSeen) / 86400000 * 10) / 10 : 0,
+        };
+        if (j.stage === 'COATING') coatingQueue.push(enriched);
+        else if (j.stage === 'SURFACING') surfacingJobs.push(enriched);
+      }
+      coatingQueue.sort((a,b) => (b.rush?1:0)-(a.rush?1:0) || b.minutesInStage-a.minutesInStage);
+
+      // Oven racks finishing soon
+      const runningRacksData = [];
+      const ovenLiveData = liveTimers || {};
+      // Check mock oven data from ovenRackJobs
+      for (const [key, rack] of Object.entries(ovenRackJobs)) {
+        runningRacksData.push({ location: key, jobs: rack.jobs, coating: rack.coating });
+      }
+
+      // Build the AI prompt context
+      const contextSummary = `
+## Current Coating Department Status (${new Date().toLocaleString()})
+
+### Coating Queue: ${coatingQueue.length} jobs (${coatingQueue.length * 2} lenses)
+${coatingQueue.length > 0 ? `Breakdown by coating type:
+${Object.entries(coatingQueue.reduce((g,j) => { g[j.coating]=(g[j.coating]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
+
+Breakdown by lens type:
+${Object.entries(coatingQueue.reduce((g,j) => { const k = j.lensType==='P'?'Progressive':j.lensType==='S'?'Single Vision':j.lensType==='B'?'Bifocal':'Unknown'; g[k]=(g[k]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
+
+Breakdown by lens material:
+${Object.entries(coatingQueue.reduce((g,j) => { g[j.lensMat]=(g[j.lensMat]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
+
+Rush jobs: ${coatingQueue.filter(j=>j.rush).length}
+Longest wait: ${coatingQueue[0]?.minutesInStage || 0} minutes
+` : 'No jobs in queue.'}
+
+### Incoming from Surfacing: ${surfacingJobs.length} jobs (${surfacingJobs.length * 2} lenses)
+${surfacingJobs.length > 0 ? `These will arrive at coating within ~45 minutes.
+Coating types: ${Object.entries(surfacingJobs.reduce((g,j) => { g[j.coating]=(g[j.coating]||0)+1; return g; }, {})).map(([t,c]) => `${t}:${c}`).join(', ')}
+` : ''}
+
+### Oven Rack Loads (jobs currently curing):
+${runningRacksData.length > 0 ? runningRacksData.map(r => `  - ${r.location}: ${r.jobs.length} jobs [${r.jobs.join(', ')}]`).join('\n') : 'No tracked oven loads.'}
+
+### Available Coaters:
+${COATERS.map(c => `  - ${c.name} (${c.id}): ${c.lensCapacity} lens capacity (${c.orderCapacity} orders), ${c.runHours}h run. ${c.notes}`).join('\n')}
+
+### Full Job List in Coating Queue:
+${coatingQueue.slice(0, 300).map(j => `${j.jobId} | ${j.coating} | ${j.lensType==='P'?'Prog':j.lensType==='S'?'SV':j.lensType==='B'?'BF':'?'} | ${j.lensMat} | eye:${j.eyeSize} | ${j.rush?'RUSH':'std'} | wait:${j.minutesInStage}m | ${j.daysInLab}d in lab`).join('\n')}
+`;
+
+      // Call gateway AI
+      const aiQuestion = `Analyze the current coating queue and recommend optimal batching.
+
+${contextSummary}
+
+## Instructions:
+1. Group jobs by coating type first (AR, Blue Cut, etc.)
+2. Within each coating type, consider lens material and size for optimal grouping
+3. Assign to specific coaters (E1400 for largest batches, EB9s for smaller/rush)
+4. Prioritize rush jobs — they should go in the earliest batch
+5. Consider what's incoming from surfacing when deciding whether to wait or run now
+6. Consider oven rack loads — these will need oven space after coating
+7. Give specific job IDs for each coater assignment
+8. Note any timing recommendations (run now vs wait for more jobs)
+9. Flag any efficiency concerns or unusual patterns
+
+Respond with a structured batching plan in this format:
+- For each coater: which specific jobs to load, why this grouping makes sense
+- Whether to run now or wait, and why
+- Any notes about timing, upcoming capacity constraints, or efficiency tips`;
+
+      const aiRes = await fetch(`${gatewayUrl}/web/ask-sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: aiQuestion,
+          agent: 'coating',
+          userId: 'coating-intel',
+          context: { source: 'coating-intelligence-panel' },
+        }),
+      }).then(r => r.json()).catch(e => ({ error: e.message }));
+
+      return json(res, {
+        ok: true,
+        recommendation: aiRes.response || aiRes.error || 'AI unavailable',
+        context: {
+          queueSize: coatingQueue.length,
+          surfacingIncoming: surfacingJobs.length,
+          ovenLoads: runningRacksData.length,
+          coaters: COATERS.map(c => c.name),
+        },
+      });
+    } catch(e) { return json(res, {ok:false, error:e.message}, 500); }
   }
 
   // ── ItemPath/Kardex inventory endpoints ─────────────────────

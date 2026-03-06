@@ -31,6 +31,10 @@ import {
   query_database,
   call_api,
   think_aloud,
+  get_coating_intelligence,
+  get_coating_batch_history,
+  submit_coating_batch_plan,
+  get_oven_rack_status,
   ALL_TOOLS,
 } from '../tools/definitions.js';
 
@@ -129,7 +133,7 @@ export const SURFACE_AGENT: AgentConfig = {
 
 export const COATING_AGENT: AgentConfig = {
   name: 'CoatingAgent',
-  description: 'Coating department: queue, wait times, AR/Blue/Hard coat processes',
+  description: 'Coating department: intelligent batching, oven tracking, queue optimization, AR/Blue/Hard coat',
   department: 'C',
   systemPrompt: COATING_AGENT_PROMPT,
   tools: [
@@ -138,6 +142,10 @@ export const COATING_AGENT: AgentConfig = {
     get_job_detail,
     get_coating_queue,
     get_coating_wait_summary,
+    get_coating_intelligence,
+    get_coating_batch_history,
+    submit_coating_batch_plan,
+    get_oven_rack_status,
     get_aging_report,
     get_breakage_summary,
     get_breakage_events,
