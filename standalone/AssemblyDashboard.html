@@ -304,13 +304,14 @@ let selectedOp = null;
 
 // ─── LEADERBOARD DISPLAY CONFIG ─────────────────────────────────
 const LB_PRESETS = {
-  desktop: { totalSize:64, winnerSize:32, awardSize:44, rowPad:10, nameSize:15, scoreSize:20, barH:5, avatarSize:38, showBars:true, showStation:true, showAvgRate:true, label:'Desktop' },
-  tablet:  { totalSize:80, winnerSize:38, awardSize:52, rowPad:14, nameSize:18, scoreSize:24, barH:7, avatarSize:44, showBars:true, showStation:true, showAvgRate:true, label:'Tablet' },
-  tv:      { totalSize:120, winnerSize:48, awardSize:72, rowPad:20, nameSize:28, scoreSize:36, barH:10, avatarSize:56, showBars:true, showStation:false, showAvgRate:true, label:'TV / Large Display' },
-  minimal: { totalSize:96, winnerSize:40, awardSize:56, rowPad:16, nameSize:22, scoreSize:28, barH:0, avatarSize:48, showBars:false, showStation:false, showAvgRate:false, label:'Minimal' }
+  desktop: { totalSize:64, winnerSize:32, awardSize:44, rowPad:10, nameSize:15, scoreSize:20, barH:5, barLblSize:8, avatarSize:38, showBars:true, showStation:true, showAvgRate:true, label:'Desktop' },
+  tablet:  { totalSize:80, winnerSize:38, awardSize:52, rowPad:14, nameSize:18, scoreSize:24, barH:7, barLblSize:12, avatarSize:44, showBars:true, showStation:true, showAvgRate:true, label:'Tablet' },
+  tv:      { totalSize:120, winnerSize:48, awardSize:72, rowPad:20, nameSize:28, scoreSize:36, barH:10, barLblSize:18, avatarSize:56, showBars:true, showStation:false, showAvgRate:true, label:'TV / Large Display' },
+  minimal: { totalSize:96, winnerSize:40, awardSize:56, rowPad:16, nameSize:22, scoreSize:28, barH:0, barLblSize:14, avatarSize:48, showBars:false, showStation:false, showAvgRate:false, label:'Minimal' }
 };
 let lbConfig = JSON.parse(localStorage.getItem('asy_lb_config') || 'null') || {...LB_PRESETS.desktop, preset:'desktop'};
 if(!lbConfig.awardSize) lbConfig.awardSize = 44;
+if(!lbConfig.barLblSize) lbConfig.barLblSize = 8;
 function saveLbConfig(){ localStorage.setItem('asy_lb_config', JSON.stringify(lbConfig)); }
 
 // ─────────────────────────────────────────────────────────────────
@@ -737,6 +738,7 @@ function renderLbSettings(){
       ${slider('Row Padding', 'rowPad', 6, 32, 2)}
       ${slider('Avatar Size', 'avatarSize', 24, 72, 4)}
       ${slider('Bar Height', 'barH', 0, 16, 1)}
+      ${slider('Bar Labels', 'barLblSize', 6, 24, 1)}
       ${toggle('Show Bars', 'showBars')}
       ${toggle('Show Station', 'showStation')}
       ${toggle('Show Avg Rate', 'showAvgRate')}
@@ -769,14 +771,15 @@ function renderLeaderboard(){
     const aboveAvg = (op.todayJobs||0) > shiftAvgJobs;
 
     const rateVal = (op.jobsPerHour||0).toFixed(1);
+    const bls = c.barLblSize||8;
     const barsHtml = c.showBars ? `
       <div class="lb-bars">
         <div class="lb-bar-row">
-          <div class="lb-bar-lbl">JOBS</div>
+          <div class="lb-bar-lbl" style="font-size:${bls}px;width:${bls*5}px">JOBS</div>
           <div class="lb-bar-wrap" style="height:${c.barH}px"><div class="lb-bar" style="height:100%;width:${jobPct}%;background:${isTop3?rankColors[i]:'var(--blue)'}"></div></div>
         </div>
         <div class="lb-bar-row">
-          <div class="lb-bar-lbl">${rateVal}/HR</div>
+          <div class="lb-bar-lbl" style="font-size:${bls}px;width:${bls*5}px">${rateVal}/HR</div>
           <div class="lb-bar-wrap" style="height:${c.barH}px"><div class="lb-bar" style="height:100%;width:${ratePct}%;background:var(--purple)"></div></div>
         </div>
       </div>` : '';
