@@ -5457,11 +5457,11 @@ function LabAssistantV2(){
     return()=>{ window.removeEventListener('storage',handleStorage); clearInterval(iv); };
   },[]);
 
-  // Fetch DVI data from gateway
+  // Fetch DVI job data from lab server (trace file watcher)
   useEffect(()=>{
     const fetchDvi=async()=>{
       try{
-        const res=await fetch("http://localhost:3001/api/dvi/data");
+        const res=await fetch("http://localhost:3002/api/dvi/jobs");
         if(res.ok){
           const data=await res.json();
           // Filter out CANCELED jobs
@@ -5475,7 +5475,7 @@ function LabAssistantV2(){
       }catch(e){ console.warn("DVI fetch:",e.message); }
     };
     fetchDvi();
-    const iv=setInterval(fetchDvi,120000);
+    const iv=setInterval(fetchDvi,10000); // 10s to match trace watcher cadence
     return()=>clearInterval(iv);
   },[]);
 

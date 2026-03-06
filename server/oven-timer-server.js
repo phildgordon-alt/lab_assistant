@@ -52,6 +52,75 @@ if (process.env.DVI_SYNC_USER) {
   console.log('[DVI-Sync] Skipped (DVI_SYNC_USER not set)');
 }
 
+// ── DVI Trace Watcher (live tray movement from LT files) ──────
+const dviTrace = require('./dvi-trace');
+dviTrace.start();
+dviTrace.on('data', ({ count, file }) => {
+  const status = dviTrace.getStatus();
+  console.log(`[DVI-Trace] ${file}: +${count} events (${status.totalEvents} total, ${status.jobCount} jobs)`);
+});
+
+// ── DVI Job Index (parsed from synced XML files) ──────────────
+const dviJobIndex = new Map(); // dviJob# → {coating, lens, frame, rx, ...}
+const DVI_JOBS_DIR = path.join(__dirname, '..', 'data', 'dvi', 'jobs');
+
+function parseDviXml(xml) {
+  // Lightweight XML parser for DVI job files (no dependency needed)
+  const get = (tag) => { const m = xml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
+  const getAttr = (tag, attr) => { const m = xml.match(new RegExp(`<${tag}[^>]*\\s${attr}="([^"]*)"`)); return m ? m[1] : null; };
+
+  return {
+    status: getAttr('Job', 'Status'),
+    date: get('Date'),
+    rmtInv: get('RmtInv'),
+    tray: get('Tray'),
+    rxNum: get('RxNum'),
+    patient: get('Patient'),
+    origin: get('Origin'),
+    coating: getAttr('Coat', 'Type') ? `${get('Coat')}` : get('Coat'),
+    lensStyle: get('Style'),
+    lensMat: get('Mat'),
+    lensThick: get('Thick'),
+    lensColor: get('Color'),
+    frameStyle: getAttr('Frame', 'Status') ? get('Style') : null,
+    frameSku: get('SKU'),
+    frameMfr: get('Mfr'),
+    frameColor: getAttr('Frame', 'Status') ? null : null, // parsed separately below
+    eyeSize: get('EyeSize'),
+    bridge: get('Bridge'),
+    edge: get('Edge'),
+    serviceInstruction: getAttr('Service', 'Instruction'),
+  };
+}
+
+function loadDviJobIndex() {
+  if (!fs.existsSync(DVI_JOBS_DIR)) return;
+  const files = fs.readdirSync(DVI_JOBS_DIR).filter(f => f.endsWith('.xml'));
+  let loaded = 0;
+  for (const file of files) {
+    try {
+      const jobNum = path.basename(file, '.xml');
+      if (dviJobIndex.has(jobNum)) continue;
+      const xml = fs.readFileSync(path.join(DVI_JOBS_DIR, file), 'utf8');
+      const parsed = parseDviXml(xml);
+      dviJobIndex.set(jobNum, parsed);
+      loaded++;
+    } catch (e) { /* skip bad files */ }
+  }
+  if (loaded > 0) console.log(`[DVI-Index] Loaded ${loaded} job files (${dviJobIndex.size} total)`);
+}
+
+// Load on startup and refresh every 60s
+loadDviJobIndex();
+setInterval(loadDviJobIndex, 60000);
+
+// Also reload when dvi-sync copies new files
+dviSync.on('file', (evt) => {
+  if (evt.sync === 'jobs') {
+    setTimeout(loadDviJobIndex, 1000);
+  }
+});
+
 const PORT      = parseInt(process.env.PORT || '3002', 10);
 const DATA_FILE = path.join(__dirname, 'oven-runs.json');
 const MAX_RUNS  = 20000;
@@ -448,6 +517,40 @@ const server = http.createServer(async (req, res) => {
   if (req.method==='GET' && url.pathname==='/api/som/alerts') {
     return json(res, som.getAlerts());
   }
+  // ── Cross-referenced jobs: SOM department + DVI job details ──
+  if (req.method==='GET' && url.pathname==='/api/jobs/active') {
+    const somData = som.getActiveJobs();
+    const enriched = somData.jobs.map(job => {
+      const dvi = dviJobIndex.get(job.dviJob) || null;
+      return {
+        ...job,
+        dvi: dvi ? {
+          coating: dvi.coating,
+          lensStyle: dvi.lensStyle,
+          lensMat: dvi.lensMat,
+          frameStyle: dvi.frameStyle,
+          frameSku: dvi.frameSku,
+          rxNum: dvi.rxNum,
+          serviceInstruction: dvi.serviceInstruction,
+        } : null
+      };
+    });
+    // Group by department zone
+    const byZone = {};
+    enriched.forEach(j => {
+      const z = j.zone || 'unknown';
+      if (!byZone[z]) byZone[z] = { zone: z, deptName: j.deptName, jobs: [] };
+      byZone[z].jobs.push(j);
+    });
+    return json(res, {
+      total: enriched.length,
+      dviIndexSize: dviJobIndex.size,
+      matchRate: enriched.filter(j => j.dvi).length,
+      byZone,
+      isLive: somData.isLive,
+      lastPoll: somData.lastPoll
+    });
+  }
   if (req.method==='GET' && url.pathname==='/api/som/health') {
     return json(res, som.getHealth());
   }
@@ -498,6 +601,53 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return json(res, { ok: false, error: e.message }, 500);
     }
+  }
+
+  // ── DVI Trace (live tray movement) endpoints ─────────────────
+  if (req.method==='GET' && url.pathname==='/api/dvi/jobs') {
+    // Primary job data endpoint — feeds KPIs and department views
+    const jobs = dviTrace.getJobsForKPI();
+    // Enrich with DVI XML data (coating, lens, frame) where available
+    const enriched = jobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      if (xml) {
+        j.coating = xml.coating;
+        j.lensStyle = xml.lensStyle;
+        j.lensMat = xml.lensMat;
+        j.frameStyle = xml.frameStyle;
+        j.frameSku = xml.frameSku;
+        j.rxNum = xml.rxNum;
+      }
+      return j;
+    });
+    const shipped = enriched.filter(j => j.status === 'SHIPPED');
+    return json(res, {
+      jobs: enriched,
+      shipped: {
+        today: shipped.length,
+        yesterday: 0,
+        thisWeek: shipped.length
+      },
+      stats: dviTrace.getStats(),
+      source: 'dvi-trace',
+      jobCount: enriched.length
+    });
+  }
+  if (req.method==='GET' && url.pathname==='/api/dvi/trace/status') {
+    return json(res, dviTrace.getStatus());
+  }
+  if (req.method==='GET' && url.pathname==='/api/dvi/trace/events') {
+    const limit = parseInt(url.searchParams.get('limit') || '100');
+    return json(res, dviTrace.getRecentEvents(limit));
+  }
+  if (req.method==='GET' && url.pathname==='/api/dvi/trace/stats') {
+    return json(res, dviTrace.getStats());
+  }
+  if (req.method==='GET' && url.pathname.startsWith('/api/dvi/trace/job/')) {
+    const jobId = url.pathname.split('/').pop();
+    const history = dviTrace.getJobHistory(jobId);
+    if (!history) return json(res, { error: 'Job not found' }, 404);
+    return json(res, history);
   }
 
   // Slack test endpoint
@@ -891,7 +1041,13 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     GET  /api/som/devices          ← Schneider machine status`);
   console.log(`     GET  /api/som/conveyors        ← Conveyor belt positions`);
   console.log(`     GET  /api/som/orders           ← Jobs by department`);
+  console.log(`     GET  /api/jobs/active          ← Active WIP: SOM + DVI cross-ref`);
   console.log(`     GET  /api/som/alerts           ← Machine/conveyor alerts`);
+  console.log(`     GET  /api/dvi/jobs             ← Live WIP jobs (trace watcher)`);
+  console.log(`     GET  /api/dvi/trace/status     ← Trace watcher status`);
+  console.log(`     GET  /api/dvi/trace/events     ← Recent movement events`);
+  console.log(`     GET  /api/dvi/trace/stats      ← Today's movement stats`);
+  console.log(`     GET  /api/dvi/trace/job/:id    ← Job movement history`);
   console.log(`     GET  /api/dvi-sync/status      ← DVI file sync status`);
   console.log(`     POST /api/dvi-sync/poll        ← Force sync poll`);
   console.log(`     POST /api/ai/query             ← AI query with lab context`);

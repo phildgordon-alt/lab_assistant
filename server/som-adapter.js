@@ -41,6 +41,7 @@ let devices = [];
 let conveyors = [];
 let oee = [];
 let orders = { byDepartment: [], today: [], total: 0, todayTotal: 0 };
+let activeJobs = []; // Individual WIP jobs with department + DVI job#
 let alerts = [];
 
 // Department mappings (Schneider LMS department IDs)
@@ -444,6 +445,45 @@ async function poll() {
       console.warn('[SOM] Could not query orders:', e.message);
     }
 
+    // Query individual active WIP jobs (not Complete/dept 9)
+    try {
+      const [jobRows] = await connection.query(`
+        SELECT
+          TRIM(OrdNumbH) as dviJob,
+          TRIM(OrdNumb) as somOrder,
+          CurrentDepartmentID as dept,
+          previousDepartmentID as prevDept,
+          Side,
+          EntryDate,
+          EntryTime,
+          TRIM(FrameNo) as frameNo,
+          TRIM(FReference) as frameRef,
+          TRIM(LDS) as lds,
+          TRIM(Reference) as reference
+        FROM order_header
+        WHERE EntryDate >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+          AND CurrentDepartmentID != 9
+        ORDER BY EntryDate DESC, EntryTime DESC
+      `);
+      activeJobs = jobRows.map(r => ({
+        dviJob: r.dviJob,
+        somOrder: r.somOrder,
+        dept: r.dept,
+        deptName: DEPARTMENTS[r.dept]?.name || `Dept ${r.dept}`,
+        zone: DEPARTMENTS[r.dept]?.zone || 'unknown',
+        prevDept: r.prevDept,
+        side: r.Side,
+        entryDate: r.EntryDate,
+        entryTime: r.EntryTime,
+        frameNo: r.frameNo,
+        frameRef: r.frameRef,
+        lds: r.lds,
+        reference: r.reference
+      }));
+    } catch (e) {
+      console.warn('[SOM] Could not query active jobs:', e.message);
+    }
+
     // Build alerts from errors
     alerts = [];
 
@@ -614,6 +654,27 @@ module.exports = {
         inProduction: orders.today.find(d => d.departmentId === 4)?.jobs || 0,
         complete: orders.today.find(d => d.departmentId === 9)?.jobs || 0,
         unassigned: orders.today.find(d => d.departmentId === null)?.jobs || 0
+      }
+    };
+  },
+
+  /**
+   * Get individual active WIP jobs with department tracking
+   */
+  getActiveJobs() {
+    return {
+      jobs: activeJobs,
+      isLive,
+      lastPoll,
+      lastSuccessfulPoll,
+      connectionError,
+      summary: {
+        total: activeJobs.length,
+        byDept: activeJobs.reduce((acc, j) => {
+          const key = j.zone || 'unknown';
+          acc[key] = (acc[key] || 0) + 1;
+          return acc;
+        }, {})
       }
     };
   },

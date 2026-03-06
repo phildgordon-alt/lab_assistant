@@ -924,13 +924,15 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   useEffect(()=>{
     const fetchSomData=async()=>{
       try{
-        // Fetch both orders and devices in parallel
-        const [ordersRes, devicesRes]=await Promise.all([
+        // Fetch orders, devices, and active jobs in parallel
+        const [ordersRes, devicesRes, activeJobsRes]=await Promise.all([
           fetch("http://localhost:3002/api/som/orders"),
-          fetch("http://localhost:3002/api/som/devices")
+          fetch("http://localhost:3002/api/som/devices"),
+          fetch("http://localhost:3002/api/jobs/active")
         ]);
         const ordersData=await ordersRes.json();
         const devicesData=await devicesRes.json();
+        const activeJobsData=await activeJobsRes.json();
         // Transform today's department data into zones array
         const zones=(ordersData.orders?.today||[]).map(d=>({
           departmentId:d.departmentId,
@@ -966,6 +968,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           devices:Object.keys(deviceCategories).length>0?deviceCategories:prev.devices,
           deviceList:allDevices.length>0?allDevices:prev.deviceList,
           allTimeZones:allTimeZones.length>0?allTimeZones:prev.allTimeZones,
+          activeJobs:activeJobsData||prev.activeJobs||null,
           total:ordersData.orders?.total||prev.total,
           todayTotal:ordersData.orders?.todayTotal||prev.todayTotal,
           isLive:ordersData.isLive||false,
@@ -1316,6 +1319,67 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                     <div style={{textAlign:"center",padding:"12px 0",fontSize:11,color:T.textDim,fontFamily:mono}}>No job data available</div>
                   )}
                 </div>
+                {/* Active WIP with DVI detail breakdown */}
+                {somOrders.activeJobs && (() => {
+                  const aj = somOrders.activeJobs;
+                  const zones = Object.values(aj.byZone || {}).filter(z => z.zone !== 'ship').sort((a,b) => b.jobs.length - a.jobs.length);
+                  if (zones.length === 0) return null;
+                  // Coating breakdown from DVI-enriched jobs
+                  const coatingCounts = {};
+                  zones.forEach(z => z.jobs.forEach(j => {
+                    if (j.dvi?.coating) coatingCounts[j.dvi.coating] = (coatingCounts[j.dvi.coating] || 0) + 1;
+                  }));
+                  const COAT_COLORS = { AR:'#3B82F6', BC:'#8B5CF6', HC:'#22C55E', MR:'#EC4899', PL:'#F59E0B', TR:'#06B6D4',DERA:'#14B8A6' };
+                  return (
+                    <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${T.border}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                        <div style={{fontSize:10,color:T.textDim,fontFamily:mono,textTransform:"uppercase",letterSpacing:1}}>
+                          Active WIP ({aj.total.toLocaleString()} jobs)
+                        </div>
+                        <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>
+                          {aj.matchRate}/{aj.total} matched · {aj.dviIndexSize} in index
+                        </div>
+                      </div>
+                      {/* Per-zone breakdown with coating mix */}
+                      {zones.map(z => {
+                        const zStyle = DEPT_STYLES[z.zone] || { color:'#64748B', label: z.deptName };
+                        const zCoatings = {};
+                        z.jobs.forEach(j => { if(j.dvi?.coating) zCoatings[j.dvi.coating] = (zCoatings[j.dvi.coating]||0)+1; });
+                        const coatEntries = Object.entries(zCoatings).sort((a,b)=>b[1]-a[1]);
+                        return (
+                          <div key={z.zone} style={{marginBottom:8,padding:10,background:T.bg,borderRadius:8,border:`1px solid ${zStyle.color}25`}}>
+                            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:coatEntries.length>0?6:0}}>
+                              <span style={{fontSize:11,fontWeight:700,color:zStyle.color,fontFamily:mono}}>{zStyle.label}</span>
+                              <span style={{fontSize:14,fontWeight:800,color:T.text,fontFamily:mono}}>{z.jobs.length.toLocaleString()}</span>
+                            </div>
+                            {coatEntries.length > 0 && (
+                              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                                {coatEntries.map(([coat,cnt])=>(
+                                  <span key={coat} style={{fontSize:9,fontFamily:mono,padding:"2px 6px",borderRadius:4,background:(COAT_COLORS[coat]||'#475569')+'20',color:COAT_COLORS[coat]||'#94A3B8',fontWeight:600}}>
+                                    {coat} {cnt}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {/* Overall coating mix */}
+                      {Object.keys(coatingCounts).length > 0 && (
+                        <div style={{marginTop:8}}>
+                          <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginBottom:4,textTransform:"uppercase"}}>Coating Mix (DVI-matched)</div>
+                          <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                            {Object.entries(coatingCounts).sort((a,b)=>b[1]-a[1]).map(([coat,cnt])=>(
+                              <span key={coat} style={{fontSize:10,fontFamily:mono,padding:"3px 8px",borderRadius:4,background:(COAT_COLORS[coat]||'#475569')+'20',color:COAT_COLORS[coat]||'#94A3B8',fontWeight:700}}>
+                                {coat} {cnt}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
               </>
             )}
             {lastUpdate && (
