@@ -2265,33 +2265,47 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
 }
 
 function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenServerUrl,settings}){
-  const [subView,setSubView]=useState("predictive");
-  // Get coater machines from settings
-  const coaterMachines=useMemo(()=>{
-    const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
-    return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
-  },[settings?.equipment]);
+  const [subView,setSubView]=useState("intelligence");
+  const [intel,setIntel]=useState(null);
+  const [intelError,setIntelError]=useState(null);
+  const [batchEdits,setBatchEdits]=useState(()=>{try{return JSON.parse(localStorage.getItem("la_coating_batches")||"{}")}catch{return{}}});
+  const [lastFetch,setLastFetch]=useState(null);
 
-  // Filter DVI jobs in coating (CCL, CCP, Coating stations) - exclude shipped
+  // Poll coating intelligence endpoint
+  useEffect(()=>{
+    const base=ovenServerUrl||"http://localhost:3002";
+    let active=true;
+    const poll=async()=>{
+      try{
+        const r=await fetch(`${base}/api/coating/intelligence`);
+        if(!r.ok) throw new Error(`${r.status}`);
+        const data=await r.json();
+        if(active){setIntel(data);setIntelError(null);setLastFetch(Date.now());}
+      }catch(e){if(active)setIntelError(e.message);}
+    };
+    poll();
+    const iv=setInterval(poll,30000);
+    return()=>{active=false;clearInterval(iv);};
+  },[ovenServerUrl]);
+
+  // Save batch edits to localStorage
+  useEffect(()=>{localStorage.setItem("la_coating_batches",JSON.stringify(batchEdits));},[batchEdits]);
+
   const coatingJobs=useMemo(()=>{
     return dviJobs.filter(j=>{
-      // Exclude shipped jobs
-      if (j.status === 'SHIPPED' || j.stage === 'SHIP' || (j.station||'').toUpperCase().includes('SHIP')) return false;
+      if(j.status==='SHIPPED'||j.stage==='SHIP'||(j.station||'').toUpperCase().includes('SHIP')) return false;
       const stage=(j.stage||j.Stage||'').toUpperCase();
       const station=(j.station||'').toUpperCase();
       return stage==='COATING'||station.includes('CCL')||station.includes('CCP')||station.includes('COATING')||station.includes('RECEIVED COAT');
     });
   },[dviJobs]);
 
-  const inProcess=coatingJobs.filter(j=>j.status==='In Progress');
   const rushJobs=coatingJobs.filter(j=>j.rush==='Y'||j.Rush==='Y');
   const contextData={
     jobs:coatingJobs,
     stagedCount:coatingJobs.length,
-    inProcessCount:inProcess.length,
     rushCount:rushJobs.length,
-    batches:batches,
-    machines:coaterMachines,
+    intel,
     dviJobCount:coatingJobs.length,
   };
 
@@ -2299,86 +2313,375 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
     <ProductionStageTab domain="coating" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16}}>
-        {[{id:"predictive",label:"Predictive Analysis",icon:"📊"},{id:"inspection",label:"Inspection & QC",icon:"🔬"},{id:"oven",label:"Oven History",icon:"🌡"}].map(sv=>(
+        {[{id:"intelligence",label:"Coating Intelligence",icon:"🧠"},{id:"batches",label:"Batch Builder",icon:"📦"},{id:"ovens",label:"Oven Status",icon:"🌡"},{id:"inspection",label:"QC",icon:"🔬"}].map(sv=>(
           <button key={sv.id} onClick={()=>setSubView(sv.id)} style={{background:subView===sv.id?T.blueDark:"transparent",border:`1px solid ${subView===sv.id?T.blue:"transparent"}`,borderRadius:8,padding:"10px 20px",cursor:"pointer",color:subView===sv.id?T.blue:T.textMuted,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,fontFamily:sans}}><span>{sv.icon}</span>{sv.label}</button>
         ))}
       </div>
-      {subView==="predictive"&&<PredictiveView batches={batches} trays={trays} onBatchControl={onBatchControl} coaterMachines={coaterMachines}/>}
+      {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl}/>}
+      {subView==="batches"&&<BatchBuilderView intel={intel} batchEdits={batchEdits} setBatchEdits={setBatchEdits} serverUrl={ovenServerUrl}/>}
+      {subView==="ovens"&&<OvenStatusView intel={intel} serverUrl={ovenServerUrl}/>}
       {subView==="inspection"&&<InspectionView inspections={inspections}/>}
-      {subView==="oven"&&<OvenHistoryView serverUrl={ovenServerUrl}/>}
     </div>
     </ProductionStageTab>
   );
 }
 
-function PredictiveView({batches,trays,onBatchControl}){
-  const [expandedBatch,setExpandedBatch]=useState(null);
-  const predictions=useMemo(()=>COATING_TYPES.map(ct=>{
-    const queue=Math.floor(Math.random()*80)+20;
-    const predicted=Math.floor(Math.random()*40)+60;
-    const timeToFull=Math.floor(Math.random()*120)+15;
-    const rec=predicted>=80?"RUN NOW":predicted>=50?"RUN PARTIAL":"WAIT";
-    return{type:ct,queue,predicted,timeToFull,recommendation:rec,dailyAvg:Math.floor(Math.random()*200)+50};
-  }),[]);
-  const recColors={"RUN NOW":T.green,"WAIT":T.amber,"RUN PARTIAL":T.blue};
+// ── Coating Intelligence — Live Overview ────────────────────
+function CoatingIntelView({intel,error,lastFetch,serverUrl}){
+  if(error) return <Card style={{borderLeft:`4px solid ${T.red}`}}><div style={{color:T.red,fontFamily:mono,fontSize:13}}>Failed to load coating intelligence: {error}</div><div style={{color:T.textDim,fontSize:11,marginTop:8}}>Server: {serverUrl}/api/coating/intelligence</div></Card>;
+  if(!intel) return <Card><div style={{color:T.textDim,fontFamily:mono,fontSize:13,textAlign:"center",padding:40}}>Loading coating intelligence...</div></Card>;
 
-  // Stage pipeline view
-  const stagePipeline=Object.entries(COATING_STAGES).map(([key,stage])=>{
-    const count=trays.filter(t=>t.department==="COATING"&&t.coatingStage===key).length;
-    return{key,stage,count};
-  });
+  const q=intel.queue||{};
+  const o=intel.ovens||{};
+  const c=intel.capacity||{};
+  const recs=intel.recommendations||[];
+  const recColors={"RUN NOW":T.green,"WAIT":T.amber,"RUN PARTIAL":T.blue};
+  const staleStr=lastFetch?`${Math.round((Date.now()-lastFetch)/1000)}s ago`:"—";
+
+  // Assigned vs unassigned jobs
+  const batchedJobs=JSON.parse(localStorage.getItem("la_coating_batches")||"{}");
+  const assignedJobIds=new Set(Object.values(batchedJobs).flat().map(j=>j.jobId||j));
+  const totalQueue=q.total||0;
+  const assignedCount=Math.min(assignedJobIds.size, totalQueue);
+  const unassignedCount=totalQueue-assignedCount;
 
   return(
-    <div style={{display:"flex",flexDirection:"column",gap:20}}>
-      {/* Live Stage Pipeline */}
-      <Card style={{borderLeft:`4px solid ${T.amber}`}}>
-        <SectionHeader right="All machines combined">Coating Line — Live Stage View</SectionHeader>
-        <div style={{display:"flex",alignItems:"stretch",gap:0}}>
-          {stagePipeline.map(({key,stage,count},i)=>(
-            <div key={key} style={{display:"flex",alignItems:"center",flex:1}}>
-              <div style={{flex:1,padding:"12px 8px",textAlign:"center",background:count>0?`${stage.color}15`:T.bg,border:`1px solid ${count>0?stage.color:T.border}`,borderRadius:i===0?"8px 0 0 8px":i===stagePipeline.length-1?"0 8px 8px 0":"0",borderLeft:i>0?"none":"1px solid"}}>
-                <div style={{fontSize:22,fontWeight:800,color:count>0?stage.color:T.textDim,fontFamily:mono}}>{count}</div>
-                <div style={{fontSize:10,color:count>0?stage.color:T.textDim,fontFamily:mono,fontWeight:700,marginTop:2}}>{stage.label}</div>
-                <div style={{fontSize:8,color:T.textDim,marginTop:2,fontFamily:mono}}>{stage.desc.slice(0,20)}</div>
-              </div>
-              {i<stagePipeline.length-1&&(
-                <div style={{width:16,display:"flex",alignItems:"center",justifyContent:"center",color:T.textDim,fontSize:12,zIndex:1}}>→</div>
-              )}
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      {/* Machines with full controls */}
-      <div>
-        <SectionHeader>Coating Machines — Manual Control</SectionHeader>
-        <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-          {batches.map(b=><BatchCard key={b.id} batch={b} trays={trays} expanded={expandedBatch===b.id} onToggle={()=>setExpandedBatch(expandedBatch===b.id?null:b.id)} onControl={onBatchControl}/>)}
-        </div>
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* KPI Row */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+        <KPICard label="Coating Queue" value={totalQueue} sub="jobs waiting" accent={T.amber}/>
+        <KPICard label="In Batches" value={assignedCount} sub="assigned" accent={T.green}/>
+        <KPICard label="Unassigned" value={unassignedCount} sub="need batching" accent={unassignedCount>0?T.red:T.textDim}/>
+        <KPICard label="Oven Racks Active" value={o.racksInUse||0} sub={`of ${c.totalRacks||54}`} accent={T.orange}/>
+        <KPICard label="Next Rack Done" value={o.nextFinishing?`${o.nextFinishing.remainingMin}m`:"—"} sub={o.nextFinishing?o.nextFinishing.coating:""} accent={T.cyan}/>
+        <KPICard label="Today Oven Runs" value={o.todayRuns||0} sub="completed" accent={T.blue}/>
       </div>
 
-      {/* Fill Predictions */}
-      <Card>
-        <SectionHeader right="Updated every 60s">Batch Fill Predictions</SectionHeader>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:10}}>
-          {predictions.map(p=>(
-            <div key={p.type} style={{background:T.bg,borderRadius:8,padding:14,border:`1px solid ${T.border}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:14,color:T.text,fontWeight:700}}>{p.type}</span>
-                <Pill color={recColors[p.recommendation]}>{p.recommendation}</Pill>
-              </div>
-              <div style={{marginTop:10}}>
-                <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.textDim,fontFamily:mono,marginBottom:3}}><span>Queue: {p.queue}</span><span>{p.predicted}% fill</span></div>
-                <div style={{height:8,background:T.card,borderRadius:4,overflow:"hidden"}}>
-                  <div style={{height:"100%",width:`${p.predicted}%`,borderRadius:4,background:p.predicted>=80?T.green:p.predicted>=50?T.amber:T.textDim}}/>
+      {/* Queue by Coating Type */}
+      <Card style={{borderLeft:`4px solid ${T.amber}`}}>
+        <SectionHeader right={`Live · ${staleStr}`}>Coating Queue by Type</SectionHeader>
+        {(q.byType||[]).length===0?
+          <div style={{color:T.textDim,fontFamily:mono,fontSize:12,textAlign:"center",padding:20}}>No jobs in coating queue</div>
+        :
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(220px,1fr))",gap:10}}>
+            {(q.byType||[]).map(g=>{
+              const lensCount=g.count*2;
+              const racks=Math.ceil(lensCount/c.rackSize);
+              const lastFill=lensCount%c.rackSize||c.rackSize;
+              const lastPct=Math.round(lastFill/c.rackSize*100);
+              return(
+                <div key={g.type} style={{background:T.bg,borderRadius:8,padding:14,border:`1px solid ${T.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:15,color:T.text,fontWeight:700}}>{g.type}</span>
+                    {g.rushCount>0&&<Pill color={T.red}>🚨 {g.rushCount} RUSH</Pill>}
+                  </div>
+                  <div style={{display:"flex",gap:16,marginTop:10,fontFamily:mono,fontSize:11}}>
+                    <div><div style={{fontSize:22,fontWeight:800,color:T.amber}}>{g.count}</div><div style={{color:T.textDim,fontSize:9}}>JOBS</div></div>
+                    <div><div style={{fontSize:22,fontWeight:800,color:T.blue}}>{lensCount}</div><div style={{color:T.textDim,fontSize:9}}>LENSES</div></div>
+                    <div><div style={{fontSize:22,fontWeight:800,color:T.purple}}>{racks}</div><div style={{color:T.textDim,fontSize:9}}>RACKS</div></div>
+                  </div>
+                  <div style={{marginTop:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:T.textDim,fontFamily:mono,marginBottom:3}}><span>Last rack fill</span><span>{lastPct}%</span></div>
+                    <div style={{height:6,background:T.card,borderRadius:3,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${lastPct}%`,borderRadius:3,background:lastPct>=75?T.green:lastPct>=50?T.amber:T.textDim}}/>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        }
+      </Card>
+
+      {/* AI Recommendations */}
+      <Card style={{borderLeft:`4px solid ${T.blue}`}}>
+        <SectionHeader right="AI-powered">Batching Recommendations</SectionHeader>
+        {recs.length===0?
+          <div style={{color:T.textDim,fontFamily:mono,fontSize:12,textAlign:"center",padding:20}}>No recommendations — queue empty</div>
+        :
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {recs.map(r=>(
+              <div key={r.coatingType} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",background:T.bg,borderRadius:8,border:`1px solid ${T.border}`}}>
+                <div style={{minWidth:100}}>
+                  <div style={{fontSize:14,fontWeight:700,color:T.text}}>{r.coatingType}</div>
+                  <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{r.jobCount} jobs · {r.lensCount} lenses</div>
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                    <Pill color={recColors[r.action]}>{r.action}</Pill>
+                    {r.rushCount>0&&<Pill color={T.red}>🚨 RUSH</Pill>}
+                  </div>
+                  <div style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{r.reason}</div>
+                </div>
+                <div style={{textAlign:"right",fontFamily:mono}}>
+                  <div style={{fontSize:11,color:T.textDim}}>{r.fullRacks} full + {r.lastRackPct}%</div>
+                  <div style={{fontSize:10,color:T.textDim}}>~{r.dipTimeMin}m dip time</div>
                 </div>
               </div>
-              <div style={{display:"flex",justifyContent:"space-between",marginTop:8,fontSize:10,color:T.textDim,fontFamily:mono}}>
-                <span>ETA full: {p.timeToFull}m</span><span>Avg: {p.dailyAvg}/day</span>
+            ))}
+          </div>
+        }
+      </Card>
+
+      {/* Capacity Summary */}
+      <Card>
+        <SectionHeader>Capacity Reference</SectionHeader>
+        <div style={{display:"flex",gap:20,flexWrap:"wrap",fontFamily:mono,fontSize:12}}>
+          <div><span style={{color:T.textDim}}>Rack size:</span> <span style={{color:T.text,fontWeight:700}}>{c.rackSize} lenses</span></div>
+          <div><span style={{color:T.textDim}}>Ovens:</span> <span style={{color:T.text,fontWeight:700}}>{c.ovenCount} × {c.racksPerOven} racks</span></div>
+          <div><span style={{color:T.textDim}}>Oven run:</span> <span style={{color:T.text,fontWeight:700}}>{c.ovenRunHours}h</span></div>
+          <div><span style={{color:T.textDim}}>Coaters:</span> <span style={{color:T.text,fontWeight:700}}>{c.coaterCount} × {c.coaterRate}/hr</span></div>
+          <div><span style={{color:T.textDim}}>Total throughput:</span> <span style={{color:T.text,fontWeight:700}}>{(c.coaterCount||2)*(c.coaterRate||200)}/hr</span></div>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// ── Batch Builder — Assign all jobs to racks ────────────────
+function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
+  const [selectedType,setSelectedType]=useState(null);
+  if(!intel) return <Card><div style={{color:T.textDim,fontFamily:mono,fontSize:13,textAlign:"center",padding:40}}>Loading...</div></Card>;
+
+  const q=intel.queue||{};
+  const c=intel.capacity||{};
+  const types=(q.byType||[]);
+
+  // Auto-select first type
+  const activeType=selectedType||(types[0]?.type)||null;
+  const typeData=types.find(t=>t.type===activeType);
+  const jobs=typeData?.jobs||[];
+
+  // Current batch assignments for this type
+  const batches=batchEdits[activeType]||[];
+  const assignedIds=new Set(batches.flat().map(j=>j.jobId||j));
+  const unassigned=jobs.filter(j=>!assignedIds.has(j.jobId));
+
+  // Auto-batch: fill racks of 18 jobs (36 lenses) each
+  const autoBatch=()=>{
+    const remaining=[...unassigned];
+    const newBatches=[...batches];
+    // Fill last incomplete rack first
+    if(newBatches.length>0){
+      const last=newBatches[newBatches.length-1];
+      while(last.length<18&&remaining.length>0) last.push(remaining.shift());
+    }
+    while(remaining.length>0){
+      const rack=remaining.splice(0,18);
+      newBatches.push(rack);
+    }
+    setBatchEdits(prev=>({...prev,[activeType]:newBatches}));
+  };
+
+  const clearBatches=()=>{
+    setBatchEdits(prev=>{const next={...prev};delete next[activeType];return next;});
+  };
+
+  const removeFromBatch=(rackIdx,jobId)=>{
+    setBatchEdits(prev=>{
+      const next={...prev};
+      const racks=[...(next[activeType]||[])];
+      racks[rackIdx]=racks[rackIdx].filter(j=>(j.jobId||j)!==jobId);
+      if(racks[rackIdx].length===0) racks.splice(rackIdx,1);
+      next[activeType]=racks;
+      return next;
+    });
+  };
+
+  const addToRack=(rackIdx,job)=>{
+    setBatchEdits(prev=>{
+      const next={...prev};
+      const racks=[...(next[activeType]||[])];
+      if(!racks[rackIdx]) racks[rackIdx]=[];
+      racks[rackIdx]=[...racks[rackIdx],job];
+      next[activeType]=racks;
+      return next;
+    });
+  };
+
+  const totalAssigned=batches.reduce((s,r)=>s+r.length,0);
+  const totalJobs=jobs.length;
+  const allAssigned=unassigned.length===0&&totalJobs>0;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Type selector */}
+      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        {types.map(t=>{
+          const tb=batchEdits[t.type]||[];
+          const ta=tb.reduce((s,r)=>s+r.length,0);
+          const complete=ta>=t.count&&t.count>0;
+          return(
+            <button key={t.type} onClick={()=>setSelectedType(t.type)}
+              style={{padding:"10px 18px",borderRadius:8,cursor:"pointer",fontFamily:mono,fontSize:12,fontWeight:700,
+                background:t.type===activeType?T.blueDark:"transparent",
+                border:`1px solid ${complete?T.green:t.type===activeType?T.blue:T.border}`,
+                color:t.type===activeType?T.blue:complete?T.green:T.textMuted}}>
+              {t.type} ({t.count}) {complete?"✓":""}
+            </button>
+          );
+        })}
+      </div>
+
+      {activeType&&typeData&&(
+        <>
+          {/* Status bar */}
+          <Card style={{borderLeft:`4px solid ${allAssigned?T.green:T.amber}`}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:allAssigned?T.green:T.text}}>
+                  {allAssigned?"All jobs assigned — ready to run":"Assign all jobs to racks before running"}
+                </div>
+                <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginTop:4}}>
+                  {totalAssigned}/{totalJobs} jobs assigned · {batches.length} rack{batches.length!==1?"s":""} · {unassigned.length} unassigned
+                </div>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <button onClick={autoBatch} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${T.blue}`,background:T.blueDark,color:T.blue,fontFamily:mono,fontSize:11,cursor:"pointer",fontWeight:700}}>Auto-Batch</button>
+                {batches.length>0&&<button onClick={clearBatches} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${T.red}`,background:"transparent",color:T.red,fontFamily:mono,fontSize:11,cursor:"pointer"}}>Clear</button>}
               </div>
             </div>
-          ))}
-        </div>
+            {totalJobs>0&&(
+              <div style={{marginTop:10}}>
+                <div style={{height:8,background:T.bg,borderRadius:4,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${Math.round(totalAssigned/totalJobs*100)}%`,borderRadius:4,background:allAssigned?T.green:T.amber,transition:"width .3s"}}/>
+                </div>
+              </div>
+            )}
+          </Card>
+
+          {/* Racks */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+            {batches.map((rack,ri)=>{
+              const lenses=rack.length*2;
+              const fillPct=Math.round(lenses/(c.rackSize||36)*100);
+              const hasRush=rack.some(j=>j.rush);
+              return(
+                <Card key={ri} style={{borderLeft:`4px solid ${fillPct>=100?T.green:fillPct>=75?T.blue:T.amber}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                    <div style={{fontFamily:mono,fontWeight:700,fontSize:13,color:T.text}}>Rack {ri+1} {hasRush&&<span style={{color:T.red}}>🚨</span>}</div>
+                    <div style={{fontFamily:mono,fontSize:11,color:fillPct>=100?T.green:T.textDim}}>{lenses}/{c.rackSize||36} lenses · {fillPct}%</div>
+                  </div>
+                  <div style={{height:4,background:T.bg,borderRadius:2,overflow:"hidden",marginBottom:8}}>
+                    <div style={{height:"100%",width:`${Math.min(100,fillPct)}%`,background:fillPct>=100?T.green:fillPct>=75?T.blue:T.amber,borderRadius:2}}/>
+                  </div>
+                  <div style={{maxHeight:200,overflowY:"auto"}}>
+                    {rack.map((j,ji)=>(
+                      <div key={j.jobId||ji} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0",borderBottom:`1px solid ${T.border}`,fontSize:11,fontFamily:mono}}>
+                        <span style={{color:j.rush?T.red:T.textMuted}}>{j.rush?"🚨 ":""}{j.jobId}</span>
+                        <span style={{color:T.textDim}}>{j.coating}</span>
+                        <button onClick={()=>removeFromBatch(ri,j.jobId)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:10,padding:"2px 4px"}}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+
+          {/* Unassigned jobs */}
+          {unassigned.length>0&&(
+            <Card style={{borderLeft:`4px solid ${T.red}`}}>
+              <SectionHeader right={`${unassigned.length} remaining`}>Unassigned Jobs — {activeType}</SectionHeader>
+              <div style={{maxHeight:300,overflowY:"auto"}}>
+                {unassigned.map(j=>(
+                  <div key={j.jobId} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"4px 0",borderBottom:`1px solid ${T.border}`,fontSize:11,fontFamily:mono}}>
+                    <span style={{color:j.rush?T.red:T.text}}>{j.rush?"🚨 ":""}{j.jobId}</span>
+                    <span style={{color:T.textDim}}>{j.station}</span>
+                    <span style={{color:T.textDim}}>{j.tray&&`T${j.tray}`}</span>
+                    <button onClick={()=>{
+                      const rackIdx=batches.length>0&&batches[batches.length-1].length<18?batches.length-1:batches.length;
+                      addToRack(rackIdx,j);
+                    }} style={{padding:"2px 8px",borderRadius:4,border:`1px solid ${T.blue}`,background:"transparent",color:T.blue,cursor:"pointer",fontSize:10}}>+ Rack</button>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Oven Status — Live rack timers ──────────────────────────
+function OvenStatusView({intel,serverUrl}){
+  const [ovenHistory,setOvenHistory]=useState([]);
+  useEffect(()=>{
+    const base=serverUrl||"http://localhost:3002";
+    fetch(`${base}/api/oven-runs?limit=50`).then(r=>r.json()).then(d=>setOvenHistory(d.runs||[])).catch(()=>{});
+  },[serverUrl]);
+
+  if(!intel) return <Card><div style={{color:T.textDim,fontFamily:mono,fontSize:13,textAlign:"center",padding:40}}>Loading...</div></Card>;
+  const o=intel.ovens||{};
+  const c=intel.capacity||{};
+  const running=o.racksRunning||[];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Running racks */}
+      <Card style={{borderLeft:`4px solid ${T.orange}`}}>
+        <SectionHeader right={`${running.length} active`}>Running Oven Racks</SectionHeader>
+        {running.length===0?
+          <div style={{color:T.textDim,fontFamily:mono,fontSize:12,textAlign:"center",padding:20}}>No oven racks currently running</div>
+        :
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:10}}>
+            {running.map((r,i)=>{
+              const pct=r.target>0?Math.round(r.elapsed/r.target*100):0;
+              const nearDone=r.remainingMin<=15;
+              return(
+                <div key={i} style={{background:T.bg,borderRadius:8,padding:14,border:`1px solid ${nearDone?T.green:T.border}`}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <span style={{fontSize:13,fontWeight:700,color:T.text}}>{r.ovenId} — {r.rackLabel}</span>
+                    <Pill color={nearDone?T.green:T.orange}>{r.state}</Pill>
+                  </div>
+                  <div style={{marginTop:8,fontFamily:mono,fontSize:12,color:T.amber}}>{r.coating}</div>
+                  <div style={{marginTop:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:10,fontFamily:mono,color:T.textDim,marginBottom:3}}>
+                      <span>{Math.floor(r.elapsed/60)}m elapsed</span>
+                      <span>{r.remainingMin}m remaining</span>
+                    </div>
+                    <div style={{height:8,background:T.card,borderRadius:4,overflow:"hidden"}}>
+                      <div style={{height:"100%",width:`${Math.min(100,pct)}%`,borderRadius:4,background:nearDone?T.green:pct>80?T.amber:T.blue,transition:"width 1s"}}/>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        }
+      </Card>
+
+      {/* Oven capacity */}
+      <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+        <KPICard label="Racks In Use" value={o.racksInUse||0} sub={`of ${c.totalRacks||54}`} accent={T.orange}/>
+        <KPICard label="Available" value={o.racksAvailable||0} sub="racks" accent={T.green}/>
+        <KPICard label="Today Runs" value={o.todayRuns||0} sub="completed" accent={T.blue}/>
+      </div>
+
+      {/* Recent completed runs */}
+      <Card>
+        <SectionHeader right="Last 50">Completed Oven Runs</SectionHeader>
+        {ovenHistory.length===0?
+          <div style={{color:T.textDim,fontFamily:mono,fontSize:12,textAlign:"center",padding:20}}>No completed runs yet</div>
+        :
+          <div style={{maxHeight:400,overflowY:"auto"}}>
+            {ovenHistory.slice(0,50).map((r,i)=>{
+              const mins=Math.round((r.actualSecs||0)/60);
+              const targetMins=Math.round((r.targetSecs||0)/60);
+              const overTime=r.actualSecs>r.targetSecs;
+              return(
+                <div key={r.id||i} style={{display:"flex",alignItems:"center",gap:10,padding:"6px 0",borderBottom:`1px solid ${T.border}`,fontSize:11,fontFamily:mono}}>
+                  <span style={{color:T.textMuted,minWidth:80}}>{r.ovenName||r.ovenId}</span>
+                  <span style={{color:T.textDim,minWidth:40}}>{r.rackLabel||r.rack}</span>
+                  <span style={{color:T.amber,minWidth:80}}>{r.coating||"?"}</span>
+                  <span style={{color:overTime?T.red:T.green}}>{mins}m{targetMins?` / ${targetMins}m`:""}</span>
+                  <span style={{color:T.textDim,marginLeft:"auto"}}>{r.completedAt?new Date(r.completedAt).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}</span>
+                </div>
+              );
+            })}
+          </div>
+        }
       </Card>
     </div>
   );
