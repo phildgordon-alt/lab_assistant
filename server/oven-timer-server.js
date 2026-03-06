@@ -671,6 +671,112 @@ const server = http.createServer(async (req, res) => {
       dviIndexSize: dviJobIndex.size
     });
   }
+  // ── Assembly-specific endpoint for AssemblyDashboard ──────────
+  if (req.method==='GET' && url.pathname==='/api/assembly/jobs') {
+    const allJobs = dviTrace.getJobs();
+    const now = Date.now();
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayMs = todayStart.getTime();
+
+    // Assembly jobs: currently at ASSEMBLY stage
+    const assemblyJobs = allJobs.filter(j => j.stage === 'ASSEMBLY');
+    // Completed assembly: jobs that passed through assembly and are now at QC/SHIPPING
+    // We check their event history for ASSEMBLY PASS/ASSEMBLY FAIL
+    const completedToday = [];
+    const passFailToday = { pass: 0, fail: 0 };
+
+    for (const j of allJobs) {
+      const history = dviTrace.getJobHistory(j.job_id);
+      if (!history || !history.events) continue;
+      const asmEvents = history.events.filter(e =>
+        e.timestamp >= todayMs &&
+        (e.station === 'ASSEMBLY PASS' || e.station === 'ASSEMBLY FAIL')
+      );
+      for (const e of asmEvents) {
+        if (e.station === 'ASSEMBLY PASS') passFailToday.pass++;
+        if (e.station === 'ASSEMBLY FAIL') passFailToday.fail++;
+        completedToday.push({
+          id: j.job_id,
+          station: e.station,
+          operator: e.operator,
+          timestamp: e.timestamp
+        });
+      }
+    }
+
+    // Build per-station breakdown from trace station names
+    const byStation = {};
+    for (const j of assemblyJobs) {
+      const stn = j.station || 'UNKNOWN';
+      if (!byStation[stn]) byStation[stn] = { station: stn, jobs: [], operators: new Set() };
+      byStation[stn].jobs.push(j.job_id);
+      if (j.operator) byStation[stn].operators.add(j.operator);
+    }
+    // Convert sets to arrays for JSON
+    for (const s of Object.values(byStation)) {
+      s.operators = [...s.operators];
+      s.jobCount = s.jobs.length;
+    }
+
+    // Build per-operator stats from today's completed assembly
+    const operatorStats = {};
+    for (const c of completedToday) {
+      if (!c.operator) continue;
+      if (!operatorStats[c.operator]) operatorStats[c.operator] = { initials: c.operator, jobs: 0, rush: 0, firstJob: null, lastJob: null };
+      operatorStats[c.operator].jobs++;
+      if (!operatorStats[c.operator].firstJob || c.timestamp < operatorStats[c.operator].firstJob)
+        operatorStats[c.operator].firstJob = c.timestamp;
+      if (!operatorStats[c.operator].lastJob || c.timestamp > operatorStats[c.operator].lastJob)
+        operatorStats[c.operator].lastJob = c.timestamp;
+    }
+    // Calculate jobs/hr for each operator
+    for (const op of Object.values(operatorStats)) {
+      if (op.firstJob && op.lastJob && op.lastJob > op.firstJob) {
+        const hours = (op.lastJob - op.firstJob) / 3600000;
+        op.jobsPerHour = hours > 0 ? (op.jobs / hours) : 0;
+      } else {
+        op.jobsPerHour = 0;
+      }
+    }
+
+    // Enrich assembly jobs with XML data
+    const enrichedAssembly = assemblyJobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      return {
+        id: j.job_id,
+        tray: j.tray,
+        station: j.station,
+        stationNum: j.stationNum,
+        operator: j.operator,
+        status: 'active',
+        coating: xml?.coating || '',
+        lensStyle: xml?.lensStyle || '',
+        lensMat: xml?.lensMat || '',
+        frameStyle: xml?.frameStyle || '',
+        rxNum: xml?.rxNum || '',
+        isRush: false, // TODO: from XML rush flag
+        firstSeen: j.firstSeen,
+        lastSeen: j.lastSeen,
+        minutesAtStation: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : null,
+        daysInLab: j.daysInLab || 0,
+      };
+    });
+
+    return json(res, {
+      jobs: enrichedAssembly,
+      assemblyWip: assemblyJobs.length,
+      completedToday: completedToday.length,
+      passFailToday,
+      byStation,
+      operatorStats,
+      shippedToday: allJobs.filter(j => j.stage === 'SHIPPING' && j.lastSeen >= todayMs).length,
+      incomingToday: allJobs.filter(j => j.stage === 'INCOMING' && j.lastSeen >= todayMs).length,
+      totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
+      source: 'dvi-trace',
+      timestamp: new Date().toISOString()
+    });
+  }
+
   if (req.method==='GET' && url.pathname==='/api/dvi/trace/status') {
     const status = dviTrace.getStatus();
     // Add queue job count from XML index (jobs not in trace)
