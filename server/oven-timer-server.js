@@ -727,45 +727,70 @@ const server = http.createServer(async (req, res) => {
 
     // Assembly jobs: currently at ASSEMBLY stage
     const assemblyJobs = allJobs.filter(j => j.stage === 'ASSEMBLY');
-    // Completed assembly: jobs that passed through assembly and are now at QC/SHIPPING
-    // We check their event history for ASSEMBLY PASS/ASSEMBLY FAIL
+
+    // Scan all jobs for assembly completions today.
+    // For each ASSEMBLY PASS/FAIL event, find the preceding ASSEMBLY #N
+    // event to determine which station completed the job.
     const completedToday = [];
     const passFailToday = { pass: 0, fail: 0 };
+    const stationCompletions = {}; // 'ASSEMBLY #7' → count
 
     for (const j of allJobs) {
       const history = dviTrace.getJobHistory(j.job_id);
       if (!history || !history.events) continue;
-      const asmEvents = history.events.filter(e =>
-        e.timestamp >= todayMs &&
-        (e.station === 'ASSEMBLY PASS' || e.station === 'ASSEMBLY FAIL')
-      );
-      for (const e of asmEvents) {
+      const events = history.events;
+      for (let i = 0; i < events.length; i++) {
+        const e = events[i];
+        if (e.timestamp < todayMs) continue;
+        if (e.station !== 'ASSEMBLY PASS' && e.station !== 'ASSEMBLY FAIL') continue;
+
         if (e.station === 'ASSEMBLY PASS') passFailToday.pass++;
         if (e.station === 'ASSEMBLY FAIL') passFailToday.fail++;
+
+        // Look backward for the ASSEMBLY #N station this job came from
+        let fromStation = null;
+        let fromOperator = e.operator || null;
+        for (let k = i - 1; k >= 0; k--) {
+          if (/^ASSEMBLY #\d+/.test(events[k].station)) {
+            fromStation = events[k].station;
+            if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
+            break;
+          }
+        }
+
+        if (fromStation) {
+          stationCompletions[fromStation] = (stationCompletions[fromStation] || 0) + 1;
+        }
+
         completedToday.push({
           id: j.job_id,
-          station: e.station,
-          operator: e.operator,
+          result: e.station,
+          operator: fromOperator,
+          fromStation,
           timestamp: e.timestamp
         });
       }
     }
 
-    // Build per-station breakdown from trace station names
+    // Build per-station breakdown for active jobs
     const byStation = {};
     for (const j of assemblyJobs) {
       const stn = j.station || 'UNKNOWN';
-      if (!byStation[stn]) byStation[stn] = { station: stn, jobs: [], operators: new Set() };
+      if (!byStation[stn]) byStation[stn] = { station: stn, jobs: [], operators: new Set(), completedToday: 0 };
       byStation[stn].jobs.push(j.job_id);
       if (j.operator) byStation[stn].operators.add(j.operator);
     }
-    // Convert sets to arrays for JSON
+    // Add completion counts and ensure all stations with completions appear
+    for (const [stn, count] of Object.entries(stationCompletions)) {
+      if (!byStation[stn]) byStation[stn] = { station: stn, jobs: [], operators: new Set(), completedToday: 0 };
+      byStation[stn].completedToday = count;
+    }
     for (const s of Object.values(byStation)) {
       s.operators = [...s.operators];
       s.jobCount = s.jobs.length;
     }
 
-    // Build per-operator stats from today's completed assembly
+    // Build per-operator stats — from completions with known operators
     const operatorStats = {};
     for (const c of completedToday) {
       if (!c.operator) continue;
@@ -776,7 +801,6 @@ const server = http.createServer(async (req, res) => {
       if (!operatorStats[c.operator].lastJob || c.timestamp > operatorStats[c.operator].lastJob)
         operatorStats[c.operator].lastJob = c.timestamp;
     }
-    // Calculate jobs/hr for each operator
     for (const op of Object.values(operatorStats)) {
       if (op.firstJob && op.lastJob && op.lastJob > op.firstJob) {
         const hours = (op.lastJob - op.firstJob) / 3600000;
@@ -801,7 +825,7 @@ const server = http.createServer(async (req, res) => {
         lensMat: xml?.lensMat || '',
         frameStyle: xml?.frameStyle || '',
         rxNum: xml?.rxNum || '',
-        isRush: false, // TODO: from XML rush flag
+        isRush: false,
         firstSeen: j.firstSeen,
         lastSeen: j.lastSeen,
         minutesAtStation: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : null,
@@ -812,9 +836,10 @@ const server = http.createServer(async (req, res) => {
     return json(res, {
       jobs: enrichedAssembly,
       assemblyWip: assemblyJobs.length,
-      completedToday: completedToday.length,
+      completedToday: passFailToday.pass + passFailToday.fail,
       passFailToday,
       byStation,
+      stationCompletions,
       operatorStats,
       shippedToday: allJobs.filter(j => j.stage === 'SHIPPING' && j.lastSeen >= todayMs).length,
       incomingToday: allJobs.filter(j => j.stage === 'INCOMING' && j.lastSeen >= todayMs).length,

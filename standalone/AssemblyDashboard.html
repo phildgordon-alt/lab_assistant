@@ -439,20 +439,42 @@ function updateSrvDot(state, label){
 // OPERATOR STATS — derived from DVI job data
 // ─────────────────────────────────────────────────────────────────
 function reconcileOperatorStats(){
-  // If we have live assembly data, use server-computed operator stats
-  if(assemblyData && assemblyData.operatorStats){
-    const serverStats = assemblyData.operatorStats;
-    // Reset all operator job counts
-    Object.values(operators).forEach(o => { o.todayJobs=0; o.avgMinutes=0; o.rushJobs=0; o.jobsPerHour=0; });
+  // Reset all operator job counts
+  Object.values(operators).forEach(o => { o.todayJobs=0; o.avgMinutes=0; o.rushJobs=0; o.jobsPerHour=0; });
 
-    Object.entries(serverStats).forEach(([init, stats])=>{
-      const name = resolveOperator(init);
-      if(!operators[name]) operators[name] = {color:pickColor(name),name};
-      operators[name].todayJobs  = stats.jobs || 0;
-      operators[name].jobsPerHour = stats.jobsPerHour || 0;
-      operators[name].rushJobs   = stats.rush || 0;
-      operators[name].initials   = init;
+  if(assemblyData && assemblyData.stationCompletions){
+    const stnComp = assemblyData.stationCompletions;
+    const shiftH = shiftHours() || 1;
+
+    // Attribute station completions to assigned operators.
+    // DVI trace rarely logs operator initials at assembly stations,
+    // so we use the dashboard's station assignments as the source of truth.
+    Object.entries(assignments).forEach(([stnId, a])=>{
+      if(!a?.operatorName) return;
+      // Find the DVI station name for this station ID
+      const stn = STATIONS.find(s => s.id === stnId);
+      if(!stn) return;
+      const dviStation = stn.dvi; // e.g. "ASSEMBLY #7"
+      const completed = stnComp[dviStation] || 0;
+      if(!operators[a.operatorName]) operators[a.operatorName] = {color:a.color||pickColor(a.operatorName),name:a.operatorName};
+      operators[a.operatorName].todayJobs = (operators[a.operatorName].todayJobs || 0) + completed;
+      operators[a.operatorName].jobsPerHour = operators[a.operatorName].todayJobs / shiftH;
     });
+
+    // Also add operator stats from trace (for operators with logged initials like AF)
+    if(assemblyData.operatorStats){
+      Object.entries(assemblyData.operatorStats).forEach(([init, stats])=>{
+        const name = resolveOperator(init);
+        // Only add if this operator isn't already accounted for via station assignment
+        const alreadyCounted = Object.values(assignments).some(a => a?.operatorName === name);
+        if(!alreadyCounted){
+          if(!operators[name]) operators[name] = {color:pickColor(name),name};
+          operators[name].todayJobs  = (operators[name].todayJobs || 0) + (stats.jobs || 0);
+          operators[name].jobsPerHour = stats.jobsPerHour || 0;
+          operators[name].initials   = init;
+        }
+      });
+    }
   } else {
     // Mock mode: derive from job data
     const completedToday = jobs.filter(j=>j.status==='completed' && isToday(j.completedAt));
@@ -474,7 +496,7 @@ function reconcileOperatorStats(){
     });
   }
 
-  // Also ensure operators from assignments exist
+  // Ensure operators from assignments exist even if 0 completions
   Object.values(assignments).forEach(a=>{
     if(a?.operatorName && !operators[a.operatorName]){
       operators[a.operatorName] = {color:a.color||pickColor(a.operatorName),name:a.operatorName,todayJobs:0,avgMinutes:0,rushJobs:0,jobsPerHour:0};
@@ -532,7 +554,11 @@ function render(){
 // ─── LIVE FLOOR ──────────────────────────────────────────────────
 function renderLive(){
   const totalStations  = STATIONS.length;
-  const busyStations   = STATIONS.filter(s=>assignments[s.id]?.status==='busy').length;
+  const busyStations   = STATIONS.filter(s => {
+    const hasAssignment = assignments[s.id]?.status==='busy';
+    const hasLiveJobs = jobs.some(j => j.stationId === s.id || j.dviStation === s.dvi);
+    return hasAssignment || hasLiveJobs;
+  }).length;
   // Use server-computed stats when live, fall back to local calculation
   const totalTodayJobs = assemblyData ? (assemblyData.completedToday || 0) : jobs.filter(j=>j.status==='completed' && isToday(j.completedAt)).length;
   const incomingToday  = assemblyData ? (assemblyData.incomingToday || 0) : jobs.filter(j=>isToday(j.receivedAt)).length;
@@ -579,16 +605,31 @@ function renderLive(){
     </div>
   </div>`;
 
+  // Station completions from server (tracked by which ASSEMBLY #N a job was at before PASS/FAIL)
+  const stnCompletions = assemblyData?.stationCompletions || {};
+
   const stationCards = STATIONS.map(stn=>{
     const a = assignments[stn.id];
     // Find live jobs at this station from trace data
     const liveJobs = jobs.filter(j => j.stationId === stn.id || j.dviStation === stn.dvi);
-    const liveOp = liveJobs.length > 0 ? liveJobs[0].operator || liveJobs[0].operatorInit : null;
     const hasLiveActivity = liveJobs.length > 0;
-    const assignedOp = a?.operatorName || liveOp;
-    const opData = assignedOp ? (operators[assignedOp] || {}) : {};
+    // Completion count for this station today (from server trace scan)
+    const todayCount = stnCompletions[stn.dvi] || 0;
+    // Station is considered active if it has live jobs OR an operator assigned
+    const assignedOp = a?.operatorName || null;
 
     if(!assignedOp && !hasLiveActivity){
+      // Show unassigned but include today's completions if any
+      if(todayCount > 0){
+        return `<div class="station-card idle" onclick="assignStation('${stn.id}')">
+          <div class="stn-top"><span class="stn-id">${stn.id} · BENCH ${stn.bench}</span><span class="stn-status-dot s-idle"></span></div>
+          <div style="color:var(--dimmer);font-family:var(--mono);font-size:11px;text-align:center;padding:4px 0">NO OPERATOR ASSIGNED</div>
+          <div class="stn-stats" style="justify-content:center;">
+            <div class="stn-stat"><div class="stn-stat-val" style="color:var(--purple)">${todayCount}</div><div class="stn-stat-lbl">COMPLETED TODAY</div></div>
+          </div>
+          <button class="assign-btn">+ ASSIGN OPERATOR</button>
+        </div>`;
+      }
       return `<div class="station-card idle" onclick="assignStation('${stn.id}')">
         <div class="stn-top"><span class="stn-id">${stn.id} · BENCH ${stn.bench}</span><span class="stn-status-dot s-idle"></span></div>
         <div style="color:var(--dimmer);font-family:var(--mono);font-size:11px;text-align:center;padding:8px 0">UNASSIGNED</div>
@@ -600,10 +641,11 @@ function renderLive(){
     const statusClass = hasLiveActivity ? 'busy' : (a?.status || 'idle');
     const dotClass = {busy:'s-busy',idle:'s-idle',break:'s-break',hold:'s-hold'}[statusClass]||'s-busy';
     const activeJob = liveJobs[0] || null;
-    const todayCount = opData.todayJobs || 0;
-    const pct = Math.min(100,(todayCount / Math.max(1, (shiftHours()||1) * 3.5)) * 100);
+    const shiftH = shiftHours() || 1;
+    const jph = todayCount > 0 && shiftH > 0 ? (todayCount / shiftH) : 0;
+    const pct = Math.min(100,(todayCount / Math.max(1, shiftH * 3.5)) * 100);
     const barClass = pct>80?'':'b-amber';
-    const opColor = a?.color || opData.color || pickColor(displayName);
+    const opColor = a?.color || pickColor(displayName);
 
     return `<div class="station-card ${statusClass}" onclick="showStationMenu('${stn.id}')">
       <div class="stn-top">
@@ -617,10 +659,10 @@ function renderLive(){
           <div style="font-family:var(--mono);font-size:8px;color:var(--dim);text-transform:uppercase;">${statusClass}${liveJobs.length>1?' · '+liveJobs.length+' JOBS':''}</div>
         </div>
       </div>
-      ${activeJob?`<div class="stn-job">▶ ${esc(activeJob.id)}${activeJob.isRush?' 🚨':''} · ${esc(activeJob.coating||'')}</div>`:'<div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);">— waiting —</div>'}
+      ${activeJob?`<div class="stn-job">▶ ${esc(activeJob.id)}${activeJob.isRush?' 🚨':''} · ${esc(activeJob.coating||'')}</div>`:'<div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);">— waiting for job —</div>'}
       <div class="stn-stats">
         <div class="stn-stat"><div class="stn-stat-val">${todayCount}</div><div class="stn-stat-lbl">TODAY</div></div>
-        <div class="stn-stat"><div class="stn-stat-val">${(opData.jobsPerHour||0).toFixed(1)}</div><div class="stn-stat-lbl">J/HR</div></div>
+        <div class="stn-stat"><div class="stn-stat-val">${jph.toFixed(1)}</div><div class="stn-stat-lbl">J/HR</div></div>
         <div class="stn-stat"><div class="stn-stat-val">${activeJob?.minutesAtStation||'—'}</div><div class="stn-stat-lbl">MIN</div></div>
       </div>
       <div class="stn-bar-wrap"><div class="stn-bar ${barClass}" style="width:${pct}%"></div></div>
