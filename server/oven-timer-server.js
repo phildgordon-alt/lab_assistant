@@ -607,7 +607,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method==='GET' && url.pathname==='/api/dvi/jobs') {
     // Primary job data endpoint — feeds KPIs and department views
     const jobs = dviTrace.getJobsForKPI();
-    // Enrich with DVI XML data (coating, lens, frame) where available
+    const traceJobIds = new Set(jobs.map(j => j.job_id));
+
+    // Enrich trace jobs with DVI XML data (coating, lens, frame)
     const enriched = jobs.map(j => {
       const xml = dviJobIndex.get(j.job_id);
       if (xml) {
@@ -620,6 +622,37 @@ const server = http.createServer(async (req, res) => {
       }
       return j;
     });
+
+    // Add unreleased queue jobs — jobs in XML index with no trace events.
+    // These are jobs sitting in DVI queues (NEL, FRMHOLD, Edits, At Kardex)
+    // that haven't been released to the floor yet. They still count as WIP.
+    let queueJobCount = 0;
+    for (const [jobNum, xml] of dviJobIndex) {
+      if (traceJobIds.has(jobNum)) continue; // already tracked by trace
+      if (xml.status !== 'NEW') continue; // only count active/new jobs
+      queueJobCount++;
+      enriched.push({
+        job_id: jobNum,
+        invoice: jobNum,
+        stage: 'INCOMING',
+        status: 'Queued',
+        station: xml.status || 'NEW',
+        coating: xml.coating,
+        lensStyle: xml.lensStyle,
+        lensMat: xml.lensMat,
+        frameStyle: xml.frameStyle,
+        frameSku: xml.frameSku,
+        rxNum: xml.rxNum,
+        rush: 'N',
+        Rush: 'N',
+        priority: 'NORMAL',
+        firstSeen: null,
+        lastSeen: null,
+        source: 'dvi-xml'
+      });
+    }
+    if (queueJobCount > 0) console.log(`[DVI-Jobs] Added ${queueJobCount} unreleased queue jobs from XML index`);
+
     const shipped = enriched.filter(j => j.status === 'SHIPPED');
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const shippedToday = shipped.filter(j => j.lastSeen && j.lastSeen >= todayStart.getTime());
@@ -631,12 +664,24 @@ const server = http.createServer(async (req, res) => {
         thisWeek: shipped.length
       },
       stats: dviTrace.getStats(),
-      source: 'dvi-trace',
-      jobCount: enriched.length
+      source: 'dvi-trace+xml',
+      jobCount: enriched.length,
+      traceJobs: traceJobIds.size,
+      queueJobs: queueJobCount,
+      dviIndexSize: dviJobIndex.size
     });
   }
   if (req.method==='GET' && url.pathname==='/api/dvi/trace/status') {
-    return json(res, dviTrace.getStatus());
+    const status = dviTrace.getStatus();
+    // Add queue job count from XML index (jobs not in trace)
+    const traceJobIds = new Set(dviTrace.getJobs().map(j => j.job_id));
+    let queueJobs = 0;
+    for (const [jobNum, xml] of dviJobIndex) {
+      if (!traceJobIds.has(jobNum) && xml.status === 'NEW') queueJobs++;
+    }
+    status.queueJobs = queueJobs;
+    status.totalWip = (status.jobCount || 0) + queueJobs - (status.byStage?.SHIPPING || 0) - (status.byStage?.CANCELED || 0);
+    return json(res, status);
   }
   if (req.method==='GET' && url.pathname==='/api/dvi/trace/events') {
     const limit = parseInt(url.searchParams.get('limit') || '100');
