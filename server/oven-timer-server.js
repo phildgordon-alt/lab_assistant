@@ -311,6 +311,50 @@ ${todayRuns.length ? `
 </html>`;
 }
 
+function buildLandingPage() {
+  const now = new Date();
+  const apps = [
+    { name:'Assembly Dashboard', icon:'🔧', desc:'Live assembly floor — stations, operators, leaderboard', path:'/standalone/AssemblyDashboard.html', color:'#8B5CF6' },
+    { name:'Oven Timer', icon:'🔥', desc:'Coating oven rack timers — 6 racks per oven', path:'/standalone/OvenTimer.html', color:'#F59E0B' },
+    { name:'Coating Timer', icon:'⏱', desc:'Per-coater timer — single large display', path:'/standalone/CoatingTimer.html', color:'#06B6D4' },
+  ];
+  const cards = apps.map(a => `
+    <a href="${a.path}" style="text-decoration:none;display:block;background:#111820;border:2px solid #1C2733;border-radius:14px;padding:28px 24px;transition:border-color .15s;cursor:pointer;" onmouseover="this.style.borderColor='${a.color}'" onmouseout="this.style.borderColor='#1C2733'">
+      <div style="font-size:36px;margin-bottom:12px;">${a.icon}</div>
+      <div style="font-family:'Bebas Neue',sans-serif;font-size:22px;color:${a.color};letter-spacing:1px;">${a.name.toUpperCase()}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#8899AA;margin-top:6px;">${a.desc}</div>
+    </a>`).join('');
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Lab Assistant — Pair Eyewear</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:#070A0F;color:#E8EDF2;font-family:'DM Sans',sans-serif;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;}
+</style>
+</head>
+<body>
+  <div style="text-align:center;margin-bottom:40px;">
+    <div style="width:56px;height:56px;background:linear-gradient(135deg,#10B981,#059669);border-radius:12px;display:inline-flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-weight:800;font-size:16px;color:#fff;margin-bottom:12px;">LA</div>
+    <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:2px;">LAB ASSISTANT</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#445566;letter-spacing:3px;">PAIR EYEWEAR · IRVINE · PORT ${PORT}</div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:900px;width:100%;">
+    ${cards}
+  </div>
+  <div style="margin-top:40px;font-family:'JetBrains Mono',monospace;font-size:9px;color:#1C2733;">
+    <a href="/oven" style="color:#445566;text-decoration:none;margin-right:16px;">Oven Status</a>
+    <a href="/api/dvi/trace/status" style="color:#445566;text-decoration:none;margin-right:16px;">Trace API</a>
+    <a href="/api/assembly/jobs" style="color:#445566;text-decoration:none;">Assembly API</a>
+  </div>
+</body>
+</html>`;
+}
+
 // ── Request handler ───────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -324,8 +368,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── Mobile status page ──────────────────────────────────────
-  if (req.method==='GET' && (url.pathname==='/status' || url.pathname==='/')) {
+  if (req.method==='GET' && url.pathname==='/oven') {
     return html(res, buildStatusPage());
+  }
+  if (req.method==='GET' && (url.pathname==='/' || url.pathname==='/status')) {
+    return html(res, buildLandingPage());
   }
 
   // ── POST completed run ──────────────────────────────────────
@@ -1166,6 +1213,26 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     }
   }
 
+  // ── Serve standalone HTML apps ──────────────────────────────
+  if (req.method==='GET' && url.pathname.startsWith('/standalone/')) {
+    const safeName = path.basename(url.pathname);
+    if (!safeName.endsWith('.html')) { cors(res); res.writeHead(404); res.end('Not found'); return; }
+    const filePath = path.join(__dirname, '..', 'standalone', safeName);
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      cors(res);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(content);
+    } catch (e) {
+      cors(res); res.writeHead(404); res.end('Not found');
+    }
+    return;
+  }
+
+  // ── 404 ─────────────────────────────────────────────────────
+  cors(res);
+  res.writeHead(404, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({ error: 'Not found', path: url.pathname }));
 
 });
 
