@@ -2264,20 +2264,28 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
   );
 }
 
+const COATING_CONFIG_DEFAULTS={rackSize:36,ovenCount:6,racksPerOven:9,ovenRunHours:3,coaterCount:2,coaterRate:200,runNowPct:75,runPartialPct:50,waitWindowMin:30};
+
 function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenServerUrl,settings}){
   const [subView,setSubView]=useState("intelligence");
   const [intel,setIntel]=useState(null);
   const [intelError,setIntelError]=useState(null);
   const [batchEdits,setBatchEdits]=useState(()=>{try{return JSON.parse(localStorage.getItem("la_coating_batches")||"{}")}catch{return{}}});
   const [lastFetch,setLastFetch]=useState(null);
+  const [coatingConfig,setCoatingConfig]=useState(()=>{try{return{...COATING_CONFIG_DEFAULTS,...JSON.parse(localStorage.getItem("la_coating_config")||"{}")}}catch{return{...COATING_CONFIG_DEFAULTS}}});
 
-  // Poll coating intelligence endpoint
+  // Persist config
+  useEffect(()=>{localStorage.setItem("la_coating_config",JSON.stringify(coatingConfig));},[coatingConfig]);
+
+  // Poll coating intelligence endpoint with config as query params
   useEffect(()=>{
     const base=ovenServerUrl||"http://localhost:3002";
     let active=true;
     const poll=async()=>{
       try{
-        const r=await fetch(`${base}/api/coating/intelligence`);
+        const params=new URLSearchParams();
+        Object.entries(coatingConfig).forEach(([k,v])=>params.set(k,v));
+        const r=await fetch(`${base}/api/coating/intelligence?${params}`);
         if(!r.ok) throw new Error(`${r.status}`);
         const data=await r.json();
         if(active){setIntel(data);setIntelError(null);setLastFetch(Date.now());}
@@ -2286,7 +2294,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
     poll();
     const iv=setInterval(poll,30000);
     return()=>{active=false;clearInterval(iv);};
-  },[ovenServerUrl]);
+  },[ovenServerUrl,coatingConfig]);
 
   // Save batch edits to localStorage
   useEffect(()=>{localStorage.setItem("la_coating_batches",JSON.stringify(batchEdits));},[batchEdits]);
@@ -2313,7 +2321,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
     <ProductionStageTab domain="coating" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16}}>
-        {[{id:"intelligence",label:"Coating Intelligence",icon:"🧠"},{id:"batches",label:"Batch Builder",icon:"📦"},{id:"ovens",label:"Oven Status",icon:"🌡"},{id:"inspection",label:"QC",icon:"🔬"}].map(sv=>(
+        {[{id:"intelligence",label:"Coating Intelligence",icon:"🧠"},{id:"batches",label:"Batch Builder",icon:"📦"},{id:"ovens",label:"Oven Status",icon:"🌡"},{id:"inspection",label:"QC",icon:"🔬"},{id:"config",label:"Rules",icon:"⚙"}].map(sv=>(
           <button key={sv.id} onClick={()=>setSubView(sv.id)} style={{background:subView===sv.id?T.blueDark:"transparent",border:`1px solid ${subView===sv.id?T.blue:"transparent"}`,borderRadius:8,padding:"10px 20px",cursor:"pointer",color:subView===sv.id?T.blue:T.textMuted,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,fontFamily:sans}}><span>{sv.icon}</span>{sv.label}</button>
         ))}
       </div>
@@ -2321,8 +2329,69 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
       {subView==="batches"&&<BatchBuilderView intel={intel} batchEdits={batchEdits} setBatchEdits={setBatchEdits} serverUrl={ovenServerUrl}/>}
       {subView==="ovens"&&<OvenStatusView intel={intel} serverUrl={ovenServerUrl}/>}
       {subView==="inspection"&&<InspectionView inspections={inspections}/>}
+      {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
     </div>
     </ProductionStageTab>
+  );
+}
+
+// ── Coating Rules Configuration ─────────────────────────────
+function CoatingConfigView({config,setConfig}){
+  const update=(k,v)=>setConfig(prev=>({...prev,[k]:parseInt(v)||0}));
+  const reset=()=>setConfig({...COATING_CONFIG_DEFAULTS});
+
+  const fields=[
+    {section:"Capacity",items:[
+      {key:"rackSize",label:"Lenses per rack",min:1,max:100,desc:"How many lenses fit on one oven rack"},
+      {key:"ovenCount",label:"Number of ovens",min:1,max:12,desc:"Total ovens available"},
+      {key:"racksPerOven",label:"Racks per oven",min:1,max:20,desc:"Rack slots in each oven"},
+      {key:"ovenRunHours",label:"Oven run time (hours)",min:1,max:8,desc:"Standard oven cycle duration"},
+      {key:"coaterCount",label:"Number of dip coaters",min:1,max:6,desc:"Dip coating machines available"},
+      {key:"coaterRate",label:"Lenses per hour per coater",min:50,max:500,step:10,desc:"Throughput rate of each coater"},
+    ]},
+    {section:"AI Recommendation Thresholds",items:[
+      {key:"runNowPct",label:"RUN NOW threshold (%)",min:25,max:100,desc:"Last rack fill % to recommend running immediately"},
+      {key:"runPartialPct",label:"RUN PARTIAL threshold (%)",min:10,max:100,desc:"Last rack fill % to recommend partial run (if no ovens finishing soon)"},
+      {key:"waitWindowMin",label:"Wait window (minutes)",min:5,max:120,desc:"Look-ahead window — if an oven rack finishes within this time, recommend waiting"},
+    ]},
+  ];
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:13,color:T.textMuted,fontFamily:mono,fontWeight:600,textTransform:"uppercase",letterSpacing:1.5}}>Coating Rules & Capacity</div>
+        <button onClick={reset} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${T.border}`,background:"transparent",color:T.textMuted,fontFamily:mono,fontSize:11,cursor:"pointer"}}>Reset Defaults</button>
+      </div>
+      {fields.map(section=>(
+        <Card key={section.section}>
+          <SectionHeader>{section.section}</SectionHeader>
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {section.items.map(f=>(
+              <div key={f.key} style={{display:"flex",alignItems:"center",gap:16}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,color:T.text,fontWeight:600}}>{f.label}</div>
+                  <div style={{fontSize:10,color:T.textDim,marginTop:2}}>{f.desc}</div>
+                </div>
+                <input type="range" min={f.min} max={f.max} step={f.step||1} value={config[f.key]}
+                  onChange={e=>update(f.key,e.target.value)}
+                  style={{width:160,accentColor:T.blue}}/>
+                <div style={{minWidth:50,textAlign:"right",fontFamily:mono,fontSize:14,fontWeight:700,color:T.blue}}>{config[f.key]}</div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      ))}
+      <Card style={{borderLeft:`4px solid ${T.amber}`}}>
+        <SectionHeader>How Recommendations Work</SectionHeader>
+        <div style={{fontSize:12,color:T.textMuted,lineHeight:1.8,fontFamily:mono}}>
+          <div><span style={{color:T.red,fontWeight:700}}>RUSH</span> jobs always trigger <span style={{color:T.green,fontWeight:700}}>RUN NOW</span> regardless of fill level</div>
+          <div>Last rack fill ≥ <span style={{color:T.green,fontWeight:700}}>{config.runNowPct}%</span> → <span style={{color:T.green,fontWeight:700}}>RUN NOW</span></div>
+          <div>Last rack fill ≥ <span style={{color:T.blue,fontWeight:700}}>{config.runPartialPct}%</span> + no oven finishing within {config.waitWindowMin}m → <span style={{color:T.blue,fontWeight:700}}>RUN PARTIAL</span></div>
+          <div>Last rack fill ≥ <span style={{color:T.blue,fontWeight:700}}>{config.runPartialPct}%</span> + oven finishing within {config.waitWindowMin}m → <span style={{color:T.amber,fontWeight:700}}>WAIT</span></div>
+          <div>Last rack fill &lt; <span style={{color:T.amber,fontWeight:700}}>{config.runPartialPct}%</span> → <span style={{color:T.amber,fontWeight:700}}>WAIT</span> (accumulate more jobs)</div>
+        </div>
+      </Card>
+    </div>
   );
 }
 

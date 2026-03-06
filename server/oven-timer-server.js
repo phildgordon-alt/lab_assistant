@@ -559,13 +559,19 @@ const server = http.createServer(async (req, res) => {
   // Combines: DVI trace (coating queue), oven live state, oven runs,
   // coating runs, DVI XML (coating types) into a single coaching payload
   if (req.method==='GET' && url.pathname==='/api/coating/intelligence') {
-    const RACK_CAPACITY = 36;
-    const OVEN_COUNT = 6;
-    const RACKS_PER_OVEN = 9;
+    // All capacity/threshold values can be overridden via query params
+    const p = (k, def) => parseInt(url.searchParams.get(k)) || def;
+    const RACK_CAPACITY = p('rackSize', 36);
+    const OVEN_COUNT = p('ovenCount', 6);
+    const RACKS_PER_OVEN = p('racksPerOven', 9);
     const TOTAL_RACKS = OVEN_COUNT * RACKS_PER_OVEN;
-    const OVEN_RUN_HOURS = 3;
-    const COATER_COUNT = 2;
-    const COATER_RATE = 200; // lenses/hour per coater
+    const OVEN_RUN_HOURS = p('ovenRunHours', 3);
+    const COATER_COUNT = p('coaterCount', 2);
+    const COATER_RATE = p('coaterRate', 200);
+    // Thresholds for recommendations
+    const RUN_NOW_PCT = p('runNowPct', 75);
+    const RUN_PARTIAL_PCT = p('runPartialPct', 50);
+    const WAIT_WINDOW_MIN = p('waitWindowMin', 30); // minutes to look ahead for finishing racks
 
     const today = new Date(); today.setHours(0,0,0,0);
     const todayMs = today.getTime();
@@ -658,27 +664,27 @@ const server = http.createServer(async (req, res) => {
 
       // Check if oven racks finishing soon for this coating type
       const sameTypeFinishing = runningRacks
-        .filter(r => r.coating === group.type && r.remainingMin <= 30)
+        .filter(r => r.coating === group.type && r.remainingMin <= WAIT_WINDOW_MIN)
         .sort((a,b) => a.remainingSec - b.remainingSec);
 
       let action, reason;
       if (hasRush) {
         action = 'RUN NOW';
         reason = `${group.rushCount} rush job(s) in queue — prioritize immediately`;
-      } else if (lastRackPct >= 75) {
+      } else if (lastRackPct >= RUN_NOW_PCT) {
         action = 'RUN NOW';
-        reason = `Last rack ${lastRackPct}% full (${lastRackFill}/${RACK_CAPACITY} lenses). Good fill rate.`;
-      } else if (lastRackPct >= 50) {
+        reason = `Last rack ${lastRackPct}% full (${lastRackFill}/${RACK_CAPACITY} lenses). Above ${RUN_NOW_PCT}% threshold.`;
+      } else if (lastRackPct >= RUN_PARTIAL_PCT) {
         if (sameTypeFinishing.length > 0) {
           action = 'WAIT';
           reason = `${lastRackPct}% fill. ${sameTypeFinishing[0].coating} rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait for capacity.`;
         } else {
           action = 'RUN PARTIAL';
-          reason = `${lastRackPct}% fill. No ovens finishing soon. Consider running partial.`;
+          reason = `${lastRackPct}% fill (above ${RUN_PARTIAL_PCT}% partial threshold). No ovens finishing within ${WAIT_WINDOW_MIN}m.`;
         }
       } else {
-        // Under 50%
-        if (sameTypeFinishing.length > 0 && sameTypeFinishing[0].remainingMin <= 20) {
+        // Under partial threshold
+        if (sameTypeFinishing.length > 0 && sameTypeFinishing[0].remainingMin <= WAIT_WINDOW_MIN) {
           action = 'WAIT';
           reason = `Only ${lastRackPct}% fill. Rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait.`;
         } else {
@@ -724,6 +730,7 @@ const server = http.createServer(async (req, res) => {
       timestamp: now,
       // Capacity constants
       capacity: { rackSize: RACK_CAPACITY, ovenCount: OVEN_COUNT, racksPerOven: RACKS_PER_OVEN, totalRacks: TOTAL_RACKS, ovenRunHours: OVEN_RUN_HOURS, coaterCount: COATER_COUNT, coaterRate: COATER_RATE },
+      thresholds: { runNowPct: RUN_NOW_PCT, runPartialPct: RUN_PARTIAL_PCT, waitWindowMin: WAIT_WINDOW_MIN },
       // Live queue
       queue: { total: coatingQueue.length, byType: Object.values(queueByType).map(g => ({ type: g.type, count: g.jobs.length, rushCount: g.rushCount, jobs: g.jobs })), },
       // Oven status
