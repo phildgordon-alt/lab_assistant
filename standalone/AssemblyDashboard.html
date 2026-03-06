@@ -746,7 +746,15 @@ function renderLeaderboard(){
     </div>
   </div>` : '';
 
+  const totalToday = assemblyData ? (assemblyData.completedToday || 0) : jobs.filter(j=>j.status==='completed' && isToday(j.completedAt)).length;
+  const avgRate = shiftH > 0 ? (totalToday / shiftH).toFixed(1) : '—';
+
   return `
+  <div style="text-align:center;padding:18px 0 10px;">
+    <div style="font-family:var(--mono);font-size:11px;color:var(--dimmer);letter-spacing:2px;">TOTAL ASSEMBLED TODAY</div>
+    <div style="font-family:var(--disp);font-size:64px;color:var(--green);line-height:1;">${totalToday}</div>
+    <div style="font-family:var(--mono);font-size:13px;color:var(--dim);">${avgRate} jobs/hr avg</div>
+  </div>
   ${bannerHtml}
   <div class="card">
     <div class="card-title">
