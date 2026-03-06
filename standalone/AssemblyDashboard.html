@@ -783,6 +783,8 @@ function renderLeaderboard(){
         </div>
       </div>` : '';
 
+    const lbMerged = Object.entries(operatorMap).filter(([,n])=>n===op.name).map(([i])=>i);
+    const lbMergeBadge = lbMerged.length ? `<span style="font-size:${Math.round(c.nameSize*0.6)}px;background:var(--purple);color:#fff;padding:1px 5px;border-radius:3px;margin-left:4px;">+${lbMerged.join(',')}</span>` : '';
     const stationHtml = c.showStation ? `<div class="lb-station">${stationLabel} · ${op.rushJobs||0} rush completed</div>` : '';
 
     return `
@@ -790,7 +792,7 @@ function renderLeaderboard(){
       <div class="lb-medal" style="font-size:${Math.round((c.awardSize||44)*0.55)}px">${medals[i]||''}</div>
       <div class="lb-avatar" style="background:${op.color||'#8B5CF6'};width:${c.avatarSize}px;height:${c.avatarSize}px;font-size:${Math.round(c.avatarSize*0.35)}px;">${initials(op.name)}</div>
       <div class="lb-info">
-        <div class="lb-name" style="font-size:${c.nameSize}px">${esc(op.name)} ${aboveAvg?`<span style="font-size:${Math.round(c.nameSize*0.7)}px;color:var(--green)">↑</span>`:''}</div>
+        <div class="lb-name" style="font-size:${c.nameSize}px">${esc(op.name)}${lbMergeBadge} ${aboveAvg?`<span style="font-size:${Math.round(c.nameSize*0.7)}px;color:var(--green)">↑</span>`:''}</div>
         ${stationHtml}
       </div>
       ${barsHtml}
@@ -888,12 +890,14 @@ function renderOperators(){
     const stationId = stationEntries.length ? stationEntries.map(([id])=>id).join(' + ') : '—';
     const status = stationEntries[0]?.[1]?.status || 'idle';
     const pct = Math.round(((op.todayJobs||0)/maxJobs)*100);
+    const mergedFrom = Object.entries(operatorMap).filter(([,n])=>n===op.name).map(([i])=>i);
+    const mergedBadge = mergedFrom.length ? `<span style="font-family:var(--mono);font-size:9px;background:var(--purple);color:#fff;padding:2px 6px;border-radius:4px;margin-left:6px;">MERGED: ${mergedFrom.join(', ')}</span>` : '';
     return `
     <div class="card" style="cursor:pointer;${selectedOp===op.name?'border-color:var(--purple);':''}" onclick="toggleOp('${esc(op.name)}')">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
         <div class="op-big-avatar" style="background:${op.color||'#8B5CF6'}">${initials(op.name)}</div>
         <div style="flex:1">
-          <div style="font-family:var(--sans);font-size:16px;font-weight:700;">${esc(op.name)}</div>
+          <div style="font-family:var(--sans);font-size:16px;font-weight:700;">${esc(op.name)}${mergedBadge}</div>
           <div style="font-family:var(--mono);font-size:9px;color:var(--dim);">${stationId} · ${status.toUpperCase()}</div>
         </div>
         <button onclick="event.stopPropagation();editOperator('${esc(op.name)}')" style="background:transparent;border:1px solid var(--border);border-radius:6px;padding:5px 10px;cursor:pointer;font-size:12px;color:var(--dim);">✏</button>
@@ -1045,6 +1049,15 @@ function editOperator(name){
   if(!op) return;
   const others = Object.values(operators).filter(o=>o.name && o.name!==name).map(o=>o.name);
   const mergeOpts = others.map(n=>`<option value="${esc(n)}">${esc(n)} (${operators[n]?.todayJobs||0} jobs)</option>`).join('');
+  const mergedFrom = Object.entries(operatorMap).filter(([,n])=>n===name).map(([i])=>i);
+  const unmergeHtml = mergedFrom.length ? `
+    <div class="m-field" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
+      <label style="color:var(--purple);">MERGED FROM: ${mergedFrom.join(', ')}</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+        ${mergedFrom.map(i=>`<button onclick="event.stopPropagation();unmergeOperator('${esc(name)}','${esc(i)}')" style="padding:6px 12px;border-radius:6px;border:1px solid var(--amber);background:transparent;color:var(--amber);font-family:var(--mono);font-size:11px;cursor:pointer;">Unmerge ${i}</button>`).join('')}
+      </div>
+    </div>` : '';
+
   document.getElementById('mTitle').textContent = `EDIT — ${name}`;
   document.getElementById('mBody').innerHTML = `
     <div class="m-field">
@@ -1053,6 +1066,7 @@ function editOperator(name){
         ${AVATAR_COLORS.map(c=>`<div onclick="selectColor('${c}')" style="width:30px;height:30px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c===op.color?'#fff':'transparent'};transition:all .15s;" id="coloropt-${c.slice(1)}" class="coloropt"></div>`).join('')}
       </div>
     </div>
+    ${unmergeHtml}
     ${others.length ? `
     <div class="m-field" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
       <label>MERGE WITH ANOTHER OPERATOR</label>
@@ -1107,6 +1121,12 @@ function saveOpEdit(name){
   localStorage.setItem('asy_operators',JSON.stringify(operators));
   localStorage.setItem('asy_assignments',JSON.stringify(assignments));
   closeModal(); render(); toast('Updated','ok');
+}
+
+function unmergeOperator(parentName, initials){
+  delete operatorMap[initials.toUpperCase()];
+  localStorage.setItem('asy_operator_map', JSON.stringify(operatorMap));
+  closeModal(); render(); toast(`${initials} unmerged from ${parentName}`,'ok');
 }
 
 function removeOperator(name){
