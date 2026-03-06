@@ -302,6 +302,17 @@ let lastSync = null;
 let activeTab = 'live';
 let selectedOp = null;
 
+// ─── LEADERBOARD DISPLAY CONFIG ─────────────────────────────────
+const LB_PRESETS = {
+  desktop: { totalSize:64, winnerSize:32, awardSize:44, rowPad:10, nameSize:15, scoreSize:20, barH:5, avatarSize:38, showBars:true, showStation:true, showAvgRate:true, label:'Desktop' },
+  tablet:  { totalSize:80, winnerSize:38, awardSize:52, rowPad:14, nameSize:18, scoreSize:24, barH:7, avatarSize:44, showBars:true, showStation:true, showAvgRate:true, label:'Tablet' },
+  tv:      { totalSize:120, winnerSize:48, awardSize:72, rowPad:20, nameSize:28, scoreSize:36, barH:10, avatarSize:56, showBars:true, showStation:false, showAvgRate:true, label:'TV / Large Display' },
+  minimal: { totalSize:96, winnerSize:40, awardSize:56, rowPad:16, nameSize:22, scoreSize:28, barH:0, avatarSize:48, showBars:false, showStation:false, showAvgRate:false, label:'Minimal' }
+};
+let lbConfig = JSON.parse(localStorage.getItem('asy_lb_config') || 'null') || {...LB_PRESETS.desktop, preset:'desktop'};
+if(!lbConfig.awardSize) lbConfig.awardSize = 44;
+function saveLbConfig(){ localStorage.setItem('asy_lb_config', JSON.stringify(lbConfig)); }
+
 // ─────────────────────────────────────────────────────────────────
 // CLOCK + DATE
 // ─────────────────────────────────────────────────────────────────
@@ -684,7 +695,57 @@ function renderLive(){
 }
 
 // ─── LEADERBOARD ─────────────────────────────────────────────────
+let lbSettingsOpen = false;
+function toggleLbSettings(){ lbSettingsOpen = !lbSettingsOpen; render(); }
+function applyLbPreset(key){ lbConfig = {...LB_PRESETS[key], preset:key}; saveLbConfig(); render(); }
+function updateLbVal(key, val){
+  lbConfig[key] = typeof LB_PRESETS.desktop[key]==='boolean' ? val : parseInt(val);
+  lbConfig.preset = 'custom';
+  saveLbConfig(); render();
+}
+
+function renderLbSettings(){
+  const c = lbConfig;
+  const presetBtns = Object.entries(LB_PRESETS).map(([k,v])=>
+    `<button onclick="applyLbPreset('${k}')" style="padding:8px 14px;border-radius:8px;border:1px solid ${c.preset===k?'var(--blue)':'var(--border)'};background:${c.preset===k?'var(--blue)':'var(--surface)'};color:var(--text);font-family:var(--mono);font-size:12px;cursor:pointer;">${v.label}</button>`
+  ).join('');
+
+  const slider = (label, key, min, max, step)=> `
+    <div style="display:flex;align-items:center;gap:10px;padding:4px 0;">
+      <span style="font-family:var(--mono);font-size:11px;color:var(--dim);width:120px;">${label}</span>
+      <input type="range" min="${min}" max="${max}" step="${step||1}" value="${c[key]}"
+        onchange="updateLbVal('${key}',this.value)" style="flex:1;accent-color:var(--blue);">
+      <span style="font-family:var(--mono);font-size:12px;color:var(--text);width:36px;text-align:right;">${c[key]}</span>
+    </div>`;
+
+  const toggle = (label, key)=> `
+    <div style="display:flex;align-items:center;gap:10px;padding:4px 0;">
+      <span style="font-family:var(--mono);font-size:11px;color:var(--dim);width:120px;">${label}</span>
+      <button onclick="updateLbVal('${key}',${!c[key]})" style="padding:4px 16px;border-radius:6px;border:1px solid var(--border);background:${c[key]?'var(--green)':'var(--surface)'};color:${c[key]?'#000':'var(--dim)'};font-family:var(--mono);font-size:11px;cursor:pointer;">${c[key]?'ON':'OFF'}</button>
+    </div>`;
+
+  return `
+  <div class="card" style="margin-bottom:12px;">
+    <div class="card-title">DISPLAY SETTINGS</div>
+    <div style="padding:8px 0 12px;display:flex;gap:8px;flex-wrap:wrap;">${presetBtns}</div>
+    <div style="border-top:1px solid var(--border);padding-top:10px;">
+      ${slider('Total Font', 'totalSize', 32, 160, 4)}
+      ${slider('Winner Font', 'winnerSize', 20, 72, 2)}
+      ${slider('Award Size', 'awardSize', 24, 120, 4)}
+      ${slider('Name Font', 'nameSize', 12, 40, 1)}
+      ${slider('Score Font', 'scoreSize', 14, 52, 2)}
+      ${slider('Row Padding', 'rowPad', 6, 32, 2)}
+      ${slider('Avatar Size', 'avatarSize', 24, 72, 4)}
+      ${slider('Bar Height', 'barH', 0, 16, 1)}
+      ${toggle('Show Bars', 'showBars')}
+      ${toggle('Show Station', 'showStation')}
+      ${toggle('Show Avg Rate', 'showAvgRate')}
+    </div>
+  </div>`;
+}
+
 function renderLeaderboard(){
+  const c = lbConfig;
   const maxJobs = Math.max(1, ...Object.values(operators).map(o=>o.todayJobs||0));
   const maxRate = Math.max(1, ...Object.values(operators).map(o=>o.jobsPerHour||0));
 
@@ -703,30 +764,36 @@ function renderLeaderboard(){
     const ratePct = Math.round(((op.jobsPerHour||0)/maxRate)*100);
     const rankNum = i+1;
     const isTop3  = rankNum<=3;
-    const stationEntry = Object.entries(assignments).find(([,a])=>a?.operatorName===op.name);
-    const stationLabel = stationEntry ? stationEntry[0] : '—';
+    const stationEntries = Object.entries(assignments).filter(([,a])=>a?.operatorName===op.name);
+    const stationLabel = stationEntries.length ? stationEntries.map(([id])=>id).join(' + ') : '—';
     const aboveAvg = (op.todayJobs||0) > shiftAvgJobs;
 
-    return `
-    <div class="lb-row ${rankNum<=3?'rank-'+rankNum:''}" style="cursor:pointer" onclick="focusOp('${esc(op.name)}')">
-      <div class="lb-medal">${medals[i]||''}</div>
-      <div class="lb-avatar" style="background:${op.color||'#8B5CF6'}">${initials(op.name)}</div>
-      <div class="lb-info">
-        <div class="lb-name">${esc(op.name)} ${aboveAvg?'<span style="font-size:11px;color:var(--green)">↑</span>':''}</div>
-        <div class="lb-station">${stationLabel} · ${op.rushJobs||0} rush completed</div>
-      </div>
+    const rateVal = (op.jobsPerHour||0).toFixed(1);
+    const barsHtml = c.showBars ? `
       <div class="lb-bars">
         <div class="lb-bar-row">
           <div class="lb-bar-lbl">JOBS</div>
-          <div class="lb-bar-wrap"><div class="lb-bar" style="width:${jobPct}%;background:${isTop3?rankColors[i]:'var(--blue)'}"></div></div>
+          <div class="lb-bar-wrap" style="height:${c.barH}px"><div class="lb-bar" style="height:100%;width:${jobPct}%;background:${isTop3?rankColors[i]:'var(--blue)'}"></div></div>
         </div>
         <div class="lb-bar-row">
-          <div class="lb-bar-lbl">RATE</div>
-          <div class="lb-bar-wrap"><div class="lb-bar" style="width:${ratePct}%;background:var(--purple)"></div></div>
+          <div class="lb-bar-lbl">${rateVal}/HR</div>
+          <div class="lb-bar-wrap" style="height:${c.barH}px"><div class="lb-bar" style="height:100%;width:${ratePct}%;background:var(--purple)"></div></div>
         </div>
+      </div>` : '';
+
+    const stationHtml = c.showStation ? `<div class="lb-station">${stationLabel} · ${op.rushJobs||0} rush completed</div>` : '';
+
+    return `
+    <div class="lb-row ${rankNum<=3?'rank-'+rankNum:''}" style="cursor:pointer;padding:${c.rowPad}px 14px;" onclick="focusOp('${esc(op.name)}')">
+      <div class="lb-medal" style="font-size:${Math.round((c.awardSize||44)*0.55)}px">${medals[i]||''}</div>
+      <div class="lb-avatar" style="background:${op.color||'#8B5CF6'};width:${c.avatarSize}px;height:${c.avatarSize}px;font-size:${Math.round(c.avatarSize*0.35)}px;">${initials(op.name)}</div>
+      <div class="lb-info">
+        <div class="lb-name" style="font-size:${c.nameSize}px">${esc(op.name)} ${aboveAvg?`<span style="font-size:${Math.round(c.nameSize*0.7)}px;color:var(--green)">↑</span>`:''}</div>
+        ${stationHtml}
       </div>
+      ${barsHtml}
       <div>
-        <div class="lb-score" style="color:${isTop3?rankColors[i]:'var(--green)'}">${op.todayJobs||0}</div>
+        <div class="lb-score" style="font-size:${c.scoreSize}px;color:${isTop3?rankColors[i]:'var(--green)'}">${op.todayJobs||0}</div>
         <div class="lb-score-lbl">TODAY</div>
       </div>
     </div>`;
@@ -735,14 +802,14 @@ function renderLeaderboard(){
   const winner = ranked[0];
   const bannerHtml = winner && winner.todayJobs>0 ? `
   <div style="background:linear-gradient(135deg,#2A2200,#1A1000);border:2px solid var(--gold);border-radius:14px;padding:16px;display:flex;align-items:center;gap:16px;">
-    <div style="font-size:44px">🏆</div>
+    <div style="font-size:${c.awardSize||44}px">🏆</div>
     <div>
-      <div style="font-family:var(--disp);font-size:32px;color:var(--gold);letter-spacing:1px;">${esc(winner.name)}</div>
-      <div style="font-family:var(--mono);font-size:11px;color:var(--amber);">TODAY'S LEADER · ${winner.todayJobs} JOBS · ${(winner.jobsPerHour||0).toFixed(1)}/HR</div>
+      <div style="font-family:var(--disp);font-size:${c.winnerSize}px;color:var(--gold);letter-spacing:1px;">${esc(winner.name)}</div>
+      <div style="font-family:var(--mono);font-size:${Math.round(c.winnerSize*0.34)}px;color:var(--amber);">TODAY'S LEADER · ${winner.todayJobs} JOBS · ${(winner.jobsPerHour||0).toFixed(1)}/HR</div>
     </div>
     <div style="margin-left:auto;text-align:right;">
-      <div style="font-family:var(--mono);font-size:40px;font-weight:800;color:var(--gold);">${winner.todayJobs}</div>
-      <div style="font-family:var(--mono);font-size:9px;color:var(--amber);">JOBS COMPLETED</div>
+      <div style="font-family:var(--mono);font-size:${Math.round(c.winnerSize*1.25)}px;font-weight:800;color:var(--gold);">${winner.todayJobs}</div>
+      <div style="font-family:var(--mono);font-size:${Math.round(c.winnerSize*0.28)}px;color:var(--amber);">JOBS COMPLETED</div>
     </div>
   </div>` : '';
 
@@ -751,11 +818,15 @@ function renderLeaderboard(){
 
   return `
   <div style="text-align:center;padding:18px 0 10px;">
-    <div style="font-family:var(--mono);font-size:11px;color:var(--dimmer);letter-spacing:2px;">TOTAL ASSEMBLED TODAY</div>
-    <div style="font-family:var(--disp);font-size:64px;color:var(--green);line-height:1;">${totalToday}</div>
-    <div style="font-family:var(--mono);font-size:13px;color:var(--dim);">${avgRate} jobs/hr avg</div>
+    <div style="font-family:var(--mono);font-size:${Math.round(c.totalSize*0.17)}px;color:var(--dimmer);letter-spacing:2px;">TOTAL ASSEMBLED TODAY</div>
+    <div style="font-family:var(--disp);font-size:${c.totalSize}px;color:var(--green);line-height:1;">${totalToday}</div>
+    ${c.showAvgRate ? `<div style="font-family:var(--mono);font-size:${Math.round(c.totalSize*0.2)}px;color:var(--dim);">${avgRate} jobs/hr avg</div>` : ''}
   </div>
   ${bannerHtml}
+  <div style="text-align:right;padding:4px 0;">
+    <button onclick="toggleLbSettings()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--dim);font-family:var(--mono);font-size:11px;cursor:pointer;">⚙ Display</button>
+  </div>
+  ${lbSettingsOpen ? renderLbSettings() : ''}
   <div class="card">
     <div class="card-title">
       TODAY'S LEADERBOARD
@@ -811,9 +882,9 @@ function renderOperators(){
   const maxJobs = Math.max(1,...opList.map(o=>o.todayJobs||0));
 
   const cards = opList.map(op=>{
-    const stationEntry = Object.entries(assignments).find(([,a])=>a?.operatorName===op.name);
-    const stationId = stationEntry?.[0] || '—';
-    const status = stationEntry?.[1]?.status || 'idle';
+    const stationEntries = Object.entries(assignments).filter(([,a])=>a?.operatorName===op.name);
+    const stationId = stationEntries.length ? stationEntries.map(([id])=>id).join(' + ') : '—';
+    const status = stationEntries[0]?.[1]?.status || 'idle';
     const pct = Math.round(((op.todayJobs||0)/maxJobs)*100);
     return `
     <div class="card" style="cursor:pointer;${selectedOp===op.name?'border-color:var(--purple);':''}" onclick="toggleOp('${esc(op.name)}')">
@@ -854,7 +925,11 @@ function renderOperators(){
 function assignStation(stnId){
   const stn = STATIONS.find(s=>s.id===stnId);
   const opNames = Object.values(operators).filter(o=>o.name).map(o=>o.name);
-  const opts = opNames.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  const opts = opNames.map(n=>{
+    const existingStn = Object.entries(assignments).filter(([,a])=>a?.operatorName===n).map(([id])=>id);
+    const hint = existingStn.length ? ` (${existingStn.join('+')})` : '';
+    return `<option value="${esc(n)}">${esc(n)}${hint}</option>`;
+  }).join('');
 
   document.getElementById('mTitle').textContent = `ASSIGN — ${stnId}`;
   document.getElementById('mBody').innerHTML = `
