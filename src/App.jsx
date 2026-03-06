@@ -2400,6 +2400,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
   const [showJobs,setShowJobs]=useState(false);
   const [activeRuns,setActiveRuns]=useState({});
   const [rackPopup,setRackPopup]=useState(null); // {ovenId, rackIndex, jobs, state, coating, remainingMin}
+  const [expandedBatch,setExpandedBatch]=useState(null); // "AR::PLY" key to show job list
   const [aiAdvice,setAiAdvice]=useState(null);
   const [aiLoading,setAiLoading]=useState(false);
 
@@ -2491,6 +2492,20 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
   };
 
   const totalAssigned=Object.values(batches).reduce((s,arr)=>s+arr.length,0);
+
+  // Fill a pre-work batch group into its suggested coater
+  const fillBatchGroup=(bs)=>{
+    const coaterDef=coaters.find(ct=>ct.name===bs.suggestedCoater);
+    if(!coaterDef) return;
+    const coaterId=coaterDef.id;
+    const existing=batches[coaterId]||[];
+    const slotsLeft=coaterDef.orderCapacity-existing.length;
+    if(slotsLeft<=0) return;
+    const groupJobs=(bs.jobs||[]).filter(j=>!assignedIds.has(j.jobId));
+    const toAdd=groupJobs.slice(0,slotsLeft);
+    if(toAdd.length===0) return;
+    setBatchEdits(prev=>({...prev,_batch:{...(prev._batch||{}),[coaterId]:[...existing,...toAdd]}}));
+  };
 
   // Start coating run
   const startCoatingRun=(ct,jobs)=>{
@@ -2625,50 +2640,85 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
         )}
       </Card>
 
-      {/* ── PRE-WORK: Batch Analysis by Coating Type (always visible) ── */}
+      {/* ── PRE-WORK: Batch groups by Coating + Material (hard constraint) ── */}
       <Card style={{borderLeft:`4px solid ${T.blue}`}}>
-        <SectionHeader right={`${(rec.batchSuggestions||[]).length} coating type(s) · pre-work analysis`}>Batch Pre-Work</SectionHeader>
+        <SectionHeader right={`${(rec.batchSuggestions||[]).length} batch group(s) · material is a hard constraint`}>Batch Pre-Work</SectionHeader>
         {(rec.batchSuggestions||[]).length>0?(
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(260px,1fr))",gap:12,marginTop:10}}>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginTop:10}}>
             {(rec.batchSuggestions||[]).map(bs=>{
+              const batchKey=`${bs.coatingType}::${bs.material}`;
+              const isExpanded=expandedBatch===batchKey;
               const fillColor=bs.ready?T.green:bs.fillPct>=50?T.amber:T.border;
+              const jobs=bs.jobs||[];
               return(
-              <div key={bs.coatingType} style={{background:T.bg,borderRadius:10,padding:14,border:`1px solid ${fillColor}44`,position:"relative",overflow:"hidden"}}>
-                {/* Fill bar background */}
-                <div style={{position:"absolute",left:0,bottom:0,height:3,width:`${Math.min(100,bs.fillPct||0)}%`,background:fillColor,borderRadius:"0 0 10px 10px",opacity:.6}}/>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                  <span style={{fontSize:16,fontWeight:800,color:T.amber,fontFamily:mono}}>{bs.coatingType}</span>
-                  <div style={{display:"flex",gap:4}}>
-                    {bs.ready&&<Pill color={T.green} style={{fontSize:9,padding:"2px 8px"}}>READY</Pill>}
-                    {bs.rushCount>0&&<Pill color={T.red} style={{fontSize:9,padding:"2px 8px"}}>{bs.rushCount} RUSH</Pill>}
+              <div key={batchKey} style={{background:T.bg,borderRadius:10,border:`1px solid ${fillColor}44`,overflow:"hidden"}}>
+                {/* Header row — click to expand/collapse job list */}
+                <div onClick={()=>setExpandedBatch(isExpanded?null:batchKey)}
+                  style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",cursor:"pointer",position:"relative"}}>
+                  {/* Fill bar */}
+                  <div style={{position:"absolute",left:0,bottom:0,height:3,width:`${Math.min(100,bs.fillPct||0)}%`,background:fillColor,opacity:.5}}/>
+                  {/* Coating + Material */}
+                  <div style={{minWidth:120}}>
+                    <div style={{fontSize:15,fontWeight:800,color:T.amber,fontFamily:mono}}>{bs.coatingType}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:T.blue,fontFamily:mono}}>{bs.material==='?'?'Unknown':bs.material}</div>
                   </div>
-                </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px 14px",fontSize:12,fontFamily:mono}}>
-                  <span style={{color:T.textDim}}>Jobs</span><span style={{color:T.text,fontWeight:700}}>{bs.jobCount} ({bs.lensCount} lenses)</span>
-                  <span style={{color:T.textDim}}>Best coater</span><span style={{color:T.text,fontWeight:600}}>{bs.suggestedCoater}</span>
-                  <span style={{color:T.textDim}}>Fill %</span>
-                  <span style={{fontWeight:800,fontSize:14,color:bs.fillPct>=75?T.green:bs.fillPct>=50?T.amber:T.textDim}}>{bs.fillPct}%</span>
-                  <span style={{color:T.textDim}}>Avg wait</span>
-                  <span style={{color:bs.avgWaitMin>60?T.red:bs.avgWaitMin>30?T.amber:T.text}}>{bs.avgWaitMin}m</span>
-                  {bs.maxWaitMin>0&&<><span style={{color:T.textDim}}>Max wait</span><span style={{color:bs.maxWaitMin>90?T.red:T.textDim}}>{bs.maxWaitMin}m</span></>}
-                  {bs.etaToFullMin!=null&&<><span style={{color:T.textDim}}>Full in</span><span style={{color:T.blue,fontWeight:700}}>~{bs.etaToFullMin}m</span></>}
-                </div>
-                {Object.keys(bs.materialBreakdown||{}).length>0&&(
-                  <div style={{marginTop:8,paddingTop:6,borderTop:`1px solid ${T.border}`,display:"flex",gap:8,flexWrap:"wrap"}}>
-                    {Object.entries(bs.materialBreakdown).map(([m,c])=>(
-                      <span key={m} style={{fontSize:10,fontFamily:mono,padding:"2px 8px",borderRadius:4,background:`${T.blue}15`,color:T.text}}>
-                        {m} <span style={{color:T.blue,fontWeight:700}}>{String(c)}</span>
-                      </span>
-                    ))}
+                  {/* Job count */}
+                  <div style={{textAlign:"center",minWidth:70}}>
+                    <div style={{fontSize:22,fontWeight:800,color:T.text,fontFamily:mono}}>{bs.jobCount}</div>
+                    <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{bs.lensCount} lenses</div>
                   </div>
-                )}
-                {Object.keys(bs.lensTypeBreakdown||{}).length>0&&(
-                  <div style={{display:"flex",gap:6,marginTop:4}}>
-                    {Object.entries(bs.lensTypeBreakdown).map(([lt,c])=>(
-                      <span key={lt} style={{fontSize:9,fontFamily:mono,color:T.textDim}}>
+                  {/* Fill % */}
+                  <div style={{textAlign:"center",minWidth:60}}>
+                    <div style={{fontSize:18,fontWeight:800,color:bs.fillPct>=75?T.green:bs.fillPct>=50?T.amber:T.textDim,fontFamily:mono}}>{bs.fillPct}%</div>
+                    <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>fill</div>
+                  </div>
+                  {/* Coater suggestion */}
+                  <div style={{fontSize:11,color:T.text,fontFamily:mono,minWidth:60}}>{bs.suggestedCoater}</div>
+                  {/* Wait times */}
+                  <div style={{fontSize:11,fontFamily:mono,minWidth:80}}>
+                    <span style={{color:bs.avgWaitMin>60?T.red:bs.avgWaitMin>30?T.amber:T.textDim}}>avg {bs.avgWaitMin}m</span>
+                    {bs.maxWaitMin>0&&<div style={{fontSize:9,color:bs.maxWaitMin>90?T.red:T.textDim}}>max {bs.maxWaitMin}m</div>}
+                  </div>
+                  {/* Lens types */}
+                  <div style={{display:"flex",gap:6,flex:1}}>
+                    {Object.entries(bs.lensTypeBreakdown||{}).map(([lt,c])=>(
+                      <span key={lt} style={{fontSize:10,fontFamily:mono,color:T.textDim,padding:"2px 6px",borderRadius:4,background:`${T.border}44`}}>
                         {lt==='P'?'Prog':lt==='S'?'SV':lt==='B'?'BF':lt}: {String(c)}
                       </span>
                     ))}
+                  </div>
+                  {/* Status pills + Fill button */}
+                  <div style={{display:"flex",gap:4,alignItems:"center"}} onClick={e=>e.stopPropagation()}>
+                    {bs.ready&&<Pill color={T.green} style={{fontSize:9,padding:"2px 8px"}}>READY</Pill>}
+                    {bs.rushCount>0&&<Pill color={T.red} style={{fontSize:9,padding:"2px 8px"}}>{bs.rushCount} RUSH</Pill>}
+                    <button onClick={()=>fillBatchGroup(bs)}
+                      style={{padding:"4px 12px",borderRadius:6,border:`1px solid ${T.green}`,background:`${T.green}18`,color:T.green,fontFamily:mono,fontSize:10,cursor:"pointer",fontWeight:700,whiteSpace:"nowrap"}}>
+                      Fill → {bs.suggestedCoater}
+                    </button>
+                    <span style={{fontSize:12,color:T.textDim,fontFamily:mono,cursor:"pointer"}} onClick={(e)=>{e.stopPropagation();setExpandedBatch(isExpanded?null:batchKey);}}>{isExpanded?"▲":"▼"}</span>
+                  </div>
+                </div>
+                {/* Expanded job list */}
+                {isExpanded&&jobs.length>0&&(
+                  <div style={{borderTop:`1px solid ${T.border}`,padding:"8px 16px",maxHeight:400,overflowY:"auto"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"80px 50px 50px 50px 1fr 60px",gap:"2px 10px",fontSize:11,fontFamily:mono}}>
+                      <div style={{color:T.textDim,fontWeight:700,borderBottom:`1px solid ${T.border}`,padding:"4px 0"}}>JOB</div>
+                      <div style={{color:T.textDim,fontWeight:700,borderBottom:`1px solid ${T.border}`,padding:"4px 0"}}>TYPE</div>
+                      <div style={{color:T.textDim,fontWeight:700,borderBottom:`1px solid ${T.border}`,padding:"4px 0"}}>EYE</div>
+                      <div style={{color:T.textDim,fontWeight:700,borderBottom:`1px solid ${T.border}`,padding:"4px 0"}}>RUSH</div>
+                      <div style={{color:T.textDim,fontWeight:700,borderBottom:`1px solid ${T.border}`,padding:"4px 0"}}>STATION</div>
+                      <div style={{color:T.textDim,fontWeight:700,borderBottom:`1px solid ${T.border}`,padding:"4px 0",textAlign:"right"}}>WAIT</div>
+                      {jobs.map(j=>(
+                        <div key={j.jobId} style={{display:"contents"}}>
+                          <div style={{color:j.rush?T.red:T.text,padding:"3px 0",fontWeight:600}}>{j.jobId}</div>
+                          <div style={{color:T.textDim,padding:"3px 0"}}>{j.lensType==='P'?'Prog':j.lensType==='S'?'SV':j.lensType==='B'?'BF':j.lensType||'—'}</div>
+                          <div style={{color:T.textDim,padding:"3px 0"}}>{j.eyeSize||'—'}</div>
+                          <div style={{color:j.rush?T.red:T.textDim,padding:"3px 0"}}>{j.rush?'YES':'—'}</div>
+                          <div style={{color:T.textMuted,padding:"3px 0"}}>{j.station||'—'}</div>
+                          <div style={{color:j.waitMin>60?T.red:j.waitMin>30?T.amber:T.textDim,padding:"3px 0",textAlign:"right"}}>{j.waitMin}m</div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2676,7 +2726,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
           </div>
         ):(
           <div style={{textAlign:"center",padding:"24px 0",color:T.textDim,fontFamily:mono,fontSize:12}}>
-            No coating jobs in queue — batch analysis will appear here when jobs arrive
+            No coating jobs in queue — batch groups will appear here when jobs arrive
           </div>
         )}
       </Card>

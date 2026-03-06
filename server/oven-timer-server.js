@@ -902,36 +902,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
     }
-    // Mock oven data when no live heartbeat — realistic demo numbers
-    // Builds full 6 ovens × 7 racks grid, some running some empty
-    if (!hasLiveTimers) {
-      const mockRacks = [
-        { ovenId: 'Oven 1', rackIndex: 1, elapsed: 6840, target: 10800, state: 'running', jobs: ['408201','408202','408203'] },
-        { ovenId: 'Oven 1', rackIndex: 3, elapsed: 3120, target: 10800, state: 'running', jobs: ['408210','408211'] },
-        { ovenId: 'Oven 1', rackIndex: 5, elapsed: 9600, target: 10800, state: 'running', jobs: ['407990','407991','407992','407993'] },
-        { ovenId: 'Oven 2', rackIndex: 1, elapsed: 9900, target: 10800, state: 'running', jobs: ['408150','408151'] },
-        { ovenId: 'Oven 2', rackIndex: 4, elapsed: 1800, target: 10800, state: 'running', jobs: ['408300'] },
-        { ovenId: 'Oven 2', rackIndex: 7, elapsed: 7800, target: 10800, state: 'running', jobs: ['408100','408101','408102'] },
-        { ovenId: 'Oven 3', rackIndex: 2, elapsed: 5400, target: 10800, state: 'running', jobs: ['408050','408051'] },
-        { ovenId: 'Oven 3', rackIndex: 6, elapsed: 10500, target: 10800, state: 'running', jobs: ['407880','407881'] },
-        { ovenId: 'Oven 4', rackIndex: 1, elapsed: 7200, target: 10800, state: 'running', jobs: ['408320','408321','408322'] },
-        { ovenId: 'Oven 4', rackIndex: 3, elapsed: 2400, target: 10800, state: 'running', jobs: ['408400'] },
-        { ovenId: 'Oven 4', rackIndex: 5, elapsed: 10200, target: 10800, state: 'running', jobs: ['407950','407951'] },
-        { ovenId: 'Oven 5', rackIndex: 2, elapsed: 4500, target: 10800, state: 'running', jobs: ['408250','408251','408252'] },
-        { ovenId: 'Oven 5', rackIndex: 4, elapsed: 8100, target: 10800, state: 'running', jobs: ['408180'] },
-        { ovenId: 'Oven 6', rackIndex: 1, elapsed: 600, target: 10800, state: 'running', jobs: ['408500','408501'] },
-        { ovenId: 'Oven 6', rackIndex: 3, elapsed: 6000, target: 10800, state: 'running', jobs: ['408350','408351','408352'] },
-      ];
-      mockRacks.forEach(m => {
-        const remaining = Math.max(0, m.target - m.elapsed);
-        runningRacks.push({
-          ovenId: m.ovenId, rackIndex: m.rackIndex, rackLabel: `R${m.rackIndex}`,
-          coating: 'AR', state: m.state, elapsed: m.elapsed, target: m.target,
-          remainingSec: remaining, remainingMin: Math.round(remaining / 60),
-          jobs: m.jobs || [], mock: true,
-        });
-      });
-    }
+    // No mock data — if no OvenTimer heartbeat, ovens show empty (real state)
     const racksInUse = runningRacks.length;
     const racksAvailable = TOTAL_RACKS - racksInUse;
     const nextFinishing = runningRacks.length > 0
@@ -1002,49 +973,68 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    // ── 7b. PER-TYPE BATCH SUGGESTIONS — group by coating type + threshold analysis ──
+    // ── 7b. PER-TYPE BATCH SUGGESTIONS — group by coating type + material (HARD constraint) ──
+    // Material is a hard batching constraint: PLY with PLY, H67 with H67, B67 with B67, etc.
+    // Each batch group = one coating type + one material
     const batchSuggestions = [];
-    for (const [ct, group] of Object.entries(queueByType)) {
+    // Only use QUEUE jobs for batch suggestions (not jobs already in a coater)
+    const queueOnly = coatingQueue.filter(j => j.subStage === 'QUEUE');
+    const groupKey = (j) => `${j.coating || 'AR'}::${j.lensMat || '?'}`;
+    const batchGroups = {};
+    queueOnly.forEach(j => {
+      const k = groupKey(j);
+      if (!batchGroups[k]) batchGroups[k] = { coating: j.coating || 'AR', material: j.lensMat || '?', jobs: [], rushCount: 0 };
+      batchGroups[k].jobs.push(j);
+      if (j.rush) batchGroups[k].rushCount++;
+    });
+
+    for (const [key, group] of Object.entries(batchGroups)) {
       const count = group.jobs.length;
       const lenses = count * 2;
-      // Material breakdown for this coating type
-      const matBreakdown = {};
-      const typeBreakdown = {};
-      group.jobs.forEach(j => {
-        const m = j.lensMat || '?'; matBreakdown[m] = (matBreakdown[m] || 0) + 1;
-        const t = j.lensType || '?'; typeBreakdown[t] = (typeBreakdown[t] || 0) + 1;
-      });
-      const rushCount = group.rushCount || 0;
+      const rushCount = group.rushCount;
       const avgWait = count > 0 ? Math.round(group.jobs.reduce((s,j) => s + (j.waitMin || 0), 0) / count) : 0;
       const maxWait = count > 0 ? Math.max(...group.jobs.map(j => j.waitMin || 0)) : 0;
+
+      // Lens type breakdown within this material group
+      const lensTypeBreakdown = {};
+      group.jobs.forEach(j => { const t = j.lensType || '?'; lensTypeBreakdown[t] = (lensTypeBreakdown[t] || 0) + 1; });
 
       // Which coater fits best?
       let suggestedCoater = 'E1400';
       if (count <= 57) suggestedCoater = rushCount > 0 ? 'EB9 #1' : 'EB9 #2';
       else if (count <= 114) suggestedCoater = count > 57 ? 'E1400' : 'EB9 #1';
 
-      // Fill percentage against suggested coater
       const coaterDef = COATERS.find(c => c.name === suggestedCoater) || COATERS[2];
       const fillPct = Math.round(lenses / coaterDef.lensCapacity * 100);
 
       // Estimate time until threshold hit
       const incomingRate = surfacingCount > 0 && surfacingAvgMin > 0
-        ? Math.round(surfacingCount / (surfacingAvgMin / 60)) // jobs per hour incoming
+        ? Math.round(surfacingCount / (surfacingAvgMin / 60))
         : 0;
       const ordersToFill = coaterDef.orderCapacity - count;
       const etaToFullMin = incomingRate > 0 && ordersToFill > 0
         ? Math.round(ordersToFill / incomingRate * 60)
         : null;
 
+      // Job IDs for this batch group (sorted: rush first, then longest wait)
+      const sortedJobs = [...group.jobs].sort((a,b) => (b.rush?1:0)-(a.rush?1:0) || (b.waitMin-a.waitMin));
+
       batchSuggestions.push({
-        coatingType: ct,
+        coatingType: group.coating,
+        material: group.material,
         jobCount: count, lensCount: lenses, rushCount, avgWaitMin: avgWait, maxWaitMin: maxWait,
-        materialBreakdown: matBreakdown, lensTypeBreakdown: typeBreakdown,
+        lensTypeBreakdown,
         suggestedCoater, fillPct,
-        etaToFullMin, // minutes until this type fills its suggested coater
+        etaToFullMin,
         ready: fillPct >= RUN_NOW_PCT || rushCount > 0,
+        jobs: sortedJobs.map(j => ({
+          jobId: j.jobId, lensType: j.lensType, eyeSize: j.eyeSize,
+          rush: j.rush, waitMin: j.waitMin, station: j.station,
+        })),
       });
     }
+    // Sort: ready first, then by job count desc
+    batchSuggestions.sort((a,b) => (b.ready?1:0)-(a.ready?1:0) || b.jobCount-a.jobCount);
 
     const recommendation = {
       action, reason, jobCount, lensCount, rushCount: rushInQueue,
