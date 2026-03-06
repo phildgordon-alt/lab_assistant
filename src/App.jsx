@@ -2264,7 +2264,7 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
   );
 }
 
-const COATING_CONFIG_DEFAULTS={rackSize:36,ovenCount:6,racksPerOven:9,ovenRunHours:3,coaterCount:2,coaterRate:200,runNowPct:75,runPartialPct:50,waitWindowMin:30};
+const COATING_CONFIG_DEFAULTS={rackSize:36,ovenCount:6,racksPerOven:9,ovenRunHours:3,eb9Capacity:114,e14Capacity:274,runNowPct:75,runPartialPct:50,waitWindowMin:30};
 
 function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenServerUrl,settings}){
   const [subView,setSubView]=useState("intelligence");
@@ -2341,13 +2341,15 @@ function CoatingConfigView({config,setConfig}){
   const reset=()=>setConfig({...COATING_CONFIG_DEFAULTS});
 
   const fields=[
-    {section:"Capacity",items:[
+    {section:"Coaters",items:[
+      {key:"eb9Capacity",label:"EB9 lens capacity (each)",min:50,max:200,desc:"Lenses per run for each EB9 coater (2 machines)"},
+      {key:"e14Capacity",label:"E1400 lens capacity",min:100,max:500,step:10,desc:"Lenses per run for the E1400 coater (1 machine)"},
+    ]},
+    {section:"Ovens",items:[
       {key:"rackSize",label:"Lenses per rack",min:1,max:100,desc:"How many lenses fit on one oven rack"},
       {key:"ovenCount",label:"Number of ovens",min:1,max:12,desc:"Total ovens available"},
       {key:"racksPerOven",label:"Racks per oven",min:1,max:20,desc:"Rack slots in each oven"},
       {key:"ovenRunHours",label:"Oven run time (hours)",min:1,max:8,desc:"Standard oven cycle duration"},
-      {key:"coaterCount",label:"Number of dip coaters",min:1,max:6,desc:"Dip coating machines available"},
-      {key:"coaterRate",label:"Lenses per hour per coater",min:50,max:500,step:10,desc:"Throughput rate of each coater"},
     ]},
     {section:"AI Recommendation Thresholds",items:[
       {key:"runNowPct",label:"RUN NOW threshold (%)",min:25,max:100,desc:"Last rack fill % to recommend running immediately"},
@@ -2407,9 +2409,14 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl}){
   const recColors={"RUN NOW":T.green,"WAIT":T.amber,"RUN PARTIAL":T.blue};
   const staleStr=lastFetch?`${Math.round((Date.now()-lastFetch)/1000)}s ago`:"—";
 
-  // Assigned vs unassigned jobs
+  // Assigned vs unassigned jobs — batches are {coatingType: {coaterId: [jobs]}}
   const batchedJobs=JSON.parse(localStorage.getItem("la_coating_batches")||"{}");
-  const assignedJobIds=new Set(Object.values(batchedJobs).flat().map(j=>j.jobId||j));
+  const allAssignedJobs=[];
+  Object.values(batchedJobs).forEach(coaterMap=>{
+    if(Array.isArray(coaterMap)) coaterMap.forEach(j=>allAssignedJobs.push(j)); // legacy format
+    else Object.values(coaterMap).forEach(arr=>arr.forEach(j=>allAssignedJobs.push(j)));
+  });
+  const assignedJobIds=new Set(allAssignedJobs.map(j=>j.jobId||j));
   const totalQueue=q.total||0;
   const assignedCount=Math.min(assignedJobIds.size, totalQueue);
   const unassignedCount=totalQueue-assignedCount;
@@ -2468,24 +2475,43 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl}){
         {recs.length===0?
           <div style={{color:T.textDim,fontFamily:mono,fontSize:12,textAlign:"center",padding:20}}>No recommendations — queue empty</div>
         :
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
             {recs.map(r=>(
-              <div key={r.coatingType} style={{display:"flex",alignItems:"center",gap:14,padding:"12px 16px",background:T.bg,borderRadius:8,border:`1px solid ${T.border}`}}>
-                <div style={{minWidth:100}}>
-                  <div style={{fontSize:14,fontWeight:700,color:T.text}}>{r.coatingType}</div>
-                  <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{r.jobCount} jobs · {r.lensCount} lenses</div>
-                </div>
-                <div style={{flex:1}}>
-                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                    <Pill color={recColors[r.action]}>{r.action}</Pill>
-                    {r.rushCount>0&&<Pill color={T.red}>🚨 RUSH</Pill>}
+              <div key={r.coatingType} style={{background:T.bg,borderRadius:8,border:`1px solid ${T.border}`,padding:"14px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:8}}>
+                  <div style={{minWidth:100}}>
+                    <div style={{fontSize:14,fontWeight:700,color:T.text}}>{r.coatingType}</div>
+                    <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{r.jobCount} jobs · {r.lensCount} lenses</div>
                   </div>
-                  <div style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{r.reason}</div>
+                  <div style={{flex:1}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                      <Pill color={recColors[r.action]}>{r.action}</Pill>
+                      {r.rushCount>0&&<Pill color={T.red}>🚨 RUSH</Pill>}
+                    </div>
+                    <div style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{r.reason}</div>
+                  </div>
+                  <div style={{textAlign:"right",fontFamily:mono}}>
+                    <div style={{fontSize:11,color:T.textDim}}>{r.racksNeeded} oven rack{r.racksNeeded!==1?"s":""}</div>
+                    <div style={{fontSize:10,color:T.textDim}}>{r.overallFillPct}% total fill</div>
+                  </div>
                 </div>
-                <div style={{textAlign:"right",fontFamily:mono}}>
-                  <div style={{fontSize:11,color:T.textDim}}>{r.fullRacks} full + {r.lastRackPct}%</div>
-                  <div style={{fontSize:10,color:T.textDim}}>~{r.dipTimeMin}m dip time</div>
-                </div>
+                {/* Per-coater fill plan */}
+                {(r.coaterPlan||[]).length>0&&(
+                  <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                    {r.coaterPlan.map(cp=>(
+                      <div key={cp.id} style={{flex:1,minWidth:120,background:T.card,borderRadius:6,padding:"8px 10px",border:`1px solid ${cp.fillPct>=75?T.green:cp.fillPct>=50?T.amber:T.border}`}}>
+                        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                          <span style={{fontSize:11,fontWeight:700,color:T.text}}>{cp.name}</span>
+                          <span style={{fontSize:10,fontFamily:mono,color:cp.fillPct>=75?T.green:cp.fillPct>=50?T.amber:T.textDim}}>{cp.fillPct}%</span>
+                        </div>
+                        <div style={{height:4,background:T.bg,borderRadius:2,overflow:"hidden",margin:"4px 0"}}>
+                          <div style={{height:"100%",width:`${cp.fillPct}%`,borderRadius:2,background:cp.fillPct>=75?T.green:cp.fillPct>=50?T.amber:T.textDim}}/>
+                        </div>
+                        <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{cp.fill}/{cp.lensCapacity} lenses · {cp.orders} orders</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -2496,24 +2522,26 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl}){
       <Card>
         <SectionHeader>Capacity Reference</SectionHeader>
         <div style={{display:"flex",gap:20,flexWrap:"wrap",fontFamily:mono,fontSize:12}}>
+          {(intel.coaters||[]).map(ct=>(
+            <div key={ct.id}><span style={{color:T.textDim}}>{ct.name}:</span> <span style={{color:T.text,fontWeight:700}}>{ct.lensCapacity} lenses ({ct.orderCapacity} orders) · {ct.runHours}h</span></div>
+          ))}
+          <div><span style={{color:T.textDim}}>Total coater capacity:</span> <span style={{color:T.text,fontWeight:700}}>{intel.totalCoaterCapacity||502} lenses/run</span></div>
+          <div><span style={{color:T.textDim}}>Ovens:</span> <span style={{color:T.text,fontWeight:700}}>{c.ovenCount} × {c.racksPerOven} racks · {c.ovenRunHours}h</span></div>
           <div><span style={{color:T.textDim}}>Rack size:</span> <span style={{color:T.text,fontWeight:700}}>{c.rackSize} lenses</span></div>
-          <div><span style={{color:T.textDim}}>Ovens:</span> <span style={{color:T.text,fontWeight:700}}>{c.ovenCount} × {c.racksPerOven} racks</span></div>
-          <div><span style={{color:T.textDim}}>Oven run:</span> <span style={{color:T.text,fontWeight:700}}>{c.ovenRunHours}h</span></div>
-          <div><span style={{color:T.textDim}}>Coaters:</span> <span style={{color:T.text,fontWeight:700}}>{c.coaterCount} × {c.coaterRate}/hr</span></div>
-          <div><span style={{color:T.textDim}}>Total throughput:</span> <span style={{color:T.text,fontWeight:700}}>{(c.coaterCount||2)*(c.coaterRate||200)}/hr</span></div>
         </div>
       </Card>
     </div>
   );
 }
 
-// ── Batch Builder — Assign all jobs to racks ────────────────
+// ── Batch Builder — Assign all jobs to coater runs ──────────
 function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
   const [selectedType,setSelectedType]=useState(null);
   if(!intel) return <Card><div style={{color:T.textDim,fontFamily:mono,fontSize:13,textAlign:"center",padding:40}}>Loading...</div></Card>;
 
   const q=intel.queue||{};
   const c=intel.capacity||{};
+  const coaters=intel.coaters||[];
   const types=(q.byType||[]);
 
   // Auto-select first type
@@ -2521,23 +2549,36 @@ function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
   const typeData=types.find(t=>t.type===activeType);
   const jobs=typeData?.jobs||[];
 
-  // Current batch assignments for this type
-  const batches=batchEdits[activeType]||[];
-  const assignedIds=new Set(batches.flat().map(j=>j.jobId||j));
+  // Current batch assignments for this type — keyed by coater ID
+  const batches=batchEdits[activeType]||{};
+  const assignedIds=new Set(Object.values(batches).flat().map(j=>j.jobId||j));
   const unassigned=jobs.filter(j=>!assignedIds.has(j.jobId));
 
-  // Auto-batch: fill racks of 18 jobs (36 lenses) each
+  // Auto-batch: fill coaters largest-first (E1400 then EB9s)
   const autoBatch=()=>{
     const remaining=[...unassigned];
-    const newBatches=[...batches];
-    // Fill last incomplete rack first
-    if(newBatches.length>0){
-      const last=newBatches[newBatches.length-1];
-      while(last.length<18&&remaining.length>0) last.push(remaining.shift());
+    const newBatches={...batches};
+    // Sort coaters by capacity descending
+    const sorted=[...coaters].sort((a,b)=>b.orderCapacity-a.orderCapacity);
+    for(const coater of sorted){
+      if(remaining.length<=0) break;
+      const existing=newBatches[coater.id]||[];
+      const slotsLeft=coater.orderCapacity-existing.length;
+      if(slotsLeft<=0) continue;
+      const toAdd=remaining.splice(0,slotsLeft);
+      newBatches[coater.id]=[...existing,...toAdd];
     }
+    // If still remaining, overflow into a second round starting with largest
     while(remaining.length>0){
-      const rack=remaining.splice(0,18);
-      newBatches.push(rack);
+      for(const coater of sorted){
+        if(remaining.length<=0) break;
+        const key=`${coater.id}_R2`;
+        const existing=newBatches[key]||[];
+        const slotsLeft=coater.orderCapacity-existing.length;
+        if(slotsLeft<=0) continue;
+        const toAdd=remaining.splice(0,slotsLeft);
+        newBatches[key]=[...existing,...toAdd];
+      }
     }
     setBatchEdits(prev=>({...prev,[activeType]:newBatches}));
   };
@@ -2546,39 +2587,42 @@ function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
     setBatchEdits(prev=>{const next={...prev};delete next[activeType];return next;});
   };
 
-  const removeFromBatch=(rackIdx,jobId)=>{
+  const removeFromCoater=(coaterId,jobId)=>{
     setBatchEdits(prev=>{
       const next={...prev};
-      const racks=[...(next[activeType]||[])];
-      racks[rackIdx]=racks[rackIdx].filter(j=>(j.jobId||j)!==jobId);
-      if(racks[rackIdx].length===0) racks.splice(rackIdx,1);
-      next[activeType]=racks;
+      const cb={...(next[activeType]||{})};
+      cb[coaterId]=(cb[coaterId]||[]).filter(j=>(j.jobId||j)!==jobId);
+      if(cb[coaterId].length===0) delete cb[coaterId];
+      next[activeType]=cb;
       return next;
     });
   };
 
-  const addToRack=(rackIdx,job)=>{
+  const addToCoater=(coaterId,job)=>{
     setBatchEdits(prev=>{
       const next={...prev};
-      const racks=[...(next[activeType]||[])];
-      if(!racks[rackIdx]) racks[rackIdx]=[];
-      racks[rackIdx]=[...racks[rackIdx],job];
-      next[activeType]=racks;
+      const cb={...(next[activeType]||{})};
+      cb[coaterId]=[...(cb[coaterId]||[]),job];
+      next[activeType]=cb;
       return next;
     });
   };
 
-  const totalAssigned=batches.reduce((s,r)=>s+r.length,0);
+  const totalAssigned=Object.values(batches).reduce((s,arr)=>s+arr.length,0);
+  const coaterCount=Object.keys(batches).length;
   const totalJobs=jobs.length;
   const allAssigned=unassigned.length===0&&totalJobs>0;
+
+  // Build coater cards — show all defined coaters plus any overflow keys
+  const coaterKeys=[...new Set([...coaters.map(ct=>ct.id),...Object.keys(batches)])];
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:16}}>
       {/* Type selector */}
       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
         {types.map(t=>{
-          const tb=batchEdits[t.type]||[];
-          const ta=tb.reduce((s,r)=>s+r.length,0);
+          const tb=batchEdits[t.type]||{};
+          const ta=Object.values(tb).reduce((s,arr)=>s+arr.length,0);
           const complete=ta>=t.count&&t.count>0;
           return(
             <button key={t.type} onClick={()=>setSelectedType(t.type)}
@@ -2599,15 +2643,15 @@ function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
               <div>
                 <div style={{fontSize:14,fontWeight:700,color:allAssigned?T.green:T.text}}>
-                  {allAssigned?"All jobs assigned — ready to run":"Assign all jobs to racks before running"}
+                  {allAssigned?"All jobs assigned — ready to run":"Assign all jobs to coaters before running"}
                 </div>
                 <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginTop:4}}>
-                  {totalAssigned}/{totalJobs} jobs assigned · {batches.length} rack{batches.length!==1?"s":""} · {unassigned.length} unassigned
+                  {totalAssigned}/{totalJobs} jobs assigned · {coaterCount} coater{coaterCount!==1?"s":""} loaded · {unassigned.length} unassigned
                 </div>
               </div>
               <div style={{display:"flex",gap:8}}>
                 <button onClick={autoBatch} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${T.blue}`,background:T.blueDark,color:T.blue,fontFamily:mono,fontSize:11,cursor:"pointer",fontWeight:700}}>Auto-Batch</button>
-                {batches.length>0&&<button onClick={clearBatches} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${T.red}`,background:"transparent",color:T.red,fontFamily:mono,fontSize:11,cursor:"pointer"}}>Clear</button>}
+                {coaterCount>0&&<button onClick={clearBatches} style={{padding:"8px 16px",borderRadius:8,border:`1px solid ${T.red}`,background:"transparent",color:T.red,fontFamily:mono,fontSize:11,cursor:"pointer"}}>Clear</button>}
               </div>
             </div>
             {totalJobs>0&&(
@@ -2619,29 +2663,35 @@ function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
             )}
           </Card>
 
-          {/* Racks */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
-            {batches.map((rack,ri)=>{
-              const lenses=rack.length*2;
-              const fillPct=Math.round(lenses/(c.rackSize||36)*100);
-              const hasRush=rack.some(j=>j.rush);
+          {/* Coater cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",gap:12}}>
+            {coaterKeys.map(coaterId=>{
+              const coaterDef=coaters.find(ct=>ct.id===coaterId);
+              const coaterName=coaterDef?.name||coaterId;
+              const capacity=coaterDef?.orderCapacity||137;
+              const lensCapacity=coaterDef?.lensCapacity||274;
+              const assigned=batches[coaterId]||[];
+              const lenses=assigned.length*2;
+              const fillPct=Math.round(assigned.length/capacity*100);
+              const hasRush=assigned.some(j=>j.rush);
               return(
-                <Card key={ri} style={{borderLeft:`4px solid ${fillPct>=100?T.green:fillPct>=75?T.blue:T.amber}`}}>
+                <Card key={coaterId} style={{borderLeft:`4px solid ${fillPct>=100?T.green:fillPct>=75?T.blue:T.amber}`}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-                    <div style={{fontFamily:mono,fontWeight:700,fontSize:13,color:T.text}}>Rack {ri+1} {hasRush&&<span style={{color:T.red}}>🚨</span>}</div>
-                    <div style={{fontFamily:mono,fontSize:11,color:fillPct>=100?T.green:T.textDim}}>{lenses}/{c.rackSize||36} lenses · {fillPct}%</div>
+                    <div style={{fontFamily:mono,fontWeight:700,fontSize:14,color:T.text}}>{coaterName} {hasRush&&<span style={{color:T.red}}>🚨</span>}</div>
+                    <div style={{fontFamily:mono,fontSize:11,color:fillPct>=100?T.green:T.textDim}}>{assigned.length}/{capacity} orders · {lenses}/{lensCapacity} lenses · {fillPct}%</div>
                   </div>
-                  <div style={{height:4,background:T.bg,borderRadius:2,overflow:"hidden",marginBottom:8}}>
-                    <div style={{height:"100%",width:`${Math.min(100,fillPct)}%`,background:fillPct>=100?T.green:fillPct>=75?T.blue:T.amber,borderRadius:2}}/>
+                  <div style={{height:6,background:T.bg,borderRadius:3,overflow:"hidden",marginBottom:8}}>
+                    <div style={{height:"100%",width:`${Math.min(100,fillPct)}%`,background:fillPct>=100?T.green:fillPct>=75?T.blue:T.amber,borderRadius:3}}/>
                   </div>
-                  <div style={{maxHeight:200,overflowY:"auto"}}>
-                    {rack.map((j,ji)=>(
+                  <div style={{maxHeight:220,overflowY:"auto"}}>
+                    {assigned.map((j,ji)=>(
                       <div key={j.jobId||ji} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"3px 0",borderBottom:`1px solid ${T.border}`,fontSize:11,fontFamily:mono}}>
                         <span style={{color:j.rush?T.red:T.textMuted}}>{j.rush?"🚨 ":""}{j.jobId}</span>
                         <span style={{color:T.textDim}}>{j.coating}</span>
-                        <button onClick={()=>removeFromBatch(ri,j.jobId)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:10,padding:"2px 4px"}}>✕</button>
+                        <button onClick={()=>removeFromCoater(coaterId,j.jobId)} style={{background:"none",border:"none",color:T.red,cursor:"pointer",fontSize:10,padding:"2px 4px"}}>✕</button>
                       </div>
                     ))}
+                    {assigned.length===0&&<div style={{color:T.textDim,fontSize:11,fontFamily:mono,textAlign:"center",padding:12}}>Empty — use Auto-Batch or add jobs below</div>}
                   </div>
                 </Card>
               );
@@ -2658,10 +2708,12 @@ function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
                     <span style={{color:j.rush?T.red:T.text}}>{j.rush?"🚨 ":""}{j.jobId}</span>
                     <span style={{color:T.textDim}}>{j.station}</span>
                     <span style={{color:T.textDim}}>{j.tray&&`T${j.tray}`}</span>
-                    <button onClick={()=>{
-                      const rackIdx=batches.length>0&&batches[batches.length-1].length<18?batches.length-1:batches.length;
-                      addToRack(rackIdx,j);
-                    }} style={{padding:"2px 8px",borderRadius:4,border:`1px solid ${T.blue}`,background:"transparent",color:T.blue,cursor:"pointer",fontSize:10}}>+ Rack</button>
+                    <div style={{display:"flex",gap:4}}>
+                      {coaters.map(ct=>(
+                        <button key={ct.id} onClick={()=>addToCoater(ct.id,j)}
+                          style={{padding:"2px 6px",borderRadius:4,border:`1px solid ${T.blue}`,background:"transparent",color:T.blue,cursor:"pointer",fontSize:9}}>+{ct.name}</button>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>

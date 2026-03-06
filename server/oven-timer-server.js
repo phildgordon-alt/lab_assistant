@@ -561,13 +561,21 @@ const server = http.createServer(async (req, res) => {
   if (req.method==='GET' && url.pathname==='/api/coating/intelligence') {
     // All capacity/threshold values can be overridden via query params
     const p = (k, def) => parseInt(url.searchParams.get(k)) || def;
+
+    // Coater definitions — each coater has its own lens capacity
+    const COATERS = [
+      { id: 'EB9001', name: 'EB9 #1', somId: 'EB9001', lensCapacity: p('eb9Capacity', 114), orderCapacity: 57, runHours: 2 },
+      { id: 'EB9002', name: 'EB9 #2', somId: 'EB9002', lensCapacity: p('eb9Capacity', 114), orderCapacity: 57, runHours: 2 },
+      { id: 'E14001', name: 'E1400',  somId: 'E14001', lensCapacity: p('e14Capacity', 274), orderCapacity: 137, runHours: 2 },
+    ];
+
+    // Oven capacity
     const RACK_CAPACITY = p('rackSize', 36);
     const OVEN_COUNT = p('ovenCount', 6);
     const RACKS_PER_OVEN = p('racksPerOven', 9);
     const TOTAL_RACKS = OVEN_COUNT * RACKS_PER_OVEN;
     const OVEN_RUN_HOURS = p('ovenRunHours', 3);
-    const COATER_COUNT = p('coaterCount', 2);
-    const COATER_RATE = p('coaterRate', 200);
+
     // Thresholds for recommendations
     const RUN_NOW_PCT = p('runNowPct', 75);
     const RUN_PARTIAL_PCT = p('runPartialPct', 50);
@@ -649,47 +657,73 @@ const server = http.createServer(async (req, res) => {
       return t >= todayMs;
     });
 
-    // 4. Batching recommendations
+    // 4. Per-coater batching recommendations
+    // For each coating type, figure out how to distribute across available coaters
+    const totalCoaterCapacity = COATERS.reduce((s,c) => s + c.lensCapacity, 0);
     const recommendations = [];
     Object.values(queueByType).forEach(group => {
       const jobCount = group.jobs.length;
       const lensCount = jobCount * 2; // 2 lenses per job (pair)
-      const racksNeeded = Math.ceil(lensCount / RACK_CAPACITY);
-      const lastRackFill = lensCount % RACK_CAPACITY || RACK_CAPACITY;
-      const lastRackPct = Math.round((lastRackFill / RACK_CAPACITY) * 100);
       const hasRush = group.rushCount > 0;
 
-      // Time to coat current queue through dip coaters
-      const dipTimeMin = Math.round((lensCount / (COATER_COUNT * COATER_RATE)) * 60);
+      // Plan coater fills — fill largest first (E1400), then EB9s
+      const coaterPlan = [];
+      let remaining = lensCount;
+      // Sort coaters by capacity descending for optimal fill
+      const sortedCoaters = [...COATERS].sort((a,b) => b.lensCapacity - a.lensCapacity);
+      for (const coater of sortedCoaters) {
+        if (remaining <= 0) break;
+        const fill = Math.min(remaining, coater.lensCapacity);
+        const fillPct = Math.round((fill / coater.lensCapacity) * 100);
+        coaterPlan.push({ ...coater, fill, fillPct, orders: Math.ceil(fill / 2) });
+        remaining -= fill;
+      }
 
-      // Check if oven racks finishing soon for this coating type
+      // How many full coater runs needed beyond the first set
+      const fullRuns = remaining > 0 ? Math.ceil(remaining / totalCoaterCapacity) : 0;
+
+      // Overall fill of the last/only set of coaters
+      const totalFill = Math.min(lensCount, totalCoaterCapacity);
+      const overallFillPct = Math.round((totalFill / totalCoaterCapacity) * 100);
+
+      // Oven racks needed after coating (all lenses go to ovens)
+      const racksNeeded = Math.ceil(lensCount / RACK_CAPACITY);
+
+      // Check if oven racks finishing soon
       const sameTypeFinishing = runningRacks
         .filter(r => r.coating === group.type && r.remainingMin <= WAIT_WINDOW_MIN)
         .sort((a,b) => a.remainingSec - b.remainingSec);
+
+      // Recommendation logic based on smallest coater fill in the plan
+      const minFillPct = coaterPlan.length > 0 ? Math.min(...coaterPlan.map(c => c.fillPct)) : 0;
+      // Use the last coater's fill (the one that may be partial)
+      const lastCoaterFill = coaterPlan.length > 0 ? coaterPlan[coaterPlan.length - 1].fillPct : 0;
 
       let action, reason;
       if (hasRush) {
         action = 'RUN NOW';
         reason = `${group.rushCount} rush job(s) in queue — prioritize immediately`;
-      } else if (lastRackPct >= RUN_NOW_PCT) {
+      } else if (lensCount >= totalCoaterCapacity) {
         action = 'RUN NOW';
-        reason = `Last rack ${lastRackPct}% full (${lastRackFill}/${RACK_CAPACITY} lenses). Above ${RUN_NOW_PCT}% threshold.`;
-      } else if (lastRackPct >= RUN_PARTIAL_PCT) {
+        reason = `${lensCount} lenses fills all coaters (${totalCoaterCapacity} capacity). Run full batch.`;
+      } else if (lastCoaterFill >= RUN_NOW_PCT) {
+        action = 'RUN NOW';
+        reason = `Smallest coater at ${lastCoaterFill}% fill. Above ${RUN_NOW_PCT}% threshold.`;
+      } else if (lastCoaterFill >= RUN_PARTIAL_PCT) {
         if (sameTypeFinishing.length > 0) {
           action = 'WAIT';
-          reason = `${lastRackPct}% fill. ${sameTypeFinishing[0].coating} rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait for capacity.`;
+          reason = `${lastCoaterFill}% fill on last coater. Oven rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait for capacity.`;
         } else {
           action = 'RUN PARTIAL';
-          reason = `${lastRackPct}% fill (above ${RUN_PARTIAL_PCT}% partial threshold). No ovens finishing within ${WAIT_WINDOW_MIN}m.`;
+          reason = `${lastCoaterFill}% fill. Above ${RUN_PARTIAL_PCT}% partial threshold. No ovens finishing within ${WAIT_WINDOW_MIN}m.`;
         }
       } else {
-        // Under partial threshold
         if (sameTypeFinishing.length > 0 && sameTypeFinishing[0].remainingMin <= WAIT_WINDOW_MIN) {
           action = 'WAIT';
-          reason = `Only ${lastRackPct}% fill. Rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait.`;
+          reason = `Only ${lastCoaterFill}% fill. Rack finishing in ${sameTypeFinishing[0].remainingMin}m — wait.`;
         } else {
           action = 'WAIT';
-          reason = `Only ${lastRackPct}% fill (${lastRackFill}/${RACK_CAPACITY}). Accumulate more jobs.`;
+          reason = `Only ${lastCoaterFill}% fill. Accumulate more jobs before running.`;
         }
       }
 
@@ -697,12 +731,11 @@ const server = http.createServer(async (req, res) => {
         coatingType: group.type,
         jobCount,
         lensCount,
+        coaterPlan,
+        fullRuns,
+        overallFillPct,
         racksNeeded,
-        fullRacks: racksNeeded > 0 ? racksNeeded - 1 : 0,
-        lastRackFill,
-        lastRackPct,
         rushCount: group.rushCount,
-        dipTimeMin,
         action,
         reason,
       });
@@ -729,14 +762,16 @@ const server = http.createServer(async (req, res) => {
       ok: true,
       timestamp: now,
       // Capacity constants
-      capacity: { rackSize: RACK_CAPACITY, ovenCount: OVEN_COUNT, racksPerOven: RACKS_PER_OVEN, totalRacks: TOTAL_RACKS, ovenRunHours: OVEN_RUN_HOURS, coaterCount: COATER_COUNT, coaterRate: COATER_RATE },
+      capacity: { rackSize: RACK_CAPACITY, ovenCount: OVEN_COUNT, racksPerOven: RACKS_PER_OVEN, totalRacks: TOTAL_RACKS, ovenRunHours: OVEN_RUN_HOURS },
+      coaters: COATERS.map(c => ({ id: c.id, name: c.name, somId: c.somId, lensCapacity: c.lensCapacity, orderCapacity: c.orderCapacity, runHours: c.runHours })),
+      totalCoaterCapacity,
       thresholds: { runNowPct: RUN_NOW_PCT, runPartialPct: RUN_PARTIAL_PCT, waitWindowMin: WAIT_WINDOW_MIN },
       // Live queue
       queue: { total: coatingQueue.length, byType: Object.values(queueByType).map(g => ({ type: g.type, count: g.jobs.length, rushCount: g.rushCount, jobs: g.jobs })), },
       // Oven status
       ovens: { stale: ovenStale, racksRunning: runningRacks, racksInUse, racksAvailable, nextFinishing, todayRuns: todayOvenRuns.length, },
-      // Coater status
-      coaters: { live: global.coatingLive || null, todayRuns: todayCoatingRuns.length, throughputPerHour: COATER_COUNT * COATER_RATE, },
+      // Coater live status
+      coaterLive: { live: global.coatingLive || null, todayRuns: todayCoatingRuns.length, },
       // AI batching recommendations
       recommendations,
       // Stats
