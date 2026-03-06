@@ -571,6 +571,8 @@ function renderLive(){
   const passRate       = assemblyData?.passFailToday ? (assemblyData.passFailToday.pass > 0 ? Math.round(assemblyData.passFailToday.pass / (assemblyData.passFailToday.pass + assemblyData.passFailToday.fail) * 100) : 0) : null;
   const shiftH         = shiftHours();
 
+  const avgRate = shiftH > 0 ? (totalTodayJobs / shiftH).toFixed(1) : '—';
+
   const kpis = `
   <div class="kpi-row">
     <div class="kpi">
@@ -578,27 +580,25 @@ function renderLive(){
       <div class="kpi-lbl">STATIONS ACTIVE</div>
     </div>
     <div class="kpi">
-      <div class="kpi-val" style="color:var(--teal)">${incomingToday}</div>
-      <div class="kpi-lbl">INCOMING TODAY</div>
-      <div class="kpi-sub">${shiftH>0?(incomingToday/shiftH).toFixed(1)+'/hr':''}</div>
+      <div class="kpi-val" style="color:var(--purple);font-size:36px;">${totalTodayJobs}</div>
+      <div class="kpi-lbl">ASSEMBLED TODAY</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--teal)">${avgRate}</div>
+      <div class="kpi-lbl">JOBS / HOUR</div>
+      <div class="kpi-sub">${shiftH.toFixed(1)}h into shift</div>
     </div>
     <div class="kpi">
       <div class="kpi-val" style="color:var(--blue)">${shippedToday}</div>
       <div class="kpi-lbl">SHIPPED TODAY</div>
-      <div class="kpi-sub">${shiftH>0?(shippedToday/shiftH).toFixed(1)+'/hr':''}</div>
     </div>
     <div class="kpi">
-      <div class="kpi-val" style="color:var(--purple)">${totalTodayJobs}</div>
-      <div class="kpi-lbl">ASSEMBLED TODAY</div>
-      <div class="kpi-sub">${shiftH>0?(totalTodayJobs/shiftH).toFixed(1)+'/hr avg':''}</div>
+      <div class="kpi-val" style="color:var(--dimmer)">${activeJobs}</div>
+      <div class="kpi-lbl">ASSEMBLY WIP</div>
     </div>
     <div class="kpi">
-      <div class="kpi-val" style="color:var(--dimmer)">${wipCount}</div>
-      <div class="kpi-lbl">TOTAL WIP</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-val" style="color:var(--amber)">${holdJobs}</div>
-      <div class="kpi-lbl">ON HOLD</div>
+      <div class="kpi-val" style="color:${passRate!==null&&passRate<95?'var(--red)':'var(--green)'}">${passRate!==null?passRate+'%':'—'}</div>
+      <div class="kpi-lbl">PASS RATE</div>
     </div>
     <div class="kpi">
       <div class="kpi-val" style="color:var(--red)">${rushActive}</div>
