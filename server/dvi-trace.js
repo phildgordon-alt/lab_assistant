@@ -97,8 +97,8 @@ function parseTimestamp(dateStr, timeStr) {
 function stationToStage(station) {
   const s = (station || '').toUpperCase();
   if (s === 'CANCELED') return 'CANCELED';
-  if (s.includes('INITIATE') || s.includes('NEW WORK') || s.includes('FRAME LOGGED') || s.includes('LOG LENSES')) return 'INCOMING';
-  if (s.includes('NE LENS') || s.includes('NEL') || s.includes('NOT ENOUGH') || s.includes('NE FRMS')) return 'NEL';
+  if (s.includes('INITIATE') || s.includes('NEW WORK') || s.includes('FRAME LOGGED') || s.includes('LOG LENSES') || s.includes('SENT TO LAB') || s.includes('RX ENTRY') || s.includes('INTL ACCT')) return 'INCOMING';
+  if (s.includes('NE LENS') || s.includes('NEL') || s.includes('NOT ENOUGH') || s.includes('NE FRMS') || s.includes('KRDX FAIL')) return 'NEL';
   if (s.includes('KARDEX') || s.includes('MAN2KARDX')) return 'AT_KARDEX';
   if (s.includes('DIGITAL CALC') || s.includes('GENERATOR') || s.includes('AUTO BLKER') || s.includes('POLISH') || s.includes('FINE') || s.includes('MANBLKER') || s.includes('CBOB - INHSE SF') || s.includes('CBOB - DIG')) return 'SURFACING';
   if (s.includes('CCL') || s.includes('CCP') || s.includes('COAT') || s.includes('SENT TO COAT')) return 'COATING';
@@ -107,7 +107,7 @@ function stationToStage(station) {
   if (s.includes('QC')) return 'QC';
   if (s.includes('SH CONVEY') || s.includes('SHIP')) return 'SHIPPING';
   if (s.includes('BREAKAGE')) return 'BREAKAGE';
-  if (s.includes('LASER REJECT') || s.includes('KICKOUT')) return 'HOLD';
+  if (s.includes('LASER REJECT') || s.includes('KICKOUT') || s.includes('SLOW MVRS') || s.includes('UNCATEGOR') || s.includes('INFLUENCE') || s.includes('PLANOSPLT')) return 'HOLD';
   if (s.includes('QC_HOLD') || s.includes('HOLD')) return 'HOLD';
   return 'OTHER';
 }
@@ -165,13 +165,109 @@ class DviTraceWatcher extends EventEmitter {
     this.currentFile = null;
     this.byteOffset = 0;
 
-    // Start polling
-    this.poll();
-    this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
-
     const { host } = this._connConfig;
     console.log(`[DVI-Trace] Started — watching \\\\${host}\\${TRACE_SHARE}\\${TRACE_DIR}\\LT*.DAT (every ${POLL_INTERVAL/1000}s)`);
+
+    // Delay history load to avoid SMB connection race with dvi-sync
+    const startHistory = async () => {
+      await new Promise(r => setTimeout(r, 3000));
+      await this.loadHistory();
+    };
+    startHistory().then(() => {
+      this.poll();
+      this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
+    }).catch(err => {
+      console.error('[DVI-Trace] History load failed, starting live poll anyway:', err.message);
+      this.poll();
+      this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
+    });
     return true;
+  }
+
+  /**
+   * Load all historical LT files on startup to build complete WIP state.
+   * Reads every LT*.DAT file in the TRACE directory (oldest first),
+   * processes all events, then sets byteOffset on today's file so
+   * live polling only picks up new data.
+   */
+  async loadHistory() {
+    if (!this.client) return;
+    const todayFile = getTodayFilename();
+
+    try {
+      // List all LT files in TRACE directory
+      const files = await new Promise((resolve, reject) => {
+        this.client.readdir(TRACE_DIR, (err, list) => {
+          if (err) return reject(err);
+          resolve(list);
+        });
+      });
+
+      const ltFiles = files
+        .filter(f => /^LT\d{6}\.DAT$/i.test(f))
+        .sort(); // Chronological order
+
+      console.log(`[DVI-Trace] Loading ${ltFiles.length} historical files...`);
+
+      for (const file of ltFiles) {
+        const remotePath = `${TRACE_DIR}\\${file}`;
+        try {
+          const data = await this.readFile(remotePath);
+          if (!data || data.length === 0) continue;
+
+          const text = data.toString('utf8');
+          const lines = text.split(/\r?\n/);
+          let parsed = 0;
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            if (line.startsWith('TRAY\t')) continue;
+            const evt = parseTraceLine(line);
+            if (!evt) continue;
+            this.processEvent(evt);
+            parsed++;
+          }
+
+          // If this is today's file, set byte offset so live poll picks up from here
+          if (file === todayFile) {
+            this.currentFile = todayFile;
+            this.byteOffset = data.length;
+            this.partialLine = '';
+          }
+
+          console.log(`[DVI-Trace] ${file}: ${parsed} events, ${this.jobs.size} jobs total`);
+        } catch (err) {
+          const msg = err.message || '';
+          if (msg.includes('STATUS_OBJECT_NAME_NOT_FOUND')) continue;
+          if (msg.includes('STATUS_PENDING') || msg.includes('ETIMEDOUT')) {
+            console.warn(`[DVI-Trace] Skipping ${file}: ${msg.substring(0, 60)}`);
+            continue;
+          }
+          console.warn(`[DVI-Trace] Error reading ${file}: ${msg.substring(0, 80)}`);
+        }
+
+        // Small delay between files to avoid SMB connection issues
+        await new Promise(r => setTimeout(r, 500));
+      }
+
+      // Reset today stats (history loaded stats from all days, we want today-only for stats)
+      const todayJobs = this.jobs.size;
+      this.todayStats = {
+        totalEvents: this.todayStats.totalEvents,
+        uniqueJobs: todayJobs,
+        byStation: this.todayStats.byStation,
+        byStage: this.todayStats.byStage,
+        byOperator: this.todayStats.byOperator,
+        breakageCount: this.todayStats.breakageCount,
+        firstEvent: this.todayStats.firstEvent,
+        lastEvent: this.todayStats.lastEvent
+      };
+
+      console.log(`[DVI-Trace] History loaded — ${todayJobs} total jobs across all files`);
+    } catch (err) {
+      console.error(`[DVI-Trace] Failed to load history: ${err.message}`);
+      // Still continue with live polling even if history fails
+    }
   }
 
   _createClient() {
@@ -320,9 +416,12 @@ class DviTraceWatcher extends EventEmitter {
       operator: evt.operator
     });
 
-    // Mark shipped jobs
+    // Update shipped status based on current stage
     if (stage === 'SHIPPING') {
       job.status = 'SHIPPED';
+    } else if (job.status === 'SHIPPED') {
+      // Job moved back into production after shipping station
+      job.status = 'Active';
     }
 
     // Track breakage

@@ -621,10 +621,12 @@ const server = http.createServer(async (req, res) => {
       return j;
     });
     const shipped = enriched.filter(j => j.status === 'SHIPPED');
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const shippedToday = shipped.filter(j => j.lastSeen && j.lastSeen >= todayStart.getTime());
     return json(res, {
       jobs: enriched,
       shipped: {
-        today: shipped.length,
+        today: shippedToday.length,
         yesterday: 0,
         thisWeek: shipped.length
       },
