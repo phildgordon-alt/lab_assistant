@@ -1041,6 +1041,8 @@ function saveOperator(){
 function editOperator(name){
   const op = operators[name];
   if(!op) return;
+  const others = Object.values(operators).filter(o=>o.name && o.name!==name).map(o=>o.name);
+  const mergeOpts = others.map(n=>`<option value="${esc(n)}">${esc(n)} (${operators[n]?.todayJobs||0} jobs)</option>`).join('');
   document.getElementById('mTitle').textContent = `EDIT — ${name}`;
   document.getElementById('mBody').innerHTML = `
     <div class="m-field">
@@ -1048,7 +1050,13 @@ function editOperator(name){
       <div style="display:flex;gap:6px;flex-wrap:wrap;">
         ${AVATAR_COLORS.map(c=>`<div onclick="selectColor('${c}')" style="width:30px;height:30px;border-radius:6px;background:${c};cursor:pointer;border:2px solid ${c===op.color?'#fff':'transparent'};transition:all .15s;" id="coloropt-${c.slice(1)}" class="coloropt"></div>`).join('')}
       </div>
-    </div>`;
+    </div>
+    ${others.length ? `
+    <div class="m-field" style="margin-top:12px;border-top:1px solid var(--border);padding-top:12px;">
+      <label>MERGE WITH ANOTHER OPERATOR</label>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);margin-bottom:6px;">Combine stats — the other operator will be removed</div>
+      <select class="m-sel" id="merge-target"><option value="">— select to merge —</option>${mergeOpts}</select>
+    </div>` : ''}`;
   document.getElementById('mBtns').innerHTML=`
     <button style="background:var(--redDk);color:var(--red);border:1px solid var(--red);" onclick="removeOperator('${esc(name)}')">Remove</button>
     <button style="background:var(--green);color:#000;" onclick="saveOpEdit('${esc(name)}')">Save</button>`;
@@ -1057,8 +1065,42 @@ function editOperator(name){
 }
 
 function saveOpEdit(name){
+  // Handle merge if selected
+  const mergeEl = document.getElementById('merge-target');
+  const mergeTarget = mergeEl?.value;
+  if(mergeTarget && mergeTarget !== name && operators[mergeTarget]){
+    // Merge: keep 'name', absorb 'mergeTarget'
+    // If mergeTarget has initials (from DVI), map those initials to 'name'
+    if(operators[mergeTarget].initials){
+      operatorMap[operators[mergeTarget].initials.toUpperCase()] = name;
+      localStorage.setItem('asy_operator_map', JSON.stringify(operatorMap));
+    }
+    // If 'name' looks like initials and mergeTarget is a full name, flip the merge
+    // (keep the full name, map the initials)
+    if(name.length <= 3 && mergeTarget.length > 3){
+      operatorMap[name.toUpperCase()] = mergeTarget;
+      localStorage.setItem('asy_operator_map', JSON.stringify(operatorMap));
+      // Transfer assignments from initials-name to full name
+      Object.entries(assignments).forEach(([sid,a])=>{
+        if(a?.operatorName===name){ a.operatorName=mergeTarget; a.color=operators[mergeTarget].color; }
+      });
+      delete operators[name];
+      toast(`${name} merged into ${mergeTarget}`,'ok');
+    } else {
+      // Transfer assignments from mergeTarget to name
+      Object.entries(assignments).forEach(([sid,a])=>{
+        if(a?.operatorName===mergeTarget){ a.operatorName=name; a.color=window._pickedColor||operators[name]?.color; }
+      });
+      delete operators[mergeTarget];
+      toast(`${mergeTarget} merged into ${name}`,'ok');
+    }
+    localStorage.setItem('asy_operators',JSON.stringify(operators));
+    localStorage.setItem('asy_assignments',JSON.stringify(assignments));
+    closeModal(); render();
+    return;
+  }
+
   if(operators[name]) operators[name].color = window._pickedColor||operators[name].color;
-  // Also update assignment color
   Object.values(assignments).forEach(a=>{ if(a.operatorName===name) a.color=window._pickedColor; });
   localStorage.setItem('asy_operators',JSON.stringify(operators));
   localStorage.setItem('asy_assignments',JSON.stringify(assignments));
