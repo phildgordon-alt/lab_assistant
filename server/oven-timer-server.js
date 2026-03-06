@@ -313,6 +313,31 @@ ${todayRuns.length ? `
 
 function buildLandingPage() {
   const now = new Date();
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const todayMs = todayStart.getTime();
+
+  // Shift starts at 5 AM
+  const shiftStart = new Date(); shiftStart.setHours(5,0,0,0);
+  const shiftH = Math.max(0, (now - shiftStart) / 3600000);
+
+  // Get live stats from trace
+  const allJobs = dviTrace.getJobs();
+  const shippedToday = allJobs.filter(j => j.stage === 'SHIPPING' && j.lastSeen >= todayMs).length;
+  const wipCount = allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length;
+
+  // Assembly completions (count ASSEMBLY PASS/FAIL events today)
+  let assembledToday = 0;
+  for (const j of allJobs) {
+    const history = dviTrace.getJobHistory(j.job_id);
+    if (!history || !history.events) continue;
+    for (const e of history.events) {
+      if (e.timestamp >= todayMs && (e.station === 'ASSEMBLY PASS' || e.station === 'ASSEMBLY FAIL')) {
+        assembledToday++;
+      }
+    }
+  }
+  const avgRate = shiftH > 0 ? (assembledToday / shiftH).toFixed(1) : '—';
+
   const apps = [
     { name:'Assembly Dashboard', icon:'🔧', desc:'Live assembly floor — stations, operators, leaderboard', path:'/standalone/AssemblyDashboard.html', color:'#8B5CF6' },
     { name:'Oven Timer', icon:'🔥', desc:'Coating oven rack timers — 6 racks per oven', path:'/standalone/OvenTimer.html', color:'#F59E0B' },
@@ -330,6 +355,7 @@ function buildLandingPage() {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta http-equiv="refresh" content="30"/>
 <title>Lab Assistant — Pair Eyewear</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
 <style>
@@ -338,10 +364,28 @@ function buildLandingPage() {
 </style>
 </head>
 <body>
-  <div style="text-align:center;margin-bottom:40px;">
+  <div style="text-align:center;margin-bottom:24px;">
     <div style="width:56px;height:56px;background:linear-gradient(135deg,#10B981,#059669);border-radius:12px;display:inline-flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-weight:800;font-size:16px;color:#fff;margin-bottom:12px;">LA</div>
     <div style="font-family:'Bebas Neue',sans-serif;font-size:36px;letter-spacing:2px;">LAB ASSISTANT</div>
-    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#445566;letter-spacing:3px;">PAIR EYEWEAR · IRVINE · PORT ${PORT}</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#445566;letter-spacing:3px;">PAIR EYEWEAR · IRVINE</div>
+  </div>
+  <div style="display:flex;gap:24px;justify-content:center;margin-bottom:32px;">
+    <div style="text-align:center;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#8B5CF6;line-height:1;">${assembledToday}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">ASSEMBLED TODAY</div>
+    </div>
+    <div style="text-align:center;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#06B6D4;line-height:1;">${avgRate}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">JOBS / HOUR</div>
+    </div>
+    <div style="text-align:center;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#3B82F6;line-height:1;">${shippedToday}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">SHIPPED TODAY</div>
+    </div>
+    <div style="text-align:center;">
+      <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#10B981;line-height:1;">${wipCount}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">TOTAL WIP</div>
+    </div>
   </div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:900px;width:100%;">
     ${cards}
