@@ -534,6 +534,161 @@ You are a specialist agent for Pair Eyewear's lens lab operations. You help with
   );
 }
 
+// ── DVI Files Panel ──────────────────────────────────────────────────────────
+function DVIFilesPanel({settings}){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(false);
+  const serverUrl=settings?.serverUrl||'http://localhost:3002';
+
+  const refresh=async()=>{
+    setLoading(true);
+    try{
+      const [traceRes, syncRes]=await Promise.all([
+        fetch(`${serverUrl}/api/dvi/trace/status`).then(r=>r.ok?r.json():null).catch(()=>null),
+        fetch(`${serverUrl}/api/dvi-sync/status`).then(r=>r.ok?r.json():null).catch(()=>null),
+      ]);
+      setData({trace:traceRes,sync:syncRes,fetchedAt:new Date()});
+    }catch(e){
+      setData({error:e.message,fetchedAt:new Date()});
+    }
+    setLoading(false);
+  };
+
+  useEffect(()=>{
+    refresh();
+    const iv=setInterval(refresh,10000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  const statusDot=(ok)=>({
+    width:8,height:8,borderRadius:'50%',
+    background:ok?T.green:T.red,
+    boxShadow:ok?`0 0 6px ${T.green}`:`0 0 6px ${T.red}`,
+    flexShrink:0
+  });
+
+  const trace=data?.trace;
+  const sync=data?.sync;
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:15,fontWeight:700,color:T.text}}>DVI File Sources</div>
+          <div style={{fontSize:11,color:T.textMuted}}>Live status of all DVI file watchers and sync services</div>
+        </div>
+        <button onClick={refresh} disabled={loading}
+          style={{background:T.blue,border:"none",borderRadius:8,padding:"8px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:loading?0.6:1}}>
+          {loading?"Refreshing...":"Refresh"}
+        </button>
+      </div>
+
+      {data?.error&&(
+        <Card style={{background:`${T.red}15`,border:`1px solid ${T.red}40`}}>
+          <div style={{color:T.red,fontWeight:700}}>Error connecting to lab server</div>
+          <div style={{fontSize:12,color:T.textMuted,marginTop:4}}>{data.error}</div>
+        </Card>
+      )}
+
+      {/* Trace Watcher */}
+      <Card style={{padding:0,overflow:'hidden'}}>
+        <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10}}>
+          <div style={statusDot(trace?.running)}/>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:mono}}>Trace Watcher (Tray Movement)</div>
+            <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>TRACE\LT*.DAT — poll every 5s, read-only</div>
+          </div>
+          <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{trace?.running?'RUNNING':'STOPPED'}</span>
+        </div>
+        {trace&&(
+          <div style={{padding:16,display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+            <div>
+              <div style={{fontSize:9,color:T.textMuted,fontFamily:mono,marginBottom:2}}>CURRENT FILE</div>
+              <div style={{fontSize:14,fontWeight:700,color:trace.currentFile?T.green:T.red,fontFamily:mono}}>{trace.currentFile||'None'}</div>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:T.textMuted,fontFamily:mono,marginBottom:2}}>BYTES READ</div>
+              <div style={{fontSize:14,fontWeight:700,color:T.text,fontFamily:mono}}>{(trace.byteOffset||0).toLocaleString()}</div>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:T.textMuted,fontFamily:mono,marginBottom:2}}>JOBS TRACKED</div>
+              <div style={{fontSize:14,fontWeight:700,color:T.blue,fontFamily:mono}}>{(trace.jobCount||0).toLocaleString()}</div>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:T.textMuted,fontFamily:mono,marginBottom:2}}>TOTAL EVENTS</div>
+              <div style={{fontSize:14,fontWeight:700,color:T.text,fontFamily:mono}}>{(trace.totalEvents||0).toLocaleString()}</div>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:T.textMuted,fontFamily:mono,marginBottom:2}}>LAST EVENT</div>
+              <div style={{fontSize:11,fontWeight:700,color:trace.lastEvent?T.green:T.textDim,fontFamily:mono}}>
+                {trace.lastEvent?new Date(trace.lastEvent).toLocaleTimeString():'—'}
+              </div>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:T.textMuted,fontFamily:mono,marginBottom:2}}>FILE STATUS</div>
+              <div style={{fontSize:11,fontWeight:700,color:trace.byteOffset>0?T.green:T.amber,fontFamily:mono}}>
+                {trace.byteOffset>0?'Active data':'Waiting for data'}
+              </div>
+            </div>
+          </div>
+        )}
+        {trace?.byStage&&(
+          <div style={{padding:"0 16px 16px",display:"flex",flexWrap:"wrap",gap:6}}>
+            {Object.entries(trace.byStage).sort((a,b)=>b[1]-a[1]).map(([stage,count])=>(
+              <span key={stage} style={{fontSize:10,fontFamily:mono,padding:"3px 8px",borderRadius:4,background:`${T.blue}15`,border:`1px solid ${T.border}`,color:T.textMuted}}>
+                {stage}: <span style={{color:T.text,fontWeight:700}}>{count.toLocaleString()}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* File Sync Sources */}
+      <Card style={{padding:0,overflow:'hidden'}}>
+        <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10}}>
+          <div style={statusDot(sync&&!sync.error)}/>
+          <div style={{flex:1}}>
+            <div style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:mono}}>DVI File Sync (SMB)</div>
+            <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>\\192.168.0.27\visdir — copy/move files from DVI share</div>
+          </div>
+          <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{sync?.running?'RUNNING':sync?'IDLE':'UNKNOWN'}</span>
+        </div>
+        {sync?.syncs?(
+          <div style={{padding:0}}>
+            {Object.entries(sync.syncs).map(([id,s],i,arr)=>(
+              <div key={id} style={{padding:"12px 16px",borderBottom:i<arr.length-1?`1px solid ${T.border}`:'none',display:"flex",alignItems:"center",gap:12}}>
+                <div style={statusDot(s.status==='polling'&&!s.lastError)}/>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,fontWeight:700,color:T.text,fontFamily:mono}}>{s.name||id}</div>
+                  {s.lastError&&(
+                    <div style={{fontSize:10,color:T.red,fontFamily:mono}}>{s.lastError}</div>
+                  )}
+                </div>
+                <div style={{textAlign:"right",flexShrink:0}}>
+                  <div style={{fontSize:11,fontWeight:700,color:s.filesProcessed>0?T.green:T.textDim,fontFamily:mono}}>{s.filesProcessed||0} files</div>
+                  <div style={{fontSize:9,color:T.textMuted,fontFamily:mono}}>
+                    {s.lastPoll?new Date(s.lastPoll).toLocaleTimeString():'never polled'}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ):(
+          <div style={{padding:16,textAlign:"center",color:T.textDim,fontSize:12}}>
+            {sync?.error||'No sync data available — check lab server is running'}
+          </div>
+        )}
+      </Card>
+
+      {data?.fetchedAt&&(
+        <div style={{fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"right"}}>
+          Last refreshed: {data.fetchedAt.toLocaleTimeString()}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Data Import Panel (DVI file upload) ───────────────────────────────────────
 function DataImportPanel({settings}){
   const [dragOver,setDragOver]=useState(false);
@@ -1194,6 +1349,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
         {id:"agents",icon:"🧠",label:"Agents"},
         {id:"mcptools",icon:"🔧",label:"MCP Tools"},
         {id:"dataimport",icon:"📥",label:"Data Import"},
+        {id:"dvifiles",icon:"📂",label:"DVI Files"},
         {id:"somequip",icon:"🏭",label:"SOM Equipment"},
         {id:"equipment",icon:"⚙️",label:"Equipment"},
         {id:"categories",icon:"📦",label:"Categories"},
@@ -1672,6 +1828,11 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
       {/* ══ DATA IMPORT ══ */}
       {sub==="dataimport"&&(
         <DataImportPanel settings={settings} />
+      )}
+
+      {/* ══ DVI FILES ══ */}
+      {sub==="dvifiles"&&(
+        <DVIFilesPanel settings={settings} />
       )}
 
       {/* ══ EQUIPMENT ══ */}

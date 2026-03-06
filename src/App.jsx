@@ -327,19 +327,8 @@ function initBatches() {
 }
 
 function initEvents() {
-  const types=[
-    {icon:"📥",msg:()=>`${genJob()} bound to ${genTray()} at Slot ${Math.floor(Math.random()*20)+1}`},
-    {icon:"🔍",msg:()=>`Lens scan: ${genJob()} → Tray located Shelf ${pick(["A","B","C"])}-${Math.floor(Math.random()*5)+1}`},
-    {icon:"⚡",msg:()=>`RUSH ${genJob()} routed to Rush Put Wall`},
-    {icon:"✅",msg:()=>`Batch ${pick(["B01","B02","B03"])} verified: ${Math.floor(Math.random()*10)+130}/140 lenses`},
-    {icon:"🌡",msg:()=>`${pick(MACHINES)}: Oven entry verified`},
-    {icon:"🔄",msg:()=>`${genJob()} re-trayed → cutting`},
-    {icon:"📊",msg:()=>`Batch fill: ${pick(COATING_TYPES)} at 85% in ${Math.floor(Math.random()*50)+10}min`},
-    {icon:"⚠",msg:()=>`Wedge alert: position ${Math.floor(Math.random()*140)+1} misaligned`},
-    {icon:"🔬",msg:()=>`QC: ${genJob()} passed inspection — ${pick(COATING_TYPES)}`},
-    {icon:"💥",msg:()=>`Break reported: ${genJob()} — ${pick(BREAK_TYPES)}`},
-  ];
-  return Array.from({length:15},(_,i)=>{const t=pick(types);return{id:i,time:new Date(Date.now()-i*18000-Math.random()*12000),icon:t.icon,message:t.msg()};});
+  // Events now populated from live DVI trace + SOM data
+  return [];
 }
 
 function initMessages() {
@@ -5479,6 +5468,44 @@ function LabAssistantV2(){
     return()=>clearInterval(iv);
   },[]);
 
+  // Live event feed from DVI trace + SOM
+  const lastEventTs=useRef(null);
+  useEffect(()=>{
+    const stageIcon=(s)=>({INCOMING:"📥",NEL:"🔍",AT_KARDEX:"📦",SURFACING:"⚙",COATING:"🌡",CUTTING:"✂",ASSEMBLY:"🔧",QC:"🔬",SHIPPING:"📤",BREAKAGE:"💥",HOLD:"⏸"}[s]||"📡");
+    const fetchEvents=async()=>{
+      try{
+        const res=await fetch("http://localhost:3002/api/dvi/trace/events?limit=20");
+        if(!res.ok)return;
+        const data=await res.json();
+        const evts=(data.events||data||[]);
+        if(evts.length===0)return;
+        const newEvts=lastEventTs.current?evts.filter(e=>(e.timestamp||0)>lastEventTs.current):evts.slice(0,10);
+        if(newEvts.length>0){
+          lastEventTs.current=Math.max(...evts.map(e=>e.timestamp||0));
+          const mapped=newEvts.map(e=>({
+            id:`dvi-${e.jobId}-${e.timestamp}`,
+            time:new Date(e.timestamp),
+            icon:stageIcon(e.stage||''),
+            message:`${e.jobId} → ${e.station}${e.operator?' ('+e.operator+')':''}`
+          }));
+          setEvents(prev=>[...mapped,...prev].slice(0,50));
+        }else if(!lastEventTs.current){
+          lastEventTs.current=Math.max(...evts.map(e=>e.timestamp||0));
+          const mapped=evts.slice(0,10).map(e=>({
+            id:`dvi-${e.jobId}-${e.timestamp}`,
+            time:new Date(e.timestamp),
+            icon:stageIcon(e.stage||''),
+            message:`${e.jobId} → ${e.station}${e.operator?' ('+e.operator+')':''}`
+          }));
+          setEvents(mapped);
+        }
+      }catch{}
+    };
+    fetchEvents();
+    const iv=setInterval(fetchEvents,5000);
+    return()=>clearInterval(iv);
+  },[]);
+
   // Use DVI jobs as single source of truth (from /api/dvi/data)
   // localStorage WIP data is deprecated - API now handles all WIP
   const mergedJobs=useMemo(()=>{
@@ -5575,18 +5602,7 @@ function LabAssistantV2(){
         if(b.status==="idle"&&Math.random()<0.1)return{...b,status:"loading",loaded:0,coatingType:pick(COATING_TYPES),controlState:"idle"};
         return b;
       }));
-      if(Math.random()<0.3){
-        const types=[
-          {icon:"📥",msg:()=>`${genJob()} bound to ${genTray()} at Slot ${Math.floor(Math.random()*20)+1}`},
-          {icon:"⚡",msg:()=>`RUSH ${genJob()} routed to Rush Wall`},
-          {icon:"✅",msg:()=>`Batch ${pick(["B01","B02","B03"])} verified: ${Math.floor(Math.random()*10)+130}/140`},
-          {icon:"🔄",msg:()=>`${genJob()} re-trayed → cutting`},
-          {icon:"🔬",msg:()=>`QC pass: ${genJob()} — ${pick(COATING_TYPES)}`},
-          {icon:"💥",msg:()=>`Break: ${genJob()} — ${pick(BREAK_TYPES)}`},
-        ];
-        const t=pick(types);
-        setEvents(prev=>[{id:Date.now(),time:new Date(),icon:t.icon,message:t.msg()},...prev.slice(0,30)]);
-      }
+      // Events now come from live DVI trace + SOM (see useEffect below)
     },2500);
     return()=>clearInterval(iv);
   },[]);

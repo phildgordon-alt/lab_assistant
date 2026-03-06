@@ -96,16 +96,18 @@ function parseTimestamp(dateStr, timeStr) {
 // Map station names to stage for KPI compatibility
 function stationToStage(station) {
   const s = (station || '').toUpperCase();
-  if (s.includes('INITIATE') || s.includes('NEW WORK')) return 'INCOMING';
-  if (s.includes('NE LENS') || s.includes('NEL') || s.includes('NOT ENOUGH')) return 'NEL';
+  if (s === 'CANCELED') return 'CANCELED';
+  if (s.includes('INITIATE') || s.includes('NEW WORK') || s.includes('FRAME LOGGED') || s.includes('LOG LENSES')) return 'INCOMING';
+  if (s.includes('NE LENS') || s.includes('NEL') || s.includes('NOT ENOUGH') || s.includes('NE FRMS')) return 'NEL';
   if (s.includes('KARDEX') || s.includes('MAN2KARDX')) return 'AT_KARDEX';
-  if (s.includes('DIGITAL CALC') || s.includes('GENERATOR') || s.includes('AUTO BLKER') || s.includes('POLISH') || s.includes('FINE')) return 'SURFACING';
+  if (s.includes('DIGITAL CALC') || s.includes('GENERATOR') || s.includes('AUTO BLKER') || s.includes('POLISH') || s.includes('FINE') || s.includes('MANBLKER') || s.includes('CBOB - INHSE SF') || s.includes('CBOB - DIG')) return 'SURFACING';
   if (s.includes('CCL') || s.includes('CCP') || s.includes('COAT') || s.includes('SENT TO COAT')) return 'COATING';
-  if (s.includes('EDGER') || s.includes('LCU') || s.includes('CUT')) return 'CUTTING';
-  if (s.includes('ASSEMBL')) return 'ASSEMBLY';
+  if (s.includes('EDGER') || s.includes('LCU') || s.includes('CUT') || s.includes('INHSE FIN')) return 'CUTTING';
+  if (s.includes('ASSEMBL') || s.includes('RECOMBOB')) return 'ASSEMBLY';
   if (s.includes('QC')) return 'QC';
   if (s.includes('SH CONVEY') || s.includes('SHIP')) return 'SHIPPING';
   if (s.includes('BREAKAGE')) return 'BREAKAGE';
+  if (s.includes('LASER REJECT') || s.includes('KICKOUT')) return 'HOLD';
   if (s.includes('QC_HOLD') || s.includes('HOLD')) return 'HOLD';
   return 'OTHER';
 }
@@ -149,19 +151,15 @@ class DviTraceWatcher extends EventEmitter {
       return false;
     }
 
-    const host = config?.host || process.env.DVI_SYNC_HOST || '192.168.0.27';
-    const user = config?.user || process.env.DVI_SYNC_USER || 'dvi';
-    const pass = config?.password || process.env.DVI_SYNC_PASSWORD || 'dvi';
-    const domain = config?.domain || process.env.DVI_SYNC_DOMAIN || 'WORKGROUP';
+    this._connConfig = {
+      host: config?.host || process.env.DVI_SYNC_HOST || '192.168.0.27',
+      user: config?.user || process.env.DVI_SYNC_USER || 'dvi',
+      pass: config?.password || process.env.DVI_SYNC_PASSWORD || 'dvi',
+      domain: config?.domain || process.env.DVI_SYNC_DOMAIN || 'WORKGROUP',
+    };
+    this._consecutiveErrors = 0;
 
-    this.client = new SMB2({
-      share: `\\\\${host}\\${TRACE_SHARE}`,
-      domain,
-      username: user,
-      password: pass,
-      port: 445,
-      autoCloseTimeout: 0 // Keep connection alive
-    });
+    this._createClient();
 
     this.running = true;
     this.currentFile = null;
@@ -171,8 +169,24 @@ class DviTraceWatcher extends EventEmitter {
     this.poll();
     this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
 
+    const { host } = this._connConfig;
     console.log(`[DVI-Trace] Started — watching \\\\${host}\\${TRACE_SHARE}\\${TRACE_DIR}\\LT*.DAT (every ${POLL_INTERVAL/1000}s)`);
     return true;
+  }
+
+  _createClient() {
+    if (this.client) {
+      try { this.client.close(); } catch (e) {}
+    }
+    const { host, user, pass, domain } = this._connConfig;
+    this.client = new SMB2({
+      share: `\\\\${host}\\${TRACE_SHARE}`,
+      domain,
+      username: user,
+      password: pass,
+      port: 445,
+      autoCloseTimeout: 0
+    });
   }
 
   stop() {
@@ -209,6 +223,7 @@ class DviTraceWatcher extends EventEmitter {
       // so we read full file and slice from offset
       const data = await this.readFile(remotePath);
       if (!data) return;
+      this._consecutiveErrors = 0;
 
       const fileSize = data.length;
 
@@ -242,8 +257,19 @@ class DviTraceWatcher extends EventEmitter {
       }
 
     } catch (err) {
-      // Don't spam errors for file not found (file might not exist yet at midnight)
-      if (err.message && err.message.includes('STATUS_OBJECT_NAME_NOT_FOUND')) return;
+      // Don't spam errors for transient/expected SMB conditions
+      const msg = err.message || '';
+      if (msg.includes('STATUS_OBJECT_NAME_NOT_FOUND')) return;
+      if (msg.includes('STATUS_PENDING') || msg.includes('ETIMEDOUT') || msg.includes('ECONNRESET') || msg.includes('EALREADY')) {
+        this._consecutiveErrors = (this._consecutiveErrors || 0) + 1;
+        // Reconnect after 3 consecutive transient errors
+        if (this._consecutiveErrors >= 3 && this._connConfig) {
+          console.log('[DVI-Trace] Reconnecting SMB client after repeated errors');
+          this._createClient();
+          this._consecutiveErrors = 0;
+        }
+        return;
+      }
       this.emit('error', err);
     }
   }
@@ -304,7 +330,8 @@ class DviTraceWatcher extends EventEmitter {
       job.hasBreakage = true;
     }
 
-    // Add to recent events ring buffer
+    // Add to recent events ring buffer (include stage for API consumers)
+    evt.stage = stage;
     this.events.push(evt);
     if (this.events.length > 5000) {
       this.events = this.events.slice(-5000);
@@ -369,6 +396,17 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   /**
+   * Get job counts by current stage (not event counts)
+   */
+  getJobsByStage() {
+    const byStage = {};
+    for (const job of this.jobs.values()) {
+      byStage[job.stage] = (byStage[job.stage] || 0) + 1;
+    }
+    return byStage;
+  }
+
+  /**
    * Get recent events
    */
   getRecentEvents(limit = 100) {
@@ -404,7 +442,8 @@ class DviTraceWatcher extends EventEmitter {
       lastEvent: this.todayStats.lastEvent
         ? new Date(this.todayStats.lastEvent).toISOString()
         : null,
-      byStage: this.todayStats.byStage
+      byStage: this.getJobsByStage(),
+      eventsByStage: this.todayStats.byStage
     };
   }
 

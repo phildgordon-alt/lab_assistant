@@ -35,11 +35,12 @@
         "path": "VISION\\Q\\jobexport"
       },
       "dest": "./data/dvi/jobs",
-      "action": "move",
+      "action": "copy",
       "patterns": ["*.xml", "*.json"],
       "pollInterval": 30000,
       "processJson": true,
-      "processXml": true
+      "processXml": true,
+      "note": "should be move — needs delete permission on DVI share"
     },
     {
       "id": "daily_export",
@@ -56,24 +57,25 @@
     },
     {
       "id": "shipped",
-      "name": "Shipped Invoices (PDF)",
+      "name": "Shipped Invoices (XML)",
       "enabled": true,
       "source": {
         "share": "visdir",
         "path": "VISION\\SHIPLOG"
       },
       "dest": "./data/dvi/shipped",
-      "action": "move",
+      "action": "copy",
       "patterns": ["*.xml"],
       "pollInterval": 60000,
-      "archiveDest": true
+      "archiveDest": true,
+      "note": "should be move — needs delete permission on DVI share"
     }
   ],
 
   "processing": {
     "onJobXml": "parseAndStore",
     "onJobJson": "applyChanges",
-    "onShippedPdf": "archiveAndNotify",
+    "onShippedXml": "archiveAndNotify",
     "onBreakage": "importReport"
   },
 
