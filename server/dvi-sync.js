@@ -146,29 +146,31 @@ class SmbClient {
     const client = await this.getClient(shareName);
 
     return new Promise((resolve, reject) => {
-      const fullPath = remotePath.replace(/^\//, '');
+      const fullPath = remotePath.replace(/^\//, '').replace(/\//g, '\\');
       client.readdir(fullPath, (err, files) => {
         if (err) {
-          // Directory might not exist
-          if (err.code === 'STATUS_OBJECT_NAME_NOT_FOUND') {
+          // Directory might not exist or path invalid
+          if (err.code === 'STATUS_OBJECT_NAME_NOT_FOUND' || err.code === 'STATUS_OBJECT_NAME_INVALID') {
             return resolve([]);
           }
           return reject(err);
         }
 
+        // SMB2 readdir returns plain strings, not objects
+        const fileNames = files.map(f => typeof f === 'string' ? f : f.name).filter(Boolean);
+
         // Filter by patterns
-        const filtered = files.filter(file => {
-          if (file.isDirectory) return false;
+        const filtered = fileNames.filter(name => {
           return patterns.some(pattern => {
             const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
-            return regex.test(file.name);
+            return regex.test(name);
           });
         });
 
-        resolve(filtered.map(f => ({
-          name: f.name,
-          size: f.size,
-          mtime: f.mtime
+        resolve(filtered.map(name => ({
+          name,
+          size: 0,  // SMB2 readdir doesn't provide size; we get it on read
+          mtime: null
         })));
       });
     });
@@ -178,7 +180,7 @@ class SmbClient {
     const client = await this.getClient(shareName);
 
     return new Promise((resolve, reject) => {
-      const fullPath = remotePath.replace(/^\//, '');
+      const fullPath = remotePath.replace(/^\//, '').replace(/\//g, '\\');
       client.readFile(fullPath, (err, data) => {
         if (err) return reject(err);
         resolve(data);
@@ -190,7 +192,7 @@ class SmbClient {
     const client = await this.getClient(shareName);
 
     return new Promise((resolve, reject) => {
-      const fullPath = remotePath.replace(/^\//, '');
+      const fullPath = remotePath.replace(/^\//, '').replace(/\//g, '\\');
       client.unlink(fullPath, (err) => {
         if (err) return reject(err);
         resolve();
@@ -273,6 +275,11 @@ class DviSyncService extends EventEmitter {
     this.running = false;
     this.intervals = {};
     this.processors = {};
+
+    // Prevent unhandled 'error' events from crashing the process
+    this.on('error', (err) => {
+      console.error('[DVI-Sync] Event error:', err.sync || '', err.error?.message || err.message || err);
+    });
   }
 
   // Register custom file processors
@@ -315,7 +322,8 @@ class DviSyncService extends EventEmitter {
 
     this.running = true;
 
-    // Start sync loops
+    // Start sync loops (stagger initial polls to avoid SMB connection race)
+    let staggerDelay = 0;
     for (const sync of this.config.syncs) {
       if (!sync.enabled) {
         console.log(`[DVI-Sync] Skipping disabled sync: ${sync.name}`);
@@ -331,16 +339,20 @@ class DviSyncService extends EventEmitter {
         status: 'starting'
       };
 
-      // Initial poll
-      this.pollSync(sync);
+      // Stagger initial polls by 2s each to avoid SMB connection races
+      const delay = staggerDelay;
+      setTimeout(() => {
+        this.pollSync(sync).catch(() => {});
+      }, delay);
+      staggerDelay += 2000;
 
       // Set up interval
       const interval = sync.pollInterval || 30000;
       this.intervals[sync.id] = setInterval(() => {
-        this.pollSync(sync);
+        this.pollSync(sync).catch(() => {});
       }, interval);
 
-      console.log(`[DVI-Sync] Started: ${sync.name} (every ${interval / 1000}s)`);
+      console.log(`[DVI-Sync] Started: ${sync.name} (every ${interval / 1000}s, initial delay ${delay / 1000}s)`);
     }
 
     console.log(`[DVI-Sync] Service started with ${Object.keys(this.intervals).length} syncs`);
@@ -389,11 +401,27 @@ class DviSyncService extends EventEmitter {
         return;
       }
 
+      // For copy mode, skip files we already have locally
+      let toProcess = files;
+      if (sync.action === 'copy') {
+        fs.mkdirSync(sync.dest, { recursive: true });
+        toProcess = files.filter(f => !fs.existsSync(path.join(sync.dest, f.name)));
+      }
+
+      if (toProcess.length === 0) {
+        syncState.status = 'idle';
+        return;
+      }
+
+      // Limit batch size to avoid overwhelming SMB connection
+      const batchSize = sync.batchSize || 50;
+      const batch = toProcess.slice(0, batchSize);
+
       syncState.status = 'processing';
-      console.log(`[DVI-Sync] ${sync.name}: Found ${files.length} files`);
+      console.log(`[DVI-Sync] ${sync.name}: Found ${files.length} files, ${toProcess.length} new, processing ${batch.length}`);
 
       // Process each file
-      for (const file of files) {
+      for (const file of batch) {
         await this.processFile(sync, file);
       }
 
@@ -415,7 +443,8 @@ class DviSyncService extends EventEmitter {
 
   async processFile(sync, file) {
     const syncState = state.syncs[sync.id];
-    const remotePath = path.join(sync.source.path, file.name);
+    // Use backslash for SMB remote path
+    const remotePath = sync.source.path + '\\' + file.name;
     const localPath = path.join(sync.dest, file.name);
 
     try {
@@ -433,12 +462,14 @@ class DviSyncService extends EventEmitter {
         await this.client.deleteFile(sync.source.share, remotePath);
       }
 
+      const fileSize = data.length || 0;
+
       // Update stats
       syncState.filesProcessed++;
       state.stats.totalFiles++;
-      state.stats.totalBytes += file.size;
+      state.stats.totalBytes += fileSize;
 
-      console.log(`[DVI-Sync] ${sync.action === 'move' ? 'Moved' : 'Copied'}: ${file.name} (${(file.size / 1024).toFixed(1)}KB)`);
+      console.log(`[DVI-Sync] ${sync.action === 'move' ? 'Moved' : 'Copied'}: ${file.name} (${(fileSize / 1024).toFixed(1)}KB)`);
 
       // Run processor if configured
       await this.runProcessor(sync, localPath, file, data);

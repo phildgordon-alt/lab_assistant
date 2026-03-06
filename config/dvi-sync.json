@@ -4,10 +4,10 @@
 
   "connection": {
     "type": "smb",
-    "host": "${DVI_SYNC_HOST:-Pairtcpmain-at}",
+    "host": "${DVI_SYNC_HOST:-192.168.0.27}",
     "port": 445,
-    "user": "${DVI_SYNC_USER}",
-    "password": "${DVI_SYNC_PASSWORD}",
+    "user": "${DVI_SYNC_USER:-dvi}",
+    "password": "${DVI_SYNC_PASSWORD:-dvi}",
     "domain": "${DVI_SYNC_DOMAIN:-WORKGROUP}"
   },
 
@@ -18,11 +18,11 @@
       "enabled": true,
       "source": {
         "share": "visdir",
-        "path": "/vision/LDS"
+        "path": "VISION\\LDS\\breakage"
       },
       "dest": "./data/dvi/breakage",
       "action": "copy",
-      "patterns": ["*.csv", "*.xlsx", "*.txt"],
+      "patterns": ["*.txt"],
       "pollInterval": 60000,
       "archiveSource": false
     },
@@ -32,14 +32,27 @@
       "enabled": true,
       "source": {
         "share": "visdir",
-        "path": "/VISION/Q/jobexport"
+        "path": "VISION\\Q\\jobexport"
       },
       "dest": "./data/dvi/jobs",
-      "action": "move",
+      "action": "copy",
       "patterns": ["*.xml", "*.json"],
       "pollInterval": 30000,
       "processJson": true,
       "processXml": true
+    },
+    {
+      "id": "daily_export",
+      "name": "Daily Job Export",
+      "enabled": true,
+      "source": {
+        "share": "visdir",
+        "path": "EXPORT\\D"
+      },
+      "dest": "./data/dvi/daily",
+      "action": "copy",
+      "patterns": ["*.txt"],
+      "pollInterval": 300000
     },
     {
       "id": "shipped",
@@ -47,10 +60,10 @@
       "enabled": true,
       "source": {
         "share": "visdir",
-        "path": "/VISION/invoices"
+        "path": "VISION\\invoices"
       },
       "dest": "./data/dvi/shipped",
-      "action": "move",
+      "action": "copy",
       "patterns": ["*.pdf"],
       "pollInterval": 60000,
       "archiveDest": true
