@@ -219,47 +219,48 @@ function useSlackConfig(onIncoming, setMessages){
         setProxyConnected(true);
         const data=await r.json();
         const allMsgs=(data.messages||[]).filter(m=>
-          m.type==="message" &&
           m.text &&
-          !m.bot_id &&
+          m.from!=="Unknown" &&
+          !m.text.startsWith('🔬') &&
           !m.text.match(/^(?:\/ai|@ai|ai:|\/lab)\b/i) &&
           !m.text.match(/<@U[A-Z0-9]+>/i)
         );
 
+        // Gateway returns {id, from, text, time, priority, source} — use those fields directly
+        const ts = m => m.ts || m.id || '0';
+
         if(!initialLoad.current && allMsgs.length>0 && setMessages){
           initialLoad.current=true;
           const slackMsgs=allMsgs.slice(0,20).map(m=>({
-            id:`slack-${m.ts}`,
-            from:m.bot_profile?.name||m.username||m.user||"Slack",
-            text:m.text.replace(/<[^>]*>/g,'').slice(0,200),
-            time:new Date(parseFloat(m.ts)*1000),
-            priority:m.text.toLowerCase().includes("rush")||m.text.toLowerCase().includes("hot")||m.text.toLowerCase().includes("critical")?"high":"normal",
+            id:`slack-${ts(m)}`,
+            from:m.from||m.username||m.user||"Slack",
+            text:(m.text||'').replace(/<[^>]*>/g,'').slice(0,200),
+            time:m.time?new Date(m.time):new Date(parseFloat(ts(m))*1000),
+            priority:m.priority||(m.text?.toLowerCase().includes("rush")||m.text?.toLowerCase().includes("hot")?"high":"normal"),
             source:"slack",
-            isBot:!!m.bot_id,
           }));
           setMessages(slackMsgs);
-          lastTs.current=allMsgs[0].ts;
+          lastTs.current=ts(allMsgs[0]);
           return;
         }
 
-        const humanMsgs=allMsgs.filter(m=>!m.bot_id);
-        if(lastTs.current && humanMsgs.length>0){
-          const newMsgs=humanMsgs.filter(m=>parseFloat(m.ts)>parseFloat(lastTs.current));
+        if(lastTs.current && allMsgs.length>0){
+          const newMsgs=allMsgs.filter(m=>parseFloat(ts(m))>parseFloat(lastTs.current));
           if(newMsgs.length>0){
-            lastTs.current=humanMsgs[0].ts;
+            lastTs.current=ts(allMsgs[0]);
             newMsgs.reverse().forEach(m=>{
               onIncoming({
-                id:`slack-${m.ts}`,
-                from:m.username||m.user||"Slack",
-                text:m.text,
-                time:new Date(parseFloat(m.ts)*1000),
-                priority:m.text.toLowerCase().includes("rush")||m.text.toLowerCase().includes("hot")?"high":"normal",
+                id:`slack-${ts(m)}`,
+                from:m.from||m.username||m.user||"Slack",
+                text:m.text||'',
+                time:m.time?new Date(m.time):new Date(parseFloat(ts(m))*1000),
+                priority:m.priority||(m.text?.toLowerCase().includes("rush")||m.text?.toLowerCase().includes("hot")?"high":"normal"),
                 source:"slack",
               });
             });
           }
         }
-        if(!lastTs.current && allMsgs.length>0) lastTs.current=allMsgs[0].ts;
+        if(!lastTs.current && allMsgs.length>0) lastTs.current=ts(allMsgs[0]);
       }catch(e){setProxyConnected(false);}
     };
     poll();
@@ -1156,16 +1157,11 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
       );
 
       case "putwall_dual": {
-        // Calculate At Kardex count from wipJobs
-        const atKardexJobs = wipJobs.filter(j => {
-          const s = (j.station || '').toUpperCase();
-          return s.includes('AT KARDEX') || s.includes('MAN2KARDX');
-        });
-        const atKardexCount = atKardexJobs.length;
-
         // Get order counts by category from ItemPath
         const wh1 = putWallData.WH1 || {};
         const wh2 = putWallData.WH2 || {};
+        // At Kardex = total of both warehouses
+        const atKardexCount = (wh1.totalOrders || 0) + (wh2.totalOrders || 0);
 
         // Render warehouse stats card
         const renderWarehouseStats = (whName, whData) => {
@@ -1506,11 +1502,16 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
             }
           });
         }else{
-          displayItems=inventory.alerts.slice(0,20).map(a=>({
+          // Sort: LOW/HIGH first (actionable), then CRITICAL (qty=0)
+          const sorted=[...inventory.alerts].sort((a,b)=>{
+            const order={LOW:0,HIGH:1,CRITICAL:2};
+            return (order[a.severity]??3)-(order[b.severity]??3);
+          });
+          displayItems=sorted.slice(0,20).map(a=>({
             sku:a.material?.sku||a.sku||"?",
             name:a.material?.name||a.material?.description||a.name||"Unknown",
-            qty:a.qtyOnHand??0,
-            thresh:a.reorderPoint||20,
+            qty:a.qtyOnHand??a.qty??0,
+            thresh:a.reorderPoint||a.threshold||20,
             severity:a.severity,
             found:true
           }));

@@ -35,7 +35,7 @@
         "path": "VISION\\Q\\jobexport"
       },
       "dest": "./data/dvi/jobs",
-      "action": "copy",
+      "action": "move",
       "patterns": ["*.xml", "*.json"],
       "pollInterval": 30000,
       "processJson": true,
@@ -60,11 +60,11 @@
       "enabled": true,
       "source": {
         "share": "visdir",
-        "path": "VISION\\invoices"
+        "path": "VISION\\SHIPLOG"
       },
       "dest": "./data/dvi/shipped",
-      "action": "copy",
-      "patterns": ["*.pdf"],
+      "action": "move",
+      "patterns": ["*.xml"],
       "pollInterval": 60000,
       "archiveDest": true
     }
