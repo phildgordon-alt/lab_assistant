@@ -45,6 +45,9 @@ const TOOL_LABELS: Record<string, string> = {
   query_database: 'Running database query',
   call_api: 'Calling API',
   think_aloud: 'Analyzing',
+  search_knowledge: 'Searching knowledge base',
+  get_knowledge_doc: 'Reading document',
+  generate_csv_report: 'Generating CSV report',
 };
 
 function getToolLabel(toolName: string): string {
@@ -178,6 +181,19 @@ export async function runAgent(
       systemPrompt = loadAgentPrompt(agentName);
     }
 
+    // Fetch always-on knowledge base context
+    try {
+      const labServerUrl = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:3002';
+      const kbRes = await fetch(`${labServerUrl}/api/knowledge/context?agent=${agentName}`);
+      if (kbRes.ok) {
+        const kbData = await kbRes.json() as any;
+        if (kbData.context) systemPrompt += `\n\n--- LAB KNOWLEDGE BASE ---\n${kbData.context}`;
+        if (kbData.availableDocs?.length > 0) {
+          systemPrompt += `\n\nAdditional documents available on request (use search_knowledge tool): ${kbData.availableDocs.map((d: any) => `"${d.title}" (${d.category})`).join(', ')}`;
+        }
+      }
+    } catch { /* continue without */ }
+
     const result = await withCircuitBreaker(async () => {
       // Build messages array for agentic loop
       const messages: Anthropic.MessageParam[] = [
@@ -294,10 +310,24 @@ export async function runAgentStreaming(
       basePrompt = loadAgentPrompt(agentName);
     }
 
+    // Fetch always-on knowledge base context for this agent
+    let knowledgeContext = '';
+    try {
+      const labServerUrl = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:3002';
+      const kbRes = await fetch(`${labServerUrl}/api/knowledge/context?agent=${agentName}`);
+      if (kbRes.ok) {
+        const kbData = await kbRes.json() as any;
+        if (kbData.context) knowledgeContext = `\n\n--- LAB KNOWLEDGE BASE ---\n${kbData.context}`;
+        if (kbData.availableDocs?.length > 0) {
+          knowledgeContext += `\n\nAdditional documents available on request (use search_knowledge tool): ${kbData.availableDocs.map((d: any) => `"${d.title}" (${d.category})`).join(', ')}`;
+        }
+      }
+    } catch { /* knowledge base unavailable, continue without */ }
+
     // If context is provided, prepend it to the system prompt
     const systemPrompt = context
-      ? `${basePrompt}\n\n--- LIVE LAB CONTEXT ---\n${context}`
-      : basePrompt;
+      ? `${basePrompt}${knowledgeContext}\n\n--- LIVE LAB CONTEXT ---\n${context}`
+      : `${basePrompt}${knowledgeContext}`;
 
     await withCircuitBreaker(async () => {
       // Build messages array for agentic loop

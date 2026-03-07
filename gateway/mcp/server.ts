@@ -373,6 +373,26 @@ export async function handleToolCall(
     case 'think_aloud':
       return handleThinkAloud(toolInput.thought as string);
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // KNOWLEDGE BASE TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'search_knowledge':
+      return handleSearchKnowledge(
+        toolInput.query as string,
+        toolInput.category as string | undefined,
+        toolInput.limit as number ?? 5
+      );
+
+    case 'get_knowledge_doc':
+      return handleGetKnowledgeDoc(toolInput.doc_id as string);
+
+    case 'generate_csv_report':
+      return handleGenerateCsvReport(
+        toolInput.title as string,
+        toolInput.headers as string[],
+        toolInput.rows as string[][]
+      );
+
     default:
       throw new Error(`Unknown tool: ${toolName}`);
   }
@@ -1728,6 +1748,107 @@ async function handleGetOvenRackStatus(): Promise<unknown> {
       racksAvailable: ovens.racksAvailable || 0,
       ovenIncoming: ovens.ovenIncoming || [],
       trackedRacks: rackJobsRes?.racks || {},
+    };
+  } catch (e: any) {
+    return { error: e.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE BASE HANDLERS
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function handleSearchKnowledge(
+  query: string,
+  category: string | undefined,
+  limit: number
+): Promise<unknown> {
+  try {
+    const params = new URLSearchParams({ q: query, limit: String(limit) });
+    if (category) params.set('category', category);
+    const res = await fetch(`${LAB_SERVER_URL}/api/knowledge/search?${params}`);
+    const data = await res.json() as any;
+    if (!data.results || data.results.length === 0) {
+      return { message: `No documents found for "${query}". The knowledge base may not have documents on this topic yet.`, query, results: [] };
+    }
+    // Return results with text excerpts
+    const results = [];
+    for (const doc of data.results) {
+      // Fetch text content for each result
+      let excerpt = '';
+      try {
+        const docRes = await fetch(`${LAB_SERVER_URL}/api/knowledge/doc/${doc.id}`);
+        const docData = await docRes.json() as any;
+        if (docData.textContent) {
+          // Find relevant excerpt around search terms
+          const text = docData.textContent;
+          const lowerText = text.toLowerCase();
+          const terms = query.toLowerCase().split(/\s+/);
+          let bestPos = 0;
+          for (const term of terms) {
+            const idx = lowerText.indexOf(term);
+            if (idx !== -1) { bestPos = idx; break; }
+          }
+          const start = Math.max(0, bestPos - 200);
+          const end = Math.min(text.length, bestPos + 800);
+          excerpt = (start > 0 ? '...' : '') + text.substring(start, end) + (end < text.length ? '...' : '');
+        }
+      } catch { /* skip excerpt */ }
+
+      results.push({
+        id: doc.id,
+        title: doc.title,
+        category: doc.category,
+        tags: doc.tags,
+        description: doc.description,
+        excerpt: excerpt || doc.description || '(no text preview)',
+        relevance: doc._score,
+      });
+    }
+    return { query, total: results.length, results };
+  } catch (e: any) {
+    return { error: e.message };
+  }
+}
+
+async function handleGetKnowledgeDoc(docId: string): Promise<unknown> {
+  try {
+    const res = await fetch(`${LAB_SERVER_URL}/api/knowledge/doc/${docId}`);
+    const data = await res.json() as any;
+    if (data.error) return { error: data.error };
+    return {
+      id: data.id,
+      title: data.title,
+      category: data.category,
+      tags: data.tags,
+      description: data.description,
+      content: data.textContent || '(no text content available — this may be a binary file like PDF/DOCX)',
+    };
+  } catch (e: any) {
+    return { error: e.message };
+  }
+}
+
+async function handleGenerateCsvReport(
+  title: string,
+  headers: string[],
+  rows: string[][]
+): Promise<unknown> {
+  try {
+    const res = await fetch(`${LAB_SERVER_URL}/api/knowledge/generate-csv`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, headers, rows }),
+    });
+    const data = await res.json() as any;
+    if (!data.ok) return { error: data.error || 'Failed to generate CSV' };
+    return {
+      message: `CSV report "${title}" generated successfully with ${data.rows} rows.`,
+      filename: data.filename,
+      downloadUrl: `${LAB_SERVER_URL}${data.path}`,
+      downloadPath: data.path,
+      rows: data.rows,
+      size: data.size,
     };
   } catch (e: any) {
     return { error: e.message };

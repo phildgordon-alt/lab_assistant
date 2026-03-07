@@ -516,6 +516,20 @@ function reconcileOperatorStats(){
   });
 
   localStorage.setItem('asy_operators', JSON.stringify(operators));
+  syncConfigToServer();
+}
+
+// Push assignments + operator map to server so main app can read them
+let lastSyncHash = '';
+function syncConfigToServer(){
+  const payload = JSON.stringify({ assignments, operatorMap });
+  if (payload === lastSyncHash) return; // no change
+  lastSyncHash = payload;
+  fetch(`${serverUrl}/api/assembly/config`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: payload
+  }).catch(() => {}); // silent fail
 }
 
 function isToday(iso){

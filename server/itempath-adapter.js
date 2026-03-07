@@ -361,13 +361,15 @@ async function poll() {
     // Parallel fetch — materials, active orders, transactions, warehouses, locations
     // Note: Need 20000+ locations to capture all carousel bins
     // type=4 transactions are completed picks
-    const [materialsResp, ordersResp, txResp, pickTxResp, warehousesResp, locationsResp] = await Promise.all([
+    const [materialsResp, ordersResp, txResp, pickTxResp, putTxResp, warehousesResp, locationsResp] = await Promise.all([
       ipFetch('/api/materials', { limit: 10000 }),
       // ItemPath uses "In Process" status (not "in_progress")
       ipFetch('/api/orders',    { limit: 500 }),  // Fetch all, filter by status client-side
       ipFetch('/api/transactions', { after: twoHrsAgo, limit: 500 }).catch(() => ({ transactions: [] })),
       // Today's pick transactions (type=4) for hourly stats
       ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 2000 }).catch(() => ({ transactions: [] })),
+      // Today's put/receive transactions (type=3) for put stats
+      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 5000 }).catch(() => ({ transactions: [] })),
       ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
       ipFetch('/api/locations', { limit: 20000 }).catch(() => ({ locations: [] })),
     ]);
@@ -382,6 +384,7 @@ async function poll() {
 
     const recentTx    = (txResp.transactions || txResp.data || txResp || []).map(normalizeTransaction);
     const pickTxList  = (pickTxResp.transactions || pickTxResp.data || pickTxResp || []);
+    const putTxList   = (putTxResp.transactions || putTxResp.data || putTxResp || []);
     const alerts      = detectAlerts(materials);
     const warehouses  = (warehousesResp.warehouses || []).map(w => ({ id: w.id, name: w.name }));
 
@@ -404,6 +407,16 @@ async function poll() {
       }
     }
 
+    // Calculate today's puts (type=3 receive transactions) per warehouse
+    let todayPutsTotal = { WH1: 0, WH2: 0 };
+    for (const tx of putTxList) {
+      const wh = tx.warehouseName || (tx.orderName && tx.orderName.startsWith('WH') ? tx.orderName.split(' ')[0] : null) || 'Unknown';
+      if (wh === 'WH1' || wh === 'WH2') {
+        todayPutsTotal[wh] += 1;
+      }
+    }
+    if (putTxList.length > 0) console.log(`[ItemPath] Puts today: WH1=${todayPutsTotal.WH1}, WH2=${todayPutsTotal.WH2} (${putTxList.length} total txns)`);
+
     // Calculate warehouse stats from orders (active/queued counts)
     const warehouseStats = {};
 
@@ -423,9 +436,9 @@ async function poll() {
       warehouseStats[wh].totalQty += lines.reduce((sum, l) => sum + (parseFloat(l.quantity) || 0), 0);
     }
 
-    // Set today's picks from completed transactions
-    if (warehouseStats.WH1) warehouseStats.WH1.todayPicks = todayPicksTotal.WH1;
-    if (warehouseStats.WH2) warehouseStats.WH2.todayPicks = todayPicksTotal.WH2;
+    // Set today's picks and puts from completed transactions
+    if (warehouseStats.WH1) { warehouseStats.WH1.todayPicks = todayPicksTotal.WH1; warehouseStats.WH1.todayPuts = todayPutsTotal.WH1; }
+    if (warehouseStats.WH2) { warehouseStats.WH2.todayPicks = todayPicksTotal.WH2; warehouseStats.WH2.todayPuts = todayPutsTotal.WH2; }
 
     // Calculate VLM and carousel stats from locations
     const locations = (locationsResp.locations || []);

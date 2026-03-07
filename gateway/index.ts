@@ -158,25 +158,7 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     }
   }
 
-  // 7. DVI SOAP API (real-time connection to DVI RxLab)
-  const dviPassword = process.env.DVI_PASSWORD;
-  if (!dviPassword) {
-    connections.dvi = { status: 'unconfigured', message: 'DVI_PASSWORD not set' };
-  } else {
-    try {
-      const start = Date.now();
-      // Import dynamically to avoid circular dependency at startup
-      const { healthCheck } = await import('./sources/dvi-soap.js');
-      const health = await healthCheck();
-      const latency = Date.now() - start;
-      connections.dvi = health.ok
-        ? { status: 'connected', message: 'DVI SOAP API connected', latency }
-        : { status: 'disconnected', message: health.message };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to connect';
-      connections.dvi = { status: 'disconnected', message: msg };
-    }
-  }
+  // 7. DVI SOAP API — removed, using DVI Trace instead
 
   // 8. Limble (CMMS/maintenance system) - uses Basic Auth with client credentials
   // Docs: https://apidocs.limblecmms.com/
@@ -1523,87 +1505,7 @@ function syncDviToSqlite(): void {
 // Load DVI data on startup
 loadDviData();
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DVI SOAP Polling - Download new orders automatically
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SOAP_POLL_INTERVAL = 60_000; // Poll every 60 seconds
-
-async function pollDviSoapOrders(): Promise<void> {
-  try {
-    const orders = await dviSoap.downloadOrders(100);
-    if (orders.length === 0) return;
-
-    log.info(`[DVI] SOAP: Downloaded ${orders.length} new orders`);
-
-    // Convert SOAP orders to job format and add to database
-    const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
-    if (!existsSync(dbPath)) return;
-
-    const db = new Database(dbPath);
-
-    const upsertStmt = db.prepare(`
-      INSERT INTO dvi_jobs (id, invoice, tray, stage, station, status, rush, entry_date, days_in_lab, coating, frame_name, data_date, rx_number, archived, last_sync)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'))
-      ON CONFLICT(id) DO UPDATE SET
-        stage = excluded.stage,
-        status = excluded.status,
-        coating = excluded.coating,
-        last_sync = datetime('now')
-    `);
-
-    let addedCount = 0;
-    const today = new Date().toISOString().split('T')[0];
-
-    db.transaction(() => {
-      for (const order of orders) {
-        // Use remoteInvoice as job_id, fallback to orderNumber
-        const jobId = order.remoteInvoice || order.orderNumber;
-        const coating = order.rightLens?.coating || order.leftLens?.coating || '';
-
-        upsertStmt.run(
-          jobId,
-          order.remoteInvoice,
-          order.remoteInvoice, // tray = invoice for new orders
-          'S', // New orders start in Surfacing
-          null, // station
-          'In Progress',
-          'N', // rush - would need to parse from instructions
-          today, // entry_date
-          0, // days_in_lab
-          coating,
-          order.frame?.style || '',
-          today, // data_date
-          order.rxNumber
-        );
-        addedCount++;
-      }
-    })();
-
-    db.close();
-
-    if (addedCount > 0) {
-      log.info(`[DVI] SOAP: Added/updated ${addedCount} jobs to WIP`);
-    }
-  } catch (err: any) {
-    // Don't log error if it's just no password configured
-    if (!err.message?.includes('No password')) {
-      log.error('[DVI] SOAP polling error:', err.message);
-    }
-  }
-}
-
-// Start SOAP polling - moved to after server starts (in start() function)
-// This prevents blocking server startup
-function startSoapPolling(): void {
-  if (process.env.DISABLE_SOAP_POLLING === 'true') {
-    log.info('[DVI] SOAP polling disabled via DISABLE_SOAP_POLLING env');
-    return;
-  }
-  pollDviSoapOrders().catch(err => log.warn('[DVI] Initial SOAP poll failed:', err.message));
-  setInterval(pollDviSoapOrders, SOAP_POLL_INTERVAL);
-  log.info(`[DVI] SOAP polling started (every ${SOAP_POLL_INTERVAL / 1000}s)`);
-}
+// DVI SOAP polling — removed, using DVI Trace instead
 
 // DVI MegaTransfer XML parser - extracts RxOrder records with nested data
 function parseXMLToJobs(xmlContent: string): { jobs: Record<string, any>[], columns: string[] } {
@@ -2503,54 +2405,11 @@ app.get('/api/dvi/data', async (req: Request, res: Response) => {
   const current = dviDataStore.current;
 
   if (!current && !forceMock) {
-    // No uploaded data - try to fetch live from DVI SOAP API
-    try {
-      const liveOrders = await dviSoap.downloadOrders(200);
-      if (liveOrders.length > 0) {
-        // Transform live orders to match expected job format
-        const jobs = liveOrders.map(order => ({
-          job_id: order.orderNumber,
-          order_number: order.orderNumber,
-          rx_number: order.rxNumber,
-          patient_id: order.patientId,
-          remote_invoice: order.remoteInvoice,
-          status: 'In Progress',
-          stage: 'INCOMING',
-          frame_style: order.frame?.style || '',
-          frame_sku: order.frame?.sku || '',
-          coating: order.rightLens?.coating || order.leftLens?.coating || '',
-          material: order.rightLens?.material || order.leftLens?.material || '',
-          lens_style: order.rightLens?.style || order.leftLens?.style || '',
-          r_sphere: order.rightEye?.sphere || 0,
-          r_cylinder: order.rightEye?.cylinder || 0,
-          r_axis: order.rightEye?.axis || 0,
-          r_pd: order.rightEye?.pd || 0,
-          l_sphere: order.leftEye?.sphere || 0,
-          l_cylinder: order.leftEye?.cylinder || 0,
-          l_axis: order.leftEye?.axis || 0,
-          l_pd: order.leftEye?.pd || 0,
-          instructions: order.instructions?.join(' | ') || '',
-        }));
-
-        return res.json({
-          mock: false,
-          source: 'live',
-          jobs,
-          message: 'Live data from DVI SOAP API',
-          rowCount: jobs.length,
-          timestamp: new Date().toISOString(),
-          archiveCount: dviDataStore.archive.length
-        });
-      }
-    } catch (e) {
-      log.info(`[DVI] Live fetch failed, returning empty: ${e}`);
-    }
-
-    // No live data either - return empty state
+    // No uploaded data - return empty state (DVI Trace on lab server is primary source)
     return res.json({
       mock: false,
       jobs: [],
-      message: 'No DVI data available. Upload a file or check DVI SOAP connection.',
+      message: 'No DVI data available. Upload a file or use DVI Trace on lab server.',
       uploadedAt: null,
       rowCount: 0,
       archiveCount: dviDataStore.archive.length
@@ -2890,97 +2749,7 @@ app.delete('/api/dvi/all', (_req: Request, res: Response) => {
   res.json({ success: true, message: `Cleared all data (${currentCount} current, ${archiveCount} archived)` });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// DVI SOAP Live API (real-time connection to DVI RxLab)
-// ─────────────────────────────────────────────────────────────────────────────
-import * as dviSoap from './sources/dvi-soap.js';
-
-// Get live orders from DVI
-app.get('/api/dvi/live/orders', async (req: Request, res: Response) => {
-  try {
-    const maxOrders = parseInt(req.query.max as string) || 100;
-    const orders = await dviSoap.downloadOrders(maxOrders);
-    res.json({
-      mock: false,
-      orders,
-      count: orders.length,
-      timestamp: new Date().toISOString()
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    // Check if it's a config issue
-    if (msg.includes('No password')) {
-      return res.json({ mock: true, orders: [], count: 0, message: 'DVI SOAP not configured' });
-    }
-    res.status(500).json({ error: msg });
-  }
-});
-
-// Get status updates from DVI
-app.get('/api/dvi/live/statuses', async (req: Request, res: Response) => {
-  try {
-    const hours = parseInt(req.query.hours as string) || 24;
-    const fromDate = new Date(Date.now() - hours * 60 * 60 * 1000);
-    const statuses = await dviSoap.downloadStatuses(fromDate);
-    res.json({
-      mock: false,
-      statuses,
-      count: statuses.length,
-      since: fromDate.toISOString(),
-      timestamp: new Date().toISOString()
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    if (msg.includes('No password')) {
-      return res.json({ mock: true, statuses: [], count: 0, message: 'DVI SOAP not configured' });
-    }
-    res.status(500).json({ error: msg });
-  }
-});
-
-// DVI SOAP health check
-app.get('/api/dvi/live/health', async (_req: Request, res: Response) => {
-  const health = await dviSoap.healthCheck();
-  res.json(health);
-});
-
-// DVI context for AI
-app.get('/api/dvi/live/context', async (_req: Request, res: Response) => {
-  try {
-    const context = await dviSoap.getAIContext();
-    res.json({ context });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
-  }
-});
-
-// Get order detail by order number (includes current station)
-app.get('/api/dvi/live/order/:orderNumber', async (req: Request, res: Response) => {
-  try {
-    const detail = await dviSoap.getOrderDetail(req.params.orderNumber as string);
-    res.json({ mock: false, detail });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
-  }
-});
-
-// Lookup jobs by Rx number, tray, or account
-app.get('/api/dvi/live/lookup', async (req: Request, res: Response) => {
-  try {
-    const query = req.query.q as string;
-    const type = (req.query.type as 'account' | 'tray' | 'rxnum') || 'rxnum';
-    if (!query) {
-      return res.status(400).json({ error: 'Missing query parameter ?q=' });
-    }
-    const results = await dviSoap.lookupByAccount(query, type);
-    res.json({ mock: false, query, type, results, count: results.length });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
-  }
-});
+// DVI SOAP Live API — removed, using DVI Trace on lab server instead
 
 function generateMockDVIJobs() {
   const stages = ['SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'QC', 'SHIP'];
@@ -3100,8 +2869,7 @@ async function start(): Promise<void> {
         log.error('Slack initialization failed:', err);
       });
 
-    // Start SOAP polling AFTER server is listening
-    setTimeout(startSoapPolling, 5000);
+    // DVI SOAP polling removed — using DVI Trace on lab server
   });
 }
 

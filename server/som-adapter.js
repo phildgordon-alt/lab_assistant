@@ -97,18 +97,20 @@ function parseLEDStatus(ledStr) {
 // Machine type categorization
 function categorizeDevice(model, typeDescr, deviceName) {
   const text = ((model || '') + ' ' + (typeDescr || '') + ' ' + (deviceName || '')).toUpperCase();
-  // Generators (DBA, HSC modulo XTS)
-  if (text.includes('DBA') || text.includes('GENERATOR') || text.includes('SURF') || text.includes('HSC')) return 'generators';
+  // Deblocking (DBA modulo — end of surfacing line)
+  if (text.includes('DBA')) return 'deblocking';
+  // Generators (HSC modulo XTS)
+  if (text.includes('GENERATOR') || text.includes('SURF') || text.includes('HSC')) return 'generators';
   // Cutters (HSE modulo QS)
   if (text.includes('HSE')) return 'cutters';
-  // Blocking
-  if (text.includes('BOND') || text.includes('CB-') || text.includes('BLOCK') || text.includes('CBB')) return 'blocking';
+  // Blocking / Autoblockers (CBB, CCU, CU1 — start of surfacing line)
+  if (text.includes('BOND') || text.includes('CB-') || text.includes('BLOCK') || text.includes('CBB') || text.includes('CCU') || text.includes('CU1')) return 'blocking';
   // Polishing
   if (text.includes('CCP') || text.includes('POLISH') || text.includes('CP1')) return 'polishing';
   // Coating (CCL, COA, DHC, EBC coaters)
   if (text.includes('CCL') || text.includes('COA') || text.includes('DHC') || text.includes('COAT') || text.includes('EBC')) return 'coating';
-  // Cleaning (CCS, CCU, LCU lens cleaner)
-  if (text.includes('CCS') || text.includes('CCU') || text.includes('CU1') || text.includes('LCU')) return 'cleaning';
+  // Cleaning (CCS, LCU lens cleaner)
+  if (text.includes('CCS') || text.includes('LCU') || text.includes('LC1')) return 'cleaning';
   // Edging
   if (text.includes('EDGE') || text.includes('TRACE')) return 'edging';
   // Assembly terminal
@@ -134,7 +136,8 @@ function categorizeDevice(model, typeDescr, deviceName) {
 function categorizeStation(stationName) {
   const text = (stationName || '').toUpperCase();
   // Surfacing sub-zones
-  if (text.includes('GENERATOR') || text.includes('DBA') || text.includes('GEN')) return 'generators';
+  if (text.includes('DBA')) return 'deblocking';
+  if (text.includes('GENERATOR') || text.includes('GEN')) return 'generators';
   if (text.includes('BLOCK') || text.includes('CBB') || text.includes('TAPE')) return 'blocking';
   if (text.includes('POLISH') || text.includes('POL')) return 'polishing';
   if (text.includes('FINER') || text.includes('FIN')) return 'fining';

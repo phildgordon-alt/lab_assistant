@@ -707,6 +707,94 @@ export const GENERIC_TOOLS = [
   think_aloud,
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// KNOWLEDGE BASE TOOLS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const search_knowledge = {
+  name: 'search_knowledge',
+  description: `USE THIS when the user asks about SOPs, recipes, procedures, reports, chemical formulas, oven temps, or any lab documentation.
+WHAT: Searches the lab knowledge base for documents matching keywords. Returns title, category, text excerpt.
+HOW: Provide a search query. Optionally filter by category (sops, reports, recipes, general).
+NOT for live production data — use WIP/coating/inventory tools for that.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      query: {
+        type: 'string',
+        description: 'Search keywords (e.g. "AR coating recipe", "oven temperature SOP", "breakage procedure")',
+      },
+      category: {
+        type: 'string',
+        enum: ['sops', 'reports', 'recipes', 'general'],
+        description: 'Filter by category. Omit to search all.',
+      },
+      limit: {
+        type: 'number',
+        description: 'Max results to return (default 5)',
+        default: 5,
+      },
+    },
+    required: ['query'],
+  },
+};
+
+export const get_knowledge_doc = {
+  name: 'get_knowledge_doc',
+  description: `USE THIS to retrieve the full text content of a specific knowledge base document.
+WHAT: Returns the full text of a document by ID. Use after search_knowledge finds a relevant doc.
+HOW: Provide the document ID from search results.
+NOT for searching — use search_knowledge first to find the right doc.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      doc_id: {
+        type: 'string',
+        description: 'Document ID (e.g. "kb_a1b2c3d4e5f6")',
+      },
+    },
+    required: ['doc_id'],
+  },
+};
+
+export const generate_csv_report = {
+  name: 'generate_csv_report',
+  description: `USE THIS when the user asks you to create/generate/export a CSV report or spreadsheet.
+WHAT: Creates a downloadable CSV file from structured data you provide.
+HOW: Provide a title, column headers array, and rows (array of arrays). Returns a download link.
+The user can then download the file or you can offer to send it to Google Drive.
+NOT for displaying data in chat — just format it as markdown. Only use this for actual file exports.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      title: {
+        type: 'string',
+        description: 'Report title (used as filename)',
+      },
+      headers: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Column headers (e.g. ["Job ID", "Stage", "Days In Lab", "Due Date"])',
+      },
+      rows: {
+        type: 'array',
+        items: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        description: 'Data rows, each an array of cell values matching headers',
+      },
+    },
+    required: ['title', 'headers', 'rows'],
+  },
+};
+
+export const KNOWLEDGE_TOOLS = [
+  search_knowledge,
+  get_knowledge_doc,
+  generate_csv_report,
+];
+
 // All tools (for backwards compatibility)
 export const ALL_TOOLS = [
   ...WIP_TOOLS,
@@ -718,6 +806,7 @@ export const ALL_TOOLS = [
   ...CATALOG_TOOLS,
   ...SETTINGS_TOOLS,
   ...GENERIC_TOOLS,
+  ...KNOWLEDGE_TOOLS,
 ];
 
 export {

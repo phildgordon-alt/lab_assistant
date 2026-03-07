@@ -6,6 +6,7 @@ import OverviewTab from "./components/tabs/OverviewTab";
 import InventoryTab from "./components/tabs/InventoryTab";
 import MaintenanceTab from "./components/tabs/MaintenanceTab";
 import AnalyticsTab from "./components/tabs/AnalyticsTab";
+import LensScanner from "./components/LensScanner";
 
 // ── Error Boundary — catches render errors and shows fallback UI ───────────────
 class ErrorBoundary extends Component {
@@ -350,13 +351,7 @@ function initInspections() {
 }
 
 function initBreakage() {
-  return Array.from({length:12},(_,i)=>({
-    id:`BRK-${String(i+1).padStart(3,"0")}`, job:genJob(), dept:pick(Object.keys(DEPARTMENTS)),
-    type:pick(BREAK_TYPES), lens:pick(["OD","OS","Both"]), coating:pick(COATING_TYPES),
-    cost:parseFloat((Math.random()*45+15).toFixed(2)),
-    time:new Date(Date.now()-Math.floor(Math.random()*86400000)),
-    resolved:Math.random()>0.4,
-  }));
+  return []; // Real data fetched from /api/breakage
 }
 
 // ── UI Primitives ────────────────────────────────────────────
@@ -2321,12 +2316,11 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
     <ProductionStageTab domain="coating" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16}}>
-        {[{id:"intelligence",label:"Coating",icon:"🎨"},{id:"inspection",label:"QC",icon:"🔬"},{id:"config",label:"Rules",icon:"⚙"}].map(sv=>(
+        {[{id:"intelligence",label:"Coating",icon:"🎨"},{id:"config",label:"Rules",icon:"⚙"}].map(sv=>(
           <button key={sv.id} onClick={()=>setSubView(sv.id)} style={{background:subView===sv.id?T.blueDark:"transparent",border:`1px solid ${subView===sv.id?T.blue:"transparent"}`,borderRadius:8,padding:"10px 20px",cursor:"pointer",color:subView===sv.id?T.blue:T.textMuted,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,fontFamily:sans}}><span>{sv.icon}</span>{sv.label}</button>
         ))}
       </div>
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
-      {subView==="inspection"&&<InspectionView inspections={inspections}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
     </div>
     </ProductionStageTab>
@@ -3368,12 +3362,22 @@ function MarkdownMsg({text}){
   return <div style={{display:"flex",flexDirection:"column"}}>{elements}</div>;
 }
 function InlineMd({text}){
-  // Handle **bold** inline
-  const parts=text.split(/(\*\*[^*]+\*\*)/);
-  return <>{parts.map((p,i)=>p.startsWith("**")&&p.endsWith("**")&&p.length>4
-    ? <strong key={i} style={{color:"#E2E8F0"}}>{p.slice(2,-2)}</strong>
-    : <span key={i}>{p}</span>
-  )}</>;
+  // Handle **bold**, [links](url), and download links inline
+  const parts=text.split(/(\*\*[^*]+\*\*|\[[^\]]+\]\([^)]+\)|https?:\/\/\S+)/);
+  return <>{parts.map((p,i)=>{
+    if(p.startsWith("**")&&p.endsWith("**")&&p.length>4)
+      return <strong key={i} style={{color:"#E2E8F0"}}>{p.slice(2,-2)}</strong>;
+    const linkMatch=p.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if(linkMatch){
+      const isDownload=linkMatch[2].includes('/api/knowledge/download/')||linkMatch[2].endsWith('.csv');
+      return <a key={i} href={linkMatch[2]} target="_blank" rel="noopener noreferrer" download={isDownload||undefined}
+        style={{color:"#60A5FA",textDecoration:"underline",cursor:"pointer"}}>{isDownload?"📥 ":""}{linkMatch[1]}</a>;
+    }
+    if(/^https?:\/\//.test(p)&&p.includes('/api/knowledge/download/')){
+      return <a key={i} href={p} download style={{color:"#60A5FA",textDecoration:"underline",cursor:"pointer"}}>📥 Download Report</a>;
+    }
+    return <span key={i}>{p}</span>;
+  })}</>;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -3383,15 +3387,16 @@ function InlineMd({text}){
 const DOMAIN_CONFIGS = {
   surfacing: {
     title: "Surfacing AI",
-    greeting: "I'm your Surfacing specialist. I can help with Rx interpretation, blank selection, queue priority, and defect troubleshooting.",
+    greeting: "I'm your Surfacing specialist. I can help with machine alerts, error analysis, queue priority, and defect troubleshooting. I monitor SOM machine status in real-time.",
     quickPrompts: [
+      { icon: "🚨", label: "Machine Alerts", text: "Analyze all SOM machine errors and warnings. Which ones are repeating? What maintenance actions should we take?" },
       { icon: "📋", label: "Queue Status", text: "Summarize current surfacing queue status and priorities." },
       { icon: "🔴", label: "Rush Jobs", text: "List all rush jobs in surfacing and recommended priority order." },
-      { icon: "⚠️", label: "High Power Rx", text: "Identify any high-power Rx jobs (>6.00 sph/cyl) that need special attention." },
       { icon: "🔧", label: "Defect Help", text: "Help me troubleshoot a surfacing defect. What questions should I answer?" },
-      { icon: "📊", label: "Throughput Report", text: "Generate a brief throughput report for the current shift.", isReport: true },
+      { icon: "📊", label: "Machine Health Report", text: "Generate a machine health report — uptime, error patterns, maintenance recommendations.", isReport: true },
     ],
     buildContext: (data) => `You are the Surfacing Specialist AI for Pair Eyewear's lens lab.
+You have LIVE access to SOM (Schneider Optical Machines) Control Center data.
 
 CURRENT SURFACING STATE (${new Date().toLocaleString()}):
 SURFACING QUEUE: ${data.queueCount || 0} jobs waiting
@@ -3399,20 +3404,38 @@ IN PROCESS: ${data.inProcessCount || 0} jobs
 RUSH JOBS: ${data.rushCount || 0} active
 
 JOBS IN SURFACING:
-${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: ${j.rx?.sphere || '?'}/${j.rx?.cylinder || '?'} | ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in surfacing'}
+${(data.jobs || []).slice(0, 15).map(j => `  ${j.job_id || j.invoice || j.id}: station=${j.station || '?'} | ${j.status || 'WIP'} ${(j.rush === 'Y') ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in surfacing'}
 
-STAGE METRICS:
-  Queue depth: ${data.queueCount || 0}
-  In process: ${data.inProcessCount || 0}
-  Rush active: ${data.rushCount || 0}
+SOM MACHINE STATUS (${(data.somDevices || []).length} surfacing machines):
+${(data.somDevices || []).map(d => `  ${d.name} [${d.category}] LED=${d.ledStatus || '?'} status=${d.status} event="${d.event || 'none'}" cycle=${d.cycleTime || '?'}s count=${(d.count || 0).toLocaleString()} lastOrder=${d.lastOrder || '?'}`).join('\n') || '  No SOM data'}
 
-You are an expert in lens surfacing operations. Help operators with:
-- Rx interpretation and machine setup guidance
-- Troubleshooting surfacing defects (scratches, pits, tool marks)
-- Prioritizing rush jobs and managing queue
-- Blank selection guidance based on Rx power
+MACHINES WITH ERRORS/WARNINGS (${data.somErrors || 0}):
+${(data.somDevices || []).filter(d => d.ledStatus === 'error' || d.ledStatus === 'warning').map(d => `  ⚠️ ${d.name}: ${d.event}`).join('\n') || '  None'}
 
-Be direct and technical. Use actual job IDs from the data.`,
+CONVEYOR ERRORS (${(data.conveyorErrors || []).length}):
+${(data.conveyorErrors || []).map(c => `  🔴 ${c.position}: ${c.event}`).join('\n') || '  None'}
+
+SURFACING LINE ORDER: Blocking (autoblockers CCU/CU1/CBB) → Generators (HSC) → Polishing (CCP) → Deblocking (DBA) → Fining (DNL) → Cleaning (CCS/LC1)
+
+YOUR ROLE:
+You are an expert in Schneider optical manufacturing equipment. Analyze machine data to:
+1. IDENTIFY PATTERNS — Look for repeating errors, machines stuck in warning states, or unusual event messages
+2. PREDICT FAILURES — If a machine shows degradation (increasing errors, temp warnings, backup events), flag it
+3. MAINTENANCE ALERTS — Recommend specific maintenance actions: "Machine X needs maintenance intervention because..."
+4. CONVEYOR ISSUES — Belt errors cause tray jams that stop the entire line. Prioritize these.
+5. PRODUCTION IMPACT — Connect machine issues to job throughput. "Generator DBA001 is down, blocking X jobs..."
+
+Common Schneider error patterns:
+- "Waiting for trays" = idle/starved (normal if line is paused)
+- "Backflow at machine" or "Rueckstau" = backup/jam — needs physical clearing
+- "BDEL timeout" = tray delivery timeout — conveyor issue upstream
+- "Polishing liquid supply: setpoint temperature" = polishing fluid not at temp — check heater
+- "Maintenance interval is reached or exceeded" = scheduled PM overdue — create work order
+- "Reset by DeviceServer" = machine was reset remotely — check why
+- "Error, backup at belt" = conveyor jam — tray stuck at position
+- LED green+red = warning state; red only = error state
+
+Be direct and technical. Flag urgent issues first. Suggest specific maintenance actions with machine IDs.`,
   },
 
   cutting: {
@@ -4051,6 +4074,46 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
+  const [somData,setSomData]=useState({devices:[],conveyors:[],zones:[],allTimeZones:[],activeJobs:null,todayTotal:0,total:0,isLive:false,lastPoll:null});
+
+  // Fetch SOM machine + job data
+  useEffect(()=>{
+    const fetchSom=async()=>{
+      try{
+        const [devRes,convRes,ordRes,activeRes]=await Promise.all([
+          fetch(`${ovenServerUrl}/api/som/devices`),
+          fetch(`${ovenServerUrl}/api/som/conveyors`),
+          fetch(`${ovenServerUrl}/api/som/orders`),
+          fetch(`${ovenServerUrl}/api/jobs/active`)
+        ]);
+        const devData=devRes.ok?await devRes.json():{};
+        const convData=convRes.ok?await convRes.json():{};
+        const ordData=ordRes.ok?await ordRes.json():{};
+        const activeData=activeRes.ok?await activeRes.json():null;
+        const zones=(ordData.orders?.today||[]).map(d=>({departmentId:d.departmentId,name:d.departmentName,zone:d.zone,count:d.jobs}));
+        const allTimeZones=(ordData.orders?.byDepartment||[]).map(d=>({departmentId:d.departmentId,name:d.departmentName,zone:d.zone,jobs:d.jobs}));
+        setSomData(prev=>({
+          devices:devData.devices||prev.devices,
+          conveyors:convData.conveyors||prev.conveyors,
+          zones:zones.length>0?zones:prev.zones,
+          allTimeZones:allTimeZones.length>0?allTimeZones:prev.allTimeZones,
+          activeJobs:activeData||prev.activeJobs,
+          todayTotal:ordData.orders?.todayTotal||prev.todayTotal,
+          total:ordData.orders?.total||prev.total,
+          isLive:devData.isLive||ordData.isLive||false,
+          lastPoll:devData.lastSuccessfulPoll||ordData.lastSuccessfulPoll||prev.lastPoll,
+        }));
+      }catch(e){ console.warn('SOM fetch:',e.message); }
+    };
+    fetchSom();
+    const iv=setInterval(fetchSom,30000);
+    return()=>clearInterval(iv);
+  },[ovenServerUrl]);
+
+  // Surfacing-related SOM categories
+  const surfCategories = ['blocking','generators','polishing','deblocking','fining','cleaning'];
+  const surfDevices = somData.devices.filter(d=>surfCategories.includes(d.category));
+  const errorConveyors = somData.conveyors.filter(c=>c.status===4||c.statusLabel==='Error');
 
   // Filter DVI jobs in surfacing (GENERATOR, AUTO BLKER, DIGITAL CALC stations) - exclude shipped
   const surfacingJobs = useMemo(() => {
@@ -4077,12 +4140,24 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const rushJobs = surfacingJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
   const inProcess = surfacingJobs.filter(j => j.status === 'In Progress');
 
+  // Build SOM machine context for AI
+  const somErrors = surfDevices.filter(d => d.led?.status === 'error' || d.led?.status === 'warning');
+  const somErrorSummary = surfDevices.map(d => ({
+    id: d.id, name: d.name, category: d.category,
+    status: d.statusLabel || d.status, event: d.event,
+    ledStatus: d.led?.status, cycleTime: d.cycleTime,
+    count: d.counts?.count1, lastOrder: (d.lastOrder||'').trim()
+  }));
+
   const contextData = {
     jobs: surfacingJobs,
     queueCount: surfacingJobs.length,
     inProcessCount: inProcess.length,
     rushCount: rushJobs.length,
     holdCount: 0,
+    somDevices: somErrorSummary,
+    somErrors: somErrors.length,
+    conveyorErrors: errorConveyors.map(c => ({ position: c.position, event: c.event })),
   };
 
   return (
@@ -4150,13 +4225,263 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         ) : (
           <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
-            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file at /api/dvi/upload or check DVI SOAP connection.' : 'No jobs in surfacing'}
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file at /api/dvi/upload or check DVI Trace connection.' : 'No jobs in surfacing'}
           </div>
         )}
       </Card>
 
       {/* Job Detail Panel */}
       {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
+
+      {/* SOM Production Status */}
+      {(surfDevices.length > 0 || somData.zones.length > 0) && (
+        <Card style={{ marginTop: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <SectionHeader>SOM Production Status</SectionHeader>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 8, height: 8, borderRadius: '50%', background: somData.isLive ? T.green : T.red, boxShadow: somData.isLive ? `0 0 6px ${T.green}` : `0 0 6px ${T.red}` }} />
+                <span style={{ fontSize: 10, fontFamily: mono, color: somData.isLive ? T.green : T.red, fontWeight: 600 }}>{somData.isLive ? 'LIVE' : 'OFFLINE'}</span>
+              </div>
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{somData.todayTotal || 0}</div>
+              <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>JOBS TODAY</div>
+            </div>
+          </div>
+
+          {/* Jobs by Stage (Today) */}
+          {somData.zones.length > 0 && (() => {
+            const ZONE_STYLES = { surfacing: { color: '#3B82F6', label: 'Production' }, ship: { color: '#22C55E', label: 'Complete' }, picking: { color: '#94A3B8', label: 'Unassigned' }, error: { color: '#EF4444', label: 'Error' }, coating: { color: '#F59E0B', label: 'Processing' }, control: { color: '#64748B', label: 'Control' } };
+            const activeZones = somData.zones.filter(z => z.count > 0);
+            return activeZones.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>Jobs by Stage (Today)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(activeZones.length, 4)}, 1fr)`, gap: 8 }}>
+                  {activeZones.map(z => {
+                    const zs = ZONE_STYLES[z.zone] || { color: '#64748B', label: z.name };
+                    return (
+                      <div key={z.zone} style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 8, border: `1px solid ${zs.color}30` }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: zs.color, fontFamily: mono }}>{zs.label}</div>
+                        <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{z.count}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null;
+          })()}
+
+          {/* Active WIP breakdown */}
+          {somData.activeJobs && (() => {
+            const aj = somData.activeJobs;
+            const zones = Object.values(aj.byZone || {}).filter(z => z.zone !== 'ship').sort((a, b) => b.jobs.length - a.jobs.length);
+            if (zones.length === 0) return null;
+            const ZONE_LABELS = { surfacing: { color: '#3B82F6', label: 'Production' }, ship: { color: '#22C55E', label: 'Complete' }, picking: { color: '#94A3B8', label: 'Unassigned' }, error: { color: '#EF4444', label: 'Error' }, coating: { color: '#F59E0B', label: 'Processing' }, control: { color: '#64748B', label: 'Control' } };
+            const COAT_COLORS = { AR: '#3B82F6', BC: '#8B5CF6', HC: '#22C55E', MR: '#EC4899', PL: '#F59E0B', TR: '#06B6D4', DERA: '#14B8A6' };
+            return (
+              <div style={{ marginBottom: 16, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, textTransform: 'uppercase', letterSpacing: 1 }}>Active WIP ({aj.total?.toLocaleString()} jobs)</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{aj.matchRate}/{aj.total} matched</div>
+                </div>
+                {zones.map(z => {
+                  const zs = ZONE_LABELS[z.zone] || { color: '#64748B', label: z.deptName };
+                  const zCoatings = {};
+                  z.jobs.forEach(j => { if (j.dvi?.coating) zCoatings[j.dvi.coating] = (zCoatings[j.dvi.coating] || 0) + 1; });
+                  const coatEntries = Object.entries(zCoatings).sort((a, b) => b[1] - a[1]);
+                  return (
+                    <div key={z.zone} style={{ marginBottom: 8, padding: 10, background: T.bg, borderRadius: 8, border: `1px solid ${zs.color}25` }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: coatEntries.length > 0 ? 6 : 0 }}>
+                        <span style={{ fontSize: 11, fontWeight: 700, color: zs.color, fontFamily: mono }}>{zs.label}</span>
+                        <span style={{ fontSize: 14, fontWeight: 800, color: T.text, fontFamily: mono }}>{z.jobs.length.toLocaleString()}</span>
+                      </div>
+                      {coatEntries.length > 0 && (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {coatEntries.map(([coat, cnt]) => (
+                            <span key={coat} style={{ fontSize: 9, fontFamily: mono, padding: '2px 6px', borderRadius: 4, background: (COAT_COLORS[coat] || '#475569') + '20', color: COAT_COLORS[coat] || '#94A3B8', fontWeight: 600 }}>{coat} {cnt}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* All-time totals */}
+          {somData.allTimeZones.length > 0 && (
+            <div style={{ marginBottom: 16, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+              <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 1 }}>All-Time Jobs ({(somData.total || 0).toLocaleString()} total)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {somData.allTimeZones.filter(z => z.jobs > 0).map(z => {
+                  const ZONE_LABELS = { surfacing: { color: '#3B82F6', label: 'Production' }, ship: { color: '#22C55E', label: 'Complete' }, picking: { color: '#94A3B8', label: 'Unassigned' }, error: { color: '#EF4444', label: 'Error' }, coating: { color: '#F59E0B', label: 'Processing' }, control: { color: '#64748B', label: 'Control' } };
+                  const zs = ZONE_LABELS[z.zone] || { color: '#64748B', label: z.name };
+                  return (
+                    <div key={z.zone} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', background: T.bg, borderRadius: 6, border: `1px solid ${zs.color}25` }}>
+                      <span style={{ fontSize: 10, color: zs.color, fontFamily: mono, fontWeight: 600 }}>{zs.label}</span>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: T.text, fontFamily: mono }}>{z.jobs.toLocaleString()}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {somData.lastPoll && (
+            <div style={{ fontSize: 9, color: T.textDim, textAlign: 'center', marginBottom: 16, fontFamily: mono }}>
+              Last updated: {new Date(somData.lastPoll).toLocaleTimeString()}
+            </div>
+          )}
+
+          {/* Machines by category */}
+          {surfDevices.length > 0 && <div style={{ paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+          <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 1 }}>Surfacing Machines ({surfDevices.length})</div>
+          {surfCategories.map(cat => {
+            const devs = surfDevices.filter(d => d.category === cat);
+            if (devs.length === 0) return null;
+            const catLabel = cat.charAt(0).toUpperCase() + cat.slice(1);
+            return (
+              <div key={cat} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>{catLabel} ({devs.length})</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                  {devs.map(d => {
+                    const ledColor = d.led?.status === 'error' ? T.red : d.led?.status === 'warning' ? T.amber : d.led?.green ? T.green : T.textDim;
+                    return (
+                      <div key={d.id} style={{ background: T.bg, border: `1px solid ${ledColor}30`, borderRadius: 8, padding: '10px 14px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: ledColor, boxShadow: `0 0 6px ${ledColor}60` }} />
+                            <span style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: mono }}>{d.name}</span>
+                          </div>
+                          <span style={{ fontSize: 10, color: ledColor, fontWeight: 600, fontFamily: mono }}>{d.statusLabel || d.status}</span>
+                        </div>
+                        <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginBottom: 4 }}>{d.typeDescription || d.model}</div>
+                        {d.event && <div style={{ fontSize: 9, color: d.led?.status === 'error' ? T.red : T.textDim, fontFamily: mono, marginBottom: 4, lineHeight: 1.4 }}>{d.event}</div>}
+                        <div style={{ display: 'flex', gap: 12, fontSize: 9, color: T.textDim, fontFamily: mono }}>
+                          {d.cycleTime && <span>Cycle: {d.cycleTime}s</span>}
+                          {d.counts?.count1 > 0 && <span>Count: {d.counts.count1.toLocaleString()}</span>}
+                          {d.lastOrder && d.lastOrder.trim() && <span>Last: #{d.lastOrder.trim()}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          </div>}
+
+          {/* Conveyor errors */}
+          {errorConveyors.length > 0 && (
+            <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+              <div style={{ fontSize: 10, color: T.red, fontFamily: mono, letterSpacing: 1, marginBottom: 8 }}>CONVEYOR ERRORS ({errorConveyors.length})</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {errorConveyors.map(c => (
+                  <div key={c.id} style={{ background: `${T.red}10`, border: `1px solid ${T.red}30`, borderRadius: 6, padding: '6px 10px' }}>
+                    <span style={{ fontSize: 10, fontWeight: 600, color: T.red, fontFamily: mono }}>{c.position}</span>
+                    <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, marginTop: 2 }}>{c.event}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+
+      {/* Maintenance Alert Board — repeating issues, warnings, suggestions */}
+      {surfDevices.length > 0 && (() => {
+        // Known Schneider error patterns → severity + suggestion
+        const ERROR_PATTERNS = [
+          { match: /backflow|rueckstau|rückstau/i, severity: 'critical', label: 'Tray Backup/Jam', suggestion: 'Clear tray jam at machine. Check conveyor upstream for blockages.' },
+          { match: /BDEL timeout/i, severity: 'critical', label: 'Delivery Timeout', suggestion: 'Tray delivery failed. Check conveyor belt and upstream machine output.' },
+          { match: /backup at belt|error.*belt/i, severity: 'critical', label: 'Conveyor Belt Error', suggestion: 'Belt jam is blocking the line. Physical intervention needed immediately.' },
+          { match: /maintenance interval/i, severity: 'warning', label: 'PM Overdue', suggestion: 'Scheduled preventive maintenance is overdue. Create a work order in Limble.' },
+          { match: /temperature.*not.*reached|setpoint temperature/i, severity: 'warning', label: 'Temp Not At Setpoint', suggestion: 'Fluid temperature below setpoint. Check heater, thermostat, and fluid level.' },
+          { match: /water level min/i, severity: 'warning', label: 'Low Water Level', suggestion: 'Water level is at minimum. Refill tank before it triggers a shutdown.' },
+          { match: /set up mode/i, severity: 'info', label: 'Setup Mode', suggestion: 'Machine is in setup mode — not processing jobs. Operator action needed to resume.' },
+          { match: /unknown status/i, severity: 'warning', label: 'Unknown Status', suggestion: 'SOM cannot determine machine state. May need a reset or reconnection.' },
+        ];
+
+        const alerts = [];
+        // Check all surfacing devices for known patterns
+        for (const d of surfDevices) {
+          const ev = d.event || '';
+          if (!ev || ev.toLowerCase().includes('waiting for trays') || ev.toLowerCase().includes('reset by deviceserver')) continue;
+          // Check if event is processing (not an issue)
+          if (ev.toLowerCase().includes('tray(s) in process')) continue;
+
+          let matched = false;
+          for (const pat of ERROR_PATTERNS) {
+            if (pat.match.test(ev)) {
+              alerts.push({ machine: d.name, category: d.category, event: ev, led: d.led?.status, ...pat });
+              matched = true;
+              break;
+            }
+          }
+          // Unmatched errors/warnings
+          if (!matched && (d.led?.status === 'error' || d.led?.status === 'warning')) {
+            alerts.push({ machine: d.name, category: d.category, event: ev, led: d.led?.status, severity: d.led?.status === 'error' ? 'warning' : 'info', label: 'Unusual Event', suggestion: 'Review machine event log. May need operator attention.' });
+          }
+        }
+        // Add conveyor errors
+        for (const c of errorConveyors) {
+          for (const pat of ERROR_PATTERNS) {
+            if (pat.match.test(c.event || '')) {
+              alerts.push({ machine: c.position, category: 'conveyor', event: c.event, led: 'error', ...pat });
+              break;
+            }
+          }
+        }
+
+        // Group by label to find repeating issues
+        const grouped = {};
+        alerts.forEach(a => {
+          const key = a.label;
+          if (!grouped[key]) grouped[key] = { ...a, machines: [a.machine], count: 1 };
+          else { grouped[key].machines.push(a.machine); grouped[key].count++; }
+        });
+        const sortedAlerts = Object.values(grouped).sort((a, b) => {
+          const sev = { critical: 0, warning: 1, info: 2 };
+          return (sev[a.severity] || 3) - (sev[b.severity] || 3) || b.count - a.count;
+        });
+
+        if (sortedAlerts.length === 0) return null;
+
+        const sevColor = { critical: T.red, warning: T.amber, info: T.blue };
+        const sevIcon = { critical: '🔴', warning: '🟡', info: '🔵' };
+
+        return (
+          <Card style={{ marginTop: 20 }}>
+            <SectionHeader right={`${alerts.length} issue${alerts.length !== 1 ? 's' : ''}`}>Maintenance Alerts</SectionHeader>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {sortedAlerts.map((a, i) => {
+                const color = sevColor[a.severity] || T.textDim;
+                return (
+                  <div key={i} style={{ background: `${color}08`, border: `1px solid ${color}30`, borderRadius: 8, padding: '12px 16px', borderLeft: `4px solid ${color}` }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 14 }}>{sevIcon[a.severity]}</span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color, fontFamily: mono }}>{a.label}</span>
+                        {a.count > 1 && <span style={{ fontSize: 10, fontWeight: 700, color: T.text, background: `${color}25`, padding: '2px 8px', borderRadius: 10, fontFamily: mono }}>x{a.count}</span>}
+                      </div>
+                      <span style={{ fontSize: 10, color: T.textDim, fontFamily: mono, textTransform: 'uppercase' }}>{a.severity}</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono, marginBottom: 6 }}>
+                      {a.count > 1 ? a.machines.join(', ') : a.machine} — {a.event}
+                    </div>
+                    <div style={{ fontSize: 11, color: T.text, fontFamily: mono, padding: '6px 10px', background: T.bg, borderRadius: 6, borderLeft: `2px solid ${color}` }}>
+                      {a.suggestion}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        );
+      })()}
     </ProductionStageTab>
   );
 }
@@ -4168,6 +4493,22 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
+  const [somDevices,setSomDevices]=useState([]);
+
+  // Fetch SOM cutting machines
+  useEffect(()=>{
+    const fetchSom=async()=>{
+      try{
+        const res=await fetch(`${ovenServerUrl}/api/som/devices`);
+        if(res.ok){ const d=await res.json(); setSomDevices(d.devices||[]); }
+      }catch(e){ console.warn('SOM fetch:',e.message); }
+    };
+    fetchSom();
+    const iv=setInterval(fetchSom,30000);
+    return()=>clearInterval(iv);
+  },[ovenServerUrl]);
+
+  const cutterDevices = somDevices.filter(d=>d.category==='cutters');
 
   // Filter DVI jobs in cutting (EDGER, LCU stations) - exclude shipped
   const cuttingJobs = useMemo(() => {
@@ -4275,13 +4616,44 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
           </div>
         ) : (
           <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
-            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI SOAP connection.' : 'No jobs in cutting'}
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI Trace connection.' : 'No jobs in cutting'}
           </div>
         )}
       </Card>
 
       {/* Job Detail Panel */}
       {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
+
+      {/* SOM Cutting Machines */}
+      {cutterDevices.length > 0 && (
+        <Card style={{ marginBottom: 20 }}>
+          <SectionHeader right={`${cutterDevices.filter(d=>d.led?.green && !d.led?.red).length}/${cutterDevices.length} running`}>Cutting Machines (SOM)</SectionHeader>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+            {cutterDevices.map(d => {
+              const ledColor = d.led?.status === 'error' ? T.red : d.led?.status === 'warning' ? T.amber : d.led?.green ? T.green : T.textDim;
+              const isProcessing = (d.event||'').toLowerCase().includes('process');
+              return (
+                <div key={d.id} style={{ background: T.bg, border: `1px solid ${ledColor}30`, borderRadius: 8, padding: '10px 14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: ledColor, boxShadow: `0 0 6px ${ledColor}60` }} />
+                      <span style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: mono }}>{d.name}</span>
+                    </div>
+                    <span style={{ fontSize: 10, color: isProcessing ? T.green : ledColor, fontWeight: 600, fontFamily: mono }}>{isProcessing ? 'CUTTING' : d.statusLabel || d.status}</span>
+                  </div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginBottom: 4 }}>{d.typeDescription || d.model}</div>
+                  {d.event && <div style={{ fontSize: 9, color: d.led?.status === 'error' ? T.red : T.textDim, fontFamily: mono, marginBottom: 4, lineHeight: 1.4 }}>{d.event}</div>}
+                  <div style={{ display: 'flex', gap: 12, fontSize: 9, color: T.textDim, fontFamily: mono }}>
+                    {d.cycleTime && <span>Cycle: {d.cycleTime}s</span>}
+                    {d.counts?.count1 > 0 && <span>Count: {d.counts.count1.toLocaleString()}</span>}
+                    {d.lastOrder && d.lastOrder.trim() && d.lastOrder.trim() !== 'XXXXXX' && <span>Last: #{d.lastOrder.trim()}</span>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* Recent Breaks */}
       {cuttingBreaks.length > 0 && (
@@ -4294,7 +4666,7 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
                   <div style={{ fontFamily: mono, fontSize: 11, fontWeight: 600, color: T.text }}>{b.job}</div>
                   <div style={{ fontSize: 10, color: T.textDim }}>{b.type} • {b.lens}</div>
                 </div>
-                <div style={{ fontFamily: mono, fontSize: 11, color: T.amber }}>${b.cost?.toFixed(2)}</div>
+                <div style={{ fontFamily: mono, fontSize: 11, color: T.amber }}>{b.dept}</div>
               </div>
             ))}
           </div>
@@ -4311,6 +4683,25 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
+  const [asmData,setAsmData]=useState(null);
+  const [asmConfig,setAsmConfig]=useState(null);
+
+  // Fetch assembly leaderboard data + operator config
+  useEffect(()=>{
+    const fetchAsm=async()=>{
+      try{
+        const [jobsRes, cfgRes] = await Promise.all([
+          fetch(`${ovenServerUrl}/api/assembly/jobs`),
+          fetch(`${ovenServerUrl}/api/assembly/config`)
+        ]);
+        if(jobsRes.ok) setAsmData(await jobsRes.json());
+        if(cfgRes.ok) setAsmConfig(await cfgRes.json());
+      }catch(e){ console.warn('Assembly fetch:',e.message); }
+    };
+    fetchAsm();
+    const iv=setInterval(fetchAsm,30000);
+    return()=>clearInterval(iv);
+  },[ovenServerUrl]);
 
   // Filter DVI jobs in assembly (ASSEMBLY stations) - exclude shipped
   const assemblyJobs = useMemo(() => {
@@ -4420,13 +4811,107 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         ) : (
           <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
-            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI SOAP connection.' : 'No jobs in assembly'}
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI Trace connection.' : 'No jobs in assembly'}
           </div>
         )}
       </Card>
 
       {/* Job Detail Panel */}
       {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
+
+      {/* Leaderboard — operator-per-station from DVI trace data */}
+      {asmData && (() => {
+        const stnComp = asmData.stationCompletions || {};
+        const stnOps = asmData.stationOperators || {}; // 'ASSEMBLY #7' → 'AF' (from DVI trace)
+        const operatorMap = asmConfig?.operatorMap || {};
+        const shiftCfg = JSON.parse(localStorage.getItem('asy_cfg') || '{}');
+        const [sh, sm] = (shiftCfg.shiftStart || '07:00').split(':').map(Number);
+        const shiftMs = new Date(); shiftMs.setHours(sh, sm, 0, 0);
+        const shiftH = Math.max(0.5, (Date.now() - shiftMs.getTime()) / 3600000);
+
+        // Build per-operator stats from station completions + DVI trace operator mapping
+        const opStats = {};
+        Object.entries(stnComp).forEach(([stn, count]) => {
+          if (count <= 0) return;
+          const init = stnOps[stn]; // operator initials from trace
+          const name = init ? (operatorMap[init.toUpperCase()] || init) : stn.replace('ASSEMBLY ','');
+          const key = init || stn;
+          if (!opStats[key]) opStats[key] = { name, initials: init || stn.match(/#(\d+)/)?.[1] || '?', jobs: 0, station: stn.replace('ASSEMBLY ','') };
+          opStats[key].jobs += count;
+        });
+        Object.values(opStats).forEach(o => { o.jobsPerHour = o.jobs / shiftH; });
+        const ops = Object.values(opStats).filter(o=>o.jobs>0).sort((a,b)=>b.jobs-a.jobs);
+        const medals = ['🥇','🥈','🥉'];
+        const rankColors = [T.amber, '#C0C0C0', '#CD7F32'];
+        const maxJobs = Math.max(1, ...ops.map(o=>o.jobs));
+        const winner = ops[0];
+        return ops.length > 0 ? (
+          <Card style={{ marginTop: 20 }}>
+            <SectionHeader right={`${ops.length} stations`}>Leaderboard</SectionHeader>
+
+            {/* Winner banner */}
+            {winner && winner.jobs > 0 && (
+              <div style={{ background: 'linear-gradient(135deg, #2A2200, #1A1000)', border: `2px solid ${T.amber}`, borderRadius: 14, padding: 16, display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 40 }}>🏆</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono, letterSpacing: 1 }}>{winner.name}</div>
+                  <div style={{ fontSize: 10, color: T.amber, fontFamily: mono }}>TODAY'S LEADER · {winner.jobs} JOBS · {(winner.jobsPerHour||0).toFixed(1)}/HR</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: 32, fontWeight: 800, color: T.amber, fontFamily: mono }}>{winner.jobs}</div>
+                  <div style={{ fontSize: 9, color: T.amber, fontFamily: mono }}>JOBS</div>
+                </div>
+              </div>
+            )}
+
+            {/* Ranked rows */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {ops.map((op, i) => {
+                const isTop3 = i < 3;
+                const barPct = Math.round((op.jobs / maxJobs) * 100);
+                const color = isTop3 ? rankColors[i] : T.blue;
+                return (
+                  <div key={op.name} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', background: T.bg, borderRadius: 8, border: isTop3 ? `1px solid ${color}40` : `1px solid ${T.border}` }}>
+                    <div style={{ width: 28, textAlign: 'center', fontSize: 20 }}>{medals[i] || ''}</div>
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: isTop3 ? `${color}30` : `${T.blue}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 13, fontWeight: 700, color: isTop3 ? color : T.blue, fontFamily: mono }}>{(op.initials || op.name || '??').slice(0,2).toUpperCase()}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: mono, marginBottom: 4 }}>{op.name}{op.station ? <span style={{color:T.textDim,fontWeight:400}}> · {op.station}</span> : ''}</div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <div style={{ flex: 1, height: 6, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
+                          <div style={{ width: `${barPct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s' }} />
+                        </div>
+                        <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono, whiteSpace: 'nowrap' }}>{(op.jobsPerHour||0).toFixed(1)}/hr</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right', minWidth: 40 }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: isTop3 ? color : T.green, fontFamily: mono }}>{op.jobs}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>TODAY</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Station completions */}
+            {asmData.byStation && (() => {
+              const stations = Object.values(asmData.byStation).filter(s=>s.completedToday>0).sort((a,b)=>b.completedToday-a.completedToday);
+              return stations.length > 0 ? (
+                <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+                  <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>Station Completions Today</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {stations.map(s => (
+                      <div key={s.station} style={{ background: T.bg, border: `1px solid ${T.border}`, borderRadius: 8, padding: '8px 14px', textAlign: 'center', minWidth: 90 }}>
+                        <div style={{ fontSize: 10, fontWeight: 600, color: T.textMuted, fontFamily: mono }}>{s.station.replace('ASSEMBLY ','')}</div>
+                        <div style={{ fontSize: 18, fontWeight: 800, color: T.green, fontFamily: mono }}>{s.completedToday}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+          </Card>
+        ) : null;
+      })()}
     </ProductionStageTab>
   );
 }
@@ -4438,6 +4923,20 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
   const mono = "'JetBrains Mono',monospace";
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
+  const [shippedHistory,setShippedHistory]=useState([]);
+
+  // Fetch shipped history
+  useEffect(()=>{
+    const fetchHistory=async()=>{
+      try{
+        const res=await fetch(`${ovenServerUrl}/api/shipping/history?days=14`);
+        if(res.ok){ const d=await res.json(); setShippedHistory(d.history||[]); }
+      }catch{}
+    };
+    fetchHistory();
+    const iv=setInterval(fetchHistory,60000);
+    return()=>clearInterval(iv);
+  },[ovenServerUrl]);
 
   // Filter DVI jobs in shipping (SH CONVEY stations) - exclude already shipped jobs (they're in DB)
   const shippingJobs = useMemo(() => {
@@ -4446,6 +4945,21 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
       const station = (j.station || '').toUpperCase();
       // Only include jobs in shipping stage that haven't been shipped yet
       return (stage === 'SHIPPING' || station.includes('SH CONVEY')) && j.status !== 'SHIPPED';
+    });
+  }, [dviJobs]);
+
+  // Shipped jobs today (scanned as shipped by DVI)
+  const shippedJobs = useMemo(() => {
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    return dviJobs.filter(j => {
+      if (j.status !== 'SHIPPED' && j.stage !== 'SHIPPING') return false;
+      // Check if shipped today
+      const d = j.lastSeen || j.date || j.entryDate;
+      if (d) {
+        const jDate = new Date(typeof d === 'number' ? d : d);
+        return jDate >= todayStart;
+      }
+      return true; // include if no date (assume today)
     });
   }, [dviJobs]);
 
@@ -4540,10 +5054,69 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
           </div>
         ) : (
           <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>
-            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI SOAP connection.' : 'No jobs in shipping'}
+            {dviJobs.length===0 ? 'No DVI data loaded. Upload a file or check DVI Trace connection.' : 'No jobs in shipping'}
           </div>
         )}
       </Card>
+
+      {/* Shipped Today */}
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader right={`${shippedJobs.length} jobs`}>Shipped Today</SectionHeader>
+        {shippedJobs.length > 0 ? (
+          <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead style={{ position: 'sticky', top: 0, background: T.surface }}>
+                <tr style={{ background: T.bg }}>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>JOB ID</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATION</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>STATUS</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shippedJobs.slice(0, 100).map((j,i) => (
+                  <tr key={j.job_id||j.invoice||i} onClick={()=>setSelectedJob(j)} style={{ borderBottom: `1px solid ${T.border}`, cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e=>e.currentTarget.style.background=`${T.green}08`} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, color: T.text }}>
+                      {j.job_id || j.invoice || "—"}
+                    </td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.station || j.stage || "—"}</td>
+                    <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{j.date || j.entryDate || "—"}</td>
+                    <td style={{ padding: "10px 12px" }}><Pill color={T.green}>SHIPPED</Pill></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim, fontFamily: mono, fontSize: 12 }}>
+            No shipped jobs today
+          </div>
+        )}
+      </Card>
+
+      {/* Shipped History — past days */}
+      {shippedHistory.length > 0 && (
+        <Card style={{ marginBottom: 20 }}>
+          <SectionHeader right={`${shippedHistory.length} days`}>Shipped History</SectionHeader>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {shippedHistory.filter(d=>d.date!==new Date().toISOString().slice(0,10)).map(d => {
+              const dayName = new Date(d.date+'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+              const maxShipped = Math.max(1, ...shippedHistory.map(h=>h.shipped));
+              const barPct = Math.round((d.shipped / maxShipped) * 100);
+              return (
+                <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: T.bg, borderRadius: 6, border: `1px solid ${T.border}` }}>
+                  <div style={{ width: 100, fontSize: 11, fontWeight: 600, color: T.textMuted, fontFamily: mono }}>{dayName}</div>
+                  <div style={{ flex: 1, height: 6, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
+                    <div style={{ width: `${barPct}%`, height: '100%', background: d.shipped > 0 ? T.green : T.textDim, borderRadius: 3, transition: 'width 0.5s' }} />
+                  </div>
+                  <div style={{ minWidth: 50, textAlign: 'right', fontSize: 16, fontWeight: 800, color: d.shipped > 0 ? T.green : T.textDim, fontFamily: mono }}>{d.shipped}</div>
+                  {d.rush > 0 && <Pill color={T.red}>{d.rush} rush</Pill>}
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
 
       {/* Job Detail Panel */}
       {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
@@ -4554,12 +5127,27 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
 // ══════════════════════════════════════════════════════════════
 // ── Claude AI Assistant Tab ───────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function AIAssistantTab({trays,batches,settings}){
+function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl='http://localhost:3002',settings}){
   // Get coater machines from settings (fallback to MACHINES constant)
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
     return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
   },[settings?.equipment]);
+
+  // Fetch SOM machine data for AI context
+  const [somDevices,setSomDevices]=useState([]);
+  useEffect(()=>{
+    const fetchSom=async()=>{
+      try{
+        const res=await fetch(`${ovenServerUrl}/api/som/devices`);
+        if(res.ok){ const d=await res.json(); setSomDevices(d.devices||[]); }
+      }catch(e){}
+    };
+    fetchSom();
+    const iv=setInterval(fetchSom,60000);
+    return()=>clearInterval(iv);
+  },[ovenServerUrl]);
+
 
   const [messages,setMessages]=useState([
     {role:"assistant",content:"Hello! I'm your Lab_Assistant AI. I have full context on your tray fleet, coating batches, and production data.\n\nAsk me anything — job lookups, yield analysis, shift reports — or click a quick action. For reports, I'll also offer a **Download as Word** button so you can share them directly."}
@@ -4575,13 +5163,13 @@ function AIAssistantTab({trays,batches,settings}){
 
   const QUICK_PROMPTS=[
     {icon:"🔍", label:"Find a job",          text:"Look up job "},
-    {icon:"📊", label:"Shift report",         text:"Generate a shift summary report for today including coating batch counts, yield rates by machine, and any notable issues. Format with sections and bullet points.", isReport:true},
+    {icon:"📊", label:"Shift report",         text:"Generate a shift summary report for today including DVI job counts by stage, coating batch counts, yield rates by machine, breakage summary, and any notable issues. Format with sections and bullet points.", isReport:true},
     {icon:"⏱",  label:"WIP Aging Report",    text:"__WIP_AGING__", isReport:true},
-    {icon:"⚠️", label:"Overdue trays",        text:"Which trays have been in the same state for the longest time? List the top 5 most overdue with estimated time stuck."},
-    {icon:"🏭", label:"Machine analysis",     text:"Generate a machine performance analysis report comparing all three coating machines on yield, throughput, and dwell time accuracy.", isReport:true},
-    {icon:"💡", label:"Coating yield",        text:"What is the overall coating pass rate across all batches? Break it down by coating type and flag anything below 90%."},
-    {icon:"🔴", label:"Rush jobs",            text:"List all current rush jobs and their exact locations in the lab right now."},
-    {icon:"📋", label:"End of day report",    text:"Generate a comprehensive end-of-day production report including total jobs processed, coating utilization, breakage summary, and recommendations for tomorrow's shift.", isReport:true},
+    {icon:"💥", label:"Breakage analysis",    text:"Analyze all breakage data. What types are repeating? Which departments have the most breaks? Are there patterns by coating type or lens? Give specific suggestions to reduce breakage."},
+    {icon:"🚨", label:"Error & hold jobs",    text:"List all DVI jobs currently in FAIL, HOLD, or ERROR status. For each one, explain what likely went wrong and what the next step should be."},
+    {icon:"🏭", label:"Machine alerts",       text:"Analyze SOM machine status. Which machines have errors or warnings? Are there repeating issues? What maintenance should we schedule?"},
+    {icon:"🔴", label:"Rush jobs",            text:"List all current rush jobs from DVI and their exact stage/station in the lab. Suggest priority routing for any that are behind schedule."},
+    {icon:"📋", label:"End of day report",    text:"Generate a comprehensive end-of-day production report including DVI job counts by stage, jobs shipped, breakage summary with root cause patterns, machine alerts, and recommendations for tomorrow's shift.", isReport:true},
   ];
 
   const buildAgingPrompt=()=>{
@@ -4690,6 +5278,42 @@ ${Object.entries(byCoating).map(([k,v])=>`  ${k}: ${v.count} batches, avg ${Math
 
 MACHINES: ${coaterMachines.join(", ")}
 COATING TYPES: ${COATING_TYPES.join(", ")}
+
+DVI JOBS BY STAGE:
+${(() => {
+  const stages = {};
+  dviJobs.forEach(j => { const s = j.stage || j.station || 'UNKNOWN'; stages[s] = (stages[s] || 0) + 1; });
+  return Object.entries(stages).sort((a,b) => b[1] - a[1]).map(([s,c]) => `  ${s}: ${c} jobs`).join('\n') || '  No DVI data';
+})()}
+
+DVI JOBS WITH ERRORS/HOLDS:
+${dviJobs.filter(j => (j.station||'').includes('FAIL') || (j.station||'').includes('HOLD') || (j.station||'').includes('ERROR') || (j.station||'').includes('REJECT')).slice(0, 20).map(j => `  ${j.job_id||j.invoice}: station=${j.station} status=${j.status||'?'} date=${j.date||j.entryDate||'?'}`).join('\n') || '  None'}
+
+DVI RUSH JOBS:
+${dviJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y').slice(0, 15).map(j => `  ${j.job_id||j.invoice}: stage=${j.stage||'?'} station=${j.station||'?'}`).join('\n') || '  None'}
+
+BREAKAGE LOG (${breakage.length} total, ${breakage.filter(b => { const today = new Date(); return new Date(b.time).toDateString() === today.toDateString(); }).length} today):
+${breakage.slice(0, 15).map(b => `  ${b.job}: type=${b.type} dept=${b.dept} lens=${b.lens} coating=${b.coating} ${b.resolved ? 'RESOLVED' : 'OPEN'} ${new Date(b.time).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}`).join('\n') || '  No breakage logged'}
+
+SOM MACHINE STATUS (${somDevices.length} machines):
+${(() => {
+  const errors = somDevices.filter(d => d.led?.status === 'error' || d.led?.status === 'warning');
+  if (errors.length === 0) return '  All machines nominal';
+  return errors.map(d => `  ${d.name} [${d.category}] LED=${d.led?.status} event="${d.event||'?'}"`).join('\n');
+})()}
+
+You are an expert optical manufacturing analyst. You have access to:
+1. LIVE DVI data — every job in the lab, their current stage/station, errors, holds, rush status
+2. BREAKAGE LOG — all lens breaks with type, department, coating, and resolution status
+3. SOM MACHINE STATUS — Schneider machine LEDs, errors, cycle times
+4. TRAY/BATCH data — coating batches, yield rates, operator performance
+
+When analyzing:
+- Cross-reference breakage patterns with specific DVI stages to identify root causes
+- Look for correlations: does a specific machine/station have higher error rates?
+- Flag repeating breakage types and suggest corrective actions
+- If a job is stuck (HOLD/FAIL), explain likely causes and next steps
+- For rush jobs, suggest priority routing through the lab
 
 When generating reports: use ## for main sections, ### for subsections, - for bullet points, **bold** for key metrics. Be specific with actual numbers from the data. Flag anything below 90% pass rate as a concern. Be concise but comprehensive.`;
   };
@@ -4946,22 +5570,128 @@ Type a question to get started!`;
   );
 }
 
+// ── Breakage History Component ────────────────────────────────
+function BreakageHistory({breakage}){
+  const [expanded,setExpanded]=useState(null);
+  // Aggregate breakage by day
+  const dailyData=useMemo(()=>{
+    const byDay={};
+    for(const b of breakage){
+      const d=new Date(b.time);
+      if(isNaN(d.getTime()))continue;
+      const key=d.toISOString().slice(0,10);
+      if(!byDay[key])byDay[key]={date:key,total:0,active:0,resolved:0,byStage:{},byCoating:{},jobs:[]};
+      byDay[key].total++;
+      if(b.resolved)byDay[key].resolved++;else byDay[key].active++;
+      const st=b.dept||'UNKNOWN';byDay[key].byStage[st]=(byDay[key].byStage[st]||0)+1;
+      const ct=b.coating||'Unknown';byDay[key].byCoating[ct]=(byDay[key].byCoating[ct]||0)+1;
+      byDay[key].jobs.push(b);
+    }
+    return Object.values(byDay).sort((a,b)=>b.date.localeCompare(a.date));
+  },[breakage]);
+
+  const maxDay=dailyData.length?Math.max(...dailyData.map(d=>d.total)):1;
+
+  if(!dailyData.length)return null;
+
+  return(
+    <Card>
+      <SectionHeader right={`${dailyData.length} days tracked`}>Breakage History by Day</SectionHeader>
+      <div style={{maxHeight:500,overflowY:"auto"}}>
+        {dailyData.map(day=>{
+          const isToday=day.date===new Date().toISOString().slice(0,10);
+          const isExp=expanded===day.date;
+          const dayLabel=new Date(day.date+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
+          const topStages=Object.entries(day.byStage).sort((a,b)=>b[1]-a[1]).slice(0,3);
+          return(
+            <div key={day.date} style={{marginBottom:2}}>
+              <div onClick={()=>setExpanded(isExp?null:day.date)} style={{display:"flex",alignItems:"center",gap:12,padding:"10px 12px",background:isToday?`${T.red}10`:T.bg,borderRadius:8,border:`1px solid ${isToday?T.red+'30':T.border}`,cursor:"pointer",transition:"background 0.15s"}}>
+                {/* Date */}
+                <div style={{minWidth:100}}>
+                  <div style={{fontSize:12,color:isToday?T.red:T.text,fontFamily:mono,fontWeight:700}}>{dayLabel}</div>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{day.date}</div>
+                </div>
+                {/* Bar */}
+                <div style={{flex:1,display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{flex:1,height:8,background:T.surface,borderRadius:4,overflow:"hidden"}}>
+                    <div style={{display:"flex",height:"100%"}}>
+                      <div style={{width:`${(day.active/maxDay)*100}%`,background:T.red,borderRadius:day.resolved?'4px 0 0 4px':'4px',transition:"width 0.3s"}}/>
+                      <div style={{width:`${(day.resolved/maxDay)*100}%`,background:T.green,borderRadius:day.active?'0 4px 4px 0':'4px',opacity:0.6,transition:"width 0.3s"}}/>
+                    </div>
+                  </div>
+                </div>
+                {/* Count */}
+                <div style={{minWidth:50,textAlign:"right"}}>
+                  <span style={{fontSize:16,fontWeight:800,color:T.text,fontFamily:mono}}>{day.total}</span>
+                </div>
+                {/* Active / Resolved */}
+                <div style={{minWidth:80,textAlign:"right"}}>
+                  {day.active>0&&<span style={{fontSize:10,color:T.red,fontFamily:mono,fontWeight:700,marginRight:6}}>{day.active} open</span>}
+                  <span style={{fontSize:10,color:T.green,fontFamily:mono,opacity:0.7}}>{day.resolved} ok</span>
+                </div>
+                {/* Top stages */}
+                <div style={{minWidth:120,display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {topStages.map(([st,ct])=>{const d=DEPARTMENTS[st];return(
+                    <span key={st} style={{fontSize:9,padding:"2px 6px",borderRadius:4,background:`${d?.color||T.textMuted}15`,color:d?.color||T.textMuted,fontFamily:mono,fontWeight:600}}>{d?.label||st} {ct}</span>
+                  );})}
+                </div>
+                {/* Expand arrow */}
+                <span style={{fontSize:10,color:T.textDim,transform:isExp?'rotate(180deg)':'rotate(0)',transition:'transform 0.2s'}}>▼</span>
+              </div>
+              {/* Expanded job list */}
+              {isExp&&(
+                <div style={{padding:"8px 12px 12px 24px",background:T.surface,borderRadius:"0 0 8px 8px",borderLeft:`2px solid ${T.red}30`}}>
+                  <div style={{display:"grid",gridTemplateColumns:"80px 80px 80px 80px 60px 1fr",gap:4,marginBottom:6}}>
+                    {["Job","Stage","Coating","Operator","Status","Note"].map(h=>(
+                      <div key={h} style={{fontSize:9,color:T.textDim,fontFamily:mono,textTransform:"uppercase",fontWeight:600}}>{h}</div>
+                    ))}
+                  </div>
+                  <div style={{maxHeight:200,overflowY:"auto"}}>
+                    {day.jobs.map((b,i)=>(
+                      <div key={b.id||i} style={{display:"grid",gridTemplateColumns:"80px 80px 80px 80px 60px 1fr",gap:4,padding:"4px 0",borderBottom:`1px solid ${T.border}`}}>
+                        <div style={{fontSize:11,color:T.text,fontFamily:mono,fontWeight:700}}>{b.job}</div>
+                        <div style={{fontSize:10,color:DEPARTMENTS[b.dept]?.color||T.textMuted,fontFamily:mono}}>{b.dept}</div>
+                        <div style={{fontSize:10,color:T.blue,fontFamily:mono}}>{b.coating||'—'}</div>
+                        <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{b.operator||'—'}</div>
+                        <div style={{fontSize:10,color:b.resolved?T.green:T.red,fontFamily:mono,fontWeight:700}}>{b.resolved?'OK':'OPEN'}</div>
+                        <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{b.note||''}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Day summary */}
+                  <div style={{display:"flex",gap:12,marginTop:8,paddingTop:8,borderTop:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:10,color:T.textDim}}>Coatings: {Object.entries(day.byCoating).sort((a,b)=>b[1]-a[1]).map(([c,n])=>`${c}(${n})`).join(', ')}</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 // ── QC & Breakage Tab ────────────────────────────────────────
-function QCTab({trays,breakage,setBreakage}){
+function QCTab({trays,dviJobs=[],breakage,setBreakage}){
   const [subView,setSubView]=useState("live");
   const [newBreak,setNewBreak]=useState({job:"",dept:"ASSEMBLY",type:BREAK_TYPES[0],lens:"OD",coating:COATING_TYPES[0],note:""});
   const [showForm,setShowForm]=useState(false);
 
-  const qcHolds=trays.filter(t=>t.department==="QC");
-  const brokenTrays=trays.filter(t=>t.state==="BROKEN");
+  // Real hold jobs from DVI trace (stage=HOLD or station includes HOLD)
+  const qcHolds=useMemo(()=>dviJobs.filter(j=>{
+    const st=(j.stage||'').toUpperCase();
+    const stn=(j.station||'').toUpperCase();
+    return st==='HOLD'||st==='QC'||stn.includes('HOLD')||stn.includes('QC HOLD');
+  }),[dviJobs]);
   const todayBreaks=breakage.filter(b=>{const today=new Date();const d=new Date(b.time);return d.toDateString()===today.toDateString();});
-  const totalCost=breakage.reduce((s,b)=>s+b.cost,0);
+  const totalBreaks=breakage.length;
   const byType={};breakage.forEach(b=>{byType[b.type]=(byType[b.type]||0)+1;});
   const sortedTypes=Object.entries(byType).sort((a,b)=>b[1]-a[1]);
 
   const handleLogBreak=()=>{
     if(!newBreak.job.trim())return;
-    setBreakage(prev=>[{id:`BRK-${String(prev.length+1).padStart(3,"0")}`,job:newBreak.job,dept:newBreak.dept,type:newBreak.type,lens:newBreak.lens,coating:newBreak.coating,cost:parseFloat((Math.random()*45+15).toFixed(2)),time:new Date(),resolved:false,note:newBreak.note},...prev]);
+    setBreakage(prev=>[{id:`BRK-${String(prev.length+1).padStart(3,"0")}`,job:newBreak.job,dept:newBreak.dept,type:newBreak.type,lens:newBreak.lens,coating:newBreak.coating,time:new Date(),resolved:false,note:newBreak.note},...prev]);
     setNewBreak({job:"",dept:"ASSEMBLY",type:BREAK_TYPES[0],lens:"OD",coating:COATING_TYPES[0],note:""});
     setShowForm(false);
   };
@@ -4979,28 +5709,30 @@ function QCTab({trays,breakage,setBreakage}){
           <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
             <KPICard label="QC Holds" value={qcHolds.length} sub="awaiting inspection" accent={T.orange}/>
             <KPICard label="Broken Today" value={todayBreaks.length} sub="logged breaks" accent={T.red}/>
-            <KPICard label="Break Cost Today" value={`$${todayBreaks.reduce((s,b)=>s+b.cost,0).toFixed(0)}`} sub="est. material cost" accent={T.red}/>
-            <KPICard label="Total Fleet in QC" value={`${qcHolds.length+brokenTrays.length}`} sub="trays held" accent={T.pink}/>
+            <KPICard label="Total Breaks" value={totalBreaks} sub="all time" accent={T.amber}/>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             <Card>
-              <SectionHeader right={`${qcHolds.length} trays`}>QC Hold Queue</SectionHeader>
+              <SectionHeader right={`${qcHolds.length} jobs`}>QC Hold Queue</SectionHeader>
               {qcHolds.length===0?<div style={{fontSize:12,color:T.textDim,textAlign:"center",padding:24}}>✓ No jobs on QC hold</div>:
                 <div style={{maxHeight:400,overflowY:"auto"}}>
                   {qcHolds.map(t=>(
-                    <div key={t.id} style={{display:"flex",gap:10,padding:"10px",marginBottom:6,background:T.bg,borderRadius:8,border:`1px solid ${T.pink}30`}}>
+                    <div key={t.job_id||t.id} style={{display:"flex",gap:10,padding:"10px",marginBottom:6,background:T.bg,borderRadius:8,border:`1px solid ${T.pink}30`}}>
                       <div style={{width:10,height:10,borderRadius:"50%",background:T.pink,marginTop:4,flexShrink:0,boxShadow:`0 0 8px ${T.pink}60`}}/>
                       <div style={{flex:1}}>
                         <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:2}}>
-                          <span style={{fontSize:13,color:T.text,fontWeight:700,fontFamily:mono}}>{t.job||t.id}</span>
-                          {t.rush&&<Pill color={T.red}>RUSH</Pill>}
+                          <span style={{fontSize:13,color:T.text,fontWeight:700,fontFamily:mono}}>{t.job_id||t.invoice||t.id}</span>
+                          {(t.rush==='Y'||t.Rush==='Y'||t.priority==='RUSH')&&<Pill color={T.red}>RUSH</Pill>}
                         </div>
-                        <div style={{fontSize:10,color:T.textDim}}>Tray: {t.id} • {t.coatingType||"No coating"}</div>
-                        {t.rx&&<div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>SPH {t.rx.sph} CYL {t.rx.cyl}</div>}
+                        <div style={{fontSize:10,color:T.textDim}}>Station: {t.station||'—'} • {t.coating||t.coatType||"Unknown"}</div>
+                        <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>
+                          {t.daysInLab!=null?`${Math.round(t.daysInLab*10)/10}d in lab`:''}
+                          {t.operator?` • Op: ${t.operator}`:''}
+                        </div>
                       </div>
                       <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                        <button onClick={()=>alert(`Releasing ${t.job} — integrate with DVI to update status`)} style={{fontSize:10,padding:"4px 8px",background:T.greenDark,border:`1px solid ${T.green}`,borderRadius:5,color:T.green,cursor:"pointer",fontFamily:mono,fontWeight:700}}>RELEASE</button>
-                        <button onClick={()=>alert(`Scrapping ${t.job}`)} style={{fontSize:10,padding:"4px 8px",background:T.redDark,border:`1px solid ${T.red}`,borderRadius:5,color:T.red,cursor:"pointer",fontFamily:mono,fontWeight:700}}>SCRAP</button>
+                        <button onClick={()=>alert(`Releasing ${t.job_id||t.id} — integrate with DVI to update status`)} style={{fontSize:10,padding:"4px 8px",background:T.greenDark,border:`1px solid ${T.green}`,borderRadius:5,color:T.green,cursor:"pointer",fontFamily:mono,fontWeight:700}}>RELEASE</button>
+                        <button onClick={()=>alert(`Scrapping ${t.job_id||t.id}`)} style={{fontSize:10,padding:"4px 8px",background:T.redDark,border:`1px solid ${T.red}`,borderRadius:5,color:T.red,cursor:"pointer",fontFamily:mono,fontWeight:700}}>SCRAP</button>
                       </div>
                     </div>
                   ))}
@@ -5045,7 +5777,7 @@ function QCTab({trays,breakage,setBreakage}){
                       <div style={{fontSize:9,color:T.textDim}}>{b.dept} • {b.lens} • {b.coating}</div>
                     </div>
                     <div style={{textAlign:"right",flexShrink:0}}>
-                      <div style={{fontSize:11,color:T.red,fontFamily:mono,fontWeight:700}}>${b.cost.toFixed(2)}</div>
+                      <div style={{fontSize:11,color:T.red,fontFamily:mono,fontWeight:700}}>{b.type}</div>
                       <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{new Date(b.time).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
                     </div>
                     {b.resolved&&<Pill color={T.green}>OK</Pill>}
@@ -5058,30 +5790,32 @@ function QCTab({trays,breakage,setBreakage}){
       )}
 
       {subView==="breakage"&&(
-        <Card>
-          <SectionHeader right={`${breakage.length} total breaks logged`}>Full Breakage History</SectionHeader>
-          <div style={{maxHeight:600,overflowY:"auto"}}>
-            {breakage.map(b=>(
-              <div key={b.id} style={{display:"flex",gap:12,padding:"10px",marginBottom:4,background:T.bg,borderRadius:8,border:`1px solid ${b.resolved?T.border:T.red+"30"}`}}>
-                <div style={{width:8,height:8,borderRadius:"50%",background:b.resolved?T.green:T.red,marginTop:5,flexShrink:0}}/>
-                <div style={{flex:1,display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
-                  {[["Job",b.job,T.text],["Type",b.type,T.red],["Dept",b.dept,T.textMuted],["Lens",b.lens,T.textMuted],["Coating",b.coating,T.blue],["Cost",`$${b.cost.toFixed(2)}`,T.red],["Time",new Date(b.time).toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}),T.textDim],["Status",b.resolved?"Resolved":"Open",b.resolved?T.green:T.red]].map(([l,v,c])=>(
-                    <div key={l}><div style={{fontSize:8,color:T.textDim,fontFamily:mono}}>{l}</div><div style={{fontSize:11,color:c,fontFamily:mono,fontWeight:600}}>{v}</div></div>
-                  ))}
+        <div style={{display:"flex",flexDirection:"column",gap:20}}>
+          <BreakageHistory breakage={breakage}/>
+          <Card>
+            <SectionHeader right={`${breakage.length} total breaks logged`}>All Breakage Events</SectionHeader>
+            <div style={{maxHeight:500,overflowY:"auto"}}>
+              {breakage.map(b=>(
+                <div key={b.id} style={{display:"flex",gap:12,padding:"10px",marginBottom:4,background:T.bg,borderRadius:8,border:`1px solid ${b.resolved?T.border:T.red+"30"}`}}>
+                  <div style={{width:8,height:8,borderRadius:"50%",background:b.resolved?T.green:T.red,marginTop:5,flexShrink:0}}/>
+                  <div style={{flex:1,display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4}}>
+                    {[["Job",b.job,T.text],["Stage",b.dept,DEPARTMENTS[b.dept]?.color||T.textMuted],["Operator",b.operator||'—',T.textMuted],["Coating",b.coating,T.blue],["Time",new Date(b.time).toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}),T.textDim],["Status",b.resolved?"Resolved":"Open",b.resolved?T.green:T.red],["Days",b.daysInLab?`${Math.round(b.daysInLab*10)/10}d`:'—',T.textMuted]].map(([l,v,c])=>(
+                      <div key={l}><div style={{fontSize:8,color:T.textDim,fontFamily:mono}}>{l}</div><div style={{fontSize:11,color:c,fontFamily:mono,fontWeight:600}}>{v}</div></div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </Card>
+              ))}
+            </div>
+          </Card>
+        </div>
       )}
 
       {subView==="analytics"&&(
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
           <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
             <KPICard label="Total Breaks" value={breakage.length} sub="all time" accent={T.red}/>
-            <KPICard label="Total Cost" value={`$${totalCost.toFixed(0)}`} sub="material loss" accent={T.red}/>
             <KPICard label="Today" value={todayBreaks.length} sub="breaks today" accent={T.orange}/>
-            <KPICard label="Avg Cost" value={`$${(totalCost/Math.max(1,breakage.length)).toFixed(2)}`} sub="per break" accent={T.amber}/>
+            <KPICard label="Top Type" value={sortedTypes.length>0?sortedTypes[0][0]:'—'} sub={sortedTypes.length>0?`${sortedTypes[0][1]} occurrences`:'none'} accent={T.amber}/>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             <Card>
@@ -5094,19 +5828,16 @@ function QCTab({trays,breakage,setBreakage}){
               ))}
             </Card>
             <Card>
-              <SectionHeader>Breaks by Department</SectionHeader>
-              {Object.entries(DEPARTMENTS).map(([key,dept])=>{
-                const count=breakage.filter(b=>b.dept===key).length;
-                if(!count)return null;
-                return(
-                  <div key={key} style={{marginBottom:8}}>
-                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:dept.color}}>{dept.label}</span><span style={{color:T.text,fontFamily:mono,fontWeight:700}}>{count}</span></div>
-                    <div style={{height:6,background:T.bg,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:`${(count/breakage.length)*100}%`,background:dept.color,borderRadius:3}}/></div>
+              <SectionHeader>Breaks by Stage</SectionHeader>
+              {(()=>{const byDept={};breakage.forEach(b=>{const d=b.dept||'UNKNOWN';byDept[d]=(byDept[d]||0)+1;});const sorted=Object.entries(byDept).sort((a,b)=>b[1]-a[1]);const max=sorted[0]?sorted[0][1]:1;return sorted.map(([dept,count])=>{const d=DEPARTMENTS[dept];return(
+                  <div key={dept} style={{marginBottom:8}}>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:d?.color||T.textMuted}}>{d?.label||dept}</span><span style={{color:T.text,fontFamily:mono,fontWeight:700}}>{count}</span></div>
+                    <div style={{height:6,background:T.bg,borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:`${(count/max)*100}%`,background:d?.color||T.textMuted,borderRadius:3}}/></div>
                   </div>
-                );
-              })}
+                );});})()}
             </Card>
           </div>
+          <BreakageHistory breakage={breakage}/>
         </div>
       )}
     </div>
@@ -6377,6 +7108,22 @@ function LabAssistantV2(){
     return()=>clearInterval(iv);
   },[]);
 
+  // Fetch real breakage data from DVI trace
+  useEffect(()=>{
+    const fetchBreakage=async()=>{
+      try{
+        const res=await fetch("http://localhost:3002/api/breakage");
+        if(res.ok){
+          const data=await res.json();
+          setBreakage(data.breakage||[]);
+        }
+      }catch(e){ console.warn("Breakage fetch:",e.message); }
+    };
+    fetchBreakage();
+    const iv=setInterval(fetchBreakage,30000); // refresh every 30s
+    return()=>clearInterval(iv);
+  },[]);
+
   // Live event feed from DVI trace + SOM
   const lastEventTs=useRef(null);
   useEffect(()=>{
@@ -6537,7 +7284,6 @@ function LabAssistantV2(){
     // Support (separator before)
     {id:"separator2",  type:"separator"},
     {id:"putwall",     label:"Put Wall",    icon:"⬡",  group:"support"},
-    {id:"trays",       label:"Tray Fleet",  icon:"📡", group:"support"},
     {id:"inventory",   label:"Inventory",   icon:"📦", group:"support"},
     {id:"maintenance", label:"Maintenance", icon:"🔩", group:"support"},
     // Analytics & QC (separator before)
@@ -6546,6 +7292,7 @@ function LabAssistantV2(){
     {id:"qc",          label:"QC",          icon:"✓",  group:"analytics"},
     {id:"wip",         label:"WIP Feed",    icon:"📋", group:"analytics"},
     {id:"ai",          label:"AI Assistant",icon:"🤖", group:"analytics"},
+    {id:"vision",       label:"Vision",     icon:"👁", group:"analytics"},
     // Settings (separator before)
     {id:"separator4",  type:"separator"},
     {id:"settings",    label:"Settings",    icon:"⚙️", group:"system"},
@@ -6605,6 +7352,11 @@ function LabAssistantV2(){
       )}
 
       {/* CONTENT */}
+      {view==="vision"?(
+        <div style={{height:isTablet?"calc(100dvh - 90px)":"calc(100dvh - 66px)",overflow:"hidden"}}>
+          <LensScanner/>
+        </div>
+      ):(
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
         {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events} wipJobs={wipJobs}/>}
@@ -6612,16 +7364,17 @@ function LabAssistantV2(){
         {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="cutting"&&<CuttingTab trays={trays} dviJobs={mergedJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="assembly"&&<AssemblyTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="shipping"&&<ShippingTab trays={trays} dviJobs={mergedJobs} shippedStats={shippedStats} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="shipping"&&<ShippingTab trays={trays} dviJobs={dviJobs} shippedStats={shippedStats} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="inventory"&&<InventoryTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} ovenServerUrl={ovenServerUrl} settings={settings}/>}
-        {view==="qc"&&<QCTab trays={trays} breakage={breakage} setBreakage={setBreakage}/>}
+        {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="qc"&&<QCTab trays={trays} dviJobs={mergedJobs} breakage={breakage} setBreakage={setBreakage}/>}
         {view==="wip"&&<WIPFeed/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
-        {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} settings={settings}/>}
-        {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl}/>}
+        {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl} onNavigate={setView}/>}
       </div>
+      )}
 
       {/* TABLET BOTTOM NAV */}
       {isTablet&&(
@@ -6654,6 +7407,8 @@ function LabAssistantV2(){
         select{appearance:none;}
         ${isTablet?`button{min-height:44px;} input,select{min-height:44px;font-size:16px!important;}`:""}
       `}</style>
+
+      {/* PIN Prompt Modal */}
     </div>
   );
 }

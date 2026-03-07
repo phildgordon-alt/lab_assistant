@@ -29,6 +29,9 @@ const http = require('http');
 const fs   = require('fs');
 const { URL } = require('url');
 
+// ── Knowledge Base ──────────────────────────────────────────────
+const knowledge = require('./knowledge-adapter');
+
 // ── ItemPath/Kardex inventory integration ─────────────────────
 const itempath = require('./itempath-adapter');
 itempath.start();
@@ -62,6 +65,9 @@ dviTrace.on('data', ({ count, file }) => {
 
 // ── DVI Job Index (parsed from synced XML files) ──────────────
 const dviJobIndex = new Map(); // dviJob# → {coating, lens, frame, rx, ...}
+
+// Assembly config — synced from standalone AssemblyDashboard
+const assemblyConfig = { assignments: {}, operatorMap: {}, updatedAt: null };
 const DVI_JOBS_DIR = path.join(__dirname, '..', 'data', 'dvi', 'jobs');
 
 function parseDviXml(xml) {
@@ -78,6 +84,27 @@ function parseDviXml(xml) {
   const frameBlock = xml.match(/<Frame[^>]*>([\s\S]*?)<\/Frame>/);
   const frameXml = frameBlock ? frameBlock[0] : '';
   const getFrame = (tag) => { const m = frameXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
+
+  // Extract Rx data for each eye
+  const rxBlocks = xml.match(/<Rx\s+Eye="([RL])">([\s\S]*?)<\/Rx>/g) || [];
+  const rx = {};
+  for (const block of rxBlocks) {
+    const eyeMatch = block.match(/Eye="([RL])"/);
+    if (!eyeMatch) continue;
+    const eye = eyeMatch[1]; // R or L
+    const sph = block.match(/<Sphere>([^<]*)<\/Sphere>/);
+    const cyl = block.match(/<Cylinder[^>]*>([^<]*)<\/Cylinder>/);
+    const axis = block.match(/<Cylinder\s+Axis="([^"]*)"/);
+    const pd = block.match(/<PD>([^<]*)<\/PD>/);
+    const addPow = block.match(/<Power>([^<]*)<\/Power>/);
+    rx[eye] = {
+      sphere: sph ? sph[1] : null,
+      cylinder: cyl ? cyl[1] : null,
+      axis: axis ? axis[1] : null,
+      pd: pd ? pd[1] : null,
+      add: addPow ? addPow[1] : null,
+    };
+  }
 
   return {
     status: getAttr('Job', 'Status'),
@@ -101,6 +128,7 @@ function parseDviXml(xml) {
     bridge: getFrame('Bridge') || get('Bridge'),
     edge: getFrame('Edge') || get('Edge'),
     serviceInstruction: getAttr('Service', 'Instruction'),
+    rx, // { R: {sphere,cylinder,axis,pd,add}, L: {sphere,cylinder,axis,pd,add} }
   };
 }
 
@@ -209,6 +237,35 @@ function readBody(req) {
     req.on('error', fail);
   });
 }
+// Simple multipart/form-data parser (no dependencies)
+function parseMultipart(buf, boundary) {
+  const parts = [];
+  const delim = Buffer.from('--' + boundary);
+  let pos = 0;
+  while (pos < buf.length) {
+    const start = buf.indexOf(delim, pos);
+    if (start === -1) break;
+    const nextStart = buf.indexOf(delim, start + delim.length + 2);
+    if (nextStart === -1) break;
+    const partBuf = buf.slice(start + delim.length + 2, nextStart);
+    const headerEnd = partBuf.indexOf('\r\n\r\n');
+    if (headerEnd === -1) { pos = nextStart; continue; }
+    const headerStr = partBuf.slice(0, headerEnd).toString('utf-8');
+    const data = partBuf.slice(headerEnd + 4, partBuf.length - 2); // strip trailing \r\n
+    const nameMatch = headerStr.match(/name="([^"]+)"/);
+    const filenameMatch = headerStr.match(/filename="([^"]+)"/);
+    const ctMatch = headerStr.match(/Content-Type:\s*(\S+)/i);
+    parts.push({
+      name: nameMatch ? nameMatch[1] : null,
+      filename: filenameMatch ? filenameMatch[1] : null,
+      contentType: ctMatch ? ctMatch[1] : null,
+      data,
+    });
+    pos = nextStart;
+  }
+  return parts;
+}
+
 function fmtSecs(s) {
   const a=Math.abs(s), m=Math.floor(a/60), sc=a%60;
   return `${s<0?'-':''}${String(m).padStart(2,'0')}:${String(sc).padStart(2,'0')}`;
@@ -1390,11 +1447,21 @@ Respond with a structured batching plan in this format:
       const xml = dviJobIndex.get(j.job_id);
       if (xml) {
         j.coating = xml.coating;
+        j.coatType = xml.coatType;
+        j.lensType = xml.lensType; // P=progressive, S=SV, B=bifocal
         j.lensStyle = xml.lensStyle;
         j.lensMat = xml.lensMat;
+        j.lensThick = xml.lensThick;
+        j.lensColor = xml.lensColor;
         j.frameStyle = xml.frameStyle;
         j.frameSku = xml.frameSku;
+        j.frameMfr = xml.frameMfr;
+        j.eyeSize = xml.eyeSize;
+        j.bridge = xml.bridge;
+        j.edge = xml.edge;
         j.rxNum = xml.rxNum;
+        j.patient = xml.patient;
+        j.rx = xml.rx; // { R: {sphere,cylinder,axis,pd,add}, L: {...} }
       }
       return j;
     });
@@ -1521,6 +1588,8 @@ Respond with a structured batching plan in this format:
 
     // Build per-operator stats — from completions with known operators
     const operatorStats = {};
+    // Also track which operator did the most jobs at each station
+    const stationOperatorTally = {}; // 'ASSEMBLY #7' → { 'AF': 5, 'EY': 3 }
     for (const c of completedToday) {
       if (!c.operator) continue;
       if (!operatorStats[c.operator]) operatorStats[c.operator] = { initials: c.operator, jobs: 0, rush: 0, firstJob: null, lastJob: null };
@@ -1529,6 +1598,16 @@ Respond with a structured batching plan in this format:
         operatorStats[c.operator].firstJob = c.timestamp;
       if (!operatorStats[c.operator].lastJob || c.timestamp > operatorStats[c.operator].lastJob)
         operatorStats[c.operator].lastJob = c.timestamp;
+      if (c.fromStation) {
+        if (!stationOperatorTally[c.fromStation]) stationOperatorTally[c.fromStation] = {};
+        stationOperatorTally[c.fromStation][c.operator] = (stationOperatorTally[c.fromStation][c.operator] || 0) + 1;
+      }
+    }
+    // Determine primary operator per station (whoever completed the most jobs there today)
+    const stationOperators = {}; // 'ASSEMBLY #7' → 'AF'
+    for (const [stn, tally] of Object.entries(stationOperatorTally)) {
+      const sorted = Object.entries(tally).sort((a,b) => b[1] - a[1]);
+      if (sorted.length > 0) stationOperators[stn] = sorted[0][0]; // top operator
     }
     for (const op of Object.values(operatorStats)) {
       if (op.firstJob && op.lastJob && op.lastJob > op.firstJob) {
@@ -1570,12 +1649,62 @@ Respond with a structured batching plan in this format:
       byStation,
       stationCompletions,
       operatorStats,
+      stationOperators,
       shippedToday: allJobs.filter(j => j.stage === 'SHIPPING' && j.lastSeen >= todayMs).length,
       incomingToday: allJobs.filter(j => j.stage === 'INCOMING' && j.lastSeen >= todayMs).length,
       totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
       source: 'dvi-trace',
       timestamp: new Date().toISOString()
     });
+  }
+
+  // ── Assembly config (operator assignments + name map) ──────────
+  // Synced from standalone AssemblyDashboard.html so main app can read them
+  // ── Shipped history — daily shipped counts from DVI trace ─────
+  if (req.method==='GET' && url.pathname==='/api/shipping/history') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const allJobs = dviTrace.getJobs();
+    const byDay = {};
+    const now = Date.now();
+    // Initialize days
+    for (let d = 0; d < days; d++) {
+      const date = new Date(now - d * 86400000);
+      const key = date.toISOString().slice(0, 10);
+      byDay[key] = { date: key, shipped: 0, rush: 0 };
+    }
+    // Count shipped jobs by day
+    for (const j of allJobs) {
+      if (j.status !== 'SHIPPED' || !j.lastSeen) continue;
+      const key = new Date(j.lastSeen).toISOString().slice(0, 10);
+      if (byDay[key]) {
+        byDay[key].shipped++;
+        if (j.rush === 'Y' || j.Rush === 'Y') byDay[key].rush++;
+      }
+    }
+    const history = Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date));
+    return json(res, { history, days });
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/assembly/config') {
+    return json(res, {
+      assignments: assemblyConfig.assignments,
+      operatorMap: assemblyConfig.operatorMap,
+      updatedAt: assemblyConfig.updatedAt
+    });
+  }
+  if (req.method==='POST' && url.pathname==='/api/assembly/config') {
+    let body = '';
+    req.on('data', c => body += c);
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body);
+        if (data.assignments) assemblyConfig.assignments = data.assignments;
+        if (data.operatorMap) assemblyConfig.operatorMap = data.operatorMap;
+        assemblyConfig.updatedAt = Date.now();
+        return json(res, { ok: true });
+      } catch(e) { return json(res, { error: e.message }, 400); }
+    });
+    return;
   }
 
   if (req.method==='GET' && url.pathname==='/api/dvi/trace/status') {
@@ -1602,6 +1731,252 @@ Respond with a structured batching plan in this format:
     const history = dviTrace.getJobHistory(jobId);
     if (!history) return json(res, { error: 'Job not found' }, 404);
     return json(res, history);
+  }
+
+  // ── Analytics: daily throughput from DVI trace ─────────────────
+  if (req.method==='GET' && url.pathname==='/api/analytics/throughput') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const allJobs = dviTrace.getJobs();
+    const now = Date.now();
+    const cutoff = now - days * 86400000;
+
+    // Daily throughput: jobs entering each stage per day
+    const byDay = {};
+    for (let d = 0; d < days; d++) {
+      const date = new Date(now - d * 86400000);
+      const key = date.toISOString().slice(0, 10);
+      byDay[key] = { date: key, incoming: 0, shipped: 0, surfacing: 0, coating: 0, edging: 0, assembly: 0, breakage: 0, total: 0 };
+    }
+
+    // Count jobs by stage based on firstSeen/lastSeen dates
+    for (const j of allJobs) {
+      if (!j.firstSeen || j.firstSeen < cutoff) continue;
+      const entryKey = new Date(j.firstSeen).toISOString().slice(0, 10);
+      if (byDay[entryKey]) {
+        byDay[entryKey].incoming++;
+        byDay[entryKey].total++;
+      }
+      if (j.status === 'SHIPPED' && j.lastSeen) {
+        const shipKey = new Date(j.lastSeen).toISOString().slice(0, 10);
+        if (byDay[shipKey]) byDay[shipKey].shipped++;
+      }
+      if (j.hasBreakage) {
+        const brkKey = new Date(j.lastSeen || j.firstSeen).toISOString().slice(0, 10);
+        if (byDay[brkKey]) byDay[brkKey].breakage++;
+      }
+    }
+
+    // Helper: is job still active WIP?
+    const isWip = j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED';
+
+    // Current WIP by stage
+    const stageCount = {};
+    for (const j of allJobs) {
+      if (!isWip(j)) continue;
+      const s = j.stage || 'UNKNOWN';
+      stageCount[s] = (stageCount[s] || 0) + 1;
+    }
+
+    // By station (top 20)
+    const stationCount = {};
+    for (const j of allJobs) {
+      if (!isWip(j)) continue;
+      const s = j.station || 'UNKNOWN';
+      stationCount[s] = (stationCount[s] || 0) + 1;
+    }
+    const topStations = Object.entries(stationCount).sort((a, b) => b[1] - a[1]).slice(0, 20).map(([s, c]) => ({ station: s, jobs: c }));
+
+    // Coating breakdown from current WIP
+    const coatingCount = {};
+    for (const j of allJobs) {
+      if (!isWip(j)) continue;
+      const ct = j.coatType || 'Unknown';
+      if (!coatingCount[ct]) coatingCount[ct] = { total: 0, stages: {} };
+      coatingCount[ct].total++;
+      const s = j.stage || 'UNKNOWN';
+      coatingCount[ct].stages[s] = (coatingCount[ct].stages[s] || 0) + 1;
+    }
+
+    // Cycle time stats (days from firstSeen to lastSeen for shipped jobs)
+    const cycleTimes = [];
+    for (const j of allJobs) {
+      if (j.status === 'SHIPPED' && j.firstSeen && j.lastSeen) {
+        const days_ = (j.lastSeen - j.firstSeen) / 86400000;
+        if (days_ > 0 && days_ < 30) cycleTimes.push(days_);
+      }
+    }
+    cycleTimes.sort((a, b) => a - b);
+    const avgCycle = cycleTimes.length ? (cycleTimes.reduce((s, d) => s + d, 0) / cycleTimes.length).toFixed(2) : 0;
+    const medianCycle = cycleTimes.length ? cycleTimes[Math.floor(cycleTimes.length / 2)].toFixed(2) : 0;
+    const p90Cycle = cycleTimes.length ? cycleTimes[Math.floor(cycleTimes.length * 0.9)].toFixed(2) : 0;
+
+    // Operator leaderboard (by station completions today)
+    const operatorStats = {};
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const recentEvents = dviTrace.getRecentEvents(5000);
+    for (const ev of recentEvents) {
+      if (ev.timestamp < todayStart.getTime()) continue;
+      const op = ev.operator || '?';
+      if (!operatorStats[op]) operatorStats[op] = { events: 0, stations: {} };
+      operatorStats[op].events++;
+      const st = ev.station || '?';
+      operatorStats[op].stations[st] = (operatorStats[op].stations[st] || 0) + 1;
+    }
+    const topOperators = Object.entries(operatorStats)
+      .sort((a, b) => b[1].events - a[1].events)
+      .slice(0, 15)
+      .map(([op, data]) => ({ operator: op, events: data.events, topStation: Object.entries(data.stations).sort((a, b) => b[1] - a[1])[0]?.[0] || '?' }));
+
+    const daily = Object.values(byDay).sort((a, b) => a.date.localeCompare(b.date));
+
+    return json(res, {
+      daily,
+      stageCount,
+      topStations,
+      coatingCount,
+      cycleTime: { avg: parseFloat(avgCycle), median: parseFloat(medianCycle), p90: parseFloat(p90Cycle), samples: cycleTimes.length },
+      topOperators,
+      totalJobs: allJobs.length,
+      activeWIP: allJobs.filter(isWip).length,
+      shipped: allJobs.filter(j => j.status === 'SHIPPED' || j.stage === 'SHIPPING').length,
+      incoming: allJobs.filter(j => {
+        const s = (j.station || '').toUpperCase();
+        return s.includes('INHSE FIN') || s.includes('INHSE SF');
+      }).length,
+    });
+  }
+
+  // ── Breakage endpoint — real data from DVI Trace ─────────────
+  if (req.method==='GET' && url.pathname==='/api/breakage') {
+    const allJobs = dviTrace.getJobs();
+    const breakageJobs = [];
+    for (const j of allJobs) {
+      if (!j.hasBreakage) continue;
+      const xml = dviJobIndex.get(j.job_id) || {};
+      // Find the breakage event in the job's history
+      const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+      const events = detail?.events || [];
+      const brkEvent = events.find(e => e.stage === 'BREAKAGE');
+      // Find the station just before breakage for "dept" info
+      const brkIdx = events.findIndex(e => e.stage === 'BREAKAGE');
+      const prevEvent = brkIdx > 0 ? events[brkIdx - 1] : null;
+      breakageJobs.push({
+        id: `BRK-${j.job_id}`,
+        job: j.job_id,
+        dept: prevEvent?.stage || j.stage || 'UNKNOWN',
+        station: j.station,
+        currentStage: j.stage,
+        type: 'Breakage',
+        lens: xml.lensType === 'P' ? 'Both' : xml.lensType === 'S' ? 'OD' : 'OS',
+        coating: xml.coating || 'Unknown',
+        lensStyle: xml.lensStyle || null,
+        lensMat: xml.lensMat || null,
+        time: brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen),
+        operator: brkEvent?.operator || j.operator || '?',
+        resolved: j.stage !== 'BREAKAGE',
+        daysInLab: j.daysInLab || 0,
+        note: j.stage === 'BREAKAGE' ? 'Currently at breakage station' : `Resolved — now at ${j.stage}`,
+      });
+    }
+    breakageJobs.sort((a, b) => new Date(b.time) - new Date(a.time));
+
+    // Aggregate by day for history
+    const byDay = {};
+    for (const b of breakageJobs) {
+      const d = new Date(b.time);
+      if (isNaN(d.getTime())) continue;
+      const key = d.toISOString().slice(0, 10);
+      if (!byDay[key]) byDay[key] = { date: key, total: 0, active: 0, resolved: 0, byStage: {}, byCoating: {}, jobs: [] };
+      byDay[key].total++;
+      if (b.resolved) byDay[key].resolved++; else byDay[key].active++;
+      const st = b.dept || 'UNKNOWN';
+      byDay[key].byStage[st] = (byDay[key].byStage[st] || 0) + 1;
+      const ct = b.coating || 'Unknown';
+      byDay[key].byCoating[ct] = (byDay[key].byCoating[ct] || 0) + 1;
+      byDay[key].jobs.push({ job: b.job, dept: b.dept, coating: b.coating, operator: b.operator, resolved: b.resolved });
+    }
+    const dailyHistory = Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date));
+
+    // Persist daily history to disk so it survives beyond trace file window
+    const histPath = path.join(__dirname, 'data', 'breakage-history.json');
+    try {
+      let saved = {};
+      if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8'));
+      for (const day of dailyHistory) {
+        saved[day.date] = { total: day.total, active: day.active, resolved: day.resolved, byStage: day.byStage, byCoating: day.byCoating };
+      }
+      fs.mkdirSync(path.dirname(histPath), { recursive: true });
+      fs.writeFileSync(histPath, JSON.stringify(saved, null, 2));
+    } catch (e) { /* non-critical */ }
+
+    return json(res, {
+      breakage: breakageJobs,
+      total: breakageJobs.length,
+      active: breakageJobs.filter(b => !b.resolved).length,
+      today: breakageJobs.filter(b => new Date(b.time).toDateString() === new Date().toDateString()).length,
+      dailyHistory,
+    });
+  }
+
+  // Breakage history — full persisted daily record
+  if (req.method==='GET' && url.pathname==='/api/breakage/history') {
+    const histPath = path.join(__dirname, 'data', 'breakage-history.json');
+    let saved = {};
+    try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch(e) {}
+    const days = Object.entries(saved).map(([date, data]) => ({ date, ...data })).sort((a, b) => b.date.localeCompare(a.date));
+    return json(res, { history: days, totalDays: days.length });
+  }
+
+  // ── Vision Scanner API — iPad LensScanner app endpoints ─────
+  if (req.method==='GET' && url.pathname==='/api/vision/health') {
+    return json(res, { ok: true, jobs: dviTrace.getJobs().length, timestamp: new Date().toISOString() });
+  }
+
+  if (req.method==='POST' && url.pathname==='/api/vision/scan') {
+    const body = await readBody(req);
+    const { jobNumber } = body;
+    if (!jobNumber) return json(res, { success: false, message: 'Missing jobNumber' }, 400);
+    const allJobs = dviTrace.getJobs();
+    const job = allJobs.find(j => j.job_id === jobNumber);
+    if (!job) {
+      return json(res, { success: false, message: 'Job not found in DVI', jobId: jobNumber });
+    }
+    const xml = dviJobIndex.get(jobNumber) || {};
+    return json(res, {
+      success: true,
+      message: `Found at ${job.stage}`,
+      jobId: job.job_id,
+      trayId: job.tray,
+      stage: job.stage,
+      station: job.station,
+      operator: job.operator,
+      coating: xml.coating || null,
+      daysInLab: job.daysInLab,
+    });
+  }
+
+  if (req.method==='POST' && url.pathname==='/api/vision/batch-scan') {
+    const body = await readBody(req);
+    const { jobNumbers } = body;
+    if (!Array.isArray(jobNumbers)) return json(res, { success: false, message: 'Missing jobNumbers array' }, 400);
+    const allJobs = dviTrace.getJobs();
+    const jobMap = new Map(allJobs.map(j => [j.job_id, j]));
+    const results = jobNumbers.map(num => {
+      const job = jobMap.get(num);
+      if (!job) return { jobNumber: num, success: false, message: 'Not found in DVI', stage: null, station: null };
+      const xml = dviJobIndex.get(num) || {};
+      return {
+        jobNumber: num,
+        success: true,
+        message: `${job.stage} — ${job.station}`,
+        stage: job.stage,
+        station: job.station,
+        coating: xml.coating || null,
+        daysInLab: job.daysInLab,
+      };
+    });
+    const matched = results.filter(r => r.success).length;
+    return json(res, { success: true, results, matched, total: jobNumbers.length });
   }
 
   // Slack test endpoint
@@ -1673,6 +2048,148 @@ Respond with a structured batching plan in this format:
     } catch (e) {
       return json(res, { ok: false, error: e.message }, 500);
     }
+  }
+
+  // ── Knowledge Base API ─────────────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/knowledge/list') {
+    const agent = url.searchParams.get('agent') || undefined;
+    const category = url.searchParams.get('category') || undefined;
+    const tag = url.searchParams.get('tag') || undefined;
+    const docs = knowledge.listDocuments({ agent, category, tag });
+    return json(res, { docs, total: docs.length });
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/knowledge/search') {
+    const q = url.searchParams.get('q') || '';
+    const agent = url.searchParams.get('agent') || undefined;
+    const category = url.searchParams.get('category') || undefined;
+    const limit = parseInt(url.searchParams.get('limit') || '10');
+    if (!q.trim()) return json(res, { results: [], query: q });
+    const results = knowledge.searchDocuments(q, { agent, category, limit });
+    return json(res, { results, query: q, total: results.length });
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/knowledge/context') {
+    const agent = url.searchParams.get('agent') || 'LabAgent';
+    const context = knowledge.getAlwaysOnContext(agent);
+    const aiCtx = knowledge.getAIContext(agent);
+    return json(res, { context, ...aiCtx });
+  }
+
+  if (req.method==='GET' && url.pathname.startsWith('/api/knowledge/doc/')) {
+    const id = url.pathname.split('/').pop();
+    const doc = knowledge.getDocument(id);
+    if (!doc) return json(res, { error: 'Not found' }, 404);
+    const text = knowledge.getDocumentText(id);
+    return json(res, { ...doc, textContent: text ? text.substring(0, 10000) : null });
+  }
+
+  if (req.method==='GET' && url.pathname.startsWith('/api/knowledge/file/')) {
+    const id = url.pathname.split('/').pop();
+    const filePath = knowledge.getFilePath(id);
+    const doc = knowledge.getDocument(id);
+    if (!filePath || !doc || !fs.existsSync(filePath)) return json(res, { error: 'Not found' }, 404);
+    const stat = fs.statSync(filePath);
+    res.writeHead(200, {
+      'Content-Type': doc.mimeType || 'application/octet-stream',
+      'Content-Length': stat.size,
+      'Content-Disposition': `attachment; filename="${doc.originalName}"`,
+    });
+    fs.createReadStream(filePath).pipe(res);
+    return;
+  }
+
+  if (req.method==='GET' && url.pathname.startsWith('/api/knowledge/download/')) {
+    const id = url.pathname.split('/').pop();
+    const file = knowledge.getGeneratedFile(id);
+    if (!file || !fs.existsSync(file.path)) return json(res, { error: 'Not found' }, 404);
+    const stat = fs.statSync(file.path);
+    res.writeHead(200, {
+      'Content-Type': 'text/csv',
+      'Content-Length': stat.size,
+      'Content-Disposition': `attachment; filename="${file.filename}"`,
+    });
+    fs.createReadStream(file.path).pipe(res);
+    return;
+  }
+
+  if (req.method==='DELETE' && url.pathname.startsWith('/api/knowledge/doc/')) {
+    const id = url.pathname.split('/').pop();
+    const ok = knowledge.deleteDocument(id);
+    return json(res, { ok, id });
+  }
+
+  if (req.method==='PATCH' && url.pathname.startsWith('/api/knowledge/doc/')) {
+    const id = url.pathname.split('/').pop();
+    const body = await readBody(req);
+    const doc = knowledge.updateDocument(id, body);
+    if (!doc) return json(res, { error: 'Not found' }, 404);
+    return json(res, { ok: true, doc });
+  }
+
+  if (req.method==='POST' && url.pathname==='/api/knowledge/upload') {
+    // Parse multipart form data manually (no deps)
+    const contentType = req.headers['content-type'] || '';
+    if (contentType.includes('multipart/form-data')) {
+      const boundary = contentType.split('boundary=')[1];
+      if (!boundary) return json(res, { error: 'No boundary in multipart' }, 400);
+      const chunks = [];
+      req.on('data', c => chunks.push(c));
+      req.on('end', () => {
+        try {
+          const buf = Buffer.concat(chunks);
+          const parts = parseMultipart(buf, boundary);
+          const filePart = parts.find(p => p.filename);
+          if (!filePart) return json(res, { error: 'No file uploaded' }, 400);
+          const meta = {};
+          for (const p of parts) {
+            if (!p.filename && p.name) meta[p.name] = p.data.toString('utf-8');
+          }
+          const doc = knowledge.addDocument({
+            filename: filePart.filename,
+            category: meta.category || 'general',
+            title: meta.title || filePart.filename,
+            description: meta.description || '',
+            agents: meta.agents ? JSON.parse(meta.agents) : [],
+            tags: meta.tags ? JSON.parse(meta.tags) : [],
+            alwaysOn: meta.alwaysOn === 'true',
+            content: filePart.data,
+            mimeType: filePart.contentType || 'application/octet-stream',
+          });
+          json(res, { ok: true, doc });
+        } catch (e) {
+          json(res, { error: e.message }, 500);
+        }
+      });
+      return;
+    }
+    // JSON upload (for text content)
+    const body = await readBody(req);
+    if (!body.title || !body.content) return json(res, { error: 'title and content required' }, 400);
+    const doc = knowledge.addDocument({
+      filename: (body.title || 'doc').replace(/[^a-zA-Z0-9_-]/g, '_') + '.txt',
+      category: body.category || 'general',
+      title: body.title,
+      description: body.description || '',
+      agents: body.agents || [],
+      tags: body.tags || [],
+      alwaysOn: body.alwaysOn || false,
+      content: body.content,
+      mimeType: 'text/plain',
+    });
+    return json(res, { ok: true, doc });
+  }
+
+  if (req.method==='POST' && url.pathname==='/api/knowledge/generate-csv') {
+    const body = await readBody(req);
+    if (!body.title || !body.headers || !body.rows) return json(res, { error: 'title, headers, rows required' }, 400);
+    const result = knowledge.generateCSV({
+      title: body.title,
+      headers: body.headers,
+      rows: body.rows,
+      agent: body.agent || 'LabAgent',
+    });
+    return json(res, { ok: true, ...result });
   }
 
   // AI Query endpoint - processes questions with lab context
@@ -1983,6 +2500,72 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return;
   }
 
+  // ── Vision Scanner API ──────────────────────────────────────
+  // POST /api/vision/scan — receive scanned job number from iPad LensScanner app
+  if (req.method==='POST' && url.pathname==='/api/vision/scan') {
+    try {
+      const body = await readBody(req);
+      const { jobNumber, confidence, scannedAt, device } = body;
+      if (!jobNumber) return json(res,{success:false,message:'Missing jobNumber'},400);
+
+      // Try to match against known DVI jobs
+      const allJobs = dviTrace.getJobs();
+      const match = allJobs.find(j =>
+        j.job_id === jobNumber ||
+        j.job_id === jobNumber.replace(/[^a-zA-Z0-9]/g, '') ||
+        jobNumber.includes(j.job_id) ||
+        j.job_id.includes(jobNumber)
+      );
+
+      // Log the scan
+      if (!global._visionScans) global._visionScans = [];
+      const scan = {
+        id: Date.now(),
+        jobNumber,
+        confidence: confidence || 0,
+        scannedAt: scannedAt || new Date().toISOString(),
+        device: device || 'unknown',
+        matched: !!match,
+        matchedJobId: match ? match.job_id : null,
+        matchedStage: match ? match.stage : null,
+        matchedTray: match ? match.tray : null
+      };
+      global._visionScans.unshift(scan);
+      if (global._visionScans.length > 500) global._visionScans.length = 500;
+
+      console.log(`👁 Vision scan: ${jobNumber} (${Math.round((confidence||0)*100)}%) → ${match ? `MATCHED ${match.job_id} @ ${match.stage}` : 'NO MATCH'}`);
+
+      return json(res, {
+        success: true,
+        message: match ? `Matched job ${match.job_id} — currently in ${match.stage}` : `Scan logged. No matching job found for "${jobNumber}".`,
+        jobId: match ? match.job_id : null,
+        trayId: match ? match.tray : null,
+        stage: match ? match.stage : null,
+        station: match ? match.station : null,
+        operator: match ? match.operator : null
+      });
+    } catch(e) { return json(res,{success:false,message:e.message},400); }
+  }
+
+  // GET /api/vision/scans — recent scan log
+  if (req.method==='GET' && url.pathname==='/api/vision/scans') {
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+    const scans = (global._visionScans || []).slice(0, limit);
+    return json(res, { scans, total: (global._visionScans || []).length });
+  }
+
+  // GET /api/vision/health — vision system status
+  if (req.method==='GET' && url.pathname==='/api/vision/health') {
+    const scans = global._visionScans || [];
+    const lastScan = scans[0] || null;
+    return json(res, {
+      ok: true,
+      totalScans: scans.length,
+      matchRate: scans.length > 0 ? Math.round(scans.filter(s => s.matched).length / scans.length * 100) : 0,
+      lastScan: lastScan ? { jobNumber: lastScan.jobNumber, matched: lastScan.matched, at: lastScan.scannedAt } : null
+    });
+  }
+
   // ── 404 ─────────────────────────────────────────────────────
   cors(res);
   res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -2024,6 +2607,10 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     GET  /api/dvi/trace/job/:id    ← Job movement history`);
   console.log(`     GET  /api/dvi-sync/status      ← DVI file sync status`);
   console.log(`     POST /api/dvi-sync/poll        ← Force sync poll`);
+  console.log(`     GET  /api/knowledge/list        ← Knowledge base documents`);
+  console.log(`     GET  /api/knowledge/search      ← Search knowledge base`);
+  console.log(`     POST /api/knowledge/upload      ← Upload document`);
+  console.log(`     POST /api/knowledge/generate-csv← Generate CSV report`);
   console.log(`     POST /api/ai/query             ← AI query with lab context`);
   console.log(`     POST /api/slack/ai-respond     ← Process Slack AI query`);
 

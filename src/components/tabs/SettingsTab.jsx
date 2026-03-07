@@ -993,8 +993,303 @@ function DataImportPanel({settings}){
   );
 }
 
+// ── Knowledge Base Management Panel ──────────────────────────────────────────
+const CATEGORIES = ['sops','reports','recipes','general'];
+const CATEGORY_LABELS = {sops:'SOPs',reports:'Report Templates',recipes:'Recipes & Formulas',general:'General'};
+const CATEGORY_ICONS = {sops:'📋',reports:'📊',recipes:'🧪',general:'📄'};
+const VALID_AGENTS = [
+  'LabAgent','CoatingAgent','SurfacingAgent','CuttingAgent',
+  'AssemblyAgent','QCAgent','ShippingAgent','PickingAgent',
+  'MaintenanceAgent','DirectorAgent','DevOpsAgent','OfficeAgent',
+  'ShiftReportAgent','CodingAgent'
+];
+
+function KnowledgeBasePanel({ovenServerUrl}){
+  const serverUrl = ovenServerUrl || 'http://localhost:3002';
+  const [docs,setDocs]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [filter,setFilter]=useState({category:null,agent:null});
+  const [showUpload,setShowUpload]=useState(false);
+  const [uploadForm,setUploadForm]=useState({title:'',description:'',category:'general',agents:[],tags:'',alwaysOn:false,content:''});
+  const [uploadFile,setUploadFile]=useState(null);
+  const [uploading,setUploading]=useState(false);
+  const [expandedDoc,setExpandedDoc]=useState(null);
+  const [docText,setDocText]=useState(null);
+  const fileRef=useRef(null);
+
+  const fetchDocs=async()=>{
+    try{
+      const params=new URLSearchParams();
+      if(filter.category)params.set('category',filter.category);
+      if(filter.agent)params.set('agent',filter.agent);
+      const res=await fetch(`${serverUrl}/api/knowledge/list?${params}`);
+      const data=await res.json();
+      setDocs(data.docs||[]);
+    }catch(e){console.error('KB fetch:',e);}
+    setLoading(false);
+  };
+  useEffect(()=>{fetchDocs();},[filter.category,filter.agent]);
+
+  const handleUpload=async()=>{
+    setUploading(true);
+    try{
+      if(uploadFile){
+        const fd=new FormData();
+        fd.append('file',uploadFile);
+        fd.append('title',uploadForm.title||uploadFile.name);
+        fd.append('description',uploadForm.description);
+        fd.append('category',uploadForm.category);
+        fd.append('agents',JSON.stringify(uploadForm.agents));
+        fd.append('tags',JSON.stringify(uploadForm.tags.split(',').map(t=>t.trim()).filter(Boolean)));
+        fd.append('alwaysOn',String(uploadForm.alwaysOn));
+        const res=await fetch(`${serverUrl}/api/knowledge/upload`,{method:'POST',body:fd});
+        const data=await res.json();
+        if(!data.ok)throw new Error(data.error);
+      }else if(uploadForm.content){
+        const res=await fetch(`${serverUrl}/api/knowledge/upload`,{
+          method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({
+            title:uploadForm.title,description:uploadForm.description,
+            category:uploadForm.category,agents:uploadForm.agents,
+            tags:uploadForm.tags.split(',').map(t=>t.trim()).filter(Boolean),
+            alwaysOn:uploadForm.alwaysOn,content:uploadForm.content
+          })
+        });
+        const data=await res.json();
+        if(!data.ok)throw new Error(data.error);
+      }
+      setShowUpload(false);
+      setUploadForm({title:'',description:'',category:'general',agents:[],tags:'',alwaysOn:false,content:''});
+      setUploadFile(null);
+      fetchDocs();
+    }catch(e){alert('Upload failed: '+e.message);}
+    setUploading(false);
+  };
+
+  const deleteDoc=async(id)=>{
+    if(!confirm('Delete this document?'))return;
+    await fetch(`${serverUrl}/api/knowledge/doc/${id}`,{method:'DELETE'});
+    fetchDocs();
+  };
+
+  const toggleAlwaysOn=async(doc)=>{
+    await fetch(`${serverUrl}/api/knowledge/doc/${doc.id}`,{
+      method:'PATCH',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({alwaysOn:!doc.alwaysOn})
+    });
+    fetchDocs();
+  };
+
+  const viewDoc=async(id)=>{
+    if(expandedDoc===id){setExpandedDoc(null);setDocText(null);return;}
+    setExpandedDoc(id);
+    const res=await fetch(`${serverUrl}/api/knowledge/doc/${id}`);
+    const data=await res.json();
+    setDocText(data.textContent||'(no text content — binary file)');
+  };
+
+  const toggleAgent=(agentName)=>{
+    setUploadForm(prev=>({...prev,
+      agents:prev.agents.includes(agentName)
+        ?prev.agents.filter(a=>a!==agentName)
+        :[...prev.agents,agentName]
+    }));
+  };
+
+  const inp={background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,padding:"8px 12px",color:T.text,fontSize:13,fontFamily:mono,width:"100%",boxSizing:"border-box"};
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <Card>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+          <div>
+            <SectionHeader>Knowledge Base</SectionHeader>
+            <div style={{fontSize:12,color:T.textMuted}}>Upload SOPs, recipes, report templates, and other docs. AI agents will use these when answering questions.</div>
+          </div>
+          <button onClick={()=>setShowUpload(!showUpload)}
+            style={{background:T.green,border:"none",borderRadius:8,padding:"10px 20px",cursor:"pointer",color:"#fff",fontSize:13,fontWeight:700,fontFamily:"'DM Sans',sans-serif",whiteSpace:"nowrap"}}>
+            + Add Document
+          </button>
+        </div>
+
+        {/* Filters */}
+        <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap"}}>
+          <button onClick={()=>setFilter(f=>({...f,category:null}))}
+            style={{background:!filter.category?T.blueDark:"transparent",border:`1px solid ${!filter.category?T.blue:"transparent"}`,
+            borderRadius:6,padding:"6px 14px",cursor:"pointer",color:!filter.category?"#93C5FD":T.textMuted,fontSize:12,fontWeight:700}}>
+            All
+          </button>
+          {CATEGORIES.map(c=>(
+            <button key={c} onClick={()=>setFilter(f=>({...f,category:c}))}
+              style={{background:filter.category===c?T.blueDark:"transparent",border:`1px solid ${filter.category===c?T.blue:"transparent"}`,
+              borderRadius:6,padding:"6px 14px",cursor:"pointer",color:filter.category===c?"#93C5FD":T.textMuted,fontSize:12,fontWeight:700}}>
+              {CATEGORY_ICONS[c]} {CATEGORY_LABELS[c]}
+            </button>
+          ))}
+        </div>
+
+        {/* Upload Form */}
+        {showUpload&&(
+          <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:12,padding:20,marginBottom:16}}>
+            <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:16}}>Upload Document</div>
+
+            {/* File or text toggle */}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:T.textMuted,display:"block",marginBottom:4}}>File Upload</label>
+              <input ref={fileRef} type="file" onChange={e=>setUploadFile(e.target.files[0])}
+                accept=".txt,.md,.csv,.json,.xml,.html,.pdf,.docx,.doc,.yaml,.yml,.toml,.log"
+                style={{...inp,padding:"6px 8px"}}/>
+              <div style={{fontSize:10,color:T.textDim,marginTop:4}}>Or paste text content below</div>
+            </div>
+
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+              <div>
+                <label style={{fontSize:12,color:T.textMuted,display:"block",marginBottom:4}}>Title</label>
+                <input value={uploadForm.title} onChange={e=>setUploadForm(f=>({...f,title:e.target.value}))}
+                  placeholder="e.g. AR Coating Recipe" style={inp}/>
+              </div>
+              <div>
+                <label style={{fontSize:12,color:T.textMuted,display:"block",marginBottom:4}}>Category</label>
+                <select value={uploadForm.category} onChange={e=>setUploadForm(f=>({...f,category:e.target.value}))}
+                  style={{...inp,cursor:"pointer"}}>
+                  {CATEGORIES.map(c=><option key={c} value={c}>{CATEGORY_LABELS[c]}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:T.textMuted,display:"block",marginBottom:4}}>Description</label>
+              <input value={uploadForm.description} onChange={e=>setUploadForm(f=>({...f,description:e.target.value}))}
+                placeholder="Brief description of this document" style={inp}/>
+            </div>
+
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:T.textMuted,display:"block",marginBottom:4}}>Tags (comma separated)</label>
+              <input value={uploadForm.tags} onChange={e=>setUploadForm(f=>({...f,tags:e.target.value}))}
+                placeholder="e.g. coating, AR, temperature" style={inp}/>
+            </div>
+
+            {/* Agent Assignment */}
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:12,color:T.textMuted,display:"block",marginBottom:6}}>
+                Assign to Agents <span style={{color:T.textDim}}>(empty = all agents can access)</span>
+              </label>
+              <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                {VALID_AGENTS.map(a=>{
+                  const sel=uploadForm.agents.includes(a);
+                  return(
+                    <button key={a} onClick={()=>toggleAgent(a)}
+                      style={{background:sel?`${T.blue}20`:"transparent",border:`1px solid ${sel?T.blue:T.border}`,
+                      borderRadius:6,padding:"4px 10px",cursor:"pointer",color:sel?"#93C5FD":T.textDim,fontSize:11,fontWeight:600}}>
+                      {a.replace('Agent','')}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Always-on toggle */}
+            <div style={{marginBottom:16,display:"flex",alignItems:"center",gap:10}}>
+              <button onClick={()=>setUploadForm(f=>({...f,alwaysOn:!f.alwaysOn}))}
+                style={{width:44,height:24,borderRadius:12,border:"none",cursor:"pointer",
+                background:uploadForm.alwaysOn?T.green:T.border,position:"relative",transition:"background 0.2s"}}>
+                <div style={{width:18,height:18,borderRadius:9,background:"#fff",position:"absolute",top:3,
+                  left:uploadForm.alwaysOn?23:3,transition:"left 0.2s"}}/>
+              </button>
+              <div>
+                <div style={{fontSize:12,color:T.text,fontWeight:600}}>Always-On Context</div>
+                <div style={{fontSize:10,color:T.textDim}}>Include in every AI prompt (for critical info like recipes/temps)</div>
+              </div>
+            </div>
+
+            {/* Text content */}
+            {!uploadFile&&(
+              <div style={{marginBottom:16}}>
+                <label style={{fontSize:12,color:T.textMuted,display:"block",marginBottom:4}}>Text Content</label>
+                <textarea value={uploadForm.content} onChange={e=>setUploadForm(f=>({...f,content:e.target.value}))}
+                  placeholder="Paste document content here (SOPs, recipes, procedures, etc.)"
+                  rows={8} style={{...inp,resize:"vertical",minHeight:100}}/>
+              </div>
+            )}
+
+            <div style={{display:"flex",gap:8}}>
+              <button onClick={handleUpload} disabled={uploading||(!uploadFile&&!uploadForm.content)}
+                style={{background:T.green,border:"none",borderRadius:8,padding:"10px 24px",cursor:"pointer",color:"#fff",fontSize:13,fontWeight:700,opacity:uploading||(!uploadFile&&!uploadForm.content)?0.5:1}}>
+                {uploading?"Uploading...":"Upload"}
+              </button>
+              <button onClick={()=>{setShowUpload(false);setUploadFile(null);}}
+                style={{background:"transparent",border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 24px",cursor:"pointer",color:T.textMuted,fontSize:13}}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Document List */}
+        {loading?(
+          <div style={{textAlign:"center",padding:40,color:T.textMuted}}>Loading...</div>
+        ):docs.length===0?(
+          <div style={{textAlign:"center",padding:40}}>
+            <div style={{fontSize:36,marginBottom:12}}>📚</div>
+            <div style={{fontSize:14,color:T.textMuted,marginBottom:8}}>No documents yet</div>
+            <div style={{fontSize:12,color:T.textDim}}>Upload SOPs, recipes, report templates, and other documents to train your AI agents.</div>
+          </div>
+        ):(
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {docs.map(doc=>(
+              <div key={doc.id} style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,overflow:"hidden"}}>
+                <div style={{display:"flex",alignItems:"center",padding:"12px 16px",gap:12,cursor:"pointer"}} onClick={()=>viewDoc(doc.id)}>
+                  <span style={{fontSize:20}}>{CATEGORY_ICONS[doc.category]||'📄'}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{doc.title}</div>
+                    <div style={{display:"flex",gap:8,marginTop:2,flexWrap:"wrap",alignItems:"center"}}>
+                      <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{CATEGORY_LABELS[doc.category]||doc.category}</span>
+                      {doc.alwaysOn&&<span style={{fontSize:9,background:`${T.green}20`,color:T.green,padding:"1px 6px",borderRadius:4,fontWeight:700}}>ALWAYS-ON</span>}
+                      {doc.agents.length>0&&<span style={{fontSize:9,color:T.textDim}}>{doc.agents.map(a=>a.replace('Agent','')).join(', ')}</span>}
+                      {doc.tags?.length>0&&doc.tags.map(t=><span key={t} style={{fontSize:9,background:`${T.blue}15`,color:"#93C5FD",padding:"1px 6px",borderRadius:4}}>{t}</span>)}
+                    </div>
+                  </div>
+                  <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                    <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{(doc.size/1024).toFixed(1)}KB</span>
+                    <button onClick={e=>{e.stopPropagation();toggleAlwaysOn(doc);}}
+                      title={doc.alwaysOn?"Remove from always-on":"Set always-on"}
+                      style={{background:doc.alwaysOn?`${T.green}20`:"transparent",border:`1px solid ${doc.alwaysOn?T.green:T.border}`,
+                      borderRadius:6,padding:"4px 8px",cursor:"pointer",color:doc.alwaysOn?T.green:T.textDim,fontSize:10}}>
+                      {doc.alwaysOn?'ON':'off'}
+                    </button>
+                    <a href={`${serverUrl}/api/knowledge/file/${doc.id}`} download onClick={e=>e.stopPropagation()}
+                      style={{color:T.blue,fontSize:11,textDecoration:"none",padding:"4px 8px",border:`1px solid ${T.blue}30`,borderRadius:6}}>
+                      DL
+                    </a>
+                    <button onClick={e=>{e.stopPropagation();deleteDoc(doc.id);}}
+                      style={{background:"transparent",border:`1px solid ${T.red}40`,borderRadius:6,padding:"4px 8px",cursor:"pointer",color:T.red,fontSize:11}}>
+                      ×
+                    </button>
+                  </div>
+                </div>
+                {expandedDoc===doc.id&&(
+                  <div style={{borderTop:`1px solid ${T.border}`,padding:16,maxHeight:300,overflow:"auto"}}>
+                    {doc.description&&<div style={{fontSize:12,color:T.textMuted,marginBottom:8}}>{doc.description}</div>}
+                    <pre style={{fontSize:11,color:T.textDim,fontFamily:mono,whiteSpace:"pre-wrap",wordBreak:"break-word",margin:0}}>
+                      {docText||'Loading...'}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{marginTop:16,fontSize:11,color:T.textDim,textAlign:"center"}}>
+          {docs.length} documents | Always-on docs are injected into every AI agent prompt | On-demand docs are searchable via the search_knowledge tool
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // ── Settings Tab (Main Component) ─────────────────────────────────────────────
-function SettingsTab({settings,setSettings,ovenServerUrl}){
+function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   const [sub,setSub]=useState("connections");
   const [pinInput,setPinInput]=useState("");
   const [pinMode,setPinMode]=useState(null); // null, 'set', 'change', 'verify'
@@ -1356,7 +1651,9 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
         {id:"server",icon:"🔗",label:"Server"},
         {id:"gateway",icon:"🌐",label:"Gateway"},
         {id:"ai",icon:"🤖",label:"AI"},
+        {id:"knowledge",icon:"📚",label:"Knowledge Base"},
         {id:"security",icon:"🔒",label:"Security"},
+        {id:"trayfleet",icon:"📡",label:"Tray Fleet (Dev)"},
       ].map(n=>(
         <button key={n.id} onClick={()=>setSub(n.id)}
           style={{background:sub===n.id?T.blueDark:"transparent",border:`1px solid ${sub===n.id?T.blue:"transparent"}`,
@@ -2311,7 +2608,24 @@ function SettingsTab({settings,setSettings,ovenServerUrl}){
         </div>
       )}
 
-      {/* ══ SECURITY ══ */}
+      {/* ══ KNOWLEDGE BASE ══ */}
+      {sub==="knowledge"&&<KnowledgeBasePanel ovenServerUrl={ovenServerUrl}/>}
+
+      {/* ══ TRAY FLEET ══ */}
+      {sub==="trayfleet"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <Card>
+            <SectionHeader>Smart Tray Fleet (Development)</SectionHeader>
+            <div style={{fontSize:13,color:T.textMuted,marginBottom:16}}>
+              Tray fleet management, BLE zone detection, tray locator, and QR generator. Currently using mock data — will go live when BLE hardware is installed.
+            </div>
+            <button onClick={()=>onNavigate&&onNavigate('trays')}
+              style={{background:T.blueDark,border:`1px solid ${T.blue}`,borderRadius:8,padding:"12px 24px",cursor:"pointer",color:"#93C5FD",fontSize:14,fontWeight:700,fontFamily:"'DM Sans',sans-serif"}}>
+              Open Tray Fleet View
+            </button>
+          </Card>
+        </div>
+      )}
       {sub==="security"&&(
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
           <Card>

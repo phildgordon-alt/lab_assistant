@@ -135,7 +135,7 @@ const CARD_REGISTRY = [
   { type:"event_feed",      label:"Event Feed",            icon:"📡", desc:"Live event feed showing recent lab activity" },
   { type:"fleet_dept",      label:"SOM Jobs by Zone",      icon:"◈",  desc:"Live job counts by production zone from SOM Control Center" },
   { type:"rush_queue",      label:"Rush Queue",            icon:"🔴", desc:"All active rush jobs with location and time in system" },
-  { type:"aging_alert",     label:"WIP Aging Alert",       icon:"⏱", desc:"Jobs in system longer than threshold — configurable hours" },
+  { type:"aging_alert",     label:"WIP Over SLA",          icon:"⏱", desc:"Jobs past SLA — SV 24h, Semi-finished 48h" },
   { type:"inventory",       label:"Lens Blank Inventory",  icon:"📦", desc:"Lens blank stock levels from Kardex / ItemPath (live when connected)" },
   { type:"ai_query",        label:"AI Quick Query",        icon:"🤖", desc:"Single-question AI widget — ask anything about current lab state" },
   { type:"custom_metric",   label:"Custom Metric",         icon:"✦",  desc:"Point at any server endpoint and display the returned value" },
@@ -834,6 +834,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   const [showCardPicker,setShowCardPicker]=useState(false);
   const [editCard,setEditCard]=useState(null);
   const [cardMenu,setCardMenu]=useState(null);
+  const [agingJob,setAgingJob]=useState(null); // selected job from WIP aging card
 
   useEffect(()=>{
     if(!cardMenu)return;
@@ -900,23 +901,75 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
 
   // Live Put Wall data from ItemPath
   const [putWallData,setPutWallData]=useState({WH1:{positions:[],activeCount:0},WH2:{positions:[],activeCount:0},status:"pending",lastSync:null});
+  const [pickStats,setPickStats]=useState({WH1:0,WH2:0});
+  const [putStats,setPutStats]=useState({WH1:0,WH2:0});
   useEffect(()=>{
     const fetchPutWall=async()=>{
       try{
-        const res=await fetch("http://localhost:3002/api/inventory/putwall");
-        const data=await res.json();
+        const [pwRes,invRes]=await Promise.all([
+          fetch("http://localhost:3002/api/inventory/putwall"),
+          fetch("http://localhost:3002/api/inventory")
+        ]);
+        const data=await pwRes.json();
         setPutWallData({
           WH1:data.WH1||{positions:[],activeCount:0,totalOrders:0},
           WH2:data.WH2||{positions:[],activeCount:0,totalOrders:0},
           status:data.status||"ok",
           lastSync:data.lastSync
         });
+        if(invRes.ok){
+          const inv=await invRes.json();
+          setPickStats({
+            WH1:inv.warehouseStats?.WH1?.todayPicks||0,
+            WH2:inv.warehouseStats?.WH2?.todayPicks||0
+          });
+          setPutStats({
+            WH1:inv.warehouseStats?.WH1?.todayPuts||0,
+            WH2:inv.warehouseStats?.WH2?.todayPuts||0
+          });
+        }
       }catch(e){
         setPutWallData(prev=>({...prev,status:"error"}));
       }
     };
     fetchPutWall();
     const iv=setInterval(fetchPutWall,15000); // Poll every 15s for near real-time
+    return()=>clearInterval(iv);
+  },[]);
+
+  // Coating intelligence data (real coater/oven state)
+  const [coatingIntel,setCoatingIntel]=useState(null);
+  const coatingFetchedAt=useRef(0);
+  useEffect(()=>{
+    const fetchCoating=async()=>{
+      try{
+        const [intelRes,ovenRes,coaterRes]=await Promise.all([
+          fetch("http://localhost:3002/api/coating/intelligence"),
+          fetch("http://localhost:3002/api/oven-runs?limit=10"),
+          fetch("http://localhost:3002/api/coating/runs?limit=10")
+        ]);
+        const intel=intelRes.ok?await intelRes.json():null;
+        const ovenRuns=ovenRes.ok?await ovenRes.json():null;
+        const coaterData=coaterRes.ok?await coaterRes.json():null;
+        coatingFetchedAt.current=Date.now();
+        setCoatingIntel({
+          intel,
+          ovenRuns:Array.isArray(ovenRuns)?ovenRuns:ovenRuns?.runs||[],
+          coaterRuns:coaterData?.history||Object.values(coaterData?.active||{})
+        });
+      }catch(e){
+        console.warn("Coating intel fetch:",e.message);
+      }
+    };
+    fetchCoating();
+    const iv=setInterval(fetchCoating,15000);
+    return()=>clearInterval(iv);
+  },[]);
+
+  // 1-second tick for live timer countdown between fetches
+  const [timerTick,setTimerTick]=useState(0);
+  useEffect(()=>{
+    const iv=setInterval(()=>setTimerTick(t=>t+1),1000);
     return()=>clearInterval(iv);
   },[]);
 
@@ -1147,14 +1200,152 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         </div>
       );
 
-      case "coating_machines": return(
-        <div>
-          <SectionHeader>Coating Machines</SectionHeader>
-          <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
-            {batches.map((b,idx)=><BatchCard key={b.id} batch={b} trays={trays} expanded={expandedBatch===b.id} onToggle={()=>setExpandedBatch(expandedBatch===b.id?null:b.id)} onControl={onBatchControl} machineDisplayName={coaterMachines[idx]}/>)}
+      case "coating_machines": {
+        const ci = coatingIntel;
+        const intel = ci?.intel;
+        const ovenRuns = ci?.ovenRuns || [];
+        const coaterRuns = ci?.coaterRuns || [];
+        const coaters = intel?.coaters || [];
+        const queue = intel?.queue || {};
+        const ovens = intel?.ovens || {};
+        const rec = intel?.recommendation || {};
+        const runningRacks = ovens.racksRunning || [];
+
+        // Seconds elapsed since last fetch — used for local countdown
+        void timerTick; // reference to trigger re-render each second
+        const secSinceFetch = Math.round((Date.now() - coatingFetchedAt.current) / 1000);
+
+        // Active coater runs keyed by coater name
+        const activeRuns = {};
+        coaterRuns.forEach(r => { if (r.coaterId || r.name) activeRuns[r.coaterId || r.name] = r; });
+
+        return (
+          <div>
+            {/* Coaters — timer first, then fill */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+              {(coaters.length > 0 ? coaters : [{name:'EB9 #1',id:'EB9001'},{name:'EB9 #2',id:'EB9002'},{name:'E1400',id:'E1400'}]).map(c => {
+                const run = activeRuns[c.id] || activeRuns[c.name] || null;
+                const liveSec = run ? Math.max(0, (run.remainingSec || 0) - secSinceFetch) : 0;
+                const isRunning = run && liveSec > 0;
+                const liveMin = Math.ceil(liveSec / 60);
+                const liveElapsed = run ? (run.elapsedSec || 0) + secSinceFetch : 0;
+                const timerPct = isRunning && run.targetSec > 0 ? Math.min(Math.round((liveElapsed / run.targetSec) * 100), 100) : 0;
+                // Fill % = actual loaded state from active run, not recommendation
+                const fillPct = isRunning ? (run.fillPct || 100) : 0;
+                const fillLens = isRunning ? (run.lensCount || run.fill || c.lensCapacity || '?') : 0;
+                const fillJobs = isRunning ? (run.orderCount || run.orders || '?') : 0;
+                const fillColor = fillPct >= 75 ? T.green : fillPct >= 50 ? T.amber : fillPct > 0 ? T.blue : T.textDim;
+                const mm = String(Math.floor(liveSec / 60)).padStart(2, '0');
+                const ss = String(liveSec % 60).padStart(2, '0');
+                return (
+                  <div key={c.name} style={{ background: T.surface, border: `1px solid ${isRunning ? T.green : T.border}`, borderRadius: 8, padding: 12 }}>
+                    {/* Header: name + coating type + time */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: mono }}>{c.name}</span>
+                        {isRunning && run.coating && <span style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, background: T.bg, padding: '2px 6px', borderRadius: 4 }}>{run.coating}</span>}
+                      </div>
+                      {isRunning ? (
+                        <span style={{ fontSize: 20, fontWeight: 800, color: T.green, fontFamily: mono }}>{mm}:{ss}</span>
+                      ) : (
+                        <span style={{ fontSize: 12, color: T.textDim, fontFamily: mono }}>IDLE</span>
+                      )}
+                    </div>
+                    {/* Timer bar — green 0→100% */}
+                    {isRunning && (
+                      <div style={{ height: 8, background: T.bg, borderRadius: 4, overflow: 'hidden', marginBottom: 10 }}>
+                        <div style={{ width: `${timerPct}%`, height: '100%', background: T.green, borderRadius: 4, transition: 'width 1s linear' }} />
+                      </div>
+                    )}
+                    {/* Fill bar */}
+                    <div style={{ height: 6, background: T.bg, borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+                      <div style={{ width: `${Math.min(fillPct, 100)}%`, height: '100%', background: fillColor, borderRadius: 3, transition: 'width 0.5s' }} />
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: fillColor, fontFamily: mono }}>{fillPct}%</span>
+                      <span style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{fillLens}L / {fillJobs} jobs</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Live Oven Racks */}
+            {runningRacks.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, letterSpacing: 1, marginBottom: 8 }}>OVENS — {runningRacks.length} RACK{runningRacks.length !== 1 ? 'S' : ''} RUNNING</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {runningRacks.map((r, i) => {
+                    const liveRemSec = Math.max(0, ((r.remainingMin || 0) * 60) - secSinceFetch);
+                    const liveElap = (r.elapsed || 0) + secSinceFetch;
+                    const pct = r.target > 0 ? Math.min(Math.round((liveElap / r.target) * 100), 100) : 0;
+                    const remaining = Math.ceil(liveRemSec / 60);
+                    return (
+                      <div key={i} style={{ background: T.bg, border: `1px solid ${remaining <= 10 ? T.green : T.border}`, borderRadius: 6, padding: '6px 10px', minWidth: 110 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <span style={{ fontSize: 10, fontWeight: 600, color: T.text, fontFamily: mono }}>{r.ovenId}</span>
+                          <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{r.rackLabel}</span>
+                        </div>
+                        <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden', marginBottom: 4 }}>
+                          <div style={{ width: `${Math.min(pct, 100)}%`, height: '100%', background: remaining <= 10 ? T.green : T.amber, borderRadius: 2 }} />
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span style={{ fontSize: 10, color: remaining <= 10 ? T.green : T.amber, fontWeight: 700, fontFamily: mono }}>{remaining}m left</span>
+                          <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{r.coating || 'AR'}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Oven Grid — 6 ovens x 7 racks */}
+            {(() => {
+              const layout = ovens.layout || [];
+              const activeCount = runningRacks.length;
+              return layout.length > 0 ? (
+                <div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, letterSpacing: 1, marginBottom: 8 }}>OVENS — {activeCount} RACK{activeCount !== 1 ? 'S' : ''} ACTIVE / {ovens.racksAvailable || 0} AVAILABLE</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 6 }}>
+                    {layout.map(oven => (
+                      <div key={oven.ovenId} style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 6, padding: 6 }}>
+                        <div style={{ fontSize: 9, fontWeight: 700, color: T.text, fontFamily: mono, textAlign: 'center', marginBottom: 4 }}>{oven.ovenId.replace('Oven ', 'O')}</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {(oven.racks || []).map(rack => {
+                            const isRunning = rack.state === 'running' || rack.state === 'paused';
+                            const hasJobs = rack.jobs && rack.jobs.length > 0;
+                            const rackRemSec = Math.max(0, (rack.remainingSec || (rack.remainingMin || 0) * 60) - secSinceFetch);
+                            const rackElap = (rack.elapsed || 0) + secSinceFetch;
+                            const pct = isRunning && rack.target > 0 ? Math.min(Math.round((rackElap / rack.target) * 100), 100) : 0;
+                            const remaining = Math.ceil(rackRemSec / 60);
+                            const bg = isRunning ? (remaining <= 10 ? `${T.green}30` : `${T.amber}25`) : hasJobs ? `${T.blue}15` : T.bg;
+                            const borderCol = isRunning ? (remaining <= 10 ? T.green : T.amber) : hasJobs ? `${T.blue}40` : T.border;
+                            return (
+                              <div key={rack.rackLabel || rack.rackIndex} style={{ background: bg, border: `1px solid ${borderCol}`, borderRadius: 3, padding: '2px 4px', height: 18, display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'relative', overflow: 'hidden' }} title={isRunning ? `${rack.coating || 'AR'} — ${remaining}m left` : hasJobs ? `${rack.jobs.length} jobs loaded` : 'Empty'}>
+                                {isRunning && <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${Math.min(pct, 100)}%`, background: remaining <= 10 ? `${T.green}30` : `${T.amber}20`, borderRadius: 2 }} />}
+                                <span style={{ fontSize: 7, color: T.textDim, fontFamily: mono, position: 'relative', zIndex: 1 }}>R{rack.rackIndex}</span>
+                                {isRunning && <span style={{ fontSize: 7, fontWeight: 700, color: remaining <= 10 ? T.green : T.amber, fontFamily: mono, position: 'relative', zIndex: 1 }}>{remaining}m</span>}
+                                {!isRunning && hasJobs && <span style={{ fontSize: 7, color: T.blue, fontFamily: mono, position: 'relative', zIndex: 1 }}>{rack.jobs.length}j</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {!intel && (
+              <div style={{ textAlign: 'center', padding: 24, color: T.textDim, fontSize: 12, fontFamily: mono }}>
+                Connecting to coating intelligence...
+              </div>
+            )}
           </div>
-        </div>
-      );
+        );
+      }
 
       case "putwall_dual": {
         // Get order counts by category from ItemPath
@@ -1162,6 +1353,11 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         const wh2 = putWallData.WH2 || {};
         // At Kardex = total of both warehouses
         const atKardexCount = (wh1.totalOrders || 0) + (wh2.totalOrders || 0);
+        // Today's total picks and puts across both warehouses
+        const totalDayPicks = (pickStats.WH1 || 0) + (pickStats.WH2 || 0);
+        const totalDayPuts = (putStats.WH1 || 0) + (putStats.WH2 || 0);
+        // Auto-detect mode: if there are active outgoing orders, show Out view
+        const hasOutgoing = atKardexCount > 0;
 
         // Render warehouse stats card
         const renderWarehouseStats = (whName, whData) => {
@@ -1169,12 +1365,16 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           const laptopCount = whData.laptopCount || 0;
           const manualCount = whData.manualCount || 0;
           const total = whData.totalOrders || 0;
+          const whPicks = pickStats[whName] || 0;
 
           return (
             <div style={{ flex: 1, background: T.surface, borderRadius: 8, padding: 12, border: `1px solid ${T.border}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: mono }}>{whName}</span>
-                <span style={{ fontSize: 18, fontWeight: 800, color: T.green, fontFamily: mono }}>{total}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ width: 10, height: 10, borderRadius: 3, background: whName === 'WH1' ? T.blue : T.green }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: mono }}>{whName}</span>
+                </div>
+                <span style={{ fontSize: 22, fontWeight: 800, color: whPicks > 0 ? (whName === 'WH1' ? T.blue : T.green) : T.textDim, fontFamily: mono }}>{whPicks}</span>
               </div>
               {/* Order breakdown by type */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -1206,7 +1406,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
 
         return (
           <div>
-            {/* At Kardex header */}
+            {/* At Kardex bar */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, padding: '8px 12px', background: atKardexCount > 0 ? `${T.amber}15` : T.bg, borderRadius: 6, border: `1px solid ${atKardexCount > 0 ? T.amber : T.border}` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                 <span style={{ fontSize: 16 }}>📦</span>
@@ -1214,16 +1414,27 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
               </div>
               <div style={{ fontSize: 22, fontWeight: 800, color: atKardexCount > 0 ? T.amber : T.textDim, fontFamily: mono }}>{atKardexCount}</div>
             </div>
+            {/* Picks and Puts headers */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+              <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: `${T.green}10`, borderRadius: 8, border: `1px solid ${T.green}30` }}>
+                <div>
+                  <div style={{ fontSize: 11, color: T.text, fontFamily: mono, letterSpacing: 1, fontWeight: 700 }}>PICKS</div>
+                  <div style={{ fontSize: 9, color: T.textMuted, fontFamily: mono }}>OUT — dispensing</div>
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: totalDayPicks > 0 ? T.green : T.textDim, fontFamily: mono }}>{totalDayPicks}</div>
+              </div>
+              <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: `${T.blue}10`, borderRadius: 8, border: `1px solid ${T.blue}30` }}>
+                <div>
+                  <div style={{ fontSize: 11, color: T.text, fontFamily: mono, letterSpacing: 1, fontWeight: 700 }}>PUTS</div>
+                  <div style={{ fontSize: 9, color: T.textMuted, fontFamily: mono }}>IN — receiving</div>
+                </div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: totalDayPuts > 0 ? T.blue : T.textDim, fontFamily: mono }}>{totalDayPuts}</div>
+              </div>
+            </div>
             {/* Both warehouses side by side */}
             <div style={{ display: 'flex', gap: 12 }}>
               {renderWarehouseStats('WH1', wh1)}
               {renderWarehouseStats('WH2', wh2)}
-            </div>
-            {/* Position grid note */}
-            <div style={{ marginTop: 12, padding: '8px 10px', background: `${T.blue}10`, borderRadius: 6, border: `1px dashed ${T.blue}40` }}>
-              <div style={{ fontSize: 10, color: T.blue, fontFamily: mono, textAlign: 'center' }}>
-                Position grid requires Kardex API integration
-              </div>
             </div>
             {putWallData.lastSync && (
               <div style={{ fontSize: 9, color: T.textDim, textAlign: 'center', marginTop: 8, fontFamily: mono }}>
@@ -1250,7 +1461,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           'assembly':    { color: '#10B981', label: 'Assembly', order: 9 },
           'qc':          { color: '#F97316', label: 'QC', order: 10 },
           'ar_room':     { color: '#6366F1', label: 'AR Room', order: 11 },
-          'detaper':     { color: '#14B8A6', label: 'Detaper', order: 12 },
+          'deblocking':  { color: '#F472B6', label: 'Deblocking', order: 12 },
+          'detaper':     { color: '#14B8A6', label: 'Detaper', order: 13 },
           'control':     { color: '#64748B', label: 'Control', order: 13 },
           'terminal':    { color: '#475569', label: 'Terminals', order: 14 },
           'other':       { color: '#374151', label: 'Other', order: 99 },
@@ -1442,37 +1654,71 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
       }
 
       case "aging_alert":{
-        const threshHours=card.config?.thresholdHours||8;
-        const aged=trays.filter(t=>t.state!=="IDLE"&&t.job&&((Date.now()-(t.updatedAt||Date.now()))/3600000)>=threshHours)
-          .map(t=>({...t,hoursIn:((Date.now()-(t.updatedAt||Date.now()))/3600000)}))
-          .sort((a,b)=>b.hoursIn-a.hoursIn);
+        // SLA-based aging: SV (S) = 24h, Semi-finished (P/B) = 48h
+        const getSla=(lt)=>lt==='S'?24:48;
+        const getLensLabel=(lt)=>lt==='S'?'SV':lt==='P'?'SF':lt==='B'?'SF':'SF';
+        const now=Date.now();
+        const aged=(dviJobs||[])
+          .filter(j=>{
+            if(!j.firstSeen)return false;
+            const hoursIn=(now-j.firstSeen)/3600000;
+            return hoursIn>=getSla(j.lensType);
+          })
+          .map(j=>{
+            const hoursIn=(now-j.firstSeen)/3600000;
+            const sla=getSla(j.lensType);
+            const overSla=hoursIn-sla;
+            return {...j,hoursIn,sla,overSla,daysInLab:hoursIn/24};
+          })
+          .sort((a,b)=>b.overSla-a.overSla);
+        const over3d=aged.filter(j=>j.daysInLab>=3).length;
+        const over5d=aged.filter(j=>j.daysInLab>=5).length;
+        const over10d=aged.filter(j=>j.daysInLab>=10).length;
         return(
           <div>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-              <SectionHeader>WIP Aging Alert</SectionHeader>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>THRESHOLD</span>
-                <select value={threshHours} onChange={e=>updateCardConfig(card.id,{thresholdHours:Number(e.target.value)})}
-                  style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:5,color:T.text,fontSize:11,fontFamily:mono,padding:"3px 8px"}}>
-                  {[2,4,6,8,12,24,48].map(h=><option key={h} value={h}>{h}h</option>)}
-                </select>
+              <SectionHeader>WIP Over SLA</SectionHeader>
+              <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>SV 24h · SF 48h</span>
+            </div>
+            <div style={{display:"flex",gap:10,marginBottom:14}}>
+              <div style={{flex:1,background:T.bg,borderRadius:8,padding:"10px 0",textAlign:"center",border:`1px solid ${T.amber}30`}}>
+                <div style={{fontSize:22,fontWeight:800,color:T.amber,fontFamily:mono}}>{over3d}</div>
+                <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>3+ DAYS</div>
+              </div>
+              <div style={{flex:1,background:T.bg,borderRadius:8,padding:"10px 0",textAlign:"center",border:`1px solid ${T.orange}30`}}>
+                <div style={{fontSize:22,fontWeight:800,color:T.orange,fontFamily:mono}}>{over5d}</div>
+                <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>5+ DAYS</div>
+              </div>
+              <div style={{flex:1,background:T.bg,borderRadius:8,padding:"10px 0",textAlign:"center",border:`1px solid ${T.red}30`}}>
+                <div style={{fontSize:22,fontWeight:800,color:T.red,fontFamily:mono}}>{over10d}</div>
+                <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>10+ DAYS</div>
               </div>
             </div>
             {aged.length===0
-              ?<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:T.green,fontFamily:mono}}>All jobs under {threshHours}h threshold</div>
+              ?<div style={{textAlign:"center",padding:"20px 0",fontSize:12,color:T.green,fontFamily:mono}}>All jobs within SLA</div>
               :<div style={{display:"flex",flexDirection:"column",gap:5,maxHeight:280,overflowY:"auto"}}>
-                {aged.map(t=>{
-                  const h=Math.floor(t.hoursIn),m=Math.round((t.hoursIn-h)*60);
-                  const col=t.hoursIn>48?T.red:t.hoursIn>24?T.orange:T.amber;
+                {aged.map(j=>{
+                  const overH=Math.floor(j.overSla),overM=Math.round((j.overSla-overH)*60);
+                  const totalD=Math.floor(j.daysInLab),totalH=Math.round((j.daysInLab-totalD)*24);
+                  const col=j.overSla>48?T.red:j.overSla>24?T.orange:T.amber;
+                  const isRush=j.rush===true||j.rush==='Y'||j.Rush==='Y';
                   return(
-                    <div key={t.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:T.bg,borderRadius:7,border:`1px solid ${col}30`,borderLeft:`3px solid ${col}`}}>
-                      <div style={{fontFamily:mono,fontSize:13,fontWeight:800,color:col,minWidth:56}}>{h>0?`${h}h ${m}m`:`${m}m`}</div>
-                      <div style={{flex:1}}>
-                        <span style={{fontSize:12,fontWeight:700,color:T.text,fontFamily:mono}}>{t.job||t.id}</span>
-                        {t.coatingType&&<span style={{fontSize:10,color:T.amber,fontFamily:mono,marginLeft:8}}>{t.coatingType}</span>}
+                    <div key={j.job_id||j.jobId} onClick={()=>setAgingJob(j)} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:T.bg,borderRadius:7,border:`1px solid ${col}30`,borderLeft:`3px solid ${col}`,cursor:"pointer",transition:"background 0.15s"}} onMouseEnter={e=>e.currentTarget.style.background=`${col}10`} onMouseLeave={e=>e.currentTarget.style.background=T.bg}>
+                      <div style={{textAlign:"right",minWidth:62}}>
+                        <div style={{fontFamily:mono,fontSize:13,fontWeight:800,color:col}}>+{overH>0?`${overH}h${overM}m`:`${overM}m`}</div>
+                        <div style={{fontFamily:mono,fontSize:9,color:T.textDim}}>OVER SLA</div>
                       </div>
-                      <div style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{DEPARTMENTS[t.department]?.label||t.department||"?"}</div>
-                      {t.rush&&<Pill color={T.red}>RUSH</Pill>}
+                      <div style={{flex:1}}>
+                        <div style={{display:"flex",alignItems:"center",gap:6}}>
+                          <span style={{fontSize:12,fontWeight:700,color:T.text,fontFamily:mono}}>{j.job_id||j.jobId}</span>
+                          <Pill color={j.lensType==='S'?T.blue:T.purple}>{getLensLabel(j.lensType)}</Pill>
+                          {isRush&&<Pill color={T.red}>RUSH</Pill>}
+                        </div>
+                        <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginTop:2}}>
+                          {j.stage||j.station||"?"} · {totalD>0?`${totalD}d ${totalH}h`:`${totalH}h`} in lab
+                          {j.coating&&<span style={{color:T.amber,marginLeft:6}}>{j.coating}</span>}
+                        </div>
+                      </div>
                     </div>
                   );
                 })}
@@ -1916,6 +2162,92 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
             <button onClick={()=>setEditCard(null)} style={{width:"100%",marginTop:8,padding:"12px",background:T.blue,border:"none",borderRadius:8,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer"}}>
               Done
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Job Detail Modal — from WIP Aging card */}
+      {agingJob&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:9999}} onClick={()=>setAgingJob(null)}>
+          <div onClick={e=>e.stopPropagation()} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:16,padding:0,width:480,maxWidth:"95vw",maxHeight:"85vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+            <div style={{padding:"16px 20px",borderBottom:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:18,fontWeight:800,color:T.text,fontFamily:mono}}>{agingJob.job_id||agingJob.jobId}</div>
+                <div style={{fontSize:11,color:T.textMuted}}>{agingJob.stage||agingJob.station||"—"}</div>
+              </div>
+              <button onClick={()=>setAgingJob(null)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:22,cursor:"pointer",padding:"4px 8px"}}>×</button>
+            </div>
+            <div style={{padding:20,overflowY:"auto",flex:1}}>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+                {[
+                  ["Job ID", agingJob.job_id||agingJob.jobId],
+                  ["Rx Number", agingJob.rxNum],
+                  ["Patient", agingJob.patient],
+                  ["Stage", agingJob.stage],
+                  ["Station", agingJob.station],
+                  ["Rush", (agingJob.rush===true||agingJob.rush==='Y'||agingJob.Rush==='Y')?'YES':null],
+                  ["Over SLA", agingJob.overSla!=null?`+${Math.floor(agingJob.overSla)}h ${Math.round((agingJob.overSla%1)*60)}m`:null],
+                  ["Days In Lab", agingJob.daysInLab!=null?`${Math.floor(agingJob.daysInLab)}d ${Math.round((agingJob.daysInLab%1)*24)}h`:null],
+                  ["SLA", agingJob.sla?`${agingJob.sla}h`:null],
+                  ["Lens Type", agingJob.lensType==='S'?'SV (Single Vision)':agingJob.lensType==='P'?'Progressive':agingJob.lensType==='B'?'Bifocal':agingJob.lensType],
+                  ["Lens Style", agingJob.lensStyle],
+                  ["Lens Material", agingJob.lensMat],
+                  ["Lens Thickness", agingJob.lensThick],
+                  ["Lens Color", agingJob.lensColor],
+                  ["Coating", agingJob.coating],
+                  ["Coat Type", agingJob.coatType],
+                  ["Frame Style", agingJob.frameStyle],
+                  ["Frame SKU", agingJob.frameSku],
+                  ["Frame Mfr", agingJob.frameMfr],
+                  ["Eye Size", agingJob.eyeSize],
+                  ["Bridge", agingJob.bridge],
+                  ["Edge", agingJob.edge],
+                  ["Operator", agingJob.operator],
+                  ["Tray", agingJob.tray],
+                  ["First Seen", agingJob.firstSeen?new Date(agingJob.firstSeen).toLocaleString():null],
+                  ["Last Seen", agingJob.lastSeen?new Date(agingJob.lastSeen).toLocaleString():null],
+                ].filter(([,v])=>v!=null&&v!==undefined&&v!=='').map(([label,value])=>(
+                  <div key={label} style={{background:T.bg,borderRadius:8,padding:"10px 12px",border:`1px solid ${T.border}`}}>
+                    <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1,marginBottom:4}}>{label.toUpperCase()}</div>
+                    <div style={{fontSize:13,fontWeight:600,color:T.text,fontFamily:mono,wordBreak:"break-all"}}>{value}</div>
+                  </div>
+                ))}
+              </div>
+              {/* Rx Data Table */}
+              {agingJob.rx && (agingJob.rx.R || agingJob.rx.L) && (
+                <div style={{marginTop:16}}>
+                  <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,marginBottom:8,fontWeight:700}}>PRESCRIPTION</div>
+                  <table style={{width:"100%",borderCollapse:"collapse",background:T.bg,borderRadius:8,overflow:"hidden",border:`1px solid ${T.border}`}}>
+                    <thead>
+                      <tr style={{background:`${T.blue}15`}}>
+                        <th style={{padding:"8px 10px",fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"left"}}>EYE</th>
+                        <th style={{padding:"8px 10px",fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"right"}}>SPH</th>
+                        <th style={{padding:"8px 10px",fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"right"}}>CYL</th>
+                        <th style={{padding:"8px 10px",fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"right"}}>AXIS</th>
+                        <th style={{padding:"8px 10px",fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"right"}}>ADD</th>
+                        <th style={{padding:"8px 10px",fontSize:10,color:T.textDim,fontFamily:mono,textAlign:"right"}}>PD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {['R','L'].map(eye=>{
+                        const r=agingJob.rx[eye];
+                        if(!r)return null;
+                        return(
+                          <tr key={eye} style={{borderTop:`1px solid ${T.border}`}}>
+                            <td style={{padding:"8px 10px",fontSize:12,fontWeight:700,color:eye==='R'?T.blue:T.green,fontFamily:mono}}>{eye==='R'?'OD (R)':'OS (L)'}</td>
+                            <td style={{padding:"8px 10px",fontSize:13,fontWeight:600,color:T.text,fontFamily:mono,textAlign:"right"}}>{r.sphere||'—'}</td>
+                            <td style={{padding:"8px 10px",fontSize:13,fontWeight:600,color:T.text,fontFamily:mono,textAlign:"right"}}>{r.cylinder||'—'}</td>
+                            <td style={{padding:"8px 10px",fontSize:13,fontWeight:600,color:T.text,fontFamily:mono,textAlign:"right"}}>{r.axis?`${r.axis}°`:'—'}</td>
+                            <td style={{padding:"8px 10px",fontSize:13,fontWeight:600,color:r.add?T.amber:T.textDim,fontFamily:mono,textAlign:"right"}}>{r.add?`+${(parseInt(r.add)/100).toFixed(2)}`:'—'}</td>
+                            <td style={{padding:"8px 10px",fontSize:13,fontWeight:600,color:T.text,fontFamily:mono,textAlign:"right"}}>{r.pd||'—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}

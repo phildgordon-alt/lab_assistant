@@ -35,6 +35,9 @@ import {
   get_coating_batch_history,
   submit_coating_batch_plan,
   get_oven_rack_status,
+  search_knowledge,
+  get_knowledge_doc,
+  generate_csv_report,
   ALL_TOOLS,
 } from '../tools/definitions.js';
 
@@ -125,6 +128,8 @@ export const SURFACE_AGENT: AgentConfig = {
     get_maintenance_summary,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {
     department: 'S',
@@ -153,6 +158,8 @@ export const COATING_AGENT: AgentConfig = {
     get_maintenance_summary,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {
     department: 'C',
@@ -175,6 +182,8 @@ export const OFFICE_AGENT: AgentConfig = {
     get_frame_catalog,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {
     department: 'O',
@@ -198,6 +207,8 @@ export const CUTTING_AGENT: AgentConfig = {
     get_maintenance_summary,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {
     department: 'E',
@@ -223,6 +234,8 @@ export const ASSEMBLY_AGENT: AgentConfig = {
     get_maintenance_summary,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {
     department: 'A',
@@ -245,6 +258,8 @@ export const QC_AGENT: AgentConfig = {
     get_frame_catalog,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {
     department: 'Q',
@@ -272,6 +287,9 @@ export const DIRECTOR_AGENT: AgentConfig = {
     get_maintenance_summary,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
+    generate_csv_report,
   ],
   defaultFilters: {},  // No defaults - cross-department view
 };
@@ -315,6 +333,8 @@ export const MAINTENANCE_AGENT: AgentConfig = {
     get_breakage_summary,  // Breakage often relates to equipment issues
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {},
 };
@@ -335,6 +355,9 @@ export const SHIFT_REPORT_AGENT: AgentConfig = {
     get_maintenance_summary,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
+    generate_csv_report,
   ],
   defaultFilters: {},
 };
@@ -351,6 +374,8 @@ export const PICKING_AGENT: AgentConfig = {
     get_lens_catalog,
     get_settings,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {},
 };
@@ -371,6 +396,8 @@ export const CODING_AGENT: AgentConfig = {
     get_settings,
     call_api,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {},
 };
@@ -389,6 +416,8 @@ export const SHIPPING_AGENT: AgentConfig = {
     get_settings,
     call_api,
     think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
   ],
   defaultFilters: {},
 };
