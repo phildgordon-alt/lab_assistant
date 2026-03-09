@@ -749,7 +749,7 @@ function handleGetMaintenanceSummary(): unknown {
 function handleGetWipJobs(input: Record<string, unknown>): unknown {
   try {
     const database = getDb();
-    const limit = Math.min((input.limit as number) || 50, 100);
+    const limit = Math.min((input.limit as number) || 25, 50);
 
     let whereClause = "archived = 0 AND stage NOT IN ('CANCELED', 'SHIPPED')";
     const params: any[] = [];
@@ -769,6 +769,17 @@ function handleGetWipJobs(input: Record<string, unknown>): unknown {
     if (input.entry_date) {
       whereClause += ` AND entry_date = ?`;
       params.push(input.entry_date);
+    }
+    if (input.has_rush) {
+      whereClause += ` AND rush = 'Y'`;
+    }
+    if (input.stage) {
+      whereClause += ` AND stage = ?`;
+      params.push(input.stage);
+    }
+    if (input.coating) {
+      whereClause += ` AND coating LIKE ?`;
+      params.push(`%${input.coating}%`);
     }
 
     const jobs = database.prepare(`
@@ -816,7 +827,7 @@ function handleGetRemakeRate(period: string, groupBy: string): unknown {
 function handleGetBreakageEvents(input: Record<string, unknown>): unknown {
   try {
     const database = getDb();
-    const limit = Math.min((input.limit as number) || 50, 100);
+    const limit = Math.min((input.limit as number) || 25, 50);
 
     let whereClause = '1=1';
     const params: any[] = [];
@@ -932,7 +943,7 @@ function handleGetCoatingWaitSummary(): unknown {
 function handleGetInventoryDetail(input: Record<string, unknown>): unknown {
   try {
     const database = getDb();
-    const limit = Math.min((input.limit as number) || 50, 100);
+    const limit = Math.min((input.limit as number) || 25, 50);
 
     let whereClause = '1=1';
     const params: any[] = [];
@@ -966,7 +977,7 @@ function handleGetInventoryDetail(input: Record<string, unknown>): unknown {
 function handleGetMaintenanceTasks(input: Record<string, unknown>): unknown {
   try {
     const database = getDb();
-    const limit = Math.min((input.limit as number) || 50, 100);
+    const limit = Math.min((input.limit as number) || 25, 50);
 
     let whereClause = "status NOT IN ('Complete', 'Closed', 'Completed')";
     const params: any[] = [];

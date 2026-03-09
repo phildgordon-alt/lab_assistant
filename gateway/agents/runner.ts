@@ -54,6 +54,30 @@ function getToolLabel(toolName: string): string {
   return TOOL_LABELS[toolName] || `Using ${toolName.replace(/_/g, ' ')}`;
 }
 
+// Truncate large tool results to stay within token limits
+// ~4 chars per token, aim for max ~3000 tokens per tool result
+const MAX_TOOL_RESULT_CHARS = 12000;
+function truncateToolResult(result: unknown): string {
+  const str = JSON.stringify(result);
+  if (str.length <= MAX_TOOL_RESULT_CHARS) return str;
+  // Try to preserve structure: if it's an object with arrays, trim the arrays
+  if (typeof result === 'object' && result !== null) {
+    const trimmed: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(result as Record<string, unknown>)) {
+      if (Array.isArray(val) && val.length > 20) {
+        trimmed[key] = val.slice(0, 20);
+        trimmed[`${key}_note`] = `Showing 20 of ${val.length} items. Use filters to narrow results.`;
+      } else {
+        trimmed[key] = val;
+      }
+    }
+    const trimStr = JSON.stringify(trimmed);
+    if (trimStr.length <= MAX_TOOL_RESULT_CHARS) return trimStr;
+    return trimStr.substring(0, MAX_TOOL_RESULT_CHARS) + '...(truncated)';
+  }
+  return str.substring(0, MAX_TOOL_RESULT_CHARS) + '...(truncated)';
+}
+
 // Initialize Anthropic client
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -64,7 +88,8 @@ const MODEL = 'claude-sonnet-4-20250514';
 const MAX_TOKENS = 2048;
 
 // Retry helper for 429 rate limit errors
-async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+// With 10K input tokens/min limit, need longer waits between retries
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 4): Promise<T> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
@@ -72,10 +97,10 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
       const status = error?.status || error?.error?.status;
       const isRateLimit = status === 429 || error?.message?.includes('rate_limit');
       if (!isRateLimit || attempt === maxRetries) throw error;
-      // Exponential backoff: 2s, 4s, 8s
-      const delay = Math.pow(2, attempt + 1) * 1000;
+      // Longer backoff for per-minute rate limits: 15s, 30s, 45s, 60s
+      const baseDelay = 15000;
       const retryAfter = error?.headers?.['retry-after'];
-      const waitMs = retryAfter ? parseInt(retryAfter) * 1000 : delay;
+      const waitMs = retryAfter ? parseInt(retryAfter) * 1000 : baseDelay * (attempt + 1);
       log.warn(`Rate limited (429), retrying in ${waitMs}ms (attempt ${attempt + 1}/${maxRetries})`);
       await new Promise(resolve => setTimeout(resolve, waitMs));
     }
@@ -269,7 +294,7 @@ export async function runAgent(
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
-                content: JSON.stringify(result),
+                content: truncateToolResult(result),
               });
             } catch (error) {
               const errorMsg = error instanceof Error ? error.message : 'Tool execution failed';
@@ -416,7 +441,7 @@ export async function runAgentStreaming(
               toolResults.push({
                 type: 'tool_result',
                 tool_use_id: toolUse.id,
-                content: JSON.stringify(result),
+                content: truncateToolResult(result),
               });
             } catch (error) {
               const errorMsg = error instanceof Error ? error.message : 'Tool execution failed';
