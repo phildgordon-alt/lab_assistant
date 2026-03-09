@@ -523,7 +523,7 @@ Prefer narrow tools above — they are faster and return agent-sized results.`,
 
 export const call_api = {
   name: 'call_api',
-  description: `USE THIS for real-time data (DVI SOAP) or endpoints not in SQLite.
+  description: `USE THIS for real-time data or endpoints not in SQLite.
 WHAT: Calls Lab Assistant REST API.
 HOW: method (GET/POST), endpoint path, optional body for POST.
 Most data queries should use SQLite-backed tools instead — faster and context-aware.`,
@@ -809,9 +809,3 @@ export const ALL_TOOLS = [
   ...KNOWLEDGE_TOOLS,
 ];
 
-export {
-  get_coating_intelligence,
-  get_coating_batch_history,
-  submit_coating_batch_plan,
-  get_oven_rack_status,
-};

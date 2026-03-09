@@ -63,6 +63,26 @@ const anthropic = new Anthropic({
 const MODEL = 'claude-sonnet-4-20250514';
 const MAX_TOKENS = 2048;
 
+// Retry helper for 429 rate limit errors
+async function withRetry<T>(fn: () => Promise<T>, maxRetries = 3): Promise<T> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      const status = error?.status || error?.error?.status;
+      const isRateLimit = status === 429 || error?.message?.includes('rate_limit');
+      if (!isRateLimit || attempt === maxRetries) throw error;
+      // Exponential backoff: 2s, 4s, 8s
+      const delay = Math.pow(2, attempt + 1) * 1000;
+      const retryAfter = error?.headers?.['retry-after'];
+      const waitMs = retryAfter ? parseInt(retryAfter) * 1000 : delay;
+      log.warn(`Rate limited (429), retrying in ${waitMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+      await new Promise(resolve => setTimeout(resolve, waitMs));
+    }
+  }
+  throw new Error('Max retries exceeded');
+}
+
 // Cache loaded prompts
 const promptCache: Map<string, { content: string; loadedAt: number }> = new Map();
 const CACHE_TTL = 60_000; // 1 minute cache
@@ -208,13 +228,13 @@ export async function runAgent(
       while (iterations < MAX_ITERATIONS) {
         iterations++;
 
-        const response = await anthropic.messages.create({
+        const response = await withRetry(() => anthropic.messages.create({
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: systemPrompt,
           tools: agentTools as Anthropic.Tool[],
           messages,
-        });
+        }));
 
         // Check if response contains tool use
         const toolUseBlocks = response.content.filter((c) => c.type === 'tool_use');
@@ -345,13 +365,14 @@ export async function runAgentStreaming(
         let currentContent: Anthropic.ContentBlock[] = [];
         let stopReason: string | null = null;
 
-        const stream = await anthropic.messages.stream({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const stream: any = await withRetry(async () => anthropic.messages.stream({
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: systemPrompt,
           tools: agentTools as Anthropic.Tool[],
           messages,
-        });
+        }));
 
         for await (const event of stream) {
           if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {

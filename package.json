@@ -6,8 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "server": "node server/oven-timer-server.js",
-    "server:dev": "nodemon server/oven-timer-server.js"
+    "server": "NODE_OPTIONS=--openssl-legacy-provider node server/oven-timer-server.js",
+    "server:dev": "NODE_OPTIONS=--openssl-legacy-provider nodemon server/oven-timer-server.js"
   },
   "dependencies": {
     "@marsaud/smb2": "^0.18.0",

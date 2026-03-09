@@ -1288,6 +1288,171 @@ function KnowledgeBasePanel({ovenServerUrl}){
   );
 }
 
+// ── Database Management Section ────────────────────────────────────────────────
+function DatabaseSection({serverUrl}){
+  const [dbStatus,setDbStatus]=useState(null);
+  const [backups,setBackups]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const [msg,setMsg]=useState(null);
+
+  const fetchStatus=async()=>{
+    try{
+      const res=await fetch(`${serverUrl}/api/db/status`);
+      if(res.ok) setDbStatus(await res.json());
+    }catch{}
+  };
+  const fetchBackups=async()=>{
+    try{
+      const res=await fetch(`${serverUrl}/api/db/backups`);
+      if(res.ok){ const d=await res.json(); setBackups(d.backups||[]); }
+    }catch{}
+  };
+  useEffect(()=>{ fetchStatus(); fetchBackups(); },[serverUrl]);
+
+  const doBackup=async()=>{
+    setLoading(true); setMsg(null);
+    try{
+      const res=await fetch(`${serverUrl}/api/db/backup`);
+      const d=await res.json();
+      if(d.success){
+        setMsg({ok:true,text:`Backup created: ${d.backups.map(b=>b.file).join(', ')}`});
+        fetchBackups(); fetchStatus();
+      }else setMsg({ok:false,text:'Backup failed'});
+    }catch(e){ setMsg({ok:false,text:e.message}); }
+    setLoading(false);
+  };
+
+  const doRestore=async(file)=>{
+    if(!confirm(`Restore database from ${file}? Current data will be backed up first.`)) return;
+    setLoading(true); setMsg(null);
+    try{
+      const res=await fetch(`${serverUrl}/api/db/restore`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({file})});
+      const d=await res.json();
+      if(d.success){
+        setMsg({ok:true,text:`Restored ${d.restored} from ${d.from}. Pre-restore backup: ${d.preBackup}`});
+        fetchBackups(); fetchStatus();
+      }else setMsg({ok:false,text:d.error||'Restore failed'});
+    }catch(e){ setMsg({ok:false,text:e.message}); }
+    setLoading(false);
+  };
+
+  const doExport=async()=>{
+    setLoading(true);
+    try{
+      const res=await fetch(`${serverUrl}/api/db/export`);
+      const d=await res.json();
+      const blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement('a'); a.href=url; a.download=`lab_assistant_export_${new Date().toISOString().slice(0,10)}.json`; a.click();
+      URL.revokeObjectURL(url);
+      setMsg({ok:true,text:'Database exported as JSON'});
+    }catch(e){ setMsg({ok:false,text:e.message}); }
+    setLoading(false);
+  };
+
+  const fmtSize=(bytes)=>bytes>1048576?`${(bytes/1048576).toFixed(1)} MB`:bytes>1024?`${(bytes/1024).toFixed(0)} KB`:`${bytes} B`;
+  const fmtDate=(iso)=>{try{return new Date(iso).toLocaleString();}catch{return iso;}};
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Status Card */}
+      <Card>
+        <SectionHeader>Database Status</SectionHeader>
+        {dbStatus ? (
+          <div style={{display:"flex",flexDirection:"column",gap:12}}>
+            {dbStatus.databases.map(db=>(
+              <div key={db.name} style={{background:T.bg,borderRadius:8,padding:14,border:`1px solid ${T.border}`}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <div style={{fontSize:14,fontWeight:700,color:T.text,fontFamily:mono}}>{db.name}</div>
+                  {db.exists ? (
+                    <div style={{fontSize:11,color:T.textMuted,fontFamily:mono}}>{fmtSize(db.size)} &middot; {fmtDate(db.modified)}</div>
+                  ) : (
+                    <span style={{fontSize:11,color:T.red,fontWeight:700}}>NOT FOUND</span>
+                  )}
+                </div>
+                {db.tables && (
+                  <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                    {db.tables.map(t=>(
+                      <div key={t.name} style={{background:T.surface,borderRadius:6,padding:"4px 10px",border:`1px solid ${T.border}`,fontSize:11,fontFamily:mono}}>
+                        <span style={{color:T.textMuted}}>{t.name}</span>
+                        <span style={{color:t.rows>0?T.green:T.textDim,fontWeight:700,marginLeft:6}}>{t.rows.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+            {dbStatus.backups.latest && (
+              <div style={{fontSize:11,color:T.textMuted}}>
+                Last backup: {fmtDate(dbStatus.backups.latest.created)} ({fmtSize(dbStatus.backups.latest.size)})
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={{color:T.textDim,fontSize:12}}>Loading database status...</div>
+        )}
+      </Card>
+
+      {/* Actions Card */}
+      <Card>
+        <SectionHeader>Backup & Restore</SectionHeader>
+        {msg && (
+          <div style={{background:msg.ok?`${T.green}15`:`${T.red}15`,border:`1px solid ${msg.ok?T.green:T.red}`,borderRadius:8,padding:"10px 14px",marginBottom:12,fontSize:12,color:msg.ok?T.green:T.red,fontWeight:600}}>
+            {msg.text}
+          </div>
+        )}
+        <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16}}>
+          <button onClick={doBackup} disabled={loading}
+            style={{background:T.blue,color:"#fff",border:"none",borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:loading?"wait":"pointer",opacity:loading?0.5:1}}>
+            Create Backup
+          </button>
+          <button onClick={doExport} disabled={loading}
+            style={{background:T.surface,color:T.text,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:loading?"wait":"pointer"}}>
+            Export as JSON
+          </button>
+          <button onClick={()=>{fetchStatus();fetchBackups();}}
+            style={{background:T.surface,color:T.textMuted,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 20px",fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            Refresh
+          </button>
+        </div>
+
+        {/* Backups List */}
+        {backups.length > 0 ? (
+          <div style={{maxHeight:400,overflowY:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{background:T.bg}}>
+                  <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono}}>BACKUP FILE</th>
+                  <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono}}>SIZE</th>
+                  <th style={{padding:"8px 12px",textAlign:"left",fontSize:10,color:T.textDim,fontFamily:mono}}>CREATED</th>
+                  <th style={{padding:"8px 12px",textAlign:"right",fontSize:10,color:T.textDim,fontFamily:mono}}>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {backups.map((b,i)=>(
+                  <tr key={b.file} style={{borderBottom:`1px solid ${T.border}`}}>
+                    <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.text,fontWeight:i===0?700:400}}>{b.file}</td>
+                    <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.textMuted}}>{fmtSize(b.size)}</td>
+                    <td style={{padding:"8px 12px",fontFamily:mono,fontSize:11,color:T.textMuted}}>{fmtDate(b.created)}</td>
+                    <td style={{padding:"8px 12px",textAlign:"right"}}>
+                      <button onClick={()=>doRestore(b.file)} disabled={loading}
+                        style={{background:`${T.amber}20`,color:T.amber,border:`1px solid ${T.amber}40`,borderRadius:6,padding:"4px 12px",fontSize:11,fontWeight:700,cursor:"pointer"}}>
+                        Restore
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{color:T.textDim,fontSize:12,fontFamily:mono}}>No backups yet. Click "Create Backup" to start.</div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 // ── Settings Tab (Main Component) ─────────────────────────────────────────────
 function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   const [sub,setSub]=useState("connections");
@@ -1652,6 +1817,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
         {id:"gateway",icon:"🌐",label:"Gateway"},
         {id:"ai",icon:"🤖",label:"AI"},
         {id:"knowledge",icon:"📚",label:"Knowledge Base"},
+        {id:"database",icon:"🗄️",label:"Database"},
         {id:"security",icon:"🔒",label:"Security"},
         {id:"trayfleet",icon:"📡",label:"Tray Fleet (Dev)"},
       ].map(n=>(
@@ -2626,6 +2792,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
           </Card>
         </div>
       )}
+      {sub==="database"&&(<DatabaseSection serverUrl={settings?.ovenServerUrl||'http://localhost:3002'}/>)}
       {sub==="security"&&(
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
           <Card>

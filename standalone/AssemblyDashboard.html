@@ -345,12 +345,12 @@ async function fetchDVI(){
       return;
     }
   } catch(e){ console.warn('Assembly fetch failed:', e.message); }
-  // Fallback mock
+  // No mock fallback — show empty state with error
   assemblyData = null;
-  jobs = generateMockJobs();
-  dataMode = 'mock';
+  jobs = [];
+  dataMode = 'offline';
   lastSync = new Date();
-  updateSrvDot('mock','MOCK');
+  updateSrvDot('err','OFFLINE — Check server URL in Setup');
   reconcileOperatorStats();
 }
 
@@ -401,38 +401,7 @@ function normalizeStatus(s){
   return 'waiting';
 }
 
-function generateMockJobs(){
-  const ops = Object.keys(assignments).map(sid=>assignments[sid]?.operatorName).filter(Boolean);
-  const opList = ops.length > 0 ? ops : ['Maria','James','Sofia','Diego','Aisha','Liam'];
-  const coatings = ['AR','Blue Cut','Hard Coat','Polarized','Mirror','Transitions'];
-  const statuses = ['active','active','active','waiting','waiting','completed','completed','hold'];
-  const now = Date.now();
-  const shiftMs = shiftHours() * 3600000 || 28800000; // default 8h shift
-  return Array.from({length:60},(_, i)=>{
-    const status = statuses[i%statuses.length];
-    // Spread jobs received across the shift — older jobs higher index
-    const receivedMsAgo = Math.min(i * (shiftMs/60) * 0.9, shiftMs * 0.95);
-    const startedMsAgo  = status==='active' ? Math.max(i * 180000, 60000) : null;
-    const completedMsAgo= (status==='completed') ? Math.max(i * 60000, 30000) : null;
-    const shippedMsAgo  = (status==='completed' && i%2===0) ? Math.max(i * 40000, 20000) : null;
-    return {
-      id: `J${21600+i}`,
-      rx: `${['-1.00','-2.50','+0.75','-3.25','+1.50','0.00'][i%6]} / ${['-0.25','-0.50','0.00','-0.75'][i%4]}`,
-      lensType: ['1.67 Hi-Index','1.56 Standard','1.50 Standard','1.74 Ultra-Thin'][i%4],
-      coating: coatings[i%coatings.length],
-      status,
-      operator: opList[i%opList.length],
-      stationId: `STN-0${(i%8)+1}`,
-      receivedAt:   new Date(now - receivedMsAgo).toISOString(),
-      startedAt:    startedMsAgo  ? new Date(now - startedMsAgo).toISOString()   : null,
-      completedAt:  completedMsAgo? new Date(now - completedMsAgo).toISOString() : null,
-      shippedAt:    shippedMsAgo  ? new Date(now - shippedMsAgo).toISOString()   : null,
-      isRush: i%7===0,
-      patient: null,
-      minutesAtStation: Math.round(12 + Math.random()*18),
-    };
-  });
-}
+// No mock data generator — assembly dashboard requires live DVI connection
 
 async function manualSync(){
   updateSrvDot('pending','SYNCING...');

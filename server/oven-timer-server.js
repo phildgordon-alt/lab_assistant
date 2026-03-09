@@ -29,6 +29,9 @@ const http = require('http');
 const fs   = require('fs');
 const { URL } = require('url');
 
+// ── SQLite database (shared with gateway MCP tools) ────────────
+const labDb = require('./db');
+
 // ── Knowledge Base ──────────────────────────────────────────────
 const knowledge = require('./knowledge-adapter');
 
@@ -61,7 +64,74 @@ dviTrace.start();
 dviTrace.on('data', ({ count, file }) => {
   const status = dviTrace.getStatus();
   console.log(`[DVI-Trace] ${file}: +${count} events (${status.totalEvents} total, ${status.jobCount} jobs)`);
+  // Sync all active jobs to SQLite for MCP agent queries
+  try {
+    const allJobs = dviTrace.getJobs();
+    const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
+    // Enrich with XML index data (coating, rush, frame)
+    const enriched = activeJobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      return {
+        ...j,
+        invoice: j.job_id,
+        daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
+        coating: xml?.coating || xml?.coatR || null,
+        rush: xml?.rush || 'N',
+        frameName: xml?.frameName || xml?.frame_name || null,
+        entryDate: j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null,
+      };
+    });
+    const today = new Date().toISOString().split('T')[0];
+    labDb.upsertJobs(enriched, today);
+    console.log(`[DB] Synced ${enriched.length} DVI jobs to SQLite`);
+  } catch (e) { console.warn('[DB] DVI sync error:', e.message); }
 });
+
+// ── Initial SQLite sync after startup (give adapters time to load) ──
+setTimeout(() => {
+  try {
+    const allJobs = dviTrace.getJobs();
+    const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
+    const enriched = activeJobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      return {
+        ...j,
+        invoice: j.job_id,
+        daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
+        coating: xml?.coating || xml?.coatR || null,
+        rush: xml?.rush || 'N',
+        frameName: xml?.frameName || xml?.frame_name || null,
+        entryDate: j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null,
+      };
+    });
+    const today = new Date().toISOString().split('T')[0];
+    labDb.upsertJobs(enriched, today);
+    console.log(`[DB] Initial sync: ${enriched.length} DVI jobs to SQLite`);
+  } catch (e) { console.warn('[DB] Initial DVI sync error:', e.message); }
+}, 15000); // 15s delay for DVI trace history to load
+
+// ── Periodic SQLite sync for inventory + maintenance ────────────
+setInterval(() => {
+  try {
+    const inv = itempath.getInventory();
+    if (inv.materials && inv.materials.length > 0) {
+      labDb.upsertInventory(inv.materials);
+    }
+    if (inv.alerts && inv.alerts.length > 0) {
+      labDb.upsertAlerts(inv.alerts);
+    }
+    const picks = itempath.getPicks();
+    if (picks.activePicks && picks.activePicks.length > 0) {
+      labDb.upsertPicks(picks.activePicks);
+    }
+  } catch (e) { /* inventory not ready yet */ }
+  try {
+    const assetsData = limble.getAssets();
+    const tasksData = limble.getTasks();
+    if (assetsData.assets && assetsData.assets.length > 0) labDb.upsertAssets(assetsData.assets);
+    if (tasksData.tasks && tasksData.tasks.length > 0) labDb.upsertTasks(tasksData.tasks);
+  } catch (e) { /* maintenance not ready yet */ }
+}, 60000); // sync every 60s
 
 // ── DVI Job Index (parsed from synced XML files) ──────────────
 const dviJobIndex = new Map(); // dviJob# → {coating, lens, frame, rx, ...}
@@ -1304,6 +1374,14 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/picks') {
     return json(res, itempath.getPicks());
   }
+  if (req.method==='POST' && url.pathname==='/api/inventory/picks/set') {
+    const body = await readBody(req);
+    itempath.setDailyPicks(body.WH1 || 0, body.WH2 || 0);
+    return json(res, { ok: true, ...itempath.getDailyPicks() });
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/picks/daily') {
+    return json(res, itempath.getDailyPicks());
+  }
   if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {
     return json(res, itempath.getAlerts());
   }
@@ -1496,15 +1574,24 @@ Respond with a structured batching plan in this format:
     }
     if (queueJobCount > 0) console.log(`[DVI-Jobs] Added ${queueJobCount} unreleased queue jobs from XML index`);
 
-    const shipped = enriched.filter(j => j.status === 'SHIPPED');
+    // Get shipped stats from ALL traced jobs (including shipped ones filtered from WIP)
+    const allTracedJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
+    const shippedJobs = allTracedJobs.filter(j => j.status === 'SHIPPED' || j.stage === 'SHIPPED');
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const shippedToday = shipped.filter(j => j.lastSeen && j.lastSeen >= todayStart.getTime());
+    const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    // Week starts Monday at midnight
+    const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+    const shippedToday = shippedJobs.filter(j => j.lastSeen && j.lastSeen >= todayStart.getTime());
+    const shippedYesterday = shippedJobs.filter(j => j.lastSeen && j.lastSeen >= yesterdayStart.getTime() && j.lastSeen < todayStart.getTime());
+    const shippedThisWeek = shippedJobs.filter(j => j.lastSeen && j.lastSeen >= weekStart.getTime());
     return json(res, {
       jobs: enriched,
       shipped: {
         today: shippedToday.length,
-        yesterday: 0,
-        thisWeek: shipped.length
+        yesterday: shippedYesterday.length,
+        thisWeek: shippedThisWeek.length,
+        todayJobs: shippedToday,
+        yesterdayJobs: shippedYesterday
       },
       stats: dviTrace.getStats(),
       source: 'dvi-trace+xml',
@@ -1705,6 +1792,46 @@ Respond with a structured batching plan in this format:
       } catch(e) { return json(res, { error: e.message }, 400); }
     });
     return;
+  }
+
+  // ── System Health — unified status for all connections ──────
+  if (req.method==='GET' && url.pathname==='/api/health') {
+    const trace = dviTrace.getStatus();
+    const somStatus = som.getHealth ? som.getHealth() : null;
+    const ipStatus = itempath.getHealth ? itempath.getHealth() : null;
+
+    const systems = {
+      dvi_trace: {
+        status: trace.connected && !trace.stale ? 'ok' : trace.connected && trace.stale ? 'stale' : 'down',
+        message: !trace.running ? 'Not started' :
+                 !trace.connected ? `Connection errors (${trace.consecutiveErrors})` :
+                 trace.stale ? `No events for ${Math.round(trace.lastEventAgeSec/60)}m` :
+                 `Live — ${trace.lastEventAgeSec}s ago`,
+        lastEvent: trace.lastEvent,
+        jobs: trace.jobCount,
+        file: trace.currentFile,
+      },
+      itempath: {
+        status: ipStatus?.connected ? 'ok' : ipStatus?.lastError ? 'error' : 'unknown',
+        message: ipStatus?.connected ? `Synced ${ipStatus.materials || 0} materials` : ipStatus?.lastError || 'Not polled yet',
+        lastSync: ipStatus?.lastSync || null,
+      },
+      som: {
+        status: somStatus?.isLive ? 'ok' : somStatus?.connectionError ? 'error' : 'unknown',
+        message: somStatus?.isLive ? `${somStatus.deviceCount || 0} devices, ${somStatus.conveyorCount || 0} conveyors` : somStatus?.connectionError || 'Not connected',
+        lastSync: somStatus?.lastSuccessfulPoll || null,
+      },
+      server: {
+        status: 'ok',
+        uptime: Math.round(process.uptime()),
+        memory: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+      },
+    };
+
+    const overall = Object.values(systems).every(s => s.status === 'ok') ? 'ok' :
+                    Object.values(systems).some(s => s.status === 'down' || s.status === 'error') ? 'degraded' : 'ok';
+
+    return json(res, { status: overall, systems, timestamp: new Date().toISOString() });
   }
 
   if (req.method==='GET' && url.pathname==='/api/dvi/trace/status') {
@@ -1925,6 +2052,133 @@ Respond with a structured batching plan in this format:
     try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch(e) {}
     const days = Object.entries(saved).map(([date, data]) => ({ date, ...data })).sort((a, b) => b.date.localeCompare(a.date));
     return json(res, { history: days, totalDays: days.length });
+  }
+
+  // ── SQLite Backup & Restore ──────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/db/backup') {
+    const dbDir = path.join(__dirname, '..', 'data');
+    const backupDir = path.join(dbDir, 'backups');
+    if (!fs.existsSync(backupDir)) fs.mkdirSync(backupDir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+    const results = [];
+    for (const dbName of ['lab_assistant.db', 'gateway.db']) {
+      const src = path.join(dbDir, dbName);
+      if (!fs.existsSync(src)) continue;
+      const dest = path.join(backupDir, `${dbName.replace('.db','')}_${ts}.db`);
+      try {
+        // Use SQLite VACUUM INTO for a clean, consistent backup
+        const Database = require('better-sqlite3');
+        const db = new Database(src, { readonly: true });
+        db.exec(`VACUUM INTO '${dest.replace(/'/g, "''")}'`);
+        db.close();
+        const stat = fs.statSync(dest);
+        results.push({ db: dbName, file: path.basename(dest), size: stat.size, ok: true });
+      } catch(e) {
+        // Fallback: simple file copy
+        try {
+          fs.copyFileSync(src, dest);
+          results.push({ db: dbName, file: path.basename(dest), size: fs.statSync(dest).size, ok: true, method: 'copy' });
+        } catch(e2) {
+          results.push({ db: dbName, ok: false, error: e2.message });
+        }
+      }
+    }
+    return json(res, { success: true, timestamp: ts, backups: results, dir: backupDir });
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/db/backups') {
+    const backupDir = path.join(__dirname, '..', 'data', 'backups');
+    if (!fs.existsSync(backupDir)) return json(res, { backups: [] });
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.endsWith('.db'))
+      .map(f => {
+        const stat = fs.statSync(path.join(backupDir, f));
+        return { file: f, size: stat.size, created: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => b.created.localeCompare(a.created));
+    return json(res, { backups: files, dir: backupDir });
+  }
+
+  if (req.method==='POST' && url.pathname==='/api/db/restore') {
+    const body = await readBody(req);
+    const { file } = body;
+    if (!file) return json(res, { success: false, error: 'Missing file parameter' }, 400);
+    // Sanitize filename
+    const safe = path.basename(file);
+    const backupDir = path.join(__dirname, '..', 'data', 'backups');
+    const backupPath = path.join(backupDir, safe);
+    if (!fs.existsSync(backupPath)) return json(res, { success: false, error: 'Backup file not found' }, 404);
+    // Determine target DB
+    const targetName = safe.startsWith('lab_assistant') ? 'lab_assistant.db' : safe.startsWith('gateway') ? 'gateway.db' : null;
+    if (!targetName) return json(res, { success: false, error: 'Cannot determine target DB from filename' }, 400);
+    const targetPath = path.join(__dirname, '..', 'data', targetName);
+    try {
+      // Auto-backup current before restore
+      const preTs = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+      const preBackup = path.join(backupDir, `${targetName.replace('.db','')}_pre-restore_${preTs}.db`);
+      if (fs.existsSync(targetPath)) fs.copyFileSync(targetPath, preBackup);
+      // Delete WAL/SHM files to avoid corruption
+      for (const ext of ['-wal', '-shm']) {
+        const f = targetPath + ext;
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+      }
+      fs.copyFileSync(backupPath, targetPath);
+      return json(res, { success: true, restored: targetName, from: safe, preBackup: path.basename(preBackup) });
+    } catch(e) {
+      return json(res, { success: false, error: e.message }, 500);
+    }
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/db/status') {
+    const dbPath = path.join(__dirname, '..', 'data', 'lab_assistant.db');
+    const gwDbPath = path.join(__dirname, '..', 'data', 'gateway.db');
+    const backupDir = path.join(__dirname, '..', 'data', 'backups');
+    const result = { databases: [], backups: { count: 0, latest: null, dir: backupDir } };
+    for (const [name, dbFile] of [['lab_assistant.db', dbPath], ['gateway.db', gwDbPath]]) {
+      if (!fs.existsSync(dbFile)) { result.databases.push({ name, exists: false }); continue; }
+      try {
+        const Database = require('better-sqlite3');
+        const d = new Database(dbFile, { readonly: true });
+        const tables = d.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+        const tableStats = tables.map(t => {
+          const count = d.prepare(`SELECT COUNT(*) as c FROM "${t.name}"`).get().c;
+          return { name: t.name, rows: count };
+        });
+        const stat = fs.statSync(dbFile);
+        d.close();
+        result.databases.push({ name, exists: true, size: stat.size, modified: stat.mtime.toISOString(), tables: tableStats });
+      } catch(e) {
+        result.databases.push({ name, exists: true, error: e.message });
+      }
+    }
+    if (fs.existsSync(backupDir)) {
+      const files = fs.readdirSync(backupDir).filter(f => f.endsWith('.db')).sort().reverse();
+      result.backups.count = files.length;
+      if (files.length > 0) {
+        const stat = fs.statSync(path.join(backupDir, files[0]));
+        result.backups.latest = { file: files[0], size: stat.size, created: stat.mtime.toISOString() };
+      }
+    }
+    return json(res, result);
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/db/export') {
+    // Export all tables as JSON for portability
+    const dbPath = path.join(__dirname, '..', 'data', 'lab_assistant.db');
+    if (!fs.existsSync(dbPath)) return json(res, { error: 'Database not found' }, 404);
+    try {
+      const Database = require('better-sqlite3');
+      const db = new Database(dbPath, { readonly: true });
+      const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+      const dump = {};
+      for (const { name } of tables) {
+        dump[name] = { rows: db.prepare(`SELECT * FROM "${name}"`).all(), count: db.prepare(`SELECT COUNT(*) as c FROM "${name}"`).get().c };
+      }
+      db.close();
+      return json(res, { tables: Object.keys(dump), data: dump, exportedAt: new Date().toISOString() });
+    } catch(e) {
+      return json(res, { error: e.message }, 500);
+    }
   }
 
   // ── Vision Scanner API — iPad LensScanner app endpoints ─────

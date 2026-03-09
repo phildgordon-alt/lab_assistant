@@ -374,8 +374,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     setAiResponse('');
     try{
       const agent=KPI_AGENTS[modalKpi]||'ShiftReportAgent';
-      const jobs=getJobsForKPI(modalKpi);
-      const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nJobs count: ${jobs.length}\nSample jobs: ${JSON.stringify(jobs.slice(0,10))}`;
+      const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nUse your MCP tools to get real data. Do not invent data.`;
       const res=await fetch('http://localhost:3001/web/ask-sync',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -1392,13 +1391,6 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                   </div>
                   <span style={{ fontSize: 14, fontWeight: 700, color: laptopCount > 0 ? T.blue : T.textDim, fontFamily: mono }}>{laptopCount}</span>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 8, height: 8, background: T.amber, borderRadius: 2 }} />
-                    <span style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Manual</span>
-                  </div>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: manualCount > 0 ? T.amber : T.textDim, fontFamily: mono }}>{manualCount}</span>
-                </div>
               </div>
             </div>
           );
@@ -1418,14 +1410,14 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
             <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
               <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: `${T.green}10`, borderRadius: 8, border: `1px solid ${T.green}30` }}>
                 <div>
-                  <div style={{ fontSize: 11, color: T.text, fontFamily: mono, letterSpacing: 1, fontWeight: 700 }}>PICKS</div>
+                  <div style={{ fontSize: 11, color: T.text, fontFamily: mono, letterSpacing: 1, fontWeight: 700 }}>PICKS TODAY</div>
                   <div style={{ fontSize: 9, color: T.textMuted, fontFamily: mono }}>OUT — dispensing</div>
                 </div>
                 <div style={{ fontSize: 28, fontWeight: 800, color: totalDayPicks > 0 ? T.green : T.textDim, fontFamily: mono }}>{totalDayPicks}</div>
               </div>
               <div style={{ flex: 1, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: `${T.blue}10`, borderRadius: 8, border: `1px solid ${T.blue}30` }}>
                 <div>
-                  <div style={{ fontSize: 11, color: T.text, fontFamily: mono, letterSpacing: 1, fontWeight: 700 }}>PUTS</div>
+                  <div style={{ fontSize: 11, color: T.text, fontFamily: mono, letterSpacing: 1, fontWeight: 700 }}>PUTS TODAY</div>
                   <div style={{ fontSize: 9, color: T.textMuted, fontFamily: mono }}>IN — receiving</div>
                 </div>
                 <div style={{ fontSize: 28, fontWeight: 800, color: totalDayPuts > 0 ? T.blue : T.textDim, fontFamily: mono }}>{totalDayPuts}</div>

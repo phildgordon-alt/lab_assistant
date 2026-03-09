@@ -1,3 +1,6 @@
+const path = require('path');
+const fs = require('fs');
+
 /**
  * itempath-adapter.js
  * Lab_Assistant — ItemPath/Kardex live inventory integration
@@ -61,6 +64,131 @@ const CONFIG = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// INCREMENTAL PICK/PUT TRACKING — persisted to disk, survives restarts
+// Picks: orders disappear from API when completed → count their lines
+// Puts: track material qty increases between polls (items received into Kardex)
+// ─────────────────────────────────────────────────────────────────────────────
+const DAILY_FILE = path.join(__dirname, 'data', 'daily-picks.json');
+let previousOrderMap = new Map();  // orderId → { warehouse, lineCount, reference, isPut }
+let dailyPickTotals = { WH1: 0, WH2: 0, date: null };
+let dailyPutTotals = { WH1: 0, WH2: 0, date: null };
+// Hourly breakdown — { WH1: { 0:0, 1:0, ... 23:0 }, WH2: { ... } }
+function emptyHourly() { const h = {}; for (let i = 0; i < 24; i++) h[i] = 0; return h; }
+let hourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly() };
+let hourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly() };
+
+// Load persisted daily totals from disk
+function loadDailyTotals() {
+  try {
+    if (fs.existsSync(DAILY_FILE)) {
+      const saved = JSON.parse(fs.readFileSync(DAILY_FILE, 'utf8'));
+      const today = new Date().toISOString().substring(0, 10);
+      if (saved.date === today) {
+        dailyPickTotals = { WH1: saved.picks?.WH1 || 0, WH2: saved.picks?.WH2 || 0, date: today };
+        dailyPutTotals = { WH1: saved.puts?.WH1 || 0, WH2: saved.puts?.WH2 || 0, date: today };
+        if (saved.hourlyPicks) { hourlyPicks.WH1 = { ...emptyHourly(), ...saved.hourlyPicks.WH1 }; hourlyPicks.WH2 = { ...emptyHourly(), ...saved.hourlyPicks.WH2 }; }
+        if (saved.hourlyPuts) { hourlyPuts.WH1 = { ...emptyHourly(), ...saved.hourlyPuts.WH1 }; hourlyPuts.WH2 = { ...emptyHourly(), ...saved.hourlyPuts.WH2 }; }
+        const totalPickH = Object.values(hourlyPicks.WH1).reduce((a,b)=>a+b,0) + Object.values(hourlyPicks.WH2).reduce((a,b)=>a+b,0);
+        console.log(`[ItemPath] Loaded daily totals from disk: picks WH1=${dailyPickTotals.WH1} WH2=${dailyPickTotals.WH2}, puts WH1=${dailyPutTotals.WH1} WH2=${dailyPutTotals.WH2}, hourly entries=${totalPickH}`);
+      } else {
+        console.log(`[ItemPath] Saved totals are from ${saved.date}, today is ${today} — starting fresh`);
+      }
+    }
+  } catch(e) {
+    console.log(`[ItemPath] Could not load daily totals: ${e.message}`);
+  }
+}
+
+// Save to disk after every change
+function saveDailyTotals() {
+  try {
+    const dir = path.dirname(DAILY_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(DAILY_FILE, JSON.stringify({
+      date: dailyPickTotals.date,
+      picks: { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2 },
+      puts: { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2 },
+      hourlyPicks,
+      hourlyPuts,
+      savedAt: new Date().toISOString(),
+    }));
+  } catch(e) { /* ignore write errors */ }
+}
+
+function resetDailyIfNeeded() {
+  const today = new Date().toISOString().substring(0, 10);
+  if (dailyPickTotals.date !== today) {
+    dailyPickTotals = { WH1: 0, WH2: 0, date: today };
+    dailyPutTotals = { WH1: 0, WH2: 0, date: today };
+    hourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly() };
+    hourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly() };
+    previousOrderMap.clear();
+    saveDailyTotals();
+    console.log(`[ItemPath] Daily pick/put counters reset for ${today}`);
+  }
+}
+
+function isPutOrder(order) {
+  const ref = (order.reference || order.name || '').toLowerCase();
+  return ref.includes('put');
+}
+
+function trackCompletedOrders(currentOrders) {
+  resetDailyIfNeeded();
+  const currentIds = new Set(currentOrders.map(o => o.orderId || o.id));
+
+  // Orders that were in previous poll but not in current = completed
+  const hour = new Date().getHours();
+  let completedPicks = 0;
+  let completedPuts = 0;
+  if (previousOrderMap.size > 0) {
+    for (const [orderId, info] of previousOrderMap) {
+      if (!currentIds.has(orderId)) {
+        const wh = info.warehouse;
+        if (wh === 'WH1' || wh === 'WH2') {
+          if (info.isPut) {
+            // Puts: count quantity of lenses/frames put away
+            dailyPutTotals[wh] += info.lineCount;
+            hourlyPuts[wh][hour] = (hourlyPuts[wh][hour] || 0) + info.lineCount;
+            completedPuts += info.lineCount;
+          } else {
+            // Picks: count 1 per job (order), not per line
+            dailyPickTotals[wh] += 1;
+            hourlyPicks[wh][hour] = (hourlyPicks[wh][hour] || 0) + 1;
+            completedPicks += 1;
+          }
+        }
+      }
+    }
+  }
+
+  if (completedPicks > 0) {
+    console.log(`[ItemPath] +${completedPicks} completed picks (WH1: ${dailyPickTotals.WH1}, WH2: ${dailyPickTotals.WH2})`);
+  }
+  if (completedPuts > 0) {
+    console.log(`[ItemPath] +${completedPuts} completed puts (WH1: ${dailyPutTotals.WH1}, WH2: ${dailyPutTotals.WH2})`);
+  }
+  if (completedPicks > 0 || completedPuts > 0) {
+    saveDailyTotals();
+  }
+
+  // Update map with current orders
+  previousOrderMap.clear();
+  for (const o of currentOrders) {
+    const id = o.orderId || o.id;
+    previousOrderMap.set(id, {
+      warehouse: o.warehouseName || o.warehouse || 'Unknown',
+      lineCount: (o.order_lines || []).reduce((sum, l) => sum + (parseFloat(l.quantity) || 0), 0) || (o.lines || []).length || 3,
+      reference: o.reference || o.name,
+      isPut: isPutOrder(o),
+    });
+  }
+}
+
+// Load on module init
+loadDailyTotals();
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LIVE CACHE — updated every poll cycle
 // ─────────────────────────────────────────────────────────────────────────────
 let cache = {
@@ -99,7 +227,7 @@ async function ipFetch(path, params = {}) {
 
   const resp = await fetch(url.toString(), {
     headers: authHeaders(),
-    signal: AbortSignal.timeout(60000),  // 60s timeout for large fetches
+    signal: AbortSignal.timeout(120000),  // 120s timeout for large fetches
   });
 
   if (!resp.ok) {
@@ -353,22 +481,17 @@ async function poll() {
   }
 
   try {
-    const twoHrsAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
-    // Get today's start for pick transactions
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    const twoHrsAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+    const todayPrefix = todayStart.substring(0, 10);
 
-    // Parallel fetch — materials, active orders, transactions, warehouses, locations
-    // Note: Need 20000+ locations to capture all carousel bins
-    // type=4 transactions are completed picks
+    // Single parallel fetch — everything at once (matches original working approach)
     const [materialsResp, ordersResp, txResp, pickTxResp, putTxResp, warehousesResp, locationsResp] = await Promise.all([
       ipFetch('/api/materials', { limit: 10000 }),
-      // ItemPath uses "In Process" status (not "in_progress")
-      ipFetch('/api/orders',    { limit: 500 }),  // Fetch all, filter by status client-side
+      ipFetch('/api/orders',    { limit: 500 }),
       ipFetch('/api/transactions', { after: twoHrsAgo, limit: 500 }).catch(() => ({ transactions: [] })),
-      // Today's pick transactions (type=4) for hourly stats
       ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 2000 }).catch(() => ({ transactions: [] })),
-      // Today's put/receive transactions (type=3) for put stats
       ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 5000 }).catch(() => ({ transactions: [] })),
       ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
       ipFetch('/api/locations', { limit: 20000 }).catch(() => ({ locations: [] })),
@@ -380,6 +503,9 @@ async function poll() {
     const allOrders   = (ordersResp.orders || ordersResp.data || ordersResp || []);
     const activeOrders = allOrders.filter(o => o.status === 'In Process');
 
+    // Track completed orders incrementally (orders that disappear between polls = completed picks/puts)
+    trackCompletedOrders(allOrders);
+
     const activePicks = activeOrders.map(normalizeOrder);
 
     const recentTx    = (txResp.transactions || txResp.data || txResp || []).map(normalizeTransaction);
@@ -388,34 +514,61 @@ async function poll() {
     const alerts      = detectAlerts(materials);
     const warehouses  = (warehousesResp.warehouses || []).map(w => ({ id: w.id, name: w.name }));
 
-    // Calculate hourly pick stats from type=4 transactions (completed picks)
-    const hourlyStats = { WH1: {}, WH2: {} };
-    for (let h = 0; h < 24; h++) {
-      hourlyStats.WH1[h] = 0;
-      hourlyStats.WH2[h] = 0;
-    }
-    let todayPicksTotal = { WH1: 0, WH2: 0 };
+    // Build hourly stats from transaction data
+    const txHourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly() };
+    const txHourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly() };
+    let txPicksTotal = { WH1: 0, WH2: 0 };
+    let txPutsTotal = { WH1: 0, WH2: 0 };
 
+    // Picks: count unique jobs (orderName), not individual lines
+    // Each job has 2-3 lines (R lens, L lens, frame) — 1 job = 1 pick
+    const seenPickJobs = { WH1: new Map(), WH2: new Map() }; // orderName → hour
     for (const tx of pickTxList) {
       const wh = tx.warehouseName || 'Unknown';
       const date = tx.creationDate || '';
-      if (date && (wh === 'WH1' || wh === 'WH2')) {
-        const hour = parseInt(date.substring(11, 13)) || 0;
-        // Count jobs (transactions), not quantities
-        hourlyStats[wh][hour] += 1;
-        todayPicksTotal[wh] += 1;
+      const orderName = tx.orderName || tx.order_name || '';
+      if (date.substring(0, 10) === todayPrefix && (wh === 'WH1' || wh === 'WH2') && orderName) {
+        const hr = parseInt(date.substring(11, 13)) || 0;
+        if (!seenPickJobs[wh].has(orderName)) {
+          seenPickJobs[wh].set(orderName, hr);
+          txHourlyPicks[wh][hr] += 1;
+          txPicksTotal[wh] += 1;
+        }
+      }
+    }
+    // Puts: count by confirmed quantity (each line = X items put away into Kardex)
+    for (const tx of putTxList) {
+      // Warehouse detection: warehouseName field, or parse from orderName/reference, or default WH1
+      const wh = tx.warehouseName
+        || (tx.orderName && tx.orderName.includes('WH2') ? 'WH2' : null)
+        || (tx.orderName && tx.orderName.includes('WH1') ? 'WH1' : null)
+        || (tx.locationName && tx.locationName.includes('WH2') ? 'WH2' : 'WH1');
+      const date = tx.creationDate || '';
+      if (date.substring(0, 10) === todayPrefix && (wh === 'WH1' || wh === 'WH2')) {
+        const hr = parseInt(date.substring(11, 13)) || 0;
+        const qty = Math.abs(parseFloat(tx.quantityConfirmed) || parseFloat(tx.quantity) || 1);
+        txHourlyPuts[wh][hr] += qty;
+        txPutsTotal[wh] += qty;
       }
     }
 
-    // Calculate today's puts (type=3 receive transactions) per warehouse
-    let todayPutsTotal = { WH1: 0, WH2: 0 };
-    for (const tx of putTxList) {
-      const wh = tx.warehouseName || (tx.orderName && tx.orderName.startsWith('WH') ? tx.orderName.split(' ')[0] : null) || 'Unknown';
-      if (wh === 'WH1' || wh === 'WH2') {
-        todayPutsTotal[wh] += 1;
-      }
-    }
-    if (putTxList.length > 0) console.log(`[ItemPath] Puts today: WH1=${todayPutsTotal.WH1}, WH2=${todayPutsTotal.WH2} (${putTxList.length} total txns)`);
+    // Use the higher of: transaction totals vs incremental tracking (handles API returning partial data)
+    resetDailyIfNeeded();
+    const txPickSum = txPicksTotal.WH1 + txPicksTotal.WH2;
+    const incPickSum = dailyPickTotals.WH1 + dailyPickTotals.WH2;
+    const txPutSum = txPutsTotal.WH1 + txPutsTotal.WH2;
+    const incPutSum = dailyPutTotals.WH1 + dailyPutTotals.WH2;
+
+    // Hourly: use transaction data if available, else incremental
+    const hourlyStats = txPickSum > 0 ? txHourlyPicks : { WH1: { ...hourlyPicks.WH1 }, WH2: { ...hourlyPicks.WH2 } };
+    const hourlyPutStats = txPutSum > 0 ? txHourlyPuts : { WH1: { ...hourlyPuts.WH1 }, WH2: { ...hourlyPuts.WH2 } };
+
+    // Totals: use whichever source has the higher count
+    const finalPicks = txPickSum >= incPickSum ? txPicksTotal : { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2 };
+    const finalPuts = txPutSum >= incPutSum ? txPutsTotal : { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2 };
+
+    console.log(`[ItemPath] Picks: tx=${txPickSum} (WH1:${txPicksTotal.WH1} WH2:${txPicksTotal.WH2}), inc=${incPickSum} (WH1:${dailyPickTotals.WH1} WH2:${dailyPickTotals.WH2}), using ${txPickSum >= incPickSum ? 'txn' : 'incremental'}`);
+    console.log(`[ItemPath] Puts: tx=${txPutSum} (WH1:${txPutsTotal.WH1} WH2:${txPutsTotal.WH2}), inc=${incPutSum} (WH1:${dailyPutTotals.WH1} WH2:${dailyPutTotals.WH2}), using ${txPutSum >= incPutSum ? 'txn' : 'incremental'}`);
 
     // Calculate warehouse stats from orders (active/queued counts)
     const warehouseStats = {};
@@ -436,9 +589,9 @@ async function poll() {
       warehouseStats[wh].totalQty += lines.reduce((sum, l) => sum + (parseFloat(l.quantity) || 0), 0);
     }
 
-    // Set today's picks and puts from completed transactions
-    if (warehouseStats.WH1) { warehouseStats.WH1.todayPicks = todayPicksTotal.WH1; warehouseStats.WH1.todayPuts = todayPutsTotal.WH1; }
-    if (warehouseStats.WH2) { warehouseStats.WH2.todayPicks = todayPicksTotal.WH2; warehouseStats.WH2.todayPuts = todayPutsTotal.WH2; }
+    // Set today's picks and puts (best of transaction data vs incremental tracking)
+    if (warehouseStats.WH1) { warehouseStats.WH1.todayPicks = finalPicks.WH1; warehouseStats.WH1.todayPuts = finalPuts.WH1; }
+    if (warehouseStats.WH2) { warehouseStats.WH2.todayPicks = finalPicks.WH2; warehouseStats.WH2.todayPuts = finalPuts.WH2; }
 
     // Calculate VLM and carousel stats from locations
     const locations = (locationsResp.locations || []);
@@ -496,6 +649,7 @@ async function poll() {
       warehouses,
       warehouseStats,
       hourlyStats,
+      hourlyPutStats,
       vlmStats,
       carouselStats,  // { 'CAR-1': qty, 'CAR-2': qty, ... }
       locations: normalizedLocations,
@@ -530,49 +684,17 @@ async function poll() {
 // MOCK DATA — realistic lens blank inventory for development
 // ─────────────────────────────────────────────────────────────────────────────
 function loadMockData() {
-  const mockMaterials = [
-    { sku:'LB-167-AR-SV',  name:'1.67 Hi-Index AR Single Vision',      qty:47,  unit:'EA', coatingType:'AR',       index:'1.67', rxSphere:'-2.00', location:'K-A12' },
-    { sku:'LB-167-AR-BI',  name:'1.67 Hi-Index AR Bifocal',            qty:23,  unit:'EA', coatingType:'AR',       index:'1.67', rxSphere:'-3.00', location:'K-A13' },
-    { sku:'LB-156-BC-SV',  name:'1.56 Blue Cut Single Vision',          qty:8,   unit:'EA', coatingType:'BLUE_CUT', index:'1.56', rxSphere:'+1.00', location:'K-B04' },
-    { sku:'LB-150-HC-SV',  name:'1.50 Hard Coat Standard SV',           qty:112, unit:'EA', coatingType:'HARD_COAT',index:'1.50', rxSphere:'0.00',  location:'K-C01' },
-    { sku:'LB-174-MIR-SV', name:'1.74 Ultra-Thin Mirror SV',            qty:6,   unit:'EA', coatingType:'MIRROR',   index:'1.74', rxSphere:'-5.00', location:'K-D02' },
-    { sku:'LB-156-POL-SV', name:'1.56 Polarized Single Vision',         qty:31,  unit:'EA', coatingType:'POLARIZED',index:'1.56', rxSphere:'+0.50', location:'K-E07' },
-    { sku:'LB-167-TR-SV',  name:'1.67 Transitions Gen 8 SV',            qty:19,  unit:'EA', coatingType:'TRANSITIONS',index:'1.67',rxSphere:'-1.50', location:'K-F03' },
-    { sku:'LB-174-PAR-SV', name:'1.74 Premium AR Ultra-Thin SV',        qty:0,   unit:'EA', coatingType:'PREMIUM_AR',index:'1.74',rxSphere:'-6.00', location:'K-G01' },
-    { sku:'LB-150-CLR-SV', name:'1.50 Clear Standard SV',               qty:204, unit:'EA', coatingType:'CLEAR',    index:'1.50', rxSphere:'0.00',  location:'K-H01' },
-    { sku:'LB-167-AR-PAL', name:'1.67 AR Progressive',                  qty:14,  unit:'EA', coatingType:'AR',       index:'1.67', rxSphere:'-1.00', location:'K-A20' },
-  ].map((m, i) => ({ ...m, id: `M-${1000+i}`, lastUpdated: new Date().toISOString() }));
-
-  const mockPicks = [
-    { orderId:'ORD-2847', reference:'J21694 blanks', status:'in_progress', startedAt: new Date(Date.now()-600000).toISOString(),
-      lines:[{ sku:'LB-167-AR-SV', name:'1.67 Hi-Index AR SV', qty:2, picked:1, pending:1 }] },
-    { orderId:'ORD-2848', reference:'J21700 blanks', status:'in_progress', startedAt: new Date(Date.now()-180000).toISOString(),
-      lines:[{ sku:'LB-150-CLR-SV', name:'1.50 Clear SV', qty:4, picked:4, pending:0 }] },
-  ];
-
-  const mockTx = Array.from({length:12}, (_, i) => ({
-    id: `TX-${5000+i}`,
-    sku: mockMaterials[i % mockMaterials.length].sku,
-    name: mockMaterials[i % mockMaterials.length].name,
-    qty: Math.ceil(Math.random()*3),
-    type: 'PICK',
-    completedAt: new Date(Date.now() - i * 600000).toISOString(),
-    picker: ['Maria','James','Sofia'][i%3],
-    orderId: `ORD-${2840+i}`,
-  }));
-
-  const alerts = detectAlerts(mockMaterials);
-
+  // No mock data — return empty state with error indicator
   cache = {
-    materials: mockMaterials,
-    activePicks: mockPicks,
-    recentTransactions: mockTx,
-    alerts,
+    materials: [],
+    activePicks: [],
+    recentTransactions: [],
+    alerts: [{ level: 'CRITICAL', message: 'ItemPath not configured — set ITEMPATH_URL + ITEMPATH_TOKEN in .env' }],
     lastSync:   new Date().toISOString(),
-    syncStatus: 'mock',
-    syncError:  null,
+    syncStatus: 'not_configured',
+    syncError:  'ITEMPATH_TOKEN not set',
   };
-  console.log('[ItemPath] Mock mode — set ITEMPATH_URL + ITEMPATH_TOKEN to go live');
+  console.warn('[ItemPath] NOT CONFIGURED — set ITEMPATH_URL + ITEMPATH_TOKEN in .env to get live inventory data');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -782,4 +904,35 @@ function start() {
   setInterval(poll, CONFIG.pollInterval);
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext };
+function getHealth() {
+  return {
+    connected: cache.syncStatus === 'ok',
+    lastSync: cache.lastSync,
+    lastError: cache.syncError,
+    materials: cache.materials.length,
+    status: cache.syncStatus,
+  };
+}
+
+function setDailyPicks(wh1, wh2) {
+  resetDailyIfNeeded();
+  dailyPickTotals.WH1 = wh1 || 0;
+  dailyPickTotals.WH2 = wh2 || 0;
+  saveDailyTotals();
+  console.log(`[ItemPath] Daily picks manually set: WH1=${dailyPickTotals.WH1} WH2=${dailyPickTotals.WH2}`);
+}
+
+function setDailyPuts(wh1, wh2) {
+  resetDailyIfNeeded();
+  dailyPutTotals.WH1 = wh1 || 0;
+  dailyPutTotals.WH2 = wh2 || 0;
+  saveDailyTotals();
+  console.log(`[ItemPath] Daily puts manually set: WH1=${dailyPutTotals.WH1} WH2=${dailyPutTotals.WH2}`);
+}
+
+function getDailyPicks() {
+  resetDailyIfNeeded();
+  return { ...dailyPickTotals };
+}
+
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks };

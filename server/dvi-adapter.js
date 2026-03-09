@@ -238,46 +238,16 @@ async function sendSlackAlert(text) {
 // MOCK DATA — realistic assembly job data for development / demo
 // ─────────────────────────────────────────────────────────────────────────────
 function loadMock() {
-  const operators = ['Maria Rodriguez','James Liu','Sofia Patel','Diego Reyes','Aisha Johnson','Liam Chen'];
-  const coatings  = ['AR','Blue Cut','Hard Coat','Polarized','Mirror','Transitions'];
-  const lenses    = ['1.67 Hi-Index','1.56 Standard','1.50 CR-39','1.74 Ultra-Thin'];
-  const statuses  = ['active','active','active','waiting','waiting','waiting','completed','hold'];
-  const rxSpecs   = ['-1.00','-2.50','+0.75','-3.25','+1.50','0.00','-0.50','+2.00'];
-  const cyls      = ['-0.25','-0.50','0.00','-0.75','-1.00'];
-
-  const jobs = Array.from({ length: 60 }, (_, i) => ({
-    id:          `J${21600 + i}`,
-    patient:     null,
-    rx:          { sphere: rxSpecs[i % rxSpecs.length], cylinder: cyls[i % cyls.length], axis: String(90 + (i * 15) % 180), add: i % 3 === 0 ? '+2.25' : null },
-    lensType:    lenses[i % lenses.length],
-    coatingType: coatings[i % coatings.length],
-    frameRef:    `FR-${1000 + i}`,
-    status:      statuses[i % statuses.length],
-    stage:       'ASSEMBLY',
-    operator:    operators[i % operators.length],
-    stationId:   `STN-0${(i % 8) + 1}`,
-    receivedAt:  new Date(Date.now() - (i + 20) * 900000).toISOString(),
-    startedAt:   i % statuses.length < 3 ? new Date(Date.now() - i * 420000).toISOString() : null,
-    completedAt: statuses[i % statuses.length] === 'completed' ? new Date(Date.now() - i * 120000).toISOString() : null,
-    dueDate:     new Date(Date.now() + 86400000).toISOString().slice(0, 10),
-    minutesAtStation: Math.round(10 + Math.random() * 20),
-    isRush:      i % 7 === 0,
-    priority:    i % 7 === 0 ? 'rush' : 'normal',
-    remake:      i % 11 === 0,
-    remakeReason: i % 11 === 0 ? 'Scratch on lens' : null,
-    holdReason:  statuses[i % statuses.length] === 'hold' ? 'QC inspection required' : null,
-  }));
-
-  const completedToday = jobs.filter(j => j.status === 'completed');
+  // No mock data — return empty state with error indicator
   cache = {
-    jobs:           jobs.filter(j => j.status !== 'completed'),
-    completedToday,
+    jobs:           [],
+    completedToday: [],
     lastSync:       new Date().toISOString(),
-    syncStatus:     'mock',
-    syncError:      null,
-    totalFetched:   jobs.length,
+    syncStatus:     'not_configured',
+    syncError:      'DVI_URL not set',
+    totalFetched:   0,
   };
-  console.log('[DVI] Mock mode active — set DVI_URL + DVI_API_KEY to go live');
+  console.warn('[DVI] NOT CONFIGURED — set DVI_URL + DVI_API_KEY in .env to get live assembly data');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

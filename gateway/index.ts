@@ -158,9 +158,7 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     }
   }
 
-  // 7. DVI SOAP API — removed, using DVI Trace instead
-
-  // 8. Limble (CMMS/maintenance system) - uses Basic Auth with client credentials
+  // 7. Limble (CMMS/maintenance system) - uses Basic Auth with client credentials
   // Docs: https://apidocs.limblecmms.com/
   const limbleUrl = process.env.LIMBLE_URL;
   const limbleClientId = process.env.LIMBLE_CLIENT_ID;
@@ -499,7 +497,7 @@ app.get('/api/itempath/inventory', async (_req: Request, res: Response) => {
   const itempathToken = process.env.ITEMPATH_TOKEN;
 
   if (!itempathUrl || !itempathToken) {
-    return res.json({ mock: true, materials: generateMockInventory(), lastSync: new Date().toISOString() });
+    return res.status(503).json({ error: 'ItemPath not configured', materials: [], configured: false });
   }
 
   try {
@@ -521,7 +519,7 @@ app.get('/api/itempath/picks', async (_req: Request, res: Response) => {
   const itempathToken = process.env.ITEMPATH_TOKEN;
 
   if (!itempathUrl || !itempathToken) {
-    return res.json({ mock: true, picks: generateMockPicks(), lastSync: new Date().toISOString() });
+    return res.status(503).json({ error: 'ItemPath not configured', picks: [], configured: false });
   }
 
   try {
@@ -547,7 +545,7 @@ app.get('/api/limble/assets', async (_req: Request, res: Response) => {
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.json({ mock: true, assets: generateMockAssets(), lastSync: new Date().toISOString() });
+    return res.status(503).json({ error: 'Limble CMMS not configured', assets: [], configured: false });
   }
 
   try {
@@ -571,7 +569,7 @@ app.get('/api/limble/tasks', async (_req: Request, res: Response) => {
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.json({ mock: true, tasks: generateMockTasks(), lastSync: new Date().toISOString() });
+    return res.status(503).json({ error: 'Limble CMMS not configured', tasks: [], configured: false });
   }
 
   try {
@@ -595,7 +593,7 @@ app.get('/api/limble/stats', async (_req: Request, res: Response) => {
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.json({ mock: true, stats: generateMockMaintenanceStats(), lastSync: new Date().toISOString() });
+    return res.status(503).json({ error: 'Limble CMMS not configured', stats: {}, configured: false });
   }
 
   try {
@@ -634,12 +632,7 @@ app.get('/api/inventory', async (_req: Request, res: Response) => {
   const itempathToken = process.env.ITEMPATH_TOKEN;
 
   if (!itempathUrl || !itempathToken) {
-    return res.json({
-      status: 'mock',
-      materials: generateMockInventory(),
-      alertCount: 3,
-      lastSync: new Date().toISOString()
-    });
+    return res.status(503).json({ error: 'ItemPath not configured', materials: [], alertCount: 0, configured: false });
   }
 
   try {
@@ -677,13 +670,7 @@ app.get('/api/inventory', async (_req: Request, res: Response) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to fetch';
     log.error('Inventory fetch error:', msg);
-    res.json({
-      status: 'error',
-      error: msg,
-      materials: generateMockInventory(),
-      alertCount: 0,
-      lastSync: null
-    });
+    res.status(500).json({ error: msg, materials: [], alertCount: 0, lastSync: null });
   }
 });
 
@@ -693,15 +680,7 @@ app.get('/api/inventory/alerts', async (_req: Request, res: Response) => {
   const itempathToken = process.env.ITEMPATH_TOKEN;
 
   if (!itempathUrl || !itempathToken) {
-    const mockMaterials = generateMockInventory();
-    const alerts = mockMaterials.filter((m: any) => m.qty < 20).map((m: any) => ({
-      sku: m.sku,
-      name: m.name,
-      qty: m.qty,
-      threshold: 20,
-      severity: m.qty === 0 ? 'critical' : m.qty < 10 ? 'high' : 'low'
-    }));
-    return res.json({ alerts, mock: true });
+    return res.status(503).json({ error: 'ItemPath not configured', alerts: [], configured: false });
   }
 
   try {
@@ -739,7 +718,7 @@ app.get('/api/inventory/picks', async (_req: Request, res: Response) => {
   const itempathToken = process.env.ITEMPATH_TOKEN;
 
   if (!itempathUrl || !itempathToken) {
-    return res.json({ picks: generateMockPicks(), recent: generateMockPicks().slice(0, 5), count: 10, mock: true });
+    return res.status(503).json({ error: 'ItemPath not configured', picks: [], recent: [], count: 0, configured: false });
   }
 
   try {
@@ -762,11 +741,7 @@ app.get('/api/inventory/vlms', async (_req: Request, res: Response) => {
   const itempathToken = process.env.ITEMPATH_TOKEN;
 
   if (!itempathUrl || !itempathToken) {
-    return res.json({
-      vlmStats: { totalLocations: 500, utilizationPercent: 78, cyclesPerDay: 45 },
-      locations: [],
-      mock: true
-    });
+    return res.status(503).json({ error: 'ItemPath not configured', vlmStats: {}, locations: [], configured: false });
   }
 
   try {
@@ -793,7 +768,7 @@ app.get('/api/maintenance/assets', async (_req: Request, res: Response) => {
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.json({ assets: generateMockAssets(), mock: true, lastSync: new Date().toISOString() });
+    return res.status(503).json({ error: 'Limble CMMS not configured', assets: [], configured: false });
   }
 
   try {
@@ -807,7 +782,7 @@ app.get('/api/maintenance/assets', async (_req: Request, res: Response) => {
     const assets = Array.isArray(data) ? data : (data.data || []);
     res.json({ assets, mock: false, lastSync: new Date().toISOString() });
   } catch (e) {
-    res.json({ assets: generateMockAssets(), error: (e as Error).message, lastSync: null });
+    res.status(500).json({ assets: [], error: (e as Error).message, lastSync: null });
   }
 });
 
@@ -817,22 +792,8 @@ app.get('/api/maintenance/downtime', async (_req: Request, res: Response) => {
   const limbleClientId = process.env.LIMBLE_CLIENT_ID;
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
-  // Generate mock downtime data
-  const mockDowntime = Array.from({ length: 10 }, (_, i) => ({
-    id: i + 1,
-    assetId: Math.floor(Math.random() * 15) + 1,
-    assetName: `Equipment-${String(Math.floor(Math.random() * 15) + 1).padStart(2, '0')}`,
-    startTime: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-    endTime: Math.random() > 0.2 ? new Date(Date.now() - Math.random() * 3 * 24 * 60 * 60 * 1000).toISOString() : null,
-    durationMins: Math.floor(Math.random() * 480) + 30,
-    planned: Math.random() > 0.3,
-    reason: ['Preventive Maintenance', 'Breakdown', 'Calibration', 'Part Replacement'][Math.floor(Math.random() * 4)]
-  }));
-
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    const planned = mockDowntime.filter(d => d.planned);
-    const unplanned = mockDowntime.filter(d => !d.planned);
-    return res.json({ downtime: mockDowntime, planned, unplanned, mock: true });
+    return res.status(503).json({ error: 'Limble CMMS not configured', downtime: [], planned: [], unplanned: [], configured: false });
   }
 
   try {
@@ -841,21 +802,14 @@ app.get('/api/maintenance/downtime', async (_req: Request, res: Response) => {
       headers: { 'Authorization': `Basic ${basicAuth}` },
       signal: AbortSignal.timeout(10000)
     });
-    if (!resp.ok) {
-      // API might not have downtime endpoint, use mock
-      const planned = mockDowntime.filter(d => d.planned);
-      const unplanned = mockDowntime.filter(d => !d.planned);
-      return res.json({ downtime: mockDowntime, planned, unplanned, mock: true });
-    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json() as any;
     const downtime = Array.isArray(data) ? data : (data.data || []);
     const planned = downtime.filter((d: any) => d.planned);
     const unplanned = downtime.filter((d: any) => !d.planned);
     res.json({ downtime, planned, unplanned, mock: false });
   } catch (e) {
-    const planned = mockDowntime.filter(d => d.planned);
-    const unplanned = mockDowntime.filter(d => !d.planned);
-    res.json({ downtime: mockDowntime, planned, unplanned, error: (e as Error).message });
+    res.status(500).json({ downtime: [], planned: [], unplanned: [], error: (e as Error).message });
   }
 });
 
@@ -865,22 +819,8 @@ app.get('/api/maintenance/parts', async (_req: Request, res: Response) => {
   const limbleClientId = process.env.LIMBLE_CLIENT_ID;
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
-  // Generate mock parts data
-  const mockParts = Array.from({ length: 25 }, (_, i) => ({
-    id: i + 1,
-    name: ['Belt', 'Filter', 'Bearing', 'Seal', 'Motor', 'Sensor', 'Valve', 'Pump'][i % 8] + ` ${i + 1}`,
-    partNum: `PN-${String(1000 + i).padStart(5, '0')}`,
-    qty: Math.floor(Math.random() * 20),
-    minQty: 5,
-    location: `SHELF-${String.fromCharCode(65 + (i % 5))}${Math.floor(i / 5) + 1}`,
-    vendor: ['Grainger', 'McMaster', 'MSC', 'Fastenal'][Math.floor(Math.random() * 4)],
-    cost: Math.floor(Math.random() * 500) + 10,
-    lowStock: Math.random() > 0.7
-  }));
-
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    const lowStock = mockParts.filter(p => p.lowStock);
-    return res.json({ parts: mockParts, lowStock, mock: true });
+    return res.status(503).json({ error: 'Limble CMMS not configured', parts: [], lowStock: [], configured: false });
   }
 
   try {
@@ -889,17 +829,13 @@ app.get('/api/maintenance/parts', async (_req: Request, res: Response) => {
       headers: { 'Authorization': `Basic ${basicAuth}` },
       signal: AbortSignal.timeout(10000)
     });
-    if (!resp.ok) {
-      const lowStock = mockParts.filter(p => p.lowStock);
-      return res.json({ parts: mockParts, lowStock, mock: true });
-    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json() as any;
     const parts = Array.isArray(data) ? data : (data.data || []);
     const lowStock = parts.filter((p: any) => p.qty <= (p.minQty || 5));
     res.json({ parts, lowStock, mock: false });
   } catch (e) {
-    const lowStock = mockParts.filter(p => p.lowStock);
-    res.json({ parts: mockParts, lowStock, error: (e as Error).message });
+    res.status(500).json({ parts: [], lowStock: [], error: (e as Error).message });
   }
 });
 
@@ -910,13 +846,7 @@ app.get('/api/maintenance/stats', async (_req: Request, res: Response) => {
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    const mockStats = generateMockMaintenanceStats();
-    return res.json({
-      status: 'mock',
-      ...mockStats,
-      hasData: true,
-      lastSync: new Date().toISOString()
-    });
+    return res.status(503).json({ error: 'Limble CMMS not configured', configured: false });
   }
 
   try {
@@ -953,13 +883,7 @@ app.get('/api/maintenance/stats', async (_req: Request, res: Response) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'Failed to fetch';
     log.error('Maintenance stats fetch error:', msg);
-    res.json({
-      status: 'error',
-      error: msg,
-      ...generateMockMaintenanceStats(),
-      hasData: false,
-      lastSync: null
-    });
+    res.status(500).json({ error: msg, hasData: false, lastSync: null });
   }
 });
 
@@ -970,10 +894,7 @@ app.get('/api/maintenance/tasks', async (_req: Request, res: Response) => {
   const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
 
   if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    const mockTasks = generateMockTasks();
-    const open = mockTasks.filter((t: any) => t.status === 'open' || t.status === 'in_progress');
-    const critical = mockTasks.filter((t: any) => t.priority === 'Critical');
-    return res.json({ open, critical, mock: true });
+    return res.status(503).json({ error: 'Limble CMMS not configured', open: [], critical: [], configured: false });
   }
 
   try {
@@ -1203,72 +1124,7 @@ app.delete('/api/slack/messages', async (req: Request, res: Response) => {
   }
 });
 
-// Mock data generators for when APIs aren't configured
-function generateMockInventory() {
-  const coatings = ['AR', 'BLUE_CUT', 'HARD_COAT', 'TRANSITIONS', 'POLARIZED', 'MIRROR'];
-  const indices = ['1.50', '1.56', '1.60', '1.67', '1.74'];
-  return Array.from({ length: 50 }, (_, i) => ({
-    sku: `LB-${coatings[i % coatings.length]}-${indices[i % indices.length]}-${i + 1}`,
-    name: `${coatings[i % coatings.length]} ${indices[i % indices.length]} Lens Blank`,
-    qty: Math.floor(Math.random() * 100) + 5,
-    location: `BIN-${String(Math.floor(Math.random() * 20) + 1).padStart(2, '0')}`,
-    coatingType: coatings[i % coatings.length],
-    lastUpdated: new Date().toISOString()
-  }));
-}
-
-function generateMockPicks() {
-  return Array.from({ length: 10 }, (_, i) => ({
-    id: `TXN-${Date.now()}-${i}`,
-    sku: `LB-AR-1.60-${i + 1}`,
-    qty: Math.floor(Math.random() * 5) + 1,
-    type: 'PICK',
-    completedAt: new Date(Date.now() - Math.random() * 7200000).toISOString(),
-    picker: ['Maria', 'Jose', 'Ana', 'Carlos'][Math.floor(Math.random() * 4)]
-  }));
-}
-
-function generateMockAssets() {
-  const categories = ['Coaters', 'Cutters', 'Generators', 'Polishers', 'Lasers', 'Blockers'];
-  const statuses = ['Running', 'Running', 'Running', 'Idle', 'Maintenance'];
-  return Array.from({ length: 15 }, (_, i) => ({
-    id: i + 1,
-    name: `${categories[i % categories.length]}-${String(i + 1).padStart(2, '0')}`,
-    category: categories[i % categories.length],
-    status: statuses[Math.floor(Math.random() * statuses.length)],
-    location: ['Zone A', 'Zone B', 'Zone C'][Math.floor(Math.random() * 3)],
-    lastPM: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
-    nextPM: new Date(Date.now() + Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString()
-  }));
-}
-
-function generateMockTasks() {
-  const types = ['Work Order', 'PM', 'Work Request'];
-  const statuses = ['open', 'in_progress', 'completed', 'overdue'];
-  const priorities = ['Low', 'Medium', 'High', 'Critical'];
-  return Array.from({ length: 20 }, (_, i) => ({
-    id: i + 1,
-    type: types[Math.floor(Math.random() * types.length)],
-    title: `Task ${i + 1}: ${['Replace belt', 'Clean filters', 'Calibrate sensor', 'Lubricate bearings'][Math.floor(Math.random() * 4)]}`,
-    assetId: Math.floor(Math.random() * 15) + 1,
-    priority: priorities[Math.floor(Math.random() * priorities.length)],
-    status: statuses[Math.floor(Math.random() * statuses.length)],
-    assignee: ['Tech 1', 'Tech 2', 'Tech 3'][Math.floor(Math.random() * 3)],
-    dueDate: new Date(Date.now() + (Math.random() - 0.3) * 7 * 24 * 60 * 60 * 1000).toISOString()
-  }));
-}
-
-function generateMockMaintenanceStats() {
-  return {
-    totalAssets: 15,
-    openWorkOrders: Math.floor(Math.random() * 8) + 2,
-    overdueWorkOrders: Math.floor(Math.random() * 3),
-    completedToday: Math.floor(Math.random() * 5) + 1,
-    uptime: 94 + Math.random() * 5,
-    mtbf: 120 + Math.floor(Math.random() * 50),
-    mttr: 2 + Math.random() * 3
-  };
-}
+// No mock data — all endpoints require real API credentials
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DVI Data Import (file upload for historical/mega file data)
@@ -1504,8 +1360,6 @@ function syncDviToSqlite(): void {
 
 // Load DVI data on startup
 loadDviData();
-
-// DVI SOAP polling — removed, using DVI Trace instead
 
 // DVI MegaTransfer XML parser - extracts RxOrder records with nested data
 function parseXMLToJobs(xmlContent: string): { jobs: Record<string, any>[], columns: string[] } {
@@ -2417,7 +2271,7 @@ app.get('/api/dvi/data', async (req: Request, res: Response) => {
   }
 
   if (forceMock) {
-    return res.json({ mock: true, jobs: generateMockDVIJobs(), message: 'Mock data (requested via ?mock=true)' });
+    return res.json({ mock: false, jobs: [], message: 'Mock data disabled — use real DVI uploads only' });
   }
 
   // Get shipped counts from database - use shipped_at timestamp and status check
@@ -2527,13 +2381,10 @@ app.get('/api/dvi/uploads/:id', (req: Request, res: Response) => {
 });
 
 app.get('/api/dvi/stats', (req: Request, res: Response) => {
-  const forceMock = req.query.mock === 'true';
   const current = dviDataStore.current;
-
-  // Only use real data if uploaded, never fall back to mock automatically
   const hasRealData = !!current;
-  const jobs = forceMock ? generateMockDVIJobs() : (hasRealData ? current.jobs : []);
-  const isMock = forceMock;
+  const jobs = hasRealData ? current.jobs : [];
+  const isMock = false;
 
   // Compute stats from jobs
   const stats = {
@@ -2542,7 +2393,7 @@ app.get('/api/dvi/stats', (req: Request, res: Response) => {
     byStage: {} as Record<string, number>,
     rushJobs: 0,
     completedToday: 0,
-    noData: !hasRealData && !forceMock
+    noData: !hasRealData
   };
 
   jobs.forEach((job: any) => {
@@ -2594,12 +2445,12 @@ app.get('/api/dvi/stats', (req: Request, res: Response) => {
 });
 
 // WIP Summary endpoint - returns aggregated stats + limited job list to avoid token limits
-// Merges data from SQLite (SOAP polling) and XML uploads
+// Merges data from SQLite and XML uploads
 app.get('/api/wip/summary', (_req: Request, res: Response) => {
   const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
   let dbJobs: any[] = [];
 
-  // First, get jobs from SQLite (SOAP polling data)
+  // First, get jobs from SQLite
   if (existsSync(dbPath)) {
     try {
       const db = new Database(dbPath);
@@ -2636,7 +2487,7 @@ app.get('/api/wip/summary', (_req: Request, res: Response) => {
   // Add/overwrite with SQLite jobs (fresher data)
   dbJobs.forEach((j: any) => {
     const key = j.invoice || j.id;
-    if (key) jobMap.set(key, { ...j, source: 'soap' });
+    if (key) jobMap.set(key, { ...j, source: 'sqlite' });
   });
 
   const allJobs = Array.from(jobMap.values());
@@ -2666,7 +2517,7 @@ app.get('/api/wip/summary', (_req: Request, res: Response) => {
     dataDate: current?.dataDate || new Date().toISOString().split('T')[0],
     uploadedAt: current?.uploadedAt || null,
     sources: {
-      soap: dbJobs.length,
+      sqlite: dbJobs.length,
       xml: activeXmlJobs.length,
       merged: allJobs.length
     },
@@ -2749,22 +2600,7 @@ app.delete('/api/dvi/all', (_req: Request, res: Response) => {
   res.json({ success: true, message: `Cleared all data (${currentCount} current, ${archiveCount} archived)` });
 });
 
-// DVI SOAP Live API — removed, using DVI Trace on lab server instead
-
-function generateMockDVIJobs() {
-  const stages = ['SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'QC', 'SHIP'];
-  const statuses = ['In Progress', 'Completed', 'On Hold', 'Pending'];
-  return Array.from({ length: 100 }, (_, i) => ({
-    job_id: `J${String(20000 + i).padStart(5, '0')}`,
-    order_id: `ORD-${String(10000 + Math.floor(i / 2)).padStart(5, '0')}`,
-    stage: stages[Math.floor(Math.random() * stages.length)],
-    status: statuses[Math.floor(Math.random() * statuses.length)],
-    rush: Math.random() > 0.85 ? 'Y' : 'N',
-    rx_type: ['SV', 'PAL', 'BIF'][Math.floor(Math.random() * 3)],
-    created_at: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-    operator: ['Maria', 'Jose', 'Ana', 'Carlos', 'Elena'][Math.floor(Math.random() * 5)]
-  }));
-}
+// No mock DVI data — use real DVI uploads or DVI Trace
 
 // Rate limit configuration endpoints
 app.get('/gateway/config/limits', (_req: Request, res: Response) => {
@@ -2869,7 +2705,6 @@ async function start(): Promise<void> {
         log.error('Slack initialization failed:', err);
       });
 
-    // DVI SOAP polling removed — using DVI Trace on lab server
   });
 }
 

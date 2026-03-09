@@ -244,12 +244,6 @@ const DEFAULT_SETTINGS = {
 const mono = "'JetBrains Mono','Fira Code',monospace";
 const sans = "'Outfit','DM Sans',system-ui,sans-serif";
 
-function genJob() { return `J${String(Math.floor(Math.random()*90000)+10000)}`; }
-function genTray() { return `T-${String(Math.floor(Math.random()*900)+100)}`; }
-function pick(a) { return a[Math.floor(Math.random()*a.length)]; }
-function genRx() {
-  return { sph: (Math.random()*8-4).toFixed(2), cyl: (Math.random()*-4).toFixed(2), axis: Math.floor(Math.random()*180), add: Math.random()>0.5?(Math.random()*3).toFixed(2):null };
-}
 
 function playBeep(freq=880, dur=0.4, type="sine") {
   try {
@@ -264,95 +258,7 @@ function playBeep(freq=880, dur=0.4, type="sine") {
   } catch(e) { console.warn("Audio not available"); }
 }
 
-function initTrays(n) {
-  const states = Object.keys(TRAY_STATES);
-  const coatStages = Object.keys(COATING_STAGES);
-  return Array.from({length:n},(_,i)=>{
-    const state = pick(states);
-    let dept;
-    if(state==="IDLE") dept=pick(["PICKING","SHIPPING"]);
-    else if(state==="COATING_STAGED"||state==="COATING_IN_PROCESS") dept="COATING";
-    else if(state==="QC_HOLD"||state==="BROKEN") dept="QC";
-    else if(state==="COMPLETE") dept=pick(["ASSEMBLY","SHIPPING"]);
-    else if(state==="RE_TRAY") dept=pick(["COATING","ASSEMBLY"]);
-    else dept=pick(["PICKING","SURFACING","CUTTING","COATING","ASSEMBLY","QC"]);
-    let coatingStage=null;
-    if(dept==="COATING"){
-      if(state==="COATING_STAGED") coatingStage=pick(["QUEUE","DIP","SCAN_IN"]);
-      else if(state==="COATING_IN_PROCESS") coatingStage=pick(["OVEN","COATER","COOL_DOWN"]);
-      else coatingStage=pick(coatStages);
-    }
-    return {
-      id:`T-${String(i+1).padStart(3,"0")}`,
-      job:state==="IDLE"?null:genJob(),
-      state, coatingType:state==="IDLE"?null:pick(COATING_TYPES),
-      updatedAt:Date.now()-Math.floor(Math.random()*3600000),
-      rush:Math.random()<0.08,
-      battery:Math.floor(Math.random()*80)+20,
-      rssi:Math.floor(Math.random()*-30)-40,
-      lastSeen:Date.now()-Math.floor(Math.random()*300000),
-      rx:state!=="IDLE"?genRx():null,
-      einkPages:state!=="IDLE"?3:0,
-      department:dept, coatingStage,
-      lightOn:false,
-      machine:dept==="COATING"&&coatingStage&&["OVEN","COATER"].includes(coatingStage)?pick(MACHINES):null,
-      batchId:dept==="COATING"&&coatingStage&&!["QUEUE"].includes(coatingStage)?pick(["B01","B02","B03"]):null,
-      stageEnteredAt:dept==="COATING"&&["OVEN","COATER"].includes(coatingStage)?Date.now()-Math.floor(Math.random()*2400000):null,
-      breakType:state==="BROKEN"?pick(BREAK_TYPES):null,
-    };
-  });
-}
-
-function initPutWall(slots) {
-  return Array.from({length:slots},(_,i)=>{
-    const occupied=Math.random()<0.6;
-    return { position:i+1, trayId:occupied?genTray():null, job:occupied?genJob():null, rush:occupied&&Math.random()<0.1, since:occupied?Date.now()-Math.floor(Math.random()*7200000):null, source:occupied?pick(["DVI","Lab Assistant","Kardex"]):null, coatingType:occupied?pick(COATING_TYPES):null };
-  });
-}
-
-function initBatches() {
-  return MACHINES.map((m,i)=>{
-    const status=pick(["loading","running","waiting","idle"]);
-    const capacity=140;
-    const loaded=status==="idle"?0:status==="complete"?capacity:Math.floor(Math.random()*capacity);
-    const stageLoads = {};
-    Object.keys(COATING_STAGES).forEach(s=>{ stageLoads[s]=Math.floor(Math.random()*25); });
-    return {
-      id:`B${String(i+1).padStart(2,"0")}`, machine:m,
-      coatingType:status==="idle"?null:pick(COATING_TYPES), status, loaded, capacity,
-      startedAt:status==="running"?Date.now()-Math.floor(Math.random()*5400000):null,
-      eta:status==="running"?Date.now()+Math.floor(Math.random()*3600000):null,
-      stageLoads, controlState: status === "running" ? "running" : status === "waiting" ? "waiting" : "idle",
-    };
-  });
-}
-
-function initEvents() {
-  // Events now populated from live DVI trace + SOM data
-  return [];
-}
-
-function initMessages() {
-  return [
-    {id:1,from:"Mike S.",text:"J48291 is HOT — customer pickup at 3PM",time:new Date(Date.now()-120000),priority:"high"},
-    {id:2,from:"Sarah K.",text:"AR batch ready for unload on Satis 1200",time:new Date(Date.now()-300000),priority:"normal"},
-    {id:3,from:"Phil",text:"Hold J55102 — Rx update coming from doctor",time:new Date(Date.now()-600000),priority:"high"},
-  ];
-}
-
-function initInspections() {
-  return Array.from({length:20},(_,i)=>({
-    id:`INS-${String(i+1).padStart(3,"0")}`, job:genJob(), batch:pick(["B01","B02","B03"]),
-    coatingType:pick(COATING_TYPES), result:Math.random()>0.15?"PASS":"FAIL",
-    defects:Math.random()>0.15?[]:[pick(DEFECT_TYPES),...(Math.random()>0.5?[pick(DEFECT_TYPES)]:[])],
-    inspectedAt:Date.now()-Math.floor(Math.random()*86400000),
-    inspector:pick(["Auto-Vision","Manual-QC","Auto-Vision"]),
-  }));
-}
-
-function initBreakage() {
-  return []; // Real data fetched from /api/breakage
-}
+// No mock data generators — all data comes from live APIs
 
 // ── UI Primitives ────────────────────────────────────────────
 const Pill = ({children,color,bg})=>(
@@ -1175,8 +1081,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     setAiResponse('');
     try{
       const agent=KPI_AGENTS[modalKpi]||'ShiftReportAgent';
-      const jobs=getJobsForKPI(modalKpi);
-      const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nJobs count: ${jobs.length}\nSample jobs: ${JSON.stringify(jobs.slice(0,10))}`;
+      const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nUse your MCP tools to get real data for this KPI. Do not use any sample or mock data.`;
       const res=await fetch('http://localhost:3001/web/ask-sync',{
         method:'POST',
         headers:{'Content-Type':'application/json'},
@@ -3395,35 +3300,12 @@ const DOMAIN_CONFIGS = {
       { icon: "🔧", label: "Defect Help", text: "Help me troubleshoot a surfacing defect. What questions should I answer?" },
       { icon: "📊", label: "Machine Health Report", text: "Generate a machine health report — uptime, error patterns, maintenance recommendations.", isReport: true },
     ],
-    buildContext: (data) => `You are the Surfacing Specialist AI for Pair Eyewear's lens lab.
-You have LIVE access to SOM (Schneider Optical Machines) Control Center data.
+    buildContext: () => `You are the Surfacing Specialist AI for Pair Eyewear's lens lab.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-CURRENT SURFACING STATE (${new Date().toLocaleString()}):
-SURFACING QUEUE: ${data.queueCount || 0} jobs waiting
-IN PROCESS: ${data.inProcessCount || 0} jobs
-RUSH JOBS: ${data.rushCount || 0} active
-
-JOBS IN SURFACING:
-${(data.jobs || []).slice(0, 15).map(j => `  ${j.job_id || j.invoice || j.id}: station=${j.station || '?'} | ${j.status || 'WIP'} ${(j.rush === 'Y') ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in surfacing'}
-
-SOM MACHINE STATUS (${(data.somDevices || []).length} surfacing machines):
-${(data.somDevices || []).map(d => `  ${d.name} [${d.category}] LED=${d.ledStatus || '?'} status=${d.status} event="${d.event || 'none'}" cycle=${d.cycleTime || '?'}s count=${(d.count || 0).toLocaleString()} lastOrder=${d.lastOrder || '?'}`).join('\n') || '  No SOM data'}
-
-MACHINES WITH ERRORS/WARNINGS (${data.somErrors || 0}):
-${(data.somDevices || []).filter(d => d.ledStatus === 'error' || d.ledStatus === 'warning').map(d => `  ⚠️ ${d.name}: ${d.event}`).join('\n') || '  None'}
-
-CONVEYOR ERRORS (${(data.conveyorErrors || []).length}):
-${(data.conveyorErrors || []).map(c => `  🔴 ${c.position}: ${c.event}`).join('\n') || '  None'}
+IMPORTANT: Use your MCP tools to get ALL data. Call get_wip_jobs with department="S" for surfacing jobs. Call call_api to fetch SOM machine data from /api/som/devices. Do NOT invent any data.
 
 SURFACING LINE ORDER: Blocking (autoblockers CCU/CU1/CBB) → Generators (HSC) → Polishing (CCP) → Deblocking (DBA) → Fining (DNL) → Cleaning (CCS/LC1)
-
-YOUR ROLE:
-You are an expert in Schneider optical manufacturing equipment. Analyze machine data to:
-1. IDENTIFY PATTERNS — Look for repeating errors, machines stuck in warning states, or unusual event messages
-2. PREDICT FAILURES — If a machine shows degradation (increasing errors, temp warnings, backup events), flag it
-3. MAINTENANCE ALERTS — Recommend specific maintenance actions: "Machine X needs maintenance intervention because..."
-4. CONVEYOR ISSUES — Belt errors cause tray jams that stop the entire line. Prioritize these.
-5. PRODUCTION IMPACT — Connect machine issues to job throughput. "Generator DBA001 is down, blocking X jobs..."
 
 Common Schneider error patterns:
 - "Waiting for trays" = idle/starved (normal if line is paused)
@@ -3431,8 +3313,6 @@ Common Schneider error patterns:
 - "BDEL timeout" = tray delivery timeout — conveyor issue upstream
 - "Polishing liquid supply: setpoint temperature" = polishing fluid not at temp — check heater
 - "Maintenance interval is reached or exceeded" = scheduled PM overdue — create work order
-- "Reset by DeviceServer" = machine was reset remotely — check why
-- "Error, backup at belt" = conveyor jam — tray stuck at position
 - LED green+red = warning state; red only = error state
 
 Be direct and technical. Flag urgent issues first. Suggest specific maintenance actions with machine IDs.`,
@@ -3448,16 +3328,10 @@ Be direct and technical. Flag urgent issues first. Suggest specific maintenance 
       { icon: "🔧", label: "Edge Issue", text: "Help troubleshoot an edge quality issue. What information do you need?" },
       { icon: "📐", label: "Frame Fit", text: "Guide me through checking frame-to-lens fit parameters." },
     ],
-    buildContext: (data) => `You are the Cutting/Edging Specialist AI for Pair Eyewear's lens lab.
+    buildContext: () => `You are the Cutting/Edging Specialist AI for Pair Eyewear's lens lab.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-CURRENT CUTTING STATE (${new Date().toLocaleString()}):
-CUTTING QUEUE: ${data.queueCount || 0} jobs
-IN PROCESS: ${data.inProcessCount || 0} jobs
-ON HOLD: ${data.holdCount || 0} jobs
-RUSH ACTIVE: ${data.rushCount || 0}
-
-JOBS IN CUTTING:
-${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: Frame ${j.frameRef || 'TBD'} | ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in cutting'}
+IMPORTANT: Use your MCP tools to get ALL data. Call get_wip_jobs with department="E" for cutting/edging jobs. Do NOT invent any data.
 
 You are an expert in lens edging operations. Help with:
 - Edge quality troubleshooting (chips, cracks, bevel issues)
@@ -3479,20 +3353,10 @@ Be specific with job IDs and frame references.`,
       { icon: "🌡", label: "Oven Timing", text: "Review current oven dwell times and recommend adjustments." },
       { icon: "🔴", label: "Rush Coating", text: "Which rush jobs are currently in coating and their ETA?" },
     ],
-    buildContext: (data) => `You are the Coating Specialist AI for Pair Eyewear's lens lab.
+    buildContext: () => `You are the Coating Specialist AI for Pair Eyewear's lens lab.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-CURRENT COATING STATE (${new Date().toLocaleString()}):
-TOTAL IN COATING: ${data.inCoating || 0} jobs across ${(data.batches || []).length} batches
-MACHINES: ${(data.machines || []).join(', ') || 'Unknown'}
-
-LIVE BATCHES:
-${(data.batches || []).map(b => `  ${b.id}: ${b.coatingType || b.coating} | ${b.machine} | ${b.loaded}/${b.capacity} | ${b.status}`).join('\n') || '  No active batches'}
-
-STAGE PIPELINE:
-${Object.entries(data.stageCounts || {}).map(([stage, count]) => `  ${stage}: ${count}`).join('\n') || '  No stage data'}
-
-YIELD BY COATING TYPE:
-${Object.entries(data.yieldByType || {}).map(([type, rate]) => `  ${type}: ${rate}%`).join('\n') || '  No yield data'}
+IMPORTANT: Use your MCP tools to get ALL data. Call get_coating_intelligence for full pipeline state. Call get_coating_queue for queue data. Call get_oven_rack_status for oven data. Do NOT invent any data.
 
 You are an expert in AR, Blue Cut, Mirror, Transitions, Polarized, and Hard Coat processes.
 Help operators with:
@@ -3515,19 +3379,10 @@ Flag anything below 90% yield as a concern.`,
       { icon: "📊", label: "Shift Report", text: "Generate current shift assembly summary.", isReport: true },
       { icon: "🔧", label: "Frame Issue", text: "Help troubleshoot a frame assembly problem." },
     ],
-    buildContext: (data) => `You are the Assembly Specialist AI for Pair Eyewear's lens lab.
+    buildContext: () => `You are the Assembly Specialist AI for Pair Eyewear's lens lab.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-CURRENT ASSEMBLY STATE (${new Date().toLocaleString()}):
-JOBS IN ASSEMBLY: ${data.inProcessCount || 0} in progress
-QUEUE DEPTH: ${data.queueCount || 0} waiting
-COMPLETED TODAY: ${data.completedToday || 0}
-ON HOLD: ${data.holdCount || 0}
-
-JOBS IN ASSEMBLY:
-${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in assembly'}
-
-QC RETURNS:
-${(data.qcReturns || []).slice(0, 3).map(r => `  ${r.job}: ${r.reason}`).join('\n') || '  None recent'}
+IMPORTANT: Use your MCP tools to get ALL data. Call get_wip_jobs with department="A" for assembly jobs. Do NOT invent any data.
 
 You are an expert in eyewear assembly operations. Help with:
 - Station assignment optimization
@@ -3550,18 +3405,10 @@ Reference specific job IDs.`,
       { icon: "📊", label: "EOD Report", text: "Generate end-of-day shipping report.", isReport: true },
       { icon: "🔍", label: "Track Job", text: "Help me track a specific job. Which job ID?" },
     ],
-    buildContext: (data) => `You are the Shipping Specialist AI for Pair Eyewear's lens lab.
+    buildContext: () => `You are the Shipping Specialist AI for Pair Eyewear's lens lab.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-CURRENT SHIPPING STATE (${new Date().toLocaleString()}):
-READY TO SHIP: ${data.readyCount || 0} jobs
-SHIPPED TODAY: ${data.shippedToday || 0}
-OVERDUE: ${data.overdueCount || 0}
-
-JOBS IN SHIPPING:
-${(data.jobs || []).slice(0, 15).map(j => `  ${j.job || j.id}: ${j.state} ${j.rush ? '🔴 RUSH' : ''}`).join('\n') || '  No jobs in shipping'}
-
-OVERDUE JOBS:
-${(data.overdue || []).map(j => `  ${j.job || j.id}: Due ${j.dueDate} — ${j.reason || 'Unknown hold'}`).join('\n') || '  None'}
+IMPORTANT: Use your MCP tools to get ALL data. Call get_wip_jobs with stage="SHIP" or department="SH" for shipping jobs. Do NOT invent any data.
 
 You are an expert in optical lab shipping operations. Help with:
 - Shipping priority decisions
@@ -3584,22 +3431,10 @@ Always include job IDs and specific timing.`,
       { icon: "📦", label: "Reorder List", text: "Generate recommended reorder list based on usage.", isReport: true },
       { icon: "🌡", label: "By Coating", text: "Summarize stock levels by coating type." },
     ],
-    buildContext: (data) => `You are the Inventory Specialist AI for Pair Eyewear's lens lab.
+    buildContext: () => `You are the Inventory Specialist AI for Pair Eyewear's lens lab.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-INVENTORY STATUS (${new Date().toLocaleString()}):
-TOTAL SKUs: ${data.totalSkus || 0}
-TOTAL UNITS: ${data.totalUnits || 0}
-OUT OF STOCK: ${data.outOfStock || 0} SKUs
-LOW STOCK: ${data.lowStock || 0} SKUs
-
-CRITICAL ALERTS:
-${(data.criticalAlerts || []).slice(0, 5).map(m => `  ${m.sku}: ${m.name} — ${m.qty} left`).join('\n') || '  None'}
-
-STOCK BY COATING TYPE:
-${Object.entries(data.byCoatingType || {}).map(([type, count]) => `  ${type}: ${count} units`).join('\n') || '  No data'}
-
-RECENT PICKS:
-${(data.recentPicks || []).slice(0, 5).map(p => `  ${p.sku}: qty ${p.qty}`).join('\n') || '  None'}
+IMPORTANT: Use your MCP tools to get ALL data. Call get_inventory_summary for stock levels. Call get_inventory_detail for specific materials. Do NOT invent any data.
 
 You are an expert in lens blank inventory management. Help with:
 - Low stock prioritization and reorder recommendations
@@ -3622,21 +3457,10 @@ Reference specific SKUs and quantities.`,
       { icon: "🔧", label: "Troubleshoot", text: "Help troubleshoot an equipment issue. Which asset?" },
       { icon: "📦", label: "Parts Check", text: "Are there any spare parts running low?" },
     ],
-    buildContext: (data) => `You are the Maintenance Specialist AI for Pair Eyewear's lens lab.
+    buildContext: () => `You are the Maintenance Specialist AI for Pair Eyewear's lens lab.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-MAINTENANCE STATUS (${new Date().toLocaleString()}):
-TOTAL ASSETS: ${data.totalAssets || 0}
-OPERATIONAL: ${data.operational || 0}
-DOWN: ${data.down || 0}
-
-OPEN WORK ORDERS:
-${(data.openTasks || []).slice(0, 5).map(t => `  ${t.id}: ${t.asset} — ${t.description} [${t.priority}]`).join('\n') || '  None'}
-
-OVERDUE PM:
-${(data.overduePM || []).slice(0, 5).map(t => `  ${t.asset}: ${t.pmType} due ${t.dueDate}`).join('\n') || '  None'}
-
-RECENT DOWNTIME:
-${(data.recentDowntime || []).slice(0, 5).map(d => `  ${d.asset}: ${d.duration}min — ${d.reason}`).join('\n') || '  None'}
+IMPORTANT: Use your MCP tools to get ALL data. Call get_maintenance_summary for asset status. Call get_maintenance_tasks for work orders. Do NOT invent any data.
 
 You are an expert in optical lab equipment maintenance. Help with:
 - PM scheduling and prioritization
@@ -4948,20 +4772,8 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
     });
   }, [dviJobs]);
 
-  // Shipped jobs today (scanned as shipped by DVI)
-  const shippedJobs = useMemo(() => {
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    return dviJobs.filter(j => {
-      if (j.status !== 'SHIPPED' && j.stage !== 'SHIPPING') return false;
-      // Check if shipped today
-      const d = j.lastSeen || j.date || j.entryDate;
-      if (d) {
-        const jDate = new Date(typeof d === 'number' ? d : d);
-        return jDate >= todayStart;
-      }
-      return true; // include if no date (assume today)
-    });
-  }, [dviJobs]);
+  // Shipped jobs today — from server API (dviJobs has shipped filtered out for WIP display)
+  const shippedJobs = shippedStats.todayJobs || [];
 
   // Search filter
   const filteredJobs = useMemo(() => {
@@ -5005,6 +4817,10 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>YESTERDAY</div>
             <div style={{ fontSize: 20, fontWeight: 700, color: T.textMuted, fontFamily: mono }}>{shippedStats.yesterday || 0}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>THIS WEEK</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: T.textMuted, fontFamily: mono }}>{shippedStats.thisWeek || 0}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
@@ -5173,56 +4989,20 @@ function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl='htt
   ];
 
   const buildAgingPrompt=()=>{
-    // WIP = any tray that is not IDLE
-    const wip = trays.filter(t=>t.state!=="IDLE" && t.job);
-    const now = Date.now();
-
-    // Compute days in lab from updatedAt (proxy until DVI receivedAt is live)
-    // Due date is simulated as 3–5 business days from entry; DVI will supply real values
-    const rows = wip.map(t=>{
-      const msInLab  = now - (t.updatedAt || now);
-      const daysInLab= msInLab / 86400000;
-      const hrsInLab = msInLab / 3600000;
-      // Simulated due date: rush = +1d, standard = +3d from entry
-      const dueMsOffset = t.rush ? 86400000 : 3 * 86400000;
-      const dueDate  = new Date((t.updatedAt || now) + dueMsOffset);
-      const dueDateStr = dueDate.toLocaleDateString("en-US",{month:"short",day:"numeric"});
-      const daysUntilDue = (dueDate - now) / 86400000;
-      const overdue  = daysUntilDue < 0;
-      const dueSoon  = !overdue && daysUntilDue < 1;
-      return { t, daysInLab, hrsInLab, dueDateStr, daysUntilDue, overdue, dueSoon };
-    }).sort((a,b)=>b.daysInLab - a.daysInLab); // oldest first
-
-    const overdueCount  = rows.filter(r=>r.overdue).length;
-    const dueSoonCount  = rows.filter(r=>r.dueSoon).length;
-    const avgDays       = rows.length ? (rows.reduce((s,r)=>s+r.daysInLab,0)/rows.length).toFixed(2) : 0;
-
-    const rowLines = rows.map(r=>{
-      const d = r.daysInLab < 1
-        ? `${Math.round(r.hrsInLab)}h`
-        : `${r.daysInLab.toFixed(1)}d`;
-      const flag = r.overdue ? " ⚠ OVERDUE" : r.t.rush ? " 🔴 RUSH" : r.dueSoon ? " ⏰ DUE TODAY" : "";
-      return `  ${r.t.job} | Tray: ${r.t.id} | In lab: ${d} | Due: ${r.dueDateStr} | ${r.t.department||"?"} → ${r.t.state}${flag}`;
-    }).join("\n");
-
-    return `Generate a WIP Aging Report for the Pair Eyewear assembly lab.
+    // Use MCP tools for real data — no mock tray data
+    return `Generate a WIP Aging Report for the Pair Eyewear lens lab.
 
 REPORT DATE: ${new Date().toLocaleString()}
-TOTAL WIP JOBS: ${rows.length}
-AVERAGE TIME IN LAB: ${avgDays} days
-OVERDUE: ${overdueCount} jobs
-DUE TODAY: ${dueSoonCount} jobs
 
-ALL WIP JOBS (sorted oldest first — Days In Lab | Due Date | Location | Status):
-${rowLines || "  No active WIP jobs"}
+INSTRUCTIONS: Call get_aging_report first to get real aging data from the database. Then call get_wip_snapshot for summary stats. Use ONLY the data returned by those tools.
 
 Generate a professional WIP Aging Report with these sections:
 ## WIP Aging Summary
-A brief 2–3 sentence overview of the current WIP state.
+A brief 2–3 sentence overview of the current WIP state based on tool data.
 
 ## Aging Detail Table
-Present all jobs as a clean text table with columns: Job | Tray | Days In Lab | Due Date | Location | Status | Flag
-Sort by Days In Lab descending. Flag overdue jobs with ⚠, rush with 🔴, due today with ⏰.
+Present jobs as a clean text table with columns: Job | Days In Lab | Stage | Station | Status | Flag
+Sort by Days In Lab descending. Flag overdue jobs with ⚠, rush with 🔴.
 
 ## Concerns
 List any jobs requiring immediate attention with specific job numbers and reasons.
@@ -5230,92 +5010,30 @@ List any jobs requiring immediate attention with specific job numbers and reason
 ## Recommended Actions
 3–5 specific actions the floor supervisor should take right now, ordered by priority.
 
-Be precise with job IDs and times. Use the actual data above — do not invent numbers.`;
+Be precise with job IDs and times. Use ONLY data from your tool calls — do not invent numbers.`;
   };
 
   const buildContext=()=>{
-    const bound=trays.filter(t=>t.state==="BOUND");
-    const inCoat=trays.filter(t=>t.state==="IN_COATING");
-    const idle=trays.filter(t=>t.state==="IDLE");
-    const recentBatches=batches.slice(0,20);
-    const rushTrays=trays.filter(t=>t.rush&&t.state!=="IDLE");
-    const byCoating={};
-    batches.forEach(b=>{if(!byCoating[b.coating])byCoating[b.coating]={count:0,passSum:0};byCoating[b.coating].count++;byCoating[b.coating].passSum+=b.passRate;});
-
-    // WIP aging context
-    const wip=trays.filter(t=>t.state!=="IDLE"&&t.job);
-    const now=Date.now();
-    const aging=wip.map(t=>{
-      const h=((now-(t.updatedAt||now))/3600000).toFixed(1);
-      const due=new Date((t.updatedAt||now)+(t.rush?86400000:3*86400000));
-      const dueStr=due.toLocaleDateString("en-US",{month:"short",day:"numeric"});
-      const overdue=due<new Date();
-      return `${t.job}|${t.id}|${h}h in lab|due ${dueStr}|${t.department||"?"}${overdue?" OVERDUE":""}${t.rush?" RUSH":""}`;
-    }).join("; ");
-
+    // ALL data must come from MCP tools — no frontend context injection
     return `You are Lab_Assistant AI, an expert optical manufacturing analyst embedded in the Pair Eyewear lens lab MES.
+TIMESTAMP: ${new Date().toLocaleString()}
 
-LIVE LAB STATE (${new Date().toLocaleString()}):
-TRAY FLEET: ${trays.length} total | IDLE: ${idle.length} | BOUND: ${bound.length} | IN COATING: ${inCoat.length} | RUSH: ${rushTrays.length}
+CRITICAL: Get ALL data from your MCP tools. Do NOT invent or fabricate any data.
 
-BOUND TRAYS:
-${bound.slice(0,8).map(t=>`  ${t.id}: Job ${t.job} | ${t.department||"?"} | ${t.coatingType||"?"}${t.rush?" 🔴 RUSH":""}`).join("\n")||"  None"}
-
-IN COATING:
-${inCoat.slice(0,8).map(t=>`  ${t.id}: Job ${t.job} | Machine: ${t.machine||"?"} | Stage: ${t.coatingStage||"?"}`).join("\n")||"  None"}
-
-RUSH JOBS:
-${rushTrays.map(t=>`  ${t.id}: Job ${t.job} — State: ${t.state} | Dept: ${t.department||"?"}`).join("\n")||"  None active"}
-
-WIP AGING (all active jobs — hours in lab | due date | location | flags):
-${aging||"  No WIP data"}
-
-RECENT BATCHES (last 20):
-${recentBatches.map(b=>`  ${b.id}: ${b.coating} | ${b.machine} | ${b.lenses}/${b.capacity} lenses | Actual ${b.actualMins}min vs Target ${b.targetMins}min | Pass ${b.passRate}% | Op: ${b.operator||"?"}`).join("\n")}
-
-YIELD BY COATING TYPE:
-${Object.entries(byCoating).map(([k,v])=>`  ${k}: ${v.count} batches, avg ${Math.round(v.passSum/v.count)}% pass rate`).join("\n")}
-
-MACHINES: ${coaterMachines.join(", ")}
-COATING TYPES: ${COATING_TYPES.join(", ")}
-
-DVI JOBS BY STAGE:
-${(() => {
-  const stages = {};
-  dviJobs.forEach(j => { const s = j.stage || j.station || 'UNKNOWN'; stages[s] = (stages[s] || 0) + 1; });
-  return Object.entries(stages).sort((a,b) => b[1] - a[1]).map(([s,c]) => `  ${s}: ${c} jobs`).join('\n') || '  No DVI data';
-})()}
-
-DVI JOBS WITH ERRORS/HOLDS:
-${dviJobs.filter(j => (j.station||'').includes('FAIL') || (j.station||'').includes('HOLD') || (j.station||'').includes('ERROR') || (j.station||'').includes('REJECT')).slice(0, 20).map(j => `  ${j.job_id||j.invoice}: station=${j.station} status=${j.status||'?'} date=${j.date||j.entryDate||'?'}`).join('\n') || '  None'}
-
-DVI RUSH JOBS:
-${dviJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y').slice(0, 15).map(j => `  ${j.job_id||j.invoice}: stage=${j.stage||'?'} station=${j.station||'?'}`).join('\n') || '  None'}
-
-BREAKAGE LOG (${breakage.length} total, ${breakage.filter(b => { const today = new Date(); return new Date(b.time).toDateString() === today.toDateString(); }).length} today):
-${breakage.slice(0, 15).map(b => `  ${b.job}: type=${b.type} dept=${b.dept} lens=${b.lens} coating=${b.coating} ${b.resolved ? 'RESOLVED' : 'OPEN'} ${new Date(b.time).toLocaleString([], { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })}`).join('\n') || '  No breakage logged'}
-
-SOM MACHINE STATUS (${somDevices.length} machines):
-${(() => {
-  const errors = somDevices.filter(d => d.led?.status === 'error' || d.led?.status === 'warning');
-  if (errors.length === 0) return '  All machines nominal';
-  return errors.map(d => `  ${d.name} [${d.category}] LED=${d.led?.status} event="${d.event||'?'}"`).join('\n');
-})()}
-
-You are an expert optical manufacturing analyst. You have access to:
-1. LIVE DVI data — every job in the lab, their current stage/station, errors, holds, rush status
-2. BREAKAGE LOG — all lens breaks with type, department, coating, and resolution status
-3. SOM MACHINE STATUS — Schneider machine LEDs, errors, cycle times
-4. TRAY/BATCH data — coating batches, yield rates, operator performance
+Start every query by calling get_wip_snapshot() for a real-time summary of active jobs.
+Use get_wip_jobs() with filters for department-specific data.
+Use get_aging_report() for WIP aging analysis.
+Use get_breakage_summary() and get_breakage_events() for breakage data.
+Use call_api with endpoint /api/som/devices for machine status.
+Use get_coating_intelligence() for coating pipeline data.
 
 When analyzing:
 - Cross-reference breakage patterns with specific DVI stages to identify root causes
-- Look for correlations: does a specific machine/station have higher error rates?
 - Flag repeating breakage types and suggest corrective actions
 - If a job is stuck (HOLD/FAIL), explain likely causes and next steps
 - For rush jobs, suggest priority routing through the lab
 
-When generating reports: use ## for main sections, ### for subsections, - for bullet points, **bold** for key metrics. Be specific with actual numbers from the data. Flag anything below 90% pass rate as a concern. Be concise but comprehensive.`;
+When generating reports: use ## for main sections, ### for subsections, - for bullet points, **bold** for key metrics. Be specific with actual numbers from tool data only. Flag anything below 90% pass rate as a concern.`;
   };
 
   const sendMessage=async(text)=>{
@@ -6367,7 +6085,7 @@ function TrayFleetTab({trays,setTrays}){
       setBindResult({ok:false,msg:`Tray "${mappedTrayId}" mapped to ${posKey} but not found in fleet`});
       return;
     }
-    setTrays(prev=>prev.map(t=>t.id===mappedTrayId?{...t,job,state:"BOUND",updatedAt:Date.now(),rx:genRx(),einkPages:3,coatingType:pick(COATING_TYPES),department:"PICKING",coatingStage:null,machine:null,batchId:null,position:posKey}:t));
+    setTrays(prev=>prev.map(t=>t.id===mappedTrayId?{...t,job,state:"BOUND",updatedAt:Date.now(),einkPages:3,department:"PICKING",coatingStage:null,machine:null,batchId:null,position:posKey}:t));
     setBindResult({ok:true,trayId:mappedTrayId,job,msg:`✓ ${job} → ${posKey} → ${mappedTrayId} bound`});
     setSelectedTray(mappedTrayId);
     setScanTrayInput("");setScanJobInput("");
@@ -6707,32 +6425,7 @@ function TrayFleetTab({trays,setTrays}){
 // ══════════════════════════════════════════════════════════════
 
 // Simulated 30-day historical batch data — replace with DVI/MES API in production
-function genHistoricalBatches(numDays=30){
-  const out=[]; const now=Date.now(); let n=1;
-  const targets={"AR":50,"Blue Cut":45,"Mirror":70,"Transitions":75,"Polarized":60,"Hard Coat":48};
-  for(let d=numDays;d>=0;d--){
-    const dayStart=now-d*86400000;
-    const perDay=Math.floor(Math.random()*8)+4;
-    for(let b=0;b<perDay;b++){
-      const coating=pick(COATING_TYPES);
-      const machine=pick(MACHINES);
-      const capacity=140;
-      const lenses=Math.floor(capacity*(0.6+Math.random()*0.4));
-      const targetMins=targets[coating]||60;
-      const actualMins=Math.round(targetMins*(0.85+Math.random()*0.3));
-      const startedAt=dayStart+b*Math.floor(86400000/perDay)+Math.floor(Math.random()*3600000);
-      out.push({
-        id:`CB${String(n++).padStart(4,"0")}`,
-        machine,coating,lenses,capacity,targetMins,actualMins,
-        startedAt,endedAt:startedAt+actualMins*60000,
-        operator:pick(["Mike S.","Sarah K.","James T.","Ana R."]),
-        rush:Math.random()<0.08,
-        passRate:Math.round(Math.random()*10+88),
-      });
-    }
-  }
-  return out.sort((a,b)=>b.startedAt-a.startedAt);
-}
+// Historical batch data comes from nightly ETL / live APIs — no mock generation
 
 // Mini horizontal bar inside a row
 function MiniBar({pct,color}){
@@ -6831,7 +6524,7 @@ function CorporateViewer({trays,batches,events,settings}){
     if(!question)return;
     setAiMessages(prev=>[...prev,{from:"user",text:question,time:new Date()}]);
     setAiInput(""); setAiLoading(true);
-    const ctx=`Lab context: ${totalTrays} total trays. ${activeTrays} active. ${running.length} batches running, ${hold.length} on hold. ${coatingActive} in coating. ${qcHold} QC hold. ${broken} broken. Recent events: ${events.slice(0,5).map(e=>e.message).join("; ")}. You are a read-only corporate analytics assistant. Provide clear, concise operational insights. Be direct and data-driven. Format numbers clearly.`;
+    const ctx=`You are a read-only corporate analytics assistant for Pair Eyewear's lens lab. Use your MCP tools (get_wip_snapshot, get_aging_report, get_throughput_trend) to get real production data. Provide clear, concise operational insights. Be direct and data-driven. Format numbers clearly. Do not invent data.`;
     try{
       const result = await callGateway(settings, question, { context: ctx });
       const text = result?.response || "Unable to retrieve data.";
@@ -7046,13 +6739,13 @@ function CorporateViewer({trays,batches,events,settings}){
 function LabAssistantV2(){
   const appMode=getMode(); // "desktop" | "tablet" | "corporate"
   const [view,setView]=useState("overview");
-  const [trays,setTrays]=useState(()=>initTrays(120));
-  const [putWall,setPutWall]=useState(()=>initPutWall(20));
-  const [batches,setBatches]=useState(()=>initBatches());
-  const [events,setEvents]=useState(()=>initEvents());
-  const [messages,setMessages]=useState(()=>initMessages());
-  const [inspections]=useState(()=>initInspections());
-  const [breakage,setBreakage]=useState(()=>initBreakage());
+  const [trays,setTrays]=useState([]);
+  const [putWall,setPutWall]=useState([]);
+  const [batches,setBatches]=useState([]);
+  const [events,setEvents]=useState([]);
+  const [messages,setMessages]=useState([]);
+  const [inspections]=useState([]);
+  const [breakage,setBreakage]=useState([]);
   const [connected]=useState(true);
   const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||"http://localhost:3002";}catch{return "http://localhost:3002";} });
   const [clock,setClock]=useState(new Date());
@@ -7093,8 +6786,8 @@ function LabAssistantV2(){
         const res=await fetch("http://localhost:3002/api/dvi/jobs");
         if(res.ok){
           const data=await res.json();
-          // Filter out CANCELED jobs
-          const jobs=(data?.jobs||[]).filter(j=>j.stage!=='CANCELED'&&j.station!=='CANCELED');
+          // Filter out CANCELED and SHIPPED jobs — only active WIP
+          const jobs=(data?.jobs||[]).filter(j=>j.stage!=='CANCELED'&&j.station!=='CANCELED'&&j.status!=='SHIPPED'&&j.stage!=='SHIPPED'&&!(j.station||'').toUpperCase().includes('SHIPPED'));
           setDviJobs(jobs);
           // Update shipped stats if available
           if(data.shipped){
@@ -7121,6 +6814,20 @@ function LabAssistantV2(){
     };
     fetchBreakage();
     const iv=setInterval(fetchBreakage,30000); // refresh every 30s
+    return()=>clearInterval(iv);
+  },[]);
+
+  // System health polling
+  const [systemHealth,setSystemHealth]=useState(null);
+  useEffect(()=>{
+    const fetchHealth=async()=>{
+      try{
+        const res=await fetch("http://localhost:3002/api/health");
+        if(res.ok) setSystemHealth(await res.json());
+      }catch(e){ setSystemHealth({status:'down',systems:{server:{status:'down',message:e.message}}}); }
+    };
+    fetchHealth();
+    const iv=setInterval(fetchHealth,15000); // every 15s
     return()=>clearInterval(iv);
   },[]);
 
@@ -7214,52 +6921,9 @@ function LabAssistantV2(){
     setEvents(prev=>[{id:Date.now(),time:new Date(),icon:newState==="running"?"▶":newState==="hold"?"⏸":"⏳",message:`Batch ${batchId}: ${actionLabels[newState]} by operator`},...prev.slice(0,30)]);
   },[]);
 
+  // Clock tick only — no mock simulation
   useEffect(()=>{
-    const iv=setInterval(()=>{
-      setClock(new Date());
-      setTrays(prev=>{
-        const next=[...prev];
-        const idx=Math.floor(Math.random()*next.length);
-        const states=Object.keys(TRAY_STATES);
-        const newState=pick(states);
-        let dept;
-        if(newState==="IDLE")dept=pick(["PICKING","SHIPPING"]);
-        else if(newState==="COATING_STAGED"||newState==="COATING_IN_PROCESS")dept="COATING";
-        else if(newState==="QC_HOLD"||newState==="BROKEN")dept="QC";
-        else if(newState==="COMPLETE")dept=pick(["ASSEMBLY","SHIPPING"]);
-        else dept=pick(["PICKING","SURFACING","CUTTING","COATING","ASSEMBLY","QC"]);
-        let coatingStage=null,machine=null,batchId=null;
-        if(dept==="COATING"){
-          const stages=Object.keys(COATING_STAGES);
-          if(newState==="COATING_STAGED")coatingStage=pick(["QUEUE","DIP","SCAN_IN"]);
-          else if(newState==="COATING_IN_PROCESS")coatingStage=pick(["OVEN","COATER","COOL_DOWN"]);
-          else coatingStage=pick(stages);
-          if(["OVEN","COATER"].includes(coatingStage))machine=pick(coaterMachines);
-          if(coatingStage!=="QUEUE")batchId=pick(["B01","B02","B03"]);
-          if(["OVEN","COATER"].includes(coatingStage)&&!next[idx].stageEnteredAt)next[idx]={...next[idx],stageEnteredAt:Date.now()};
-        }
-        next[idx]={...next[idx],state:newState,updatedAt:Date.now(),lastSeen:Date.now(),department:dept,coatingStage,machine,batchId};
-        return next;
-      });
-      if(Math.random()<0.3){
-        setPutWall(prev=>{
-          const next=[...prev];const idx=Math.floor(Math.random()*next.length);
-          if(next[idx].trayId&&Math.random()<0.4){next[idx]={...next[idx],trayId:null,job:null,rush:false,since:null,source:null,coatingType:null};}
-          else if(!next[idx].trayId){next[idx]={...next[idx],trayId:genTray(),job:genJob(),rush:Math.random()<0.1,since:Date.now(),source:pick(["DVI","Lab Assistant","Kardex"]),coatingType:pick(COATING_TYPES)};}
-          return next;
-        });
-      }
-      setBatches(prev=>prev.map(b=>{
-        if(b.controlState==="hold")return b;
-        if(b.controlState==="waiting")return b;
-        if(b.status==="loading"&&b.loaded<b.capacity){const nl=Math.min(b.loaded+Math.floor(Math.random()*5)+1,b.capacity);if(nl>=b.capacity)return{...b,loaded:b.capacity,status:"running",startedAt:Date.now(),eta:Date.now()+3600000};return{...b,loaded:nl};}
-        if(b.status==="running"&&b.eta&&Date.now()>b.eta)return{...b,status:"complete",controlState:"idle"};
-        if(b.status==="complete"&&Math.random()<0.05)return{...b,status:"loading",loaded:0,coatingType:pick(COATING_TYPES),startedAt:null,eta:null,controlState:"idle"};
-        if(b.status==="idle"&&Math.random()<0.1)return{...b,status:"loading",loaded:0,coatingType:pick(COATING_TYPES),controlState:"idle"};
-        return b;
-      }));
-      // Events now come from live DVI trace + SOM (see useEffect below)
-    },2500);
+    const iv=setInterval(()=>setClock(new Date()),2500);
     return()=>clearInterval(iv);
   },[]);
 
@@ -7388,13 +7052,39 @@ function LabAssistantV2(){
         </div>
       )}
 
-      {/* DESKTOP FOOTER */}
-      {!isTablet&&(
-        <div style={{padding:"12px 28px",borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between"}}>
-          <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>Lab_Assistant v2.1.0 — Custom MES for Optical Manufacturing</span>
-          <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>WS: ws://localhost:8080 | MQTT: mqtt://localhost:1883 | BLE PAwR: nRF52833</span>
-        </div>
-      )}
+      {/* SYSTEM HEALTH FOOTER */}
+      {(()=>{
+        const h=systemHealth;
+        const sys=h?.systems||{};
+        const dot=(s)=>s==='ok'?T.green:s==='stale'?T.amber:s==='error'||s==='down'?T.red:T.textDim;
+        const items=[
+          {key:'dvi_trace',label:'DVI Trace',s:sys.dvi_trace},
+          {key:'itempath',label:'ItemPath',s:sys.itempath},
+          {key:'som',label:'SOM',s:sys.som},
+          {key:'server',label:'Server',s:sys.server},
+        ];
+        return(
+          <div style={{padding:isTablet?"8px 16px":"8px 28px",borderTop:`1px solid ${T.border}`,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+            <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>Lab_Assistant v2.2.0</span>
+            <div style={{display:"flex",gap:isTablet?8:16,alignItems:"center",flexWrap:"wrap"}}>
+              {items.map(({key,label,s})=>{
+                const status=s?.status||'unknown';
+                const msg=s?.message||'';
+                return(
+                  <div key={key} title={msg} style={{display:"flex",alignItems:"center",gap:5,cursor:"default"}}>
+                    <div style={{width:7,height:7,borderRadius:"50%",background:dot(status),boxShadow:status==='ok'?'none':`0 0 6px ${dot(status)}80`,animation:status==='stale'||status==='error'||status==='down'?'pulse 2s infinite':'none'}}/>
+                    <span style={{fontSize:10,color:status==='ok'?T.textDim:status==='stale'?T.amber:status==='down'||status==='error'?T.red:T.textDim,fontFamily:mono,fontWeight:status!=='ok'?700:400}}>
+                      {label}{status!=='ok'&&status!=='unknown'?` · ${status.toUpperCase()}`:''}
+                    </span>
+                    {key==='dvi_trace'&&s?.lastEvent&&<span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{s.jobs} jobs</span>}
+                    {key==='server'&&s?.uptime!=null&&<span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{Math.floor(s.uptime/3600)}h{Math.floor((s.uptime%3600)/60)}m</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       <style>{`
         @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }

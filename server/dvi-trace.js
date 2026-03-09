@@ -487,13 +487,15 @@ class DviTraceWatcher extends EventEmitter {
    * Get jobs formatted for frontend KPIs (matches expected dviJobs shape)
    */
   getJobsForKPI() {
-    return this.getJobs().map(j => ({
-      ...j,
-      invoice: j.job_id,
-      rush: 'N', // TODO: cross-ref with DVI job XML for rush flag
-      Rush: 'N',
-      priority: 'NORMAL'
-    }));
+    return this.getJobs()
+      .filter(j => j.status !== 'SHIPPED' && j.stage !== 'SHIPPED')
+      .map(j => ({
+        ...j,
+        invoice: j.job_id,
+        rush: 'N', // TODO: cross-ref with DVI job XML for rush flag
+        Rush: 'N',
+        priority: 'NORMAL'
+      }));
   }
 
   /**
@@ -534,15 +536,22 @@ class DviTraceWatcher extends EventEmitter {
    * Get status for monitoring
    */
   getStatus() {
+    const lastEvt = this.todayStats.lastEvent;
+    const lastEvtAge = lastEvt ? (Date.now() - lastEvt) / 1000 : null; // seconds since last event
+    // Healthy = running + received an event in the last 5 minutes
+    const stale = lastEvtAge !== null && lastEvtAge > 300; // 5 min with no events
+    const connected = this.running && this._consecutiveErrors < 3;
     return {
       running: this.running,
+      connected,
+      stale,
+      consecutiveErrors: this._consecutiveErrors || 0,
       currentFile: this.currentFile,
       byteOffset: this.byteOffset,
       jobCount: this.jobs.size,
       totalEvents: this.todayStats.totalEvents,
-      lastEvent: this.todayStats.lastEvent
-        ? new Date(this.todayStats.lastEvent).toISOString()
-        : null,
+      lastEvent: lastEvt ? new Date(lastEvt).toISOString() : null,
+      lastEventAgeSec: lastEvtAge !== null ? Math.round(lastEvtAge) : null,
       byStage: this.getJobsByStage(),
       eventsByStage: this.todayStats.byStage
     };
