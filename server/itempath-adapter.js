@@ -518,8 +518,8 @@ async function poll() {
       ipFetch('/api/materials', { limit: 10000 }),                    // All materials — full catalog required
       ipFetch('/api/orders',    { limit: 200, status: 'In Process' }),  // Only active orders (was 500 all statuses)
       ipFetch('/api/transactions', { after: todayStart, limit: 200 }).catch(() => ({ transactions: [] })),  // Today's transactions only (was 2hr/500)
-      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),  // Pick lines today
-      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),  // Put lines today
+      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 5000 }).catch(() => ({ transactions: [] })),  // Pick lines today (975 jobs × ~3 lines = ~3000)
+      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 2000 }).catch(() => ({ transactions: [] })),  // Put lines today
       ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
     ]);
     // Locations: cached for 60 min — reference data that rarely changes
@@ -974,7 +974,7 @@ function setDailyPuts(wh1, wh2) {
 
 function getDailyPicks() {
   resetDailyIfNeeded();
-  return { ...dailyPickTotals };
+  return { ...dailyPickTotals, hourlyPicks, hourlyPuts };
 }
 
 module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks };

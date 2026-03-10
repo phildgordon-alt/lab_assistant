@@ -902,12 +902,14 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   const [putWallData,setPutWallData]=useState({WH1:{positions:[],activeCount:0},WH2:{positions:[],activeCount:0},status:"pending",lastSync:null});
   const [pickStats,setPickStats]=useState({WH1:0,WH2:0});
   const [putStats,setPutStats]=useState({WH1:0,WH2:0});
+  const [hourlyPicks,setHourlyPicks]=useState({WH1:{},WH2:{}});
   useEffect(()=>{
     const fetchPutWall=async()=>{
       try{
-        const [pwRes,invRes]=await Promise.all([
+        const [pwRes,invRes,dailyRes]=await Promise.all([
           fetch(`http://${window.location.hostname}:3002/api/inventory/putwall`),
-          fetch(`http://${window.location.hostname}:3002/api/inventory`)
+          fetch(`http://${window.location.hostname}:3002/api/inventory`),
+          fetch(`http://${window.location.hostname}:3002/api/inventory/picks/daily`)
         ]);
         const data=await pwRes.json();
         setPutWallData({
@@ -927,12 +929,16 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
             WH2:inv.warehouseStats?.WH2?.todayPuts||0
           });
         }
+        if(dailyRes.ok){
+          const daily=await dailyRes.json();
+          if(daily.hourlyPicks) setHourlyPicks(daily.hourlyPicks);
+        }
       }catch(e){
         setPutWallData(prev=>({...prev,status:"error"}));
       }
     };
     fetchPutWall();
-    const iv=setInterval(fetchPutWall,15000); // Poll every 15s for near real-time
+    const iv=setInterval(fetchPutWall,15000);
     return()=>clearInterval(iv);
   },[]);
 
@@ -1116,7 +1122,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     switch(card.type){
       case "kpi_row": return(
         <ConfigurableKPIRow
-          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats,somOrders}}
+          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats,somOrders,pickStats}}
           settings={settings}
           cardConfig={card.config}
           onConfigChange={(cfg)=>updateCardConfig(card.id,cfg)}
@@ -1950,6 +1956,68 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                 ))}
               </div>
             )}
+          </div>
+        );
+      }
+
+      case "kardex_picks":{
+        const totalPicks=(pickStats.WH1||0)+(pickStats.WH2||0);
+        const dayName=new Date().toLocaleDateString('en-US',{weekday:'short'});
+        // Build hourly bar data 0–23
+        const hours=Array.from({length:24},(_,h)=>({
+          h,
+          label:`${dayName} ${String(h).padStart(2,'0')}:00`,
+          wh1:hourlyPicks.WH1?.[h]||0,
+          wh2:hourlyPicks.WH2?.[h]||0
+        }));
+        const maxVal=Math.max(1,...hours.map(r=>Math.max(r.wh1,r.wh2)));
+        return(
+          <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+            {/* Big number */}
+            <div style={{minWidth:160,display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center",padding:20}}>
+              <div style={{fontSize:72,fontWeight:900,color:T.blue,fontFamily:mono,lineHeight:1}}>{totalPicks}</div>
+              <div style={{fontSize:14,color:T.textMuted,marginTop:8,fontWeight:600}}>Pick Jobs Today</div>
+            </div>
+            {/* Hourly bar chart */}
+            <div style={{flex:1,minWidth:300}}>
+              <div style={{display:"flex",justifyContent:"flex-end",gap:16,marginBottom:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:12,height:12,borderRadius:2,background:"#93C5FD"}}/><span style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>WH1</span></div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:12,height:12,borderRadius:2,background:"#2563EB"}}/><span style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>WH2</span></div>
+              </div>
+              <div style={{position:"relative",height:180}}>
+                {/* Y-axis labels */}
+                {[0,0.25,0.5,0.75,1].map(pct=>{
+                  const val=Math.round(maxVal*pct);
+                  return <div key={pct} style={{position:"absolute",bottom:`${pct*100}%`,left:0,right:0,borderBottom:`1px solid ${T.border}`,fontSize:9,color:T.textDim,fontFamily:mono,paddingLeft:2}}>{val>0?val:''}</div>;
+                })}
+                {/* Bars */}
+                <div style={{display:"flex",alignItems:"flex-end",height:"100%",gap:1,paddingLeft:30}}>
+                  {hours.map(r=>{
+                    const h1Pct=maxVal>0?(r.wh1/maxVal)*100:0;
+                    const h2Pct=maxVal>0?(r.wh2/maxVal)*100:0;
+                    const hasData=r.wh1>0||r.wh2>0;
+                    return(
+                      <div key={r.h} style={{flex:1,display:"flex",alignItems:"flex-end",gap:1,position:"relative",height:"100%"}} title={`${r.label}\nWH1: ${r.wh1}\nWH2: ${r.wh2}`}>
+                        <div style={{flex:1,height:`${h1Pct}%`,background:"#93C5FD",borderRadius:"2px 2px 0 0",minHeight:hasData&&r.wh1>0?2:0,position:"relative"}}>
+                          {r.wh1>0&&<span style={{position:"absolute",top:-14,left:"50%",transform:"translateX(-50%)",fontSize:7,color:T.textMuted,fontFamily:mono,whiteSpace:"nowrap"}}>{r.wh1}</span>}
+                        </div>
+                        <div style={{flex:1,height:`${h2Pct}%`,background:"#2563EB",borderRadius:"2px 2px 0 0",minHeight:hasData&&r.wh2>0?2:0,position:"relative"}}>
+                          {r.wh2>0&&<span style={{position:"absolute",top:-14,left:"50%",transform:"translateX(-50%)",fontSize:7,color:T.textMuted,fontFamily:mono,whiteSpace:"nowrap"}}>{r.wh2}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              {/* X-axis labels */}
+              <div style={{display:"flex",paddingLeft:30,marginTop:4}}>
+                {hours.map(r=>(
+                  <div key={r.h} style={{flex:1,textAlign:"center",fontSize:7,color:T.textDim,fontFamily:mono,transform:"rotate(-45deg)",transformOrigin:"top center",whiteSpace:"nowrap"}}>
+                    {r.h%2===0?r.label:''}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         );
       }

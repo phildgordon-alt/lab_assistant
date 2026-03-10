@@ -974,6 +974,7 @@ const KPI_METRICS = {
   pm_compliance:     { label: "PM Compliance",    desc: "Preventive maintenance rate",   accent: T.green,  category: "Maintenance" },
   open_work_orders:  { label: "Open WOs",         desc: "Open maintenance work orders",  accent: T.amber,  category: "Maintenance" },
   equipment_uptime:  { label: "Equipment Uptime", desc: "Overall equipment availability",accent: T.green,  category: "Maintenance" },
+  picks_today:       { label: "Picks Today",     desc: "Kardex picks completed today",  accent: T.blue,   category: "Production" },
 };
 
 // Default KPI configuration (user's requested defaults)
@@ -1070,6 +1071,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
       case 'pm_compliance': return {value:maintenance.stats?.pmCompliancePercent!=null?`${maintenance.stats.pmCompliancePercent}%`:'—',sub:"on schedule"};
       case 'open_work_orders': return {value:maintenance.stats?.openWorkOrders||0,sub:"open"};
       case 'equipment_uptime': return {value:maintenance.stats?.uptimePercent!=null?`${maintenance.stats.uptimePercent}%`:'—',sub:"availability"};
+      case 'picks_today': { const ps=data.pickStats||{}; const total=(ps.WH1||0)+(ps.WH2||0); return {value:total,sub:`WH1: ${ps.WH1||0} · WH2: ${ps.WH2||0}`}; }
       default: return {value:'—',sub:''};
     }
   };
@@ -1947,6 +1949,7 @@ const CARD_REGISTRY = [
   { type:"assembly_summary",  label:"Assembly Summary",  icon:"🔧", desc:"Assembly station status — station queues, operator metrics, QC returns" },
   { type:"shipping_summary",  label:"Shipping Summary",  icon:"📤", desc:"Shipping status — ready to ship, overdue, due today counts" },
   { type:"maintenance_summary", label:"Maintenance Summary", icon:"🔩", desc:"Maintenance status — open work orders, PM compliance, equipment health, critical tasks" },
+  { type:"kardex_picks",       label:"Kardex Picks",          icon:"📦", desc:"Pick jobs today + hourly bar chart by warehouse (WH1/WH2)" },
 ];
 
 const DEFAULT_CARDS = [
