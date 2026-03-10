@@ -1761,11 +1761,12 @@ Respond with a structured batching plan in this format:
             if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
             break;
           }
-          // Also grab operator from any prior event if we don't have one yet
-          if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
+          // Only grab operator from ASSEMBLY-stage events (not shipping/QC)
+          if (!fromOperator && events[k].operator && /ASSEMBL|RECOMBOB/i.test(events[k].station)) {
+            fromOperator = events[k].operator;
+          }
         }
-        // Last resort: use the job's last known operator from trace
-        if (!fromOperator) fromOperator = j.operator || null;
+        // Do NOT fall back to j.operator — that could be a shipping/QC operator
 
         if (fromStation) {
           stationCompletions[fromStation] = (stationCompletions[fromStation] || 0) + 1;
