@@ -103,7 +103,7 @@ function stationToStage(station) {
   if (s.includes('DIGITAL CALC') || s.includes('GENERATOR') || s.includes('AUTO BLKER') || s.includes('POLISH') || s.includes('FINE') || s.includes('MANBLKER') || s.includes('CBOB - INHSE SF') || s.includes('CBOB - DIG')) return 'SURFACING';
   if (s.includes('CCL') || s.includes('CCP') || s.includes('COAT') || s.includes('SENT TO COAT')) return 'COATING';
   if (s.includes('EDGER') || s.includes('LCU') || s.includes('CUT') || s.includes('INHSE FIN')) return 'CUTTING';
-  if (s === 'ASSEMBLY PASS') return 'QC';
+  if (s === 'ASSEMBLY PASS') return 'SHIPPING';
   if (s === 'ASSEMBLY FAIL') return 'HOLD';
   if (s.includes('ASSEMBL') || s.includes('RECOMBOB')) return 'ASSEMBLY';
   if (s.includes('QC')) return 'QC';
@@ -447,8 +447,8 @@ class DviTraceWatcher extends EventEmitter {
       operator: evt.operator
     });
 
-    // Update shipped status based on current stage
-    if (stage === 'SHIPPING') {
+    // Only mark SHIPPED when job hits actual shipping scan (SH CONVEY), not ASSEMBLY PASS
+    if (stage === 'SHIPPING' && /SH CONVEY|SHIP/i.test(evt.station) && evt.station !== 'ASSEMBLY PASS') {
       job.status = 'SHIPPED';
     } else if (job.status === 'SHIPPED') {
       // Job moved back into production after shipping station
