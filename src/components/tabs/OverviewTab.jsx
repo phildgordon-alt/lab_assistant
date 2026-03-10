@@ -68,7 +68,7 @@ const Card = ({children,style,onClick})=>(
 
 // ── Gateway helper ─────────────────────────────────────────────
 const callGateway = async (settings, question, { onChunk, agent, userId = 'web-user', context } = {}) => {
-  const gatewayUrl = settings?.gatewayUrl || 'http://localhost:3001';
+  const gatewayUrl = settings?.gatewayUrl || `http://${window.location.hostname}:3001`;
   const res = await fetch(`${gatewayUrl}/web/ask-sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -178,7 +178,7 @@ function useElapsed(startedAt, running) {
 function useSlackConfig(onIncoming, setMessages){
   const KEY="la_slack_v2";
   const DEFAULTS={
-    proxyUrl:"http://localhost:3001/api/slack/messages?channel=C0AJH9LG96D",
+    proxyUrl:`http://${window.location.hostname}:3001/api/slack/messages?channel=C0AJH9LG96D`,
     channel:"lab-assistant",
     channelId:"C0AJH9LG96D"
   };
@@ -192,7 +192,7 @@ function useSlackConfig(onIncoming, setMessages){
   const post=useCallback(async(text)=>{
     setStatus("sending");
     try{
-      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || 'http://localhost:3001/api/slack/send';
+      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || `http://${window.location.hostname}:3001/api/slack/send`;
       const r=await fetch(sendUrl,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -375,7 +375,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     try{
       const agent=KPI_AGENTS[modalKpi]||'ShiftReportAgent';
       const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nUse your MCP tools to get real data. Do not invent data.`;
-      const res=await fetch('http://localhost:3001/web/ask-sync',{
+      const res=await fetch(`http://${window.location.hostname}:3001/web/ask-sync`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({question:aiQuery,agent,userId:'kpi-modal',context})
@@ -851,8 +851,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchInventory=async()=>{
       try{
         const [invRes,alertRes]=await Promise.all([
-          fetch("http://localhost:3002/api/inventory"),
-          fetch("http://localhost:3002/api/inventory/alerts")
+          fetch(`http://${window.location.hostname}:3002/api/inventory`),
+          fetch(`http://${window.location.hostname}:3002/api/inventory/alerts`)
         ]);
         const inv=await invRes.json();
         const alerts=await alertRes.json();
@@ -877,8 +877,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchMaintenance=async()=>{
       try{
         const [statsRes,tasksRes]=await Promise.all([
-          fetch("http://localhost:3002/api/maintenance/stats"),
-          fetch("http://localhost:3002/api/maintenance/tasks")
+          fetch(`http://${window.location.hostname}:3002/api/maintenance/stats`),
+          fetch(`http://${window.location.hostname}:3002/api/maintenance/tasks`)
         ]);
         const stats=await statsRes.json();
         const tasks=await tasksRes.json();
@@ -906,8 +906,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchPutWall=async()=>{
       try{
         const [pwRes,invRes]=await Promise.all([
-          fetch("http://localhost:3002/api/inventory/putwall"),
-          fetch("http://localhost:3002/api/inventory")
+          fetch(`http://${window.location.hostname}:3002/api/inventory/putwall`),
+          fetch(`http://${window.location.hostname}:3002/api/inventory`)
         ]);
         const data=await pwRes.json();
         setPutWallData({
@@ -943,9 +943,9 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchCoating=async()=>{
       try{
         const [intelRes,ovenRes,coaterRes]=await Promise.all([
-          fetch("http://localhost:3002/api/coating/intelligence"),
-          fetch("http://localhost:3002/api/oven-runs?limit=10"),
-          fetch("http://localhost:3002/api/coating/runs?limit=10")
+          fetch(`http://${window.location.hostname}:3002/api/coating/intelligence`),
+          fetch(`http://${window.location.hostname}:3002/api/oven-runs?limit=10`),
+          fetch(`http://${window.location.hostname}:3002/api/coating/runs?limit=10`)
         ]);
         const intel=intelRes.ok?await intelRes.json():null;
         const ovenRuns=ovenRes.ok?await ovenRes.json():null;
@@ -954,7 +954,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         setCoatingIntel({
           intel,
           ovenRuns:Array.isArray(ovenRuns)?ovenRuns:ovenRuns?.runs||[],
-          coaterRuns:coaterData?.history||Object.values(coaterData?.active||{})
+          coaterRuns:Object.values(coaterData?.active||{}).length>0?Object.values(coaterData?.active||{}):(coaterData?.history||[])
         });
       }catch(e){
         console.warn("Coating intel fetch:",e.message);
@@ -979,9 +979,9 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
       try{
         // Fetch orders, devices, and active jobs in parallel
         const [ordersRes, devicesRes, activeJobsRes]=await Promise.all([
-          fetch("http://localhost:3002/api/som/orders"),
-          fetch("http://localhost:3002/api/som/devices"),
-          fetch("http://localhost:3002/api/jobs/active")
+          fetch(`http://${window.location.hostname}:3002/api/som/orders`),
+          fetch(`http://${window.location.hostname}:3002/api/som/devices`),
+          fetch(`http://${window.location.hostname}:3002/api/jobs/active`)
         ]);
         const ordersData=await ordersRes.json();
         const devicesData=await devicesRes.json();
@@ -1156,7 +1156,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                 {key:"channel",label:"Channel name (no #)",ph:"lab-assistant",type:"text"},
                 {key:"channelUrl",label:"Channel URL (for QR code)",ph:"https://yourco.slack.com/archives/C...",type:"url"},
                 {key:"channelId",label:"Channel ID (incoming)",ph:"C05AB12XYZ",type:"text"},
-                {key:"proxyUrl",label:"Local proxy URL (incoming)",ph:"http://localhost:3001/slack/messages",type:"url"},
+                {key:"proxyUrl",label:"Local proxy URL (incoming)",ph:"http://${window.location.hostname}:3001/slack/messages",type:"url"},
               ].map(f=>(
                 <div key={f.key} style={{marginBottom:10}}>
                   <label style={{fontSize:9,color:"#E8A9F4",fontFamily:mono,display:"block",marginBottom:3,letterSpacing:1}}>{f.label.toUpperCase()}</label>

@@ -3573,10 +3573,20 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
                 {m.role === "user" ? <span style={{ fontFamily: mono }}>{m.content}</span> : <MarkdownMsg text={m.content} />}
               </div>
               {m.role === "assistant" && m.isReport && (
-                <button onClick={() => downloadWordReport(m, i)} disabled={reportDownloading === i}
-                  style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: `${T.blue}20`, border: `1px solid ${T.blue}`, borderRadius: 4, color: T.blue, fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
-                  {reportDownloading === i ? "⏳..." : "📄 Word"}
-                </button>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={() => { setReportDownloading(i+10000); fetch(`${serverUrl}/api/report/visual`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:domain+' Report',narrative:m.content})}).then(r=>r.blob()).then(b=>{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=`${domain}_Report_${new Date().toISOString().slice(0,10)}.html`;a.click();URL.revokeObjectURL(u);}).catch(e=>alert(e.message)).finally(()=>setReportDownloading(null)); }} disabled={reportDownloading != null}
+                    style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: `${T.green}20`, border: `1px solid ${T.green}`, borderRadius: 4, color: T.green, fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                    {reportDownloading === i+10000 ? "⏳..." : "📊 Visual"}
+                  </button>
+                  <button onClick={() => downloadWordReport(m, i)} disabled={reportDownloading != null}
+                    style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: `${T.blue}20`, border: `1px solid ${T.blue}`, borderRadius: 4, color: T.blue, fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                    {reportDownloading === i ? "⏳..." : "📄 Word"}
+                  </button>
+                  <button onClick={() => { setReportDownloading(i+20000); fetch(`${serverUrl}/api/report/csv`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:domain+' Report'})}).then(r=>r.blob()).then(b=>{const u=URL.createObjectURL(b);const a=document.createElement('a');a.href=u;a.download=`${domain}_Report_${new Date().toISOString().slice(0,10)}.csv`;a.click();URL.revokeObjectURL(u);}).catch(e=>alert(e.message)).finally(()=>setReportDownloading(null)); }} disabled={reportDownloading != null}
+                    style={{ alignSelf: "flex-start", display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: `${T.amber || '#F59E0B'}20`, border: `1px solid ${T.amber || '#F59E0B'}`, borderRadius: 4, color: T.amber || '#F59E0B', fontSize: 9, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                    {reportDownloading === i+20000 ? "⏳..." : "📋 CSV"}
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -4503,12 +4513,35 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 // ── Assembly Tab ──────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
+const ASM_STATIONS = [
+  {id:'STN-01',name:'Station 1',bench:'A',dvi:'ASSEMBLY #1'},
+  {id:'STN-02',name:'Station 2',bench:'A',dvi:'ASSEMBLY #2'},
+  {id:'STN-03',name:'Station 3',bench:'A',dvi:'ASSEMBLY #3'},
+  {id:'STN-04',name:'Station 4',bench:'B',dvi:'ASSEMBLY #4'},
+  {id:'STN-05',name:'Station 5',bench:'B',dvi:'ASSEMBLY #5'},
+  {id:'STN-06',name:'Station 6',bench:'B',dvi:'ASSEMBLY #6'},
+  {id:'STN-07',name:'Station 7',bench:'C',dvi:'ASSEMBLY #7'},
+  {id:'STN-08',name:'Station 8',bench:'C',dvi:'ASSEMBLY #8'},
+  {id:'STN-09',name:'Station 9',bench:'C',dvi:'ASSEMBLY #9'},
+  {id:'STN-10',name:'Station 10',bench:'D',dvi:'ASSEMBLY #10'},
+  {id:'STN-11',name:'Station 11',bench:'D',dvi:'ASSEMBLY #11'},
+  {id:'STN-12',name:'Station 12',bench:'D',dvi:'ASSEMBLY #12'},
+  {id:'STN-13',name:'Station 13',bench:'D',dvi:'ASSEMBLY #13'},
+  {id:'STN-14',name:'Station 14',bench:'E',dvi:'ASSEMBLY #14'},
+  {id:'STN-15',name:'Station 15',bench:'E',dvi:'ASSEMBLY #15'},
+];
+
 function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
   const [asmData,setAsmData]=useState(null);
   const [asmConfig,setAsmConfig]=useState(null);
+  const [showAssign,setShowAssign]=useState(false);
+  const [localAssignments,setLocalAssignments]=useState({});
+  const [localOpMap,setLocalOpMap]=useState({});
+  const [editingStn,setEditingStn]=useState(null);
+  const [editName,setEditName]=useState('');
 
   // Fetch assembly leaderboard data + operator config
   useEffect(()=>{
@@ -4519,13 +4552,49 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           fetch(`${ovenServerUrl}/api/assembly/config`)
         ]);
         if(jobsRes.ok) setAsmData(await jobsRes.json());
-        if(cfgRes.ok) setAsmConfig(await cfgRes.json());
+        if(cfgRes.ok){
+          const cfg = await cfgRes.json();
+          setAsmConfig(cfg);
+          if(cfg.assignments && Object.keys(cfg.assignments).length > 0){
+            setLocalAssignments(cfg.assignments);
+          }
+          if(cfg.operatorMap && Object.keys(cfg.operatorMap).length > 0){
+            setLocalOpMap(cfg.operatorMap);
+          }
+        }
       }catch(e){ console.warn('Assembly fetch:',e.message); }
     };
     fetchAsm();
     const iv=setInterval(fetchAsm,30000);
     return()=>clearInterval(iv);
   },[ovenServerUrl]);
+
+  // Save assignments to server
+  const saveAssignments = async (newAssign, newOpMap) => {
+    const a = newAssign || localAssignments;
+    const m = newOpMap || localOpMap;
+    setLocalAssignments(a);
+    setLocalOpMap(m);
+    try {
+      await fetch(`${ovenServerUrl}/api/assembly/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments: a, operatorMap: m })
+      });
+    } catch(e) { console.warn('Save assignments:', e.message); }
+  };
+
+  const assignOperator = (stnId, name) => {
+    const color = ['#8B5CF6','#3B82F6','#10B981','#F59E0B','#EF4444','#EC4899','#06B6D4','#84CC16','#F97316','#A78BFA'][Math.abs([...name].reduce((h,c)=>((h<<5)-h)+c.charCodeAt(0),0)) % 10];
+    const newA = { ...localAssignments, [stnId]: { operatorName: name, color, status: 'busy', startTime: Date.now() } };
+    saveAssignments(newA);
+  };
+
+  const clearStation = (stnId) => {
+    const newA = { ...localAssignments };
+    delete newA[stnId];
+    saveAssignments(newA);
+  };
 
   // Filter DVI jobs in assembly (ASSEMBLY stations) - exclude shipped
   const assemblyJobs = useMemo(() => {
@@ -4643,25 +4712,92 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
       {/* Job Detail Panel */}
       {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
 
-      {/* Leaderboard — operator-per-station from DVI trace data */}
+      {/* Operator Station Assignments */}
+      <Card style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <SectionHeader>Station Assignments</SectionHeader>
+          <button onClick={()=>setShowAssign(!showAssign)}
+            style={{ background: showAssign ? `${T.blue}20` : 'transparent', border: `1px solid ${showAssign ? T.blue : T.border}`, borderRadius: 6, padding: '6px 12px', color: showAssign ? T.blue : T.textDim, fontSize: 11, fontFamily: mono, cursor: 'pointer' }}>
+            {showAssign ? 'Done' : 'Edit Assignments'}
+          </button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, marginTop: 12 }}>
+          {ASM_STATIONS.map(stn => {
+            const a = localAssignments[stn.id];
+            const stnComp = asmData?.stationCompletions || {};
+            const completed = stnComp[stn.dvi] || 0;
+            const isEditing = editingStn === stn.id;
+            return (
+              <div key={stn.id} style={{ background: a ? `${a.color || T.blue}15` : T.bg, border: `1px solid ${a ? (a.color || T.blue) + '40' : T.border}`, borderRadius: 8, padding: '10px 12px', position: 'relative' }}>
+                <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>{stn.dvi}</div>
+                {a ? (
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: a.color || T.blue, fontFamily: mono, marginTop: 4 }}>{a.operatorName}</div>
+                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono }}>{completed} jobs</div>
+                    {showAssign && <button onClick={()=>clearStation(stn.id)} style={{ position: 'absolute', top: 4, right: 6, background: 'none', border: 'none', color: T.red, cursor: 'pointer', fontSize: 12 }}>x</button>}
+                  </div>
+                ) : (
+                  <div>
+                    {showAssign ? (
+                      isEditing ? (
+                        <form onSubmit={e=>{e.preventDefault();if(editName.trim()){assignOperator(stn.id,editName.trim());setEditingStn(null);setEditName('');}}} style={{ marginTop: 4 }}>
+                          <input autoFocus value={editName} onChange={e=>setEditName(e.target.value)} onBlur={()=>{if(!editName.trim())setEditingStn(null);}} placeholder="Name..."
+                            style={{ width: '100%', background: T.surface, border: `1px solid ${T.blue}`, borderRadius: 4, padding: '4px 6px', color: T.text, fontSize: 11, fontFamily: mono }} />
+                        </form>
+                      ) : (
+                        <button onClick={()=>{setEditingStn(stn.id);setEditName('');}} style={{ marginTop: 4, background: 'none', border: `1px dashed ${T.border}`, borderRadius: 4, padding: '4px 8px', color: T.textDim, fontSize: 10, fontFamily: mono, cursor: 'pointer', width: '100%' }}>+ Assign</button>
+                      )
+                    ) : (
+                      <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono, marginTop: 4 }}>—</div>
+                    )}
+                    {completed > 0 && <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono }}>{completed} jobs</div>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Leaderboard — uses station assignments to attribute completions */}
       {asmData && (() => {
         const stnComp = asmData.stationCompletions || {};
         const stnOps = asmData.stationOperators || {}; // 'ASSEMBLY #7' → 'AF' (from DVI trace)
-        const operatorMap = asmConfig?.operatorMap || {};
         const shiftCfg = JSON.parse(localStorage.getItem('asy_cfg') || '{}');
         const [sh, sm] = (shiftCfg.shiftStart || '07:00').split(':').map(Number);
         const shiftMs = new Date(); shiftMs.setHours(sh, sm, 0, 0);
         const shiftH = Math.max(0.5, (Date.now() - shiftMs.getTime()) / 3600000);
 
-        // Build per-operator stats from station completions + DVI trace operator mapping
+        // Build per-operator stats: assignments first, then DVI trace operator data
         const opStats = {};
+        // 1. Attribute via station assignments (primary source)
+        Object.entries(localAssignments).forEach(([stnId, a]) => {
+          if (!a?.operatorName) return;
+          const stn = ASM_STATIONS.find(s => s.id === stnId);
+          if (!stn) return;
+          const completed = stnComp[stn.dvi] || 0;
+          const key = a.operatorName;
+          if (!opStats[key]) opStats[key] = { name: a.operatorName, initials: a.operatorName.slice(0,2).toUpperCase(), jobs: 0, color: a.color, stations: [] };
+          opStats[key].jobs += completed;
+          if (completed > 0) opStats[key].stations.push(stn.dvi.replace('ASSEMBLY ',''));
+        });
+        // 2. Add trace operator data for unassigned stations
+        const assignedDviStations = new Set(Object.entries(localAssignments).filter(([,a])=>a?.operatorName).map(([stnId])=>{const s=ASM_STATIONS.find(x=>x.id===stnId);return s?.dvi;}).filter(Boolean));
+        if (asmData.operatorStats) {
+          Object.entries(asmData.operatorStats).forEach(([init, stats]) => {
+            const name = localOpMap[init.toUpperCase()] || init;
+            if (!opStats[name]) opStats[name] = { name, initials: init, jobs: 0, stations: [] };
+            opStats[name].jobs += (stats.jobs || 0);
+          });
+        }
+        // 3. Unassigned station completions
         Object.entries(stnComp).forEach(([stn, count]) => {
-          if (count <= 0) return;
-          const init = stnOps[stn]; // operator initials from trace
-          const name = init ? (operatorMap[init.toUpperCase()] || init) : stn.replace('ASSEMBLY ','');
-          const key = init || stn;
-          if (!opStats[key]) opStats[key] = { name, initials: init || stn.match(/#(\d+)/)?.[1] || '?', jobs: 0, station: stn.replace('ASSEMBLY ','') };
-          opStats[key].jobs += count;
+          if (count <= 0 || assignedDviStations.has(stn)) return;
+          const init = stnOps[stn];
+          if (init && opStats[localOpMap[init.toUpperCase()] || init]) return; // already counted via trace
+          const label = stn.replace('ASSEMBLY ','Stn ');
+          if (!opStats[stn]) opStats[stn] = { name: label, initials: stn.match(/#(\d+)/)?.[1] || '?', jobs: 0, stations: [stn.replace('ASSEMBLY ','')] };
+          opStats[stn].jobs += count;
         });
         Object.values(opStats).forEach(o => { o.jobsPerHour = o.jobs / shiftH; });
         const ops = Object.values(opStats).filter(o=>o.jobs>0).sort((a,b)=>b.jobs-a.jobs);
@@ -5153,6 +5289,54 @@ Type a question to get started!`;
     setReportDownloading(null);
   };
 
+  const downloadVisualReport=async(msg,idx)=>{
+    setReportDownloading(idx+10000); // offset to distinguish from word download
+    try{
+      const title=msg.prompt
+        ? msg.prompt.replace(/^generate\s+a?\s*/i,"").replace(/report.*/i,"Report").trim().slice(0,60)
+        : "Shift Report";
+      const res=await fetch(`${serverUrl}/api/report/visual`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ title, narrative:msg.content }),
+      });
+      if(!res.ok) throw new Error("Server error");
+      const blob=await res.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;a.download=`ShiftReport_${new Date().toISOString().slice(0,10)}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }catch(e){
+      alert(`Visual report failed: ${e.message}`);
+    }
+    setReportDownloading(null);
+  };
+
+  const downloadCsvReport=async(msg,idx)=>{
+    setReportDownloading(idx+20000);
+    try{
+      const title=msg.prompt
+        ? msg.prompt.replace(/^generate\s+a?\s*/i,"").replace(/report.*/i,"Report").trim().slice(0,60)
+        : "Shift Report";
+      const res=await fetch(`${serverUrl}/api/report/csv`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({ title }),
+      });
+      if(!res.ok) throw new Error("Server error");
+      const blob=await res.blob();
+      const url=URL.createObjectURL(blob);
+      const a=document.createElement("a");
+      a.href=url;a.download=`ShiftReport_${new Date().toISOString().slice(0,10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }catch(e){
+      alert(`CSV export failed: ${e.message}`);
+    }
+    setReportDownloading(null);
+  };
+
   useEffect(()=>{
     if(chatRef.current)chatRef.current.scrollTop=chatRef.current.scrollHeight;
   },[messages,loading]);
@@ -5234,12 +5418,26 @@ Type a question to get started!`;
                     }
                   </div>
                   {m.role==="assistant"&&m.isReport&&(
-                    <button
-                      onClick={()=>downloadWordReport(m,i)}
-                      disabled={reportDownloading===i}
-                      style={{alignSelf:"flex-start",display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:reportDownloading===i?T.border:`${T.blue}20`,border:`1px solid ${reportDownloading===i?T.border:T.blue}`,borderRadius:6,color:reportDownloading===i?T.textDim:T.blue,fontSize:11,fontWeight:700,cursor:reportDownloading===i?"not-allowed":"pointer",fontFamily:mono,transition:"all 0.2s"}}>
-                      {reportDownloading===i?"⏳ Generating...":"📄 Download as Word (.docx)"}
-                    </button>
+                    <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                      <button
+                        onClick={()=>downloadVisualReport(m,i)}
+                        disabled={reportDownloading!=null}
+                        style={{alignSelf:"flex-start",display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:reportDownloading===i+10000?T.border:`${T.green}20`,border:`1px solid ${reportDownloading===i+10000?T.border:T.green}`,borderRadius:6,color:reportDownloading===i+10000?T.textDim:T.green,fontSize:11,fontWeight:700,cursor:reportDownloading!=null?"not-allowed":"pointer",fontFamily:mono,transition:"all 0.2s"}}>
+                        {reportDownloading===i+10000?"⏳ Generating...":"📊 Visual Report (Charts)"}
+                      </button>
+                      <button
+                        onClick={()=>downloadWordReport(m,i)}
+                        disabled={reportDownloading!=null}
+                        style={{alignSelf:"flex-start",display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:reportDownloading===i?T.border:`${T.blue}20`,border:`1px solid ${reportDownloading===i?T.border:T.blue}`,borderRadius:6,color:reportDownloading===i?T.textDim:T.blue,fontSize:11,fontWeight:700,cursor:reportDownloading!=null?"not-allowed":"pointer",fontFamily:mono,transition:"all 0.2s"}}>
+                        {reportDownloading===i?"⏳ Generating...":"📄 Word (.docx)"}
+                      </button>
+                      <button
+                        onClick={()=>downloadCsvReport(m,i)}
+                        disabled={reportDownloading!=null}
+                        style={{alignSelf:"flex-start",display:"flex",alignItems:"center",gap:6,padding:"6px 12px",background:reportDownloading===i+20000?T.border:`${T.amber||'#F59E0B'}20`,border:`1px solid ${reportDownloading===i+20000?T.border:T.amber||'#F59E0B'}`,borderRadius:6,color:reportDownloading===i+20000?T.textDim:T.amber||'#F59E0B',fontSize:11,fontWeight:700,cursor:reportDownloading!=null?"not-allowed":"pointer",fontFamily:mono,transition:"all 0.2s"}}>
+                        {reportDownloading===i+20000?"⏳ Generating...":"📋 CSV (Data)"}
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

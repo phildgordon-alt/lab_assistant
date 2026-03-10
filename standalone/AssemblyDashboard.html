@@ -276,9 +276,28 @@ const AVATAR_COLORS = [
   '#EC4899','#06B6D4','#84CC16','#F97316','#A78BFA',
 ];
 
-// Station assignments — persisted
+// Station assignments — persisted to server SQLite, cached in localStorage
 let assignments = JSON.parse(localStorage.getItem('asy_assignments') || '{}');
 // { 'STN-01': { operatorName, color, status: 'busy'|'idle'|'break'|'hold', startTime } }
+
+// Pull assignments from server on load (server is source of truth)
+(async function loadServerAssignments() {
+  try {
+    const res = await fetch(`${serverUrl}/api/assembly/config`);
+    if (res.ok) {
+      const cfg = await res.json();
+      if (cfg.assignments && Object.keys(cfg.assignments).length > 0) {
+        assignments = cfg.assignments;
+        localStorage.setItem('asy_assignments', JSON.stringify(assignments));
+        console.log('[Assembly] Loaded assignments from server:', Object.keys(assignments).length, 'stations');
+      }
+      if (cfg.operatorMap && Object.keys(cfg.operatorMap).length > 0) {
+        operatorMap = cfg.operatorMap;
+        localStorage.setItem('asy_operator_map', JSON.stringify(operatorMap));
+      }
+    }
+  } catch(e) { console.warn('[Assembly] Server config fetch failed, using localStorage'); }
+})();
 
 // Operators — derived from assignments + DVI data
 let operators = JSON.parse(localStorage.getItem('asy_operators') || '{}');

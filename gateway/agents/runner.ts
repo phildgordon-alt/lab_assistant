@@ -89,6 +89,34 @@ const anthropic = new Anthropic({
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 2048;
 
+// ── Demo Mode ────────────────────────────────────────────────────────────────
+// Set DEMO_MODE=true in gateway/.env to enable board-presentation mode.
+// Agents explain reasoning aloud, avoid writes, and clarify data is a snapshot.
+const DEMO_MODE = process.env.DEMO_MODE === 'true';
+const SNAPSHOT_DATE = process.env.DEMO_SNAPSHOT_DATE || new Date().toISOString().substring(0, 10);
+
+const DEMO_CONTEXT = `
+<demo_mode>
+You are running in DEMO MODE for a board presentation.
+
+Instructions:
+- You have access to real lab data from a recent production snapshot
+- Do NOT attempt any write operations, status updates, or job modifications
+- Explain your reasoning out loud as you work — the audience is non-technical
+- When surfacing exceptions or bottlenecks, briefly explain why it matters operationally
+- Keep responses clear and concise — avoid raw data dumps, summarize with context
+- If asked about live system status, clarify that this is snapshot data from ${SNAPSHOT_DATE}
+</demo_mode>
+`;
+
+function applyDemoMode(prompt: string): string {
+  return DEMO_MODE ? `${prompt}\n\n${DEMO_CONTEXT}` : prompt;
+}
+
+if (DEMO_MODE) {
+  log.info(`Demo mode ENABLED — snapshot date: ${SNAPSHOT_DATE}`);
+}
+
 // Retry helper for 429 rate limit errors
 // With 10K input tokens/min limit, need longer waits between retries
 async function withRetry<T>(fn: () => Promise<T>, maxRetries = 4): Promise<T> {
@@ -241,6 +269,9 @@ export async function runAgent(
       }
     } catch { /* continue without */ }
 
+    // Apply demo mode overlay if enabled
+    systemPrompt = applyDemoMode(systemPrompt);
+
     const result = await withCircuitBreaker(async () => {
       // Build messages array for agentic loop
       const messages: Anthropic.MessageParam[] = [
@@ -372,9 +403,10 @@ export async function runAgentStreaming(
     } catch { /* knowledge base unavailable, continue without */ }
 
     // If context is provided, prepend it to the system prompt
-    const systemPrompt = context
+    // Apply demo mode overlay if enabled
+    const systemPrompt = applyDemoMode(context
       ? `${basePrompt}${knowledgeContext}\n\n--- LIVE LAB CONTEXT ---\n${context}`
-      : `${basePrompt}${knowledgeContext}`;
+      : `${basePrompt}${knowledgeContext}`);
 
     await withCircuitBreaker(async () => {
       // Build messages array for agentic loop

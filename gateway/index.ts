@@ -490,49 +490,27 @@ app.delete('/gateway/tools/custom/:name', (req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ItemPath Inventory API Proxy
+// ItemPath Inventory API Proxy — reads from Lab Server cache (port 3002)
+// No direct ItemPath calls — Lab Server polls ItemPath every 60s and caches
 // ─────────────────────────────────────────────────────────────────────────────
+const LAB_SERVER_URL = process.env.LAB_ASSISTANT_API_URL || 'http://localhost:3002';
 app.get('/api/itempath/inventory', async (_req: Request, res: Response) => {
-  const itempathUrl = process.env.ITEMPATH_URL;
-  const itempathToken = process.env.ITEMPATH_TOKEN;
-
-  if (!itempathUrl || !itempathToken) {
-    return res.status(503).json({ error: 'ItemPath not configured', materials: [], configured: false });
-  }
-
   try {
-    const resp = await fetch(`${itempathUrl}/api/materials`, {
-      headers: { 'Authorization': `Bearer ${itempathToken}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    res.json({ mock: false, materials: data, lastSync: new Date().toISOString() });
+    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json() as any;
+    res.json({ mock: false, materials: data.materials || [], lastSync: data.lastSync });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
+    res.status(502).json({ error: 'Lab Server unreachable', materials: [] });
   }
 });
 
 app.get('/api/itempath/picks', async (_req: Request, res: Response) => {
-  const itempathUrl = process.env.ITEMPATH_URL;
-  const itempathToken = process.env.ITEMPATH_TOKEN;
-
-  if (!itempathUrl || !itempathToken) {
-    return res.status(503).json({ error: 'ItemPath not configured', picks: [], configured: false });
-  }
-
   try {
-    const resp = await fetch(`${itempathUrl}/api/transactions?hours=2`, {
-      headers: { 'Authorization': `Bearer ${itempathToken}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    res.json({ mock: false, picks: data, lastSync: new Date().toISOString() });
+    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory/picks`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json() as any;
+    res.json({ mock: false, picks: data.picks || data.recent || [], lastSync: data.lastSync });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
+    res.status(502).json({ error: 'Lab Server unreachable', picks: [] });
   }
 });
 
@@ -626,138 +604,47 @@ app.get('/api/limble/stats', async (_req: Request, res: Response) => {
 // These proxy to the ItemPath and Limble endpoints above
 // ─────────────────────────────────────────────────────────────────────────────
 
-// /api/inventory - legacy endpoint for ItemPath inventory
+// /api/inventory, /api/inventory/alerts, /api/inventory/picks, /api/inventory/vlms
+// These proxy through the Lab Server (port 3002) which caches ItemPath data.
+// Previously each gateway request hit ItemPath directly — massive over-fetching.
+
 app.get('/api/inventory', async (_req: Request, res: Response) => {
-  const itempathUrl = process.env.ITEMPATH_URL;
-  const itempathToken = process.env.ITEMPATH_TOKEN;
-
-  if (!itempathUrl || !itempathToken) {
-    return res.status(503).json({ error: 'ItemPath not configured', materials: [], alertCount: 0, configured: false });
-  }
-
   try {
-    const resp = await fetch(`${itempathUrl}/api/materials`, {
-      headers: { 'Authorization': `Bearer ${itempathToken}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json() as any;
-    const rawMaterials = Array.isArray(data) ? data : (data.materials || []);
-
-    // Transform ItemPath fields to frontend expected format
-    const materials = rawMaterials.map((m: any) => ({
-      // Keep original fields
-      ...m,
-      // Map to expected field names
-      sku: m.name || m.sku || m.id,
-      name: m.name || m.sku,
-      qty: m.currentQuantity ?? m.qty ?? 0,
-      location: m.locationName || m.location || m.binName || '',
-      coatingType: m.Info1 || m.coatingType || m.category || '',
-      threshold: m.reOrderPoint || m.threshold || 10,
-      lastUpdated: m.lastEdited || m.creationDate || new Date().toISOString()
-    }));
-
-    // Calculate alerts (low stock items)
-    const alerts = materials.filter((m: any) => m.qty <= (m.threshold || 10));
-
-    res.json({
-      status: 'ok',
-      materials,
-      alertCount: alerts.length,
-      lastSync: new Date().toISOString()
-    });
+    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json();
+    res.json(data);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    log.error('Inventory fetch error:', msg);
-    res.status(500).json({ error: msg, materials: [], alertCount: 0, lastSync: null });
+    res.status(502).json({ error: 'Lab Server unreachable', materials: [], alertCount: 0 });
   }
 });
 
-// /api/inventory/alerts - low stock alerts from ItemPath
 app.get('/api/inventory/alerts', async (_req: Request, res: Response) => {
-  const itempathUrl = process.env.ITEMPATH_URL;
-  const itempathToken = process.env.ITEMPATH_TOKEN;
-
-  if (!itempathUrl || !itempathToken) {
-    return res.status(503).json({ error: 'ItemPath not configured', alerts: [], configured: false });
-  }
-
   try {
-    const resp = await fetch(`${itempathUrl}/api/materials`, {
-      headers: { 'Authorization': `Bearer ${itempathToken}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json() as any;
-    const rawMaterials = Array.isArray(data) ? data : (data.materials || []);
-
-    // Transform and filter for low stock
-    const alerts = rawMaterials
-      .map((m: any) => ({
-        sku: m.name || m.sku || m.id,
-        name: m.name || m.sku,
-        qty: m.currentQuantity ?? m.qty ?? 0,
-        threshold: m.reOrderPoint || m.threshold || 10,
-      }))
-      .filter((m: any) => m.qty <= m.threshold)
-      .map((m: any) => ({
-        ...m,
-        severity: m.qty === 0 ? 'critical' : m.qty <= 5 ? 'high' : 'low'
-      }));
-
-    res.json({ alerts, mock: false });
+    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory/alerts`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json();
+    res.json(data);
   } catch (e) {
-    res.json({ alerts: [], error: (e as Error).message });
+    res.json({ alerts: [], error: 'Lab Server unreachable' });
   }
 });
 
-// /api/inventory/picks - recent picks from ItemPath
 app.get('/api/inventory/picks', async (_req: Request, res: Response) => {
-  const itempathUrl = process.env.ITEMPATH_URL;
-  const itempathToken = process.env.ITEMPATH_TOKEN;
-
-  if (!itempathUrl || !itempathToken) {
-    return res.status(503).json({ error: 'ItemPath not configured', picks: [], recent: [], count: 0, configured: false });
-  }
-
   try {
-    const resp = await fetch(`${itempathUrl}/api/transactions?hours=8`, {
-      headers: { 'Authorization': `Bearer ${itempathToken}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json() as any;
-    const picks = Array.isArray(data) ? data : (data.transactions || data.picks || []);
-    res.json({ picks, recent: picks.slice(0, 10), count: picks.length, mock: false });
+    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory/picks`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json();
+    res.json(data);
   } catch (e) {
-    res.json({ picks: [], recent: [], count: 0, error: (e as Error).message });
+    res.json({ picks: [], recent: [], count: 0, error: 'Lab Server unreachable' });
   }
 });
 
-// /api/inventory/vlms - VLM/Kardex stats
 app.get('/api/inventory/vlms', async (_req: Request, res: Response) => {
-  const itempathUrl = process.env.ITEMPATH_URL;
-  const itempathToken = process.env.ITEMPATH_TOKEN;
-
-  if (!itempathUrl || !itempathToken) {
-    return res.status(503).json({ error: 'ItemPath not configured', vlmStats: {}, locations: [], configured: false });
-  }
-
   try {
-    const resp = await fetch(`${itempathUrl}/api/locations`, {
-      headers: { 'Authorization': `Bearer ${itempathToken}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    const data = resp.ok ? await resp.json() as any : { locations: [] };
-    const locations = Array.isArray(data) ? data : (data.locations || []);
-    res.json({
-      vlmStats: { totalLocations: locations.length, utilizationPercent: 78, cyclesPerDay: 45 },
-      locations,
-      mock: false
-    });
+    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory/vlms`, { signal: AbortSignal.timeout(5000) });
+    const data = await resp.json();
+    res.json(data);
   } catch (e) {
-    res.json({ vlmStats: {}, locations: [], error: (e as Error).message });
+    res.json({ vlmStats: {}, locations: [], error: 'Lab Server unreachable' });
   }
 });
 
@@ -922,6 +809,35 @@ app.get('/api/maintenance/tasks', async (_req: Request, res: Response) => {
 
 // In-memory message store (for demo without full Slack API access)
 let slackMessages: { id: string; from: string; text: string; time: Date; priority: string; source: string }[] = [];
+
+// Demo mode: seed realistic lab Slack messages
+if (process.env.DEMO_MODE === 'true' && !process.env.SLACK_BOT_TOKEN) {
+  const now = Date.now();
+  const demoMsgs = [
+    { from: 'Phil', text: 'EB9 #1 loaded with AR batch — 45 jobs, starting run now', priority: 'normal', mins: 42 },
+    { from: 'Lab_Assistant', text: '📊 Shift start: 148 active orders across WH1 + WH2. 6 low stock alerts.', priority: 'normal', mins: 38 },
+    { from: 'Maria R.', text: 'Kardex WH2 is running slow — taking 30s per pick instead of 10s', priority: 'high', mins: 35 },
+    { from: 'Lab_Assistant', text: '⚠️ Low stock: BLY SV HK 76 -4.00 — 2 remaining (threshold: 5)', priority: 'high', mins: 30 },
+    { from: 'Derek L.', text: 'Assembly station 3 is back online — fixed the label printer jam', priority: 'normal', mins: 25 },
+    { from: 'Lab_Assistant', text: '🚨 RUSH job J26841 entered surfacing — due by EOD', priority: 'high', mins: 22 },
+    { from: 'Emily Y.', text: 'Coating queue is backed up — 67 jobs waiting, EB9 #2 still has 80 min left', priority: 'normal', mins: 18 },
+    { from: 'Lab_Assistant', text: '✅ EB9 #2 loaded: BLUE CUT batch, 35 jobs, 61% fill', priority: 'normal', mins: 17 },
+    { from: 'Kevin T.', text: 'Edger 2 threw an error on J26903 — recalibrating now', priority: 'high', mins: 12 },
+    { from: 'Lab_Assistant', text: '📦 17 jobs shipped so far today (WH1: 10, WH2: 7)', priority: 'normal', mins: 8 },
+    { from: 'Phil', text: 'How are we looking on the transitions blanks? Running low last week', priority: 'normal', mins: 5 },
+    { from: 'Lab_Assistant', text: '🔍 Transitions stock: 23 units across 4 SKUs. Reorder point is 15 — OK for now.', priority: 'normal', mins: 4 },
+    { from: 'Andrea F.', text: 'Breakage on J26955 at polish stage — lens cracked, remaking', priority: 'high', mins: 2 },
+  ];
+  slackMessages = demoMsgs.map((m, i) => ({
+    id: String((now - m.mins * 60000) / 1000),
+    from: m.from,
+    text: m.text,
+    time: new Date(now - m.mins * 60000),
+    priority: m.priority,
+    source: 'slack'
+  }));
+  log.info(`Demo mode: seeded ${slackMessages.length} Slack messages`);
+}
 
 // Fetch recent messages from Slack channel
 app.get('/api/slack/messages', async (req: Request, res: Response) => {

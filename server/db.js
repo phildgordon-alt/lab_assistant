@@ -423,6 +423,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_operator_id ON operators(employee_id);
   CREATE INDEX IF NOT EXISTS idx_operator_dept ON operators(department);
   CREATE INDEX IF NOT EXISTS idx_operator_active ON operators(valid_to) WHERE valid_to IS NULL;
+
+  -- Assembly Dashboard config (operators, assignments, operator map, leaderboard)
+  -- Key-value store for JSON blobs — simple and flexible
+  CREATE TABLE IF NOT EXISTS assembly_config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 console.log('[DB] SQLite database initialized:', DB_FILE);
@@ -1323,6 +1331,32 @@ function upsertLensCatalog(lens) {
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ASSEMBLY DASHBOARD CONFIG (persisted key-value store)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getAssemblyConfig(key) {
+  const row = db.prepare('SELECT value FROM assembly_config WHERE key = ?').get(key);
+  if (!row) return null;
+  try { return JSON.parse(row.value); } catch { return row.value; }
+}
+
+function setAssemblyConfig(key, value) {
+  db.prepare(`
+    INSERT INTO assembly_config (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = datetime('now')
+  `).run(key, JSON.stringify(value));
+}
+
+function getAllAssemblyConfig() {
+  const rows = db.prepare('SELECT key, value, updated_at FROM assembly_config').all();
+  const result = {};
+  for (const row of rows) {
+    try { result[row.key] = JSON.parse(row.value); } catch { result[row.key] = row.value; }
+  }
+  return result;
+}
+
 module.exports = {
   db,
   logSync,
@@ -1367,5 +1401,9 @@ module.exports = {
   // Reference layer (SCD Type 2)
   getLensInfo,
   getLensInfoAsOf,
-  upsertLensCatalog
+  upsertLensCatalog,
+  // Assembly Dashboard config
+  getAssemblyConfig,
+  setAssemblyConfig,
+  getAllAssemblyConfig
 };

@@ -316,21 +316,46 @@ class DviTraceWatcher extends EventEmitter {
       this.partialLine = '';
     }
 
+    // ── Staleness detection: reconnect SMB if no new data in 2 min ──
+    const lastEvt = this.todayStats.lastEvent;
+    const lastSuccessfulRead = this._lastSuccessfulRead || 0;
+    const timeSinceRead = Date.now() - lastSuccessfulRead;
+    if (lastSuccessfulRead > 0 && timeSinceRead > 120000) {
+      // No successful read in 2 minutes — SMB connection probably dead
+      this._staleCount = (this._staleCount || 0) + 1;
+      if (this._staleCount % 12 === 1) { // Log every ~60s (12 polls × 5s)
+        console.warn(`[DVI-Trace] STALE: No successful read in ${Math.round(timeSinceRead/1000)}s — reconnecting SMB`);
+        this._createClient();
+        this._consecutiveErrors = 0;
+      }
+    }
+
+    // ── Periodic health log (every 5 min) ──
+    const now = Date.now();
+    if (!this._lastHealthLog || now - this._lastHealthLog > 300000) {
+      this._lastHealthLog = now;
+      const evtAge = lastEvt ? Math.round((now - lastEvt) / 1000) : 'never';
+      console.log(`[DVI-Trace] Health: ${this.jobs.size} jobs, offset=${this.byteOffset}, file=${filename}, lastEvent=${evtAge}s ago, errors=${this._consecutiveErrors||0}`);
+    }
+
     try {
       // Read entire file — SMB2 doesn't support range reads,
       // so we read full file and slice from offset
       const data = await this.readFile(remotePath);
       if (!data) return;
       this._consecutiveErrors = 0;
+      this._lastSuccessfulRead = Date.now();
+      this._staleCount = 0;
 
       const fileSize = data.length;
 
-      // No new data
+      // No new data — file hasn't grown
       if (fileSize <= this.byteOffset) return;
 
       // Extract only new bytes
       const newData = data.slice(this.byteOffset);
       const newText = this.partialLine + newData.toString('utf8');
+      const prevOffset = this.byteOffset;
       this.byteOffset = fileSize;
 
       // Split into lines, keeping partial last line for next read
@@ -351,6 +376,7 @@ class DviTraceWatcher extends EventEmitter {
       }
 
       if (parsed > 0) {
+        console.log(`[DVI-Trace] +${parsed} events (${prevOffset}→${fileSize} bytes), ${this.jobs.size} jobs total`);
         this.emit('data', { count: parsed, fileSize, file: filename });
       }
 
@@ -360,11 +386,9 @@ class DviTraceWatcher extends EventEmitter {
       if (msg.includes('STATUS_OBJECT_NAME_NOT_FOUND')) return;
       if (msg.includes('STATUS_PENDING') || msg.includes('ETIMEDOUT') || msg.includes('ECONNRESET') || msg.includes('EALREADY')) {
         this._consecutiveErrors = (this._consecutiveErrors || 0) + 1;
-        // Reconnect after 3 consecutive transient errors
-        if (this._consecutiveErrors >= 3 && this._connConfig) {
-          console.log('[DVI-Trace] Reconnecting SMB client after repeated errors');
+        if (this._consecutiveErrors % 3 === 0) {
+          console.warn(`[DVI-Trace] ${this._consecutiveErrors} consecutive errors (${msg.substring(0, 40)}) — reconnecting SMB`);
           this._createClient();
-          this._consecutiveErrors = 0;
         }
         return;
       }
@@ -374,7 +398,12 @@ class DviTraceWatcher extends EventEmitter {
 
   readFile(remotePath) {
     return new Promise((resolve, reject) => {
+      // 15-second timeout — SMB reads can hang indefinitely on dead connections
+      const timeout = setTimeout(() => {
+        reject(new Error('ETIMEDOUT: SMB readFile exceeded 15s'));
+      }, 15000);
       this.client.readFile(remotePath, (err, data) => {
+        clearTimeout(timeout);
         if (err) return reject(err);
         resolve(data);
       });
@@ -474,6 +503,8 @@ class DviTraceWatcher extends EventEmitter {
         operator: job.operator,
         machineId: job.machineId,
         hasBreakage: job.hasBreakage || false,
+        rush: job.rush || 'N',
+        Rush: job.rush || 'N',
         firstSeen: job.firstSeen,
         lastSeen: job.lastSeen,
         eventCount: job.events.length,
@@ -575,6 +606,196 @@ class DviTraceWatcher extends EventEmitter {
       events: job.events
     };
   }
+  /**
+   * Seed trace from DVI job index (for demo mode when SMB is unreachable).
+   * Takes real jobs from the XML index and distributes them across production stages
+   * with realistic timestamps and event histories.
+   */
+  seedFromIndex(jobIndex) {
+    if (this.jobs.size > 50) return; // Already populated — don't double-seed
+
+    const now = Date.now();
+    const shiftStart = new Date();
+    shiftStart.setHours(6, 0, 0, 0);
+    const shiftMs = shiftStart.getTime();
+
+    // Realistic station distribution — weighted by where jobs actually sit
+    const STATION_POOL = [
+      // INCOMING (small — these move fast)
+      { station: 'RX ENTRY', weight: 3 },
+      { station: 'LOG LENSES', weight: 2 },
+      // AT KARDEX
+      { station: 'AT KARDEX', weight: 4 },
+      { station: 'MAN2KARDX', weight: 2 },
+      // NEL
+      { station: 'NE LENS', weight: 3 },
+      // SURFACING (big chunk — slow stage)
+      { station: 'DIGITAL CALC', weight: 8 },
+      { station: 'AUTO BLKER', weight: 5 },
+      { station: 'GENERATOR', weight: 6 },
+      { station: 'POLISH', weight: 4 },
+      // COATING (another big stage)
+      { station: 'SENT TO COAT', weight: 6 },
+      { station: 'CCL 1', weight: 5 },
+      { station: 'CCL 2', weight: 4 },
+      { station: 'CCP', weight: 3 },
+      // CUTTING
+      { station: 'EDGER 1', weight: 4 },
+      { station: 'EDGER 2', weight: 3 },
+      { station: 'LCU', weight: 2 },
+      // ASSEMBLY
+      { station: 'ASSEMBLY #1', weight: 3 },
+      { station: 'ASSEMBLY #3', weight: 2 },
+      { station: 'ASSEMBLY #5', weight: 2 },
+      { station: 'ASSEMBLY #7', weight: 2 },
+      // QC
+      { station: 'ASSEMBLY PASS', weight: 2 },
+      // SHIPPING
+      { station: 'SH CONVEY', weight: 5 },
+      // BREAKAGE (small)
+      { station: 'BREAKAGE', weight: 2 },
+      // HOLD
+      { station: 'ASSEMBLY FAIL', weight: 1 },
+      { station: 'HOLD', weight: 1 },
+    ];
+    const totalWeight = STATION_POOL.reduce((s, p) => s + p.weight, 0);
+
+    // Build weighted selection array
+    const weighted = [];
+    for (const p of STATION_POOL) {
+      for (let i = 0; i < p.weight; i++) weighted.push(p.station);
+    }
+
+    const OPERATORS = ['AF', 'MR', 'JC', 'DL', 'EY', 'KT', 'RG', 'NS', 'PH', 'BW', 'LM', 'CR'];
+
+    // ── Pass 1: 350 active WIP jobs across all stages ──────────
+    const allJobIds = [...jobIndex.keys()];
+    const wipJobIds = allJobIds.slice(0, 350);
+    let seeded = 0;
+    let shipped = 0;
+
+    for (const jobId of wipJobIds) {
+      const xmlData = jobIndex.get(jobId);
+      const station = weighted[Math.floor(Math.random() * weighted.length)];
+      const stage = stationToStage(station);
+      const operator = OPERATORS[Math.floor(Math.random() * OPERATORS.length)];
+
+      // Random time during today's shift
+      const eventTime = shiftMs + Math.floor(Math.random() * (now - shiftMs));
+      // Aging: 70% jobs 0-8 hours old, 20% 1-3 days old, 10% 3-12 days old (for SLA alerts)
+      const agingRoll = Math.random();
+      let ageMs;
+      if (agingRoll < 0.70) ageMs = Math.floor(Math.random() * 3600000 * 8);          // 0-8 hours
+      else if (agingRoll < 0.90) ageMs = Math.floor(3600000 * 24 + Math.random() * 3600000 * 48); // 1-3 days
+      else ageMs = Math.floor(3600000 * 72 + Math.random() * 3600000 * 216);           // 3-12 days
+      const firstSeen = now - ageMs;
+
+      // SH CONVEY jobs: 60% already shipped, 40% still in queue
+      const isShippedDone = stage === 'SHIPPING' ? Math.random() < 0.6 : false;
+      const isRush = Math.random() < 0.08; // ~8% rush across all stages
+
+      const job = {
+        jobId,
+        tray: xmlData?.tray || `T-${String(seeded).padStart(3, '0')}`,
+        station,
+        stationNum: null,
+        stage,
+        category: null,
+        status: isShippedDone ? 'SHIPPED' : 'Active',
+        rush: isRush ? 'Y' : 'N',
+        operator,
+        machineId: null,
+        hasBreakage: stage === 'BREAKAGE',
+        firstSeen,
+        lastSeen: eventTime,
+        events: [
+          { station: 'RX ENTRY', stage: 'INCOMING', time: new Date(firstSeen).toTimeString().slice(0, 8), timestamp: firstSeen, operator },
+          { station, stage, time: new Date(eventTime).toTimeString().slice(0, 8), timestamp: eventTime, operator }
+        ]
+      };
+
+      this.jobs.set(jobId, job);
+
+      this.events.push({
+        jobId, tray: job.tray, station, stage, operator,
+        time: new Date(eventTime).toTimeString().slice(0, 8), timestamp: eventTime
+      });
+
+      this.todayStats.totalEvents += 2;
+      this.todayStats.byStation[station] = (this.todayStats.byStation[station] || 0) + 1;
+      this.todayStats.byStage[stage] = (this.todayStats.byStage[stage] || 0) + 1;
+      if (operator) this.todayStats.byOperator[operator] = (this.todayStats.byOperator[operator] || 0) + 1;
+      if (stage === 'BREAKAGE') this.todayStats.breakageCount++;
+      if (isShippedDone) shipped++;
+
+      seeded++;
+    }
+
+    // ── Pass 2: Historical shipped jobs (past 14 days) ───────────
+    // ~120 shipped/day × 14 days ≈ 1680 historical jobs for the bar chart
+    const histJobIds = allJobIds.slice(350, 2030);
+    let histShipped = 0;
+
+    // Daily volume profile: weekdays ~130-160, weekends ~40-60
+    const dayMs = 86400000;
+    for (let d = 1; d <= 14; d++) {
+      const dayStart = new Date(now - d * dayMs);
+      dayStart.setHours(6, 0, 0, 0);
+      const dayEnd = new Date(dayStart);
+      dayEnd.setHours(18, 0, 0, 0);
+      const dow = dayStart.getDay(); // 0=Sun, 6=Sat
+      const isWeekend = dow === 0 || dow === 6;
+      const targetCount = isWeekend
+        ? 40 + Math.floor(Math.random() * 20)    // 40-60 on weekends
+        : 130 + Math.floor(Math.random() * 30);  // 130-160 on weekdays
+
+      for (let j = 0; j < targetCount; j++) {
+        const idx = 350 + histShipped;
+        if (idx >= allJobIds.length) break;
+
+        const jobId = allJobIds[idx];
+        const xmlData = jobIndex.get(jobId);
+        const operator = OPERATORS[Math.floor(Math.random() * OPERATORS.length)];
+        const shippedAt = dayStart.getTime() + Math.floor(Math.random() * (dayEnd.getTime() - dayStart.getTime()));
+        const enteredAt = shippedAt - (3600000 * 4 + Math.floor(Math.random() * 3600000 * 20)); // 4-24h before ship
+        const isRush = Math.random() < 0.08; // ~8% rush
+
+        const job = {
+          jobId,
+          tray: xmlData?.tray || `T-H${String(histShipped).padStart(4, '0')}`,
+          station: 'SH CONVEY',
+          stationNum: null,
+          stage: 'SHIPPING',
+          category: null,
+          status: 'SHIPPED',
+          rush: isRush ? 'Y' : 'N',
+          operator,
+          machineId: null,
+          hasBreakage: false,
+          firstSeen: enteredAt,
+          lastSeen: shippedAt,
+          events: [
+            { station: 'RX ENTRY', stage: 'INCOMING', time: new Date(enteredAt).toTimeString().slice(0, 8), timestamp: enteredAt, operator },
+            { station: 'SH CONVEY', stage: 'SHIPPING', time: new Date(shippedAt).toTimeString().slice(0, 8), timestamp: shippedAt, operator }
+          ]
+        };
+
+        this.jobs.set(jobId, job);
+        histShipped++;
+        shipped++;
+      }
+    }
+
+    this.todayStats.uniqueJobs = this.jobs.size;
+    this.todayStats.firstEvent = shiftMs;
+    this.todayStats.lastEvent = now;
+
+    // Sort events by timestamp
+    this.events.sort((a, b) => a.timestamp - b.timestamp);
+
+    console.log(`[DVI-Trace] Demo seed: ${seeded} active WIP + ${histShipped} historical shipped (${shipped} total shipped)`);
+    console.log(`[DVI-Trace] By stage:`, JSON.stringify(this.getJobsByStage()));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -592,5 +813,6 @@ module.exports = {
   getStats() { return watcher.getStats(); },
   getStatus() { return watcher.getStatus(); },
   getJobHistory(jobId) { return watcher.getJobHistory(jobId); },
-  on(event, handler) { watcher.on(event, handler); }
+  on(event, handler) { watcher.on(event, handler); },
+  seedFromIndex(jobIndex) { watcher.seedFromIndex(jobIndex); }
 };

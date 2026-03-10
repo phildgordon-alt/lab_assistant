@@ -219,21 +219,47 @@ function authHeaders() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FETCH WRAPPER — timeout + error handling
+// FETCH WRAPPER — timeout + error handling + payload logging
 // ─────────────────────────────────────────────────────────────────────────────
-async function ipFetch(path, params = {}) {
-  const url = new URL(`${CONFIG.baseUrl}${path}`);
+async function ipFetch(endpointPath, params = {}) {
+  const url = new URL(`${CONFIG.baseUrl}${endpointPath}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
 
   const resp = await fetch(url.toString(), {
     headers: authHeaders(),
-    signal: AbortSignal.timeout(120000),  // 120s timeout for large fetches
+    signal: AbortSignal.timeout(30000),  // 30s timeout (was 120s — fail fast)
   });
 
   if (!resp.ok) {
-    throw new Error(`ItemPath ${path} → HTTP ${resp.status}`);
+    throw new Error(`ItemPath ${endpointPath} → HTTP ${resp.status}`);
   }
-  return resp.json();
+
+  const text = await resp.text();
+  const sizeKB = (text.length / 1024).toFixed(1);
+  const sizeMB = (text.length / (1024 * 1024)).toFixed(2);
+  const label = text.length > 1048576 ? `${sizeMB} MB` : `${sizeKB} KB`;
+  console.log(`[ItemPath] ${endpointPath}${url.search} → ${label}`);
+
+  return JSON.parse(text);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LOCATIONS CACHE — reference data, refreshes every 60 minutes (not every poll)
+// ─────────────────────────────────────────────────────────────────────────────
+let locationsCache = { locations: [], loadedAt: 0 };
+const LOCATIONS_CACHE_TTL = 60 * 60 * 1000; // 60 minutes
+
+async function getLocationsData() {
+  const age = Date.now() - locationsCache.loadedAt;
+  if (locationsCache.locations.length > 0 && age < LOCATIONS_CACHE_TTL) {
+    console.log(`[ItemPath] Locations: using cache (${locationsCache.locations.length} locations, age ${Math.round(age/60000)}m)`);
+    return locationsCache.locations;
+  }
+  console.log(`[ItemPath] Locations: refreshing cache (age ${Math.round(age/60000)}m)`);
+  const resp = await ipFetch('/api/locations', { limit: 20000 });
+  locationsCache.locations = resp.locations || [];
+  locationsCache.loadedAt = Date.now();
+  return locationsCache.locations;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -483,19 +509,25 @@ async function poll() {
   try {
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const twoHrsAgo = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
     const todayPrefix = todayStart.substring(0, 10);
 
-    // Single parallel fetch — everything at once (matches original working approach)
-    const [materialsResp, ordersResp, txResp, pickTxResp, putTxResp, warehousesResp, locationsResp] = await Promise.all([
-      ipFetch('/api/materials', { limit: 10000 }),
-      ipFetch('/api/orders',    { limit: 500 }),
-      ipFetch('/api/transactions', { after: twoHrsAgo, limit: 500 }).catch(() => ({ transactions: [] })),
-      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 2000 }).catch(() => ({ transactions: [] })),
-      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 5000 }).catch(() => ({ transactions: [] })),
+    const pollStart = Date.now();
+
+    // Parallel fetch — locations cached separately (60min TTL), transactions today only
+    const [materialsResp, ordersResp, txResp, pickTxResp, putTxResp, warehousesResp] = await Promise.all([
+      ipFetch('/api/materials', { limit: 10000 }),                    // All materials — full catalog required
+      ipFetch('/api/orders',    { limit: 200, status: 'In Process' }),  // Only active orders (was 500 all statuses)
+      ipFetch('/api/transactions', { after: todayStart, limit: 200 }).catch(() => ({ transactions: [] })),  // Today's transactions only (was 2hr/500)
+      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),  // Pick lines today
+      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),  // Put lines today
       ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
-      ipFetch('/api/locations', { limit: 20000 }).catch(() => ({ locations: [] })),
     ]);
+    // Locations: cached for 60 min — reference data that rarely changes
+    const locationsData = await getLocationsData().catch(() => []);
+    const locationsResp = { locations: locationsData };
+
+    const fetchMs = Date.now() - pollStart;
+    console.log(`[ItemPath] All fetches completed in ${fetchMs}ms`);
 
     const materials   = (materialsResp.materials || materialsResp.data || materialsResp || []).map(normalizeMaterial);
 
@@ -522,13 +554,14 @@ async function poll() {
 
     // Picks: count unique jobs (orderName), not individual lines
     // Each job has 2-3 lines (R lens, L lens, frame) — 1 job = 1 pick
-    const seenPickJobs = { WH1: new Map(), WH2: new Map() }; // orderName → hour
+    // API already filters to today via `after: todayStart` — no need to re-filter by date
+    const seenPickJobs = { WH1: new Map(), WH2: new Map() };
     for (const tx of pickTxList) {
       const wh = tx.warehouseName || 'Unknown';
       const date = tx.creationDate || '';
       const orderName = tx.orderName || tx.order_name || '';
-      if (date.substring(0, 10) === todayPrefix && (wh === 'WH1' || wh === 'WH2') && orderName) {
-        const hr = parseInt(date.substring(11, 13)) || 0;
+      if ((wh === 'WH1' || wh === 'WH2') && orderName) {
+        const hr = parseInt((date.substring(11, 13) || String(now.getHours()))) || 0;
         if (!seenPickJobs[wh].has(orderName)) {
           seenPickJobs[wh].set(orderName, hr);
           txHourlyPicks[wh][hr] += 1;
@@ -537,38 +570,42 @@ async function poll() {
       }
     }
     // Puts: count by confirmed quantity (each line = X items put away into Kardex)
+    // API already filters to today via `after: todayStart`
     for (const tx of putTxList) {
-      // Warehouse detection: warehouseName field, or parse from orderName/reference, or default WH1
       const wh = tx.warehouseName
         || (tx.orderName && tx.orderName.includes('WH2') ? 'WH2' : null)
         || (tx.orderName && tx.orderName.includes('WH1') ? 'WH1' : null)
         || (tx.locationName && tx.locationName.includes('WH2') ? 'WH2' : 'WH1');
       const date = tx.creationDate || '';
-      if (date.substring(0, 10) === todayPrefix && (wh === 'WH1' || wh === 'WH2')) {
-        const hr = parseInt(date.substring(11, 13)) || 0;
+      if (wh === 'WH1' || wh === 'WH2') {
+        const hr = parseInt((date.substring(11, 13) || String(now.getHours()))) || 0;
         const qty = Math.abs(parseFloat(tx.quantityConfirmed) || parseFloat(tx.quantity) || 1);
         txHourlyPuts[wh][hr] += qty;
         txPutsTotal[wh] += qty;
       }
     }
 
-    // Use the higher of: transaction totals vs incremental tracking (handles API returning partial data)
+    // Pick/put counting: use transaction data if it has results, else incremental
     resetDailyIfNeeded();
     const txPickSum = txPicksTotal.WH1 + txPicksTotal.WH2;
     const incPickSum = dailyPickTotals.WH1 + dailyPickTotals.WH2;
     const txPutSum = txPutsTotal.WH1 + txPutsTotal.WH2;
     const incPutSum = dailyPutTotals.WH1 + dailyPutTotals.WH2;
 
-    // Hourly: use transaction data if available, else incremental
+    // Log transaction debug info on first poll
+    if (pickTxList.length > 0 && txPickSum === 0) {
+      const sample = pickTxList[0];
+      console.log(`[ItemPath] DEBUG pick tx sample: date="${sample.creationDate}" wh="${sample.warehouseName}" order="${sample.orderName}" todayPrefix="${todayPrefix}"`);
+    }
+
+    // Use transaction count if available, else incremental
     const hourlyStats = txPickSum > 0 ? txHourlyPicks : { WH1: { ...hourlyPicks.WH1 }, WH2: { ...hourlyPicks.WH2 } };
     const hourlyPutStats = txPutSum > 0 ? txHourlyPuts : { WH1: { ...hourlyPuts.WH1 }, WH2: { ...hourlyPuts.WH2 } };
+    const finalPicks = txPickSum > 0 ? txPicksTotal : { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2 };
+    const finalPuts = txPutSum > 0 ? txPutsTotal : { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2 };
 
-    // Totals: use whichever source has the higher count
-    const finalPicks = txPickSum >= incPickSum ? txPicksTotal : { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2 };
-    const finalPuts = txPutSum >= incPutSum ? txPutsTotal : { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2 };
-
-    console.log(`[ItemPath] Picks: tx=${txPickSum} (WH1:${txPicksTotal.WH1} WH2:${txPicksTotal.WH2}), inc=${incPickSum} (WH1:${dailyPickTotals.WH1} WH2:${dailyPickTotals.WH2}), using ${txPickSum >= incPickSum ? 'txn' : 'incremental'}`);
-    console.log(`[ItemPath] Puts: tx=${txPutSum} (WH1:${txPutsTotal.WH1} WH2:${txPutsTotal.WH2}), inc=${incPutSum} (WH1:${dailyPutTotals.WH1} WH2:${dailyPutTotals.WH2}), using ${txPutSum >= incPutSum ? 'txn' : 'incremental'}`);
+    console.log(`[ItemPath] Picks: tx=${txPickSum}, inc=${incPickSum}, using ${txPickSum > 0 ? 'txn' : 'incremental'} (${pickTxList.length} tx lines)`);
+    console.log(`[ItemPath] Puts: tx=${txPutSum}, inc=${incPutSum}, using ${txPutSum > 0 ? 'txn' : 'incremental'} (${putTxList.length} tx lines)`);
 
     // Calculate warehouse stats from orders (active/queued counts)
     const warehouseStats = {};
@@ -660,7 +697,12 @@ async function poll() {
 
     await sendSlackAlerts(alerts);
     updatePreviousQty(materials);  // Track for next poll's drop detection
-    console.log(`[ItemPath] ✓ Sync: ${materials.length} SKUs, ${activePicks.length} active orders, ${alerts.length} alerts`);
+
+    // Log summary with payload sizes
+    const cacheSize = JSON.stringify(cache).length;
+    const cacheSizeLabel = cacheSize > 1048576 ? `${(cacheSize/1048576).toFixed(1)} MB` : `${(cacheSize/1024).toFixed(0)} KB`;
+    const totalMs = Date.now() - pollStart;
+    console.log(`[ItemPath] ✓ Sync: ${materials.length} SKUs, ${activePicks.length} active orders, ${alerts.length} alerts, ${normalizedLocations.length} locations | cache=${cacheSizeLabel} | ${totalMs}ms total`);
 
     // Write to SQLite for AI agent queries
     try {

@@ -136,9 +136,17 @@ setInterval(() => {
 // ── DVI Job Index (parsed from synced XML files) ──────────────
 const dviJobIndex = new Map(); // dviJob# → {coating, lens, frame, rx, ...}
 
-// Assembly config — synced from standalone AssemblyDashboard
-const assemblyConfig = { assignments: {}, operatorMap: {}, updatedAt: null };
+// Assembly config — persisted to SQLite, loaded on startup
+const assemblyConfig = {
+  assignments: labDb.getAssemblyConfig('assignments') || {},
+  operators: labDb.getAssemblyConfig('operators') || {},
+  operatorMap: labDb.getAssemblyConfig('operatorMap') || {},
+  lbConfig: labDb.getAssemblyConfig('lbConfig') || null,
+  updatedAt: labDb.getAssemblyConfig('updatedAt') || null,
+};
 const DVI_JOBS_DIR = path.join(__dirname, '..', 'data', 'dvi', 'jobs');
+const DVI_SHIPPED_DIR = path.join(__dirname, '..', 'data', 'dvi', 'shipped');
+const shippedJobIndex = new Map(); // jobNum → { shipDate, entryDate, coating, ... }
 
 function parseDviXml(xml) {
   // Lightweight XML parser for DVI job files (no dependency needed)
@@ -176,9 +184,17 @@ function parseDviXml(xml) {
     };
   }
 
+  // Extract OrderData attributes (ship date, entry date, etc.)
+  const shipDate = getAttr('OrderData', 'ShipDate');
+  const shipTime = getAttr('OrderData', 'ShipTime');
+  const entryDate = getAttr('OrderData', 'EntryDate');
+  const invoice = getAttr('OrderData', 'Invoice');
+  const daysInLab = getAttr('RxOrder', 'DaysInLab');
+
   return {
     status: getAttr('Job', 'Status'),
     date: get('Date'),
+    shipDate, shipTime, entryDate, invoice, daysInLab,
     rmtInv: get('RmtInv'),
     tray: get('Tray'),
     rxNum: get('RxNum'),
@@ -219,9 +235,85 @@ function loadDviJobIndex() {
   if (loaded > 0) console.log(`[DVI-Index] Loaded ${loaded} job files (${dviJobIndex.size} total)`);
 }
 
+function loadShippedIndex() {
+  if (!fs.existsSync(DVI_SHIPPED_DIR)) return;
+  const files = fs.readdirSync(DVI_SHIPPED_DIR).filter(f => f.endsWith('.xml'));
+  let loaded = 0;
+  for (const file of files) {
+    try {
+      const jobNum = path.basename(file, '.xml');
+      if (shippedJobIndex.has(jobNum)) continue;
+      const xml = fs.readFileSync(path.join(DVI_SHIPPED_DIR, file), 'utf8');
+      const parsed = parseDviXml(xml);
+      // Parse ship date into timestamp
+      if (parsed.shipDate) {
+        const [mm, dd, yy] = parsed.shipDate.split('/');
+        const [hh, min] = (parsed.shipTime || '12:00').split(':');
+        parsed.shippedAt = new Date(`20${yy}-${mm}-${dd}T${String(hh).padStart(2,'0')}:${String(min||0).padStart(2,'0')}:00`).getTime();
+      }
+      if (parsed.entryDate) {
+        const [mm, dd, yy] = parsed.entryDate.split('/');
+        parsed.enteredAt = new Date(`20${yy}-${mm}-${dd}T00:00:00`).getTime();
+      }
+      shippedJobIndex.set(jobNum, parsed);
+      loaded++;
+    } catch (e) { /* skip bad files */ }
+  }
+  if (loaded > 0) console.log(`[DVI-Shipped] Loaded ${loaded} shipped files (${shippedJobIndex.size} total)`);
+}
+
 // Load on startup and refresh every 60s
 loadDviJobIndex();
+loadShippedIndex();
 setInterval(loadDviJobIndex, 60000);
+setInterval(loadShippedIndex, 60000);
+
+// Demo mode: seed DVI trace + coating runs when SMB is unreachable
+if (process.env.DEMO_MODE === 'true') {
+  setTimeout(() => {
+    // Seed trace with real jobs distributed across stages
+    if (dviJobIndex.size > 0) {
+      dviTrace.seedFromIndex(dviJobIndex);
+    }
+
+    // Seed active coating runs on EB machines
+    const coatingJobs = [...dviJobIndex.keys()].filter(id => {
+      const j = dviJobIndex.get(id);
+      return j && (j.coating || j.coatType);
+    }).slice(0, 80);
+
+    const eb1Jobs = coatingJobs.slice(0, 45);
+    const eb2Jobs = coatingJobs.slice(45, 80);
+    if (eb1Jobs.length > 0) {
+      coatingRuns['EB9001'] = {
+        coaterId: 'EB9001', coaterName: 'EB9 #1',
+        coating: 'AR',
+        startedAt: Date.now() - 42 * 60000, // 42 min into a 2hr run
+        targetSec: 7200,
+        jobs: eb1Jobs, jobCount: eb1Jobs.length,
+        lensCount: eb1Jobs.length * 2,
+        orderCount: eb1Jobs.length,
+        fillPct: Math.round((eb1Jobs.length * 2 / 114) * 100),
+        status: 'running'
+      };
+      console.log(`[Demo] EB9 #1: ${eb1Jobs.length} jobs, AR, 42 min in`);
+    }
+    if (eb2Jobs.length > 0) {
+      coatingRuns['EB9002'] = {
+        coaterId: 'EB9002', coaterName: 'EB9 #2',
+        coating: 'BLUE CUT',
+        startedAt: Date.now() - 18 * 60000, // 18 min into run
+        targetSec: 7200,
+        jobs: eb2Jobs, jobCount: eb2Jobs.length,
+        lensCount: eb2Jobs.length * 2,
+        orderCount: eb2Jobs.length,
+        fillPct: Math.round((eb2Jobs.length * 2 / 114) * 100),
+        status: 'running'
+      };
+      console.log(`[Demo] EB9 #2: ${eb2Jobs.length} jobs, BLUE CUT, 18 min in`);
+    }
+  }, 2000);
+}
 
 // Also reload when dvi-sync copies new files
 dviSync.on('file', (evt) => {
@@ -1544,13 +1636,15 @@ Respond with a structured batching plan in this format:
       return j;
     });
 
-    // Add unreleased queue jobs — jobs in XML index with no trace events.
-    // These are jobs sitting in DVI queues (NEL, FRMHOLD, Edits, At Kardex)
-    // that haven't been released to the floor yet. They still count as WIP.
+    // Add unreleased queue jobs — jobs in XML index with no trace events
+    // and NOT in the shipped archive. DVI exports all jobs with Status="NEW"
+    // regardless of actual state, so we must cross-reference shipped index
+    // to avoid counting completed jobs as WIP.
     let queueJobCount = 0;
+    let skippedShipped = 0;
     for (const [jobNum, xml] of dviJobIndex) {
-      if (traceJobIds.has(jobNum)) continue; // already tracked by trace
-      if (xml.status !== 'NEW') continue; // only count active/new jobs
+      if (traceJobIds.has(jobNum)) continue;      // already tracked by trace
+      if (shippedJobIndex.has(jobNum)) { skippedShipped++; continue; } // already shipped
       queueJobCount++;
       enriched.push({
         job_id: jobNum,
@@ -1572,18 +1666,44 @@ Respond with a structured batching plan in this format:
         source: 'dvi-xml'
       });
     }
-    if (queueJobCount > 0) console.log(`[DVI-Jobs] Added ${queueJobCount} unreleased queue jobs from XML index`);
+    if (queueJobCount > 0 || skippedShipped > 0) console.log(`[DVI-Jobs] Queue: ${queueJobCount} unreleased jobs added, ${skippedShipped} skipped (already shipped)`);
 
-    // Get shipped stats from ALL traced jobs (including shipped ones filtered from WIP)
-    const allTracedJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
-    const shippedJobs = allTracedJobs.filter(j => j.status === 'SHIPPED' || j.stage === 'SHIPPED');
+    // Get shipped stats from BOTH trace (today's movements) AND shipped XML index (archived files)
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    // Week starts Monday at midnight
     const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
-    const shippedToday = shippedJobs.filter(j => j.lastSeen && j.lastSeen >= todayStart.getTime());
-    const shippedYesterday = shippedJobs.filter(j => j.lastSeen && j.lastSeen >= yesterdayStart.getTime() && j.lastSeen < todayStart.getTime());
-    const shippedThisWeek = shippedJobs.filter(j => j.lastSeen && j.lastSeen >= weekStart.getTime());
+    const todayMs = todayStart.getTime();
+    const yesterdayMs = yesterdayStart.getTime();
+    const weekMs = weekStart.getTime();
+
+    // Source 1: Trace jobs with SHIPPED status (from today's trace file)
+    const allTracedJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
+    const traceShipped = allTracedJobs.filter(j => j.status === 'SHIPPED' || j.stage === 'SHIPPED');
+    const traceShippedIds = new Set(traceShipped.map(j => j.job_id));
+
+    // Source 2: Shipped XML archive (persistent — all shipped jobs with parsed dates)
+    const xmlShipped = [];
+    for (const [jobNum, xml] of shippedJobIndex) {
+      if (traceShippedIds.has(jobNum)) continue; // already counted from trace
+      if (!xml.shippedAt) continue;
+      xmlShipped.push({
+        job_id: jobNum, invoice: xml.invoice || jobNum, tray: xml.tray || jobNum,
+        station: 'SH CONVEY', stage: 'SHIPPING', status: 'SHIPPED',
+        coating: xml.coating, lensStyle: xml.lensStyle, lensMat: xml.lensMat,
+        frameStyle: xml.frameStyle, frameSku: xml.frameSku, rxNum: xml.rxNum,
+        rush: 'N', Rush: 'N',
+        firstSeen: xml.enteredAt || null, lastSeen: xml.shippedAt,
+        daysInLab: xml.daysInLab ? parseFloat(xml.daysInLab) : 0,
+        source: 'dvi-shipped-xml'
+      });
+    }
+
+    // Merge both sources
+    const allShipped = [...traceShipped, ...xmlShipped];
+    const shippedToday = allShipped.filter(j => j.lastSeen && j.lastSeen >= todayMs);
+    const shippedYesterday = allShipped.filter(j => j.lastSeen && j.lastSeen >= yesterdayMs && j.lastSeen < todayMs);
+    const shippedThisWeek = allShipped.filter(j => j.lastSeen && j.lastSeen >= weekMs);
+
     return json(res, {
       jobs: enriched,
       shipped: {
@@ -1591,14 +1711,16 @@ Respond with a structured batching plan in this format:
         yesterday: shippedYesterday.length,
         thisWeek: shippedThisWeek.length,
         todayJobs: shippedToday,
-        yesterdayJobs: shippedYesterday
+        yesterdayJobs: shippedYesterday,
+        total: allShipped.length
       },
       stats: dviTrace.getStats(),
-      source: 'dvi-trace+xml',
+      source: 'dvi-trace+xml+shipped',
       jobCount: enriched.length,
       traceJobs: traceJobIds.size,
       queueJobs: queueJobCount,
-      dviIndexSize: dviJobIndex.size
+      dviIndexSize: dviJobIndex.size,
+      shippedIndexSize: shippedJobIndex.size
     });
   }
   // ── Assembly-specific endpoint for AssemblyDashboard ──────────
@@ -1639,7 +1761,11 @@ Respond with a structured batching plan in this format:
             if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
             break;
           }
+          // Also grab operator from any prior event if we don't have one yet
+          if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
         }
+        // Last resort: use the job's last known operator from trace
+        if (!fromOperator) fromOperator = j.operator || null;
 
         if (fromStation) {
           stationCompletions[fromStation] = (stationCompletions[fromStation] || 0) + 1;
@@ -1747,10 +1873,9 @@ Respond with a structured batching plan in this format:
 
   // ── Assembly config (operator assignments + name map) ──────────
   // Synced from standalone AssemblyDashboard.html so main app can read them
-  // ── Shipped history — daily shipped counts from DVI trace ─────
+  // ── Shipped history — daily shipped counts from trace + shipped XML ─────
   if (req.method==='GET' && url.pathname==='/api/shipping/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
-    const allJobs = dviTrace.getJobs();
     const byDay = {};
     const now = Date.now();
     // Initialize days
@@ -1759,17 +1884,28 @@ Respond with a structured batching plan in this format:
       const key = date.toISOString().slice(0, 10);
       byDay[key] = { date: key, shipped: 0, rush: 0 };
     }
-    // Count shipped jobs by day
-    for (const j of allJobs) {
+    // Source 1: Trace jobs
+    const traceJobs = dviTrace.getJobs();
+    const countedIds = new Set();
+    for (const j of traceJobs) {
       if (j.status !== 'SHIPPED' || !j.lastSeen) continue;
       const key = new Date(j.lastSeen).toISOString().slice(0, 10);
       if (byDay[key]) {
         byDay[key].shipped++;
         if (j.rush === 'Y' || j.Rush === 'Y') byDay[key].rush++;
+        countedIds.add(j.job_id);
+      }
+    }
+    // Source 2: Shipped XML archive
+    for (const [jobNum, xml] of shippedJobIndex) {
+      if (countedIds.has(jobNum) || !xml.shippedAt) continue;
+      const key = new Date(xml.shippedAt).toISOString().slice(0, 10);
+      if (byDay[key]) {
+        byDay[key].shipped++;
       }
     }
     const history = Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date));
-    return json(res, { history, days });
+    return json(res, { history, days, shippedIndexSize: shippedJobIndex.size });
   }
 
   if (req.method==='GET' && url.pathname==='/api/assembly/config') {
@@ -1785,9 +1921,17 @@ Respond with a structured batching plan in this format:
     req.on('end', () => {
       try {
         const data = JSON.parse(body);
-        if (data.assignments) assemblyConfig.assignments = data.assignments;
-        if (data.operatorMap) assemblyConfig.operatorMap = data.operatorMap;
+        if (data.assignments) {
+          assemblyConfig.assignments = data.assignments;
+          labDb.setAssemblyConfig('assignments', data.assignments);
+        }
+        if (data.operatorMap) {
+          assemblyConfig.operatorMap = data.operatorMap;
+          labDb.setAssemblyConfig('operatorMap', data.operatorMap);
+        }
         assemblyConfig.updatedAt = Date.now();
+        labDb.setAssemblyConfig('updatedAt', assemblyConfig.updatedAt);
+        console.log(`[Assembly] Config saved: ${Object.keys(data.assignments||{}).length} assignments, ${Object.keys(data.operatorMap||{}).length} operator mappings`);
         return json(res, { ok: true });
       } catch(e) { return json(res, { error: e.message }, 400); }
     });
@@ -2567,6 +2711,467 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     }
   }
 
+  // ── Visual Shift Report (HTML with charts) ────────────────────
+  // POST /api/report/visual — collects live data, returns standalone HTML
+  if (req.method==='POST' && url.pathname==='/api/report/visual') {
+    try {
+      const body = await readBody(req);
+      const { title = 'Shift Report', narrative = '' } = body;
+      const now = new Date();
+      const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+      const todayMs = todayStart.getTime();
+      const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+
+      // ── Collect all live data ──────────────────────────────
+      const allTraceJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
+      const wipJobs = allTraceJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
+
+      // WIP by stage
+      const stages = ['INCOMING','AT_KARDEX','NEL','SURFACING','COATING','CUTTING','ASSEMBLY','QC','HOLD','BREAKAGE','SHIPPING'];
+      const wipByStage = {};
+      for (const s of stages) wipByStage[s] = 0;
+      for (const j of wipJobs) { wipByStage[j.stage] = (wipByStage[j.stage] || 0) + 1; }
+
+      // Shipped stats
+      const allShipped = [];
+      for (const j of allTraceJobs) {
+        if (j.status === 'SHIPPED' && j.lastSeen) allShipped.push(j);
+      }
+      for (const [jobNum, xml] of shippedJobIndex) {
+        if (!xml.shippedAt) continue;
+        if (allShipped.find(j => j.job_id === jobNum)) continue;
+        allShipped.push({ job_id: jobNum, lastSeen: xml.shippedAt, status: 'SHIPPED' });
+      }
+      const shippedToday = allShipped.filter(j => j.lastSeen >= todayMs).length;
+      const shippedThisWeek = allShipped.filter(j => j.lastSeen >= weekStart.getTime()).length;
+
+      // Shipped history (14 days)
+      const shippedByDay = [];
+      for (let d = 13; d >= 0; d--) {
+        const dayDate = new Date(Date.now() - d * 86400000);
+        const key = dayDate.toISOString().slice(0, 10);
+        const label = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        let count = 0;
+        for (const j of allShipped) {
+          if (new Date(j.lastSeen).toISOString().slice(0, 10) === key) count++;
+        }
+        shippedByDay.push({ date: key, label, count });
+      }
+
+      // Coating runs
+      const activeCoating = Object.values(coatingRuns).map(r => ({
+        name: r.coaterName, coating: r.coating,
+        elapsed: Math.round((Date.now() - r.startedAt) / 60000),
+        target: Math.round(r.targetSec / 60),
+        jobs: r.jobCount || 0, status: r.status
+      }));
+
+      // Breakage
+      const breakageJobs = allTraceJobs.filter(j => j.hasBreakage || j.stage === 'BREAKAGE');
+      const breakageRate = wipJobs.length > 0 ? ((breakageJobs.length / wipJobs.length) * 100).toFixed(1) : '0.0';
+
+      // Rush jobs
+      const rushJobs = wipJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
+
+      // Aging (jobs >24h)
+      const agedJobs = wipJobs.filter(j => j.daysInLab > 1).length;
+      const criticalAged = wipJobs.filter(j => j.daysInLab > 3).length;
+
+      // SOM machine status
+      let somDevices = [], machineAlerts = [];
+      try {
+        const somResult = som.getDevices ? som.getDevices() : {};
+        somDevices = Array.isArray(somResult.devices) ? somResult.devices : (Array.isArray(somResult) ? somResult : []);
+        machineAlerts = somDevices.filter(d => d.severity === 'error' || d.severity === 'warning');
+      } catch(e) { console.warn('[Report] SOM data unavailable:', e.message); }
+
+      // Inventory alerts
+      let invAlerts = [];
+      try { invAlerts = itempath.getAlerts ? itempath.getAlerts() : []; }
+      catch(e) { console.warn('[Report] ItemPath alerts unavailable:', e.message); }
+
+      // ── KPI summary ────────────────────────────────────────
+      const kpis = [
+        { label: 'Total WIP', value: wipJobs.length, target: null, color: '#3B82F6' },
+        { label: 'Shipped Today', value: shippedToday, target: 850, color: '#10B981' },
+        { label: 'Shipped This Week', value: shippedThisWeek, target: 5100, color: '#10B981' },
+        { label: 'Rush Active', value: rushJobs.length, target: 0, color: rushJobs.length > 0 ? '#EF4444' : '#10B981' },
+        { label: 'Breakage Rate', value: `${breakageRate}%`, target: '<2%', color: parseFloat(breakageRate) > 2 ? '#EF4444' : '#10B981' },
+        { label: 'WIP >24h', value: agedJobs, target: 0, color: agedJobs > 5 ? '#EF4444' : agedJobs > 0 ? '#F59E0B' : '#10B981' },
+        { label: 'Critical (>3d)', value: criticalAged, target: 0, color: criticalAged > 0 ? '#EF4444' : '#10B981' },
+        { label: 'Machine Alerts', value: machineAlerts.length, target: 0, color: machineAlerts.length > 0 ? '#F59E0B' : '#10B981' },
+      ];
+
+      // ── Generate HTML ──────────────────────────────────────
+      const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title} — ${dateStr}</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"><\/script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=JetBrains+Mono:wght@400;700&display=swap');
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#070A0F; color:#E8ECF1; font-family:'DM Sans',sans-serif; padding:40px; min-height:100vh; }
+  .mono { font-family:'JetBrains Mono',monospace; }
+  .container { max-width:1200px; margin:0 auto; }
+  .header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:32px; padding-bottom:24px; border-bottom:1px solid #1E2A3A; }
+  .header h1 { font-size:32px; font-weight:800; letter-spacing:-0.5px; }
+  .header .subtitle { color:#8899AA; font-size:14px; margin-top:4px; }
+  .logo { text-align:right; }
+  .logo .company { font-size:18px; font-weight:700; color:#3B82F6; }
+  .logo .dept { font-size:11px; color:#556677; letter-spacing:2px; text-transform:uppercase; }
+  .section { margin-bottom:32px; }
+  .section-title { font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#556677; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid #1E2A3A; }
+  .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:32px; }
+  .kpi-card { background:#0D1117; border:1px solid #1E2A3A; border-radius:10px; padding:16px; text-align:center; }
+  .kpi-card .label { font-size:10px; letter-spacing:1.5px; text-transform:uppercase; color:#556677; margin-bottom:6px; }
+  .kpi-card .value { font-size:32px; font-weight:800; font-family:'JetBrains Mono',monospace; line-height:1.1; }
+  .kpi-card .target { font-size:10px; color:#556677; margin-top:4px; }
+  .chart-grid { display:grid; grid-template-columns:2fr 1fr; gap:16px; margin-bottom:32px; }
+  .chart-card { background:#0D1117; border:1px solid #1E2A3A; border-radius:10px; padding:20px; }
+  .chart-card h3 { font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#8899AA; margin-bottom:16px; }
+  .pipeline { display:flex; gap:4px; margin-bottom:32px; align-items:flex-end; height:120px; }
+  .pipeline .bar { flex:1; background:#1E2A3A; border-radius:4px 4px 0 0; position:relative; min-height:4px; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; }
+  .pipeline .bar .count { font-size:14px; font-weight:800; font-family:'JetBrains Mono',monospace; color:#E8ECF1; margin-bottom:4px; }
+  .pipeline .bar .name { position:absolute; bottom:-20px; font-size:8px; letter-spacing:0.5px; text-transform:uppercase; color:#556677; white-space:nowrap; }
+  .coater-row { display:flex; gap:12px; margin-bottom:12px; }
+  .coater-card { flex:1; background:#0D1117; border:1px solid #1E2A3A; border-radius:8px; padding:14px; }
+  .coater-card.active { border-color:#10B981; }
+  .coater-card .name { font-size:13px; font-weight:700; }
+  .coater-card .status { font-size:11px; margin-top:4px; }
+  .coater-card .timer { font-size:24px; font-weight:800; font-family:'JetBrains Mono',monospace; color:#10B981; }
+  .bar-progress { height:6px; background:#1E2A3A; border-radius:3px; overflow:hidden; margin-top:8px; }
+  .bar-fill { height:100%; border-radius:3px; }
+  .alert-list { list-style:none; }
+  .alert-list li { padding:8px 12px; border-left:3px solid; margin-bottom:4px; background:#0D1117; border-radius:0 6px 6px 0; font-size:12px; }
+  .alert-list li.red { border-color:#EF4444; }
+  .alert-list li.amber { border-color:#F59E0B; }
+  .alert-list li.green { border-color:#10B981; }
+  .narrative { background:#0D1117; border:1px solid #1E2A3A; border-radius:10px; padding:24px; font-size:13px; line-height:1.7; white-space:pre-wrap; color:#C8D2DC; }
+  .narrative h2 { font-size:16px; font-weight:700; color:#E8ECF1; margin:16px 0 8px; }
+  .narrative h3 { font-size:14px; font-weight:700; color:#8899AA; margin:12px 0 6px; }
+  .narrative strong { color:#E8ECF1; }
+  .narrative ul { padding-left:20px; }
+  .footer { margin-top:48px; padding-top:16px; border-top:1px solid #1E2A3A; display:flex; justify-content:space-between; font-size:10px; color:#334455; }
+  @media print { body { background:#fff; color:#111; padding:20px; } .kpi-card,.chart-card,.coater-card,.narrative { border-color:#ddd; background:#fafafa; } .section-title,.kpi-card .label,.coater-card .status { color:#666; } .kpi-card .value { color:#111; } .footer { color:#999; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div>
+      <h1>${title}</h1>
+      <div class="subtitle">${dateStr} · ${timeStr}</div>
+    </div>
+    <div class="logo">
+      <div class="company">PAIR EYEWEAR</div>
+      <div class="dept">Irvine Lens Lab — Lab_Assistant</div>
+    </div>
+  </div>
+
+  <!-- KPI Cards -->
+  <div class="section">
+    <div class="section-title">Key Performance Indicators</div>
+    <div class="kpi-grid">
+      ${kpis.map(k => `
+      <div class="kpi-card">
+        <div class="label">${k.label}</div>
+        <div class="value" style="color:${k.color}">${k.value}</div>
+        ${k.target !== null ? `<div class="target">Target: ${k.target}</div>` : ''}
+      </div>`).join('')}
+    </div>
+  </div>
+
+  <!-- WIP Pipeline -->
+  <div class="section">
+    <div class="section-title">Production Pipeline — WIP by Stage</div>
+    <div style="position:relative;margin-bottom:40px;">
+      <div class="pipeline">
+        ${stages.filter(s => s !== 'HOLD').map(s => {
+          const count = wipByStage[s] || 0;
+          const maxWip = Math.max(1, ...stages.map(st => wipByStage[st] || 0));
+          const pct = Math.max(3, (count / maxWip) * 100);
+          const colors = { INCOMING:'#3B82F6', AT_KARDEX:'#8B5CF6', NEL:'#F59E0B', SURFACING:'#06B6D4', COATING:'#10B981', CUTTING:'#F97316', ASSEMBLY:'#A855F7', QC:'#14B8A6', BREAKAGE:'#EF4444', SHIPPING:'#10B981' };
+          return `<div class="bar" style="height:${pct}%;background:${colors[s]||'#1E2A3A'}">
+            <span class="count">${count}</span>
+            <span class="name">${s.replace('_',' ')}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Row -->
+  <div class="chart-grid">
+    <div class="chart-card">
+      <h3>Shipped — 14 Day Trend</h3>
+      <canvas id="shippedChart" height="200"></canvas>
+    </div>
+    <div class="chart-card">
+      <h3>WIP Distribution</h3>
+      <canvas id="wipDonut" height="200"></canvas>
+    </div>
+  </div>
+
+  <!-- Coating Machines -->
+  <div class="section">
+    <div class="section-title">Coating Machines</div>
+    <div class="coater-row">
+      ${['EB9 #1','EB9 #2','E1400'].map(name => {
+        const run = activeCoating.find(r => r.name === name);
+        if (run && run.status === 'running') {
+          const pct = Math.min(100, Math.round((run.elapsed / run.target) * 100));
+          const mm = String(run.target - run.elapsed).padStart(2,'0');
+          return `<div class="coater-card active">
+            <div class="name" style="color:#E8ECF1">${name} <span class="mono" style="font-size:10px;color:#556677;background:#070A0F;padding:2px 6px;border-radius:4px;margin-left:4px">${run.coating}</span></div>
+            <div class="timer">${mm}m remaining</div>
+            <div class="status" style="color:#8899AA">${run.jobs} jobs · ${run.elapsed}m elapsed of ${run.target}m</div>
+            <div class="bar-progress"><div class="bar-fill" style="width:${pct}%;background:#10B981"></div></div>
+          </div>`;
+        }
+        return `<div class="coater-card">
+          <div class="name" style="color:#556677">${name}</div>
+          <div class="status" style="color:#334455">IDLE</div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>
+
+  <!-- Alerts & Issues -->
+  <div class="chart-grid">
+    <div class="chart-card">
+      <h3>Active Alerts</h3>
+      <ul class="alert-list">
+        ${breakageJobs.length > 0 ? `<li class="red">🔴 ${breakageJobs.length} breakage job${breakageJobs.length>1?'s':''} (${breakageRate}% rate)</li>` : ''}
+        ${criticalAged > 0 ? `<li class="red">🔴 ${criticalAged} job${criticalAged>1?'s':''} aging >3 days — requires escalation</li>` : ''}
+        ${agedJobs > 0 ? `<li class="amber">🟡 ${agedJobs} job${agedJobs>1?'s':''} aging >24 hours</li>` : ''}
+        ${rushJobs.length > 0 ? `<li class="amber">🟡 ${rushJobs.length} rush job${rushJobs.length>1?'s':''} active</li>` : ''}
+        ${machineAlerts.length > 0 ? `<li class="amber">🟡 ${machineAlerts.length} machine alert${machineAlerts.length>1?'s':''}</li>` : ''}
+        ${invAlerts.length > 0 ? `<li class="amber">🟡 ${invAlerts.length} low-stock alert${invAlerts.length>1?'s':''}</li>` : ''}
+        ${breakageJobs.length===0 && criticalAged===0 && agedJobs===0 && rushJobs.length===0 && machineAlerts.length===0 && invAlerts.length===0 ? '<li class="green">✅ No active alerts — all systems nominal</li>' : ''}
+      </ul>
+    </div>
+    <div class="chart-card">
+      <h3>Quick Stats</h3>
+      <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px;">
+        <div style="display:flex;justify-content:space-between;"><span style="color:#8899AA;font-size:12px">Total Tracked Jobs</span><span class="mono" style="font-size:14px;font-weight:700">${allTraceJobs.length}</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:#8899AA;font-size:12px">Active WIP</span><span class="mono" style="font-size:14px;font-weight:700">${wipJobs.length}</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:#8899AA;font-size:12px">Shipped (XML Archive)</span><span class="mono" style="font-size:14px;font-weight:700">${shippedJobIndex.size}</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:#8899AA;font-size:12px">DVI Job Index</span><span class="mono" style="font-size:14px;font-weight:700">${dviJobIndex.size}</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:#8899AA;font-size:12px">SOM Devices</span><span class="mono" style="font-size:14px;font-weight:700">${somDevices.length}</span></div>
+      </div>
+    </div>
+  </div>
+
+  ${narrative ? `
+  <!-- AI Narrative -->
+  <div class="section">
+    <div class="section-title">AI Analysis</div>
+    <div class="narrative">${narrative.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>').replace(/^## (.+)$/gm,'<h2>$1</h2>').replace(/^### (.+)$/gm,'<h3>$1</h3>').replace(/^- (.+)$/gm,'• $1')}</div>
+  </div>` : ''}
+
+  <div class="footer">
+    <span>CONFIDENTIAL — Pair Eyewear Internal Operations</span>
+    <span>Generated by Lab_Assistant · ${dateStr} ${timeStr}</span>
+  </div>
+</div>
+
+<script>
+  const shippedData = ${JSON.stringify(shippedByDay)};
+  const wipData = ${JSON.stringify(stages.filter(s => (wipByStage[s]||0) > 0).map(s => ({ stage: s, count: wipByStage[s] })))};
+
+  // Shipped trend chart
+  new Chart(document.getElementById('shippedChart'), {
+    type: 'bar',
+    data: {
+      labels: shippedData.map(d => d.label),
+      datasets: [{
+        label: 'Shipped',
+        data: shippedData.map(d => d.count),
+        backgroundColor: shippedData.map(d => d.date === '${now.toISOString().slice(0,10)}' ? '#3B82F6' : '#10B98140'),
+        borderColor: shippedData.map(d => d.date === '${now.toISOString().slice(0,10)}' ? '#3B82F6' : '#10B981'),
+        borderWidth: 1,
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#556677', font: { size: 9 } }, grid: { color: '#1E2A3A' } },
+        y: { ticks: { color: '#556677' }, grid: { color: '#1E2A3A' }, beginAtZero: true }
+      }
+    }
+  });
+
+  // WIP donut
+  const wipColors = { INCOMING:'#3B82F6', AT_KARDEX:'#8B5CF6', NEL:'#F59E0B', SURFACING:'#06B6D4', COATING:'#10B981', CUTTING:'#F97316', ASSEMBLY:'#A855F7', QC:'#14B8A6', BREAKAGE:'#EF4444', SHIPPING:'#10B981', HOLD:'#6B7280', OTHER:'#334455' };
+  new Chart(document.getElementById('wipDonut'), {
+    type: 'doughnut',
+    data: {
+      labels: wipData.map(d => d.stage.replace('_',' ')),
+      datasets: [{
+        data: wipData.map(d => d.count),
+        backgroundColor: wipData.map(d => wipColors[d.stage] || '#334455'),
+        borderWidth: 0,
+      }]
+    },
+    options: {
+      responsive: true,
+      cutout: '60%',
+      plugins: {
+        legend: { position: 'right', labels: { color: '#8899AA', font: { size: 10 }, padding: 8, usePointStyle: true } }
+      }
+    }
+  });
+<\/script>
+</body>
+</html>`;
+
+      cors(res);
+      res.writeHead(200, {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Content-Disposition': `attachment; filename="ShiftReport_${now.toISOString().slice(0,10)}_${now.toISOString().slice(11,16).replace(':','')}.html"`,
+      });
+      res.end(html);
+      console.log(`[Report] Visual shift report generated (${(html.length/1024).toFixed(1)}KB)`);
+      return;
+    } catch(e) {
+      console.error('[Report] Visual report error:', e);
+      return json(res, { ok:false, error: e.message }, 500);
+    }
+  }
+
+  // ── CSV Shift Report ─────────────────────────────────────────
+  // POST /api/report/csv — returns CSV with KPI + WIP pipeline data
+  if (req.method==='POST' && url.pathname==='/api/report/csv') {
+    try {
+      const body = await readBody(req);
+      const { title = 'Shift Report' } = body;
+      const now = new Date();
+      const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+      const todayMs = todayStart.getTime();
+      const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+
+      const allTraceJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
+      const wipJobs = allTraceJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
+
+      // WIP by stage
+      const stages = ['INCOMING','AT_KARDEX','NEL','SURFACING','COATING','CUTTING','ASSEMBLY','QC','HOLD','BREAKAGE','SHIPPING'];
+      const wipByStage = {};
+      for (const s of stages) wipByStage[s] = 0;
+      for (const j of wipJobs) { wipByStage[j.stage] = (wipByStage[j.stage] || 0) + 1; }
+
+      // Shipped
+      const allShipped = [];
+      for (const j of allTraceJobs) {
+        if (j.status === 'SHIPPED' && j.lastSeen) allShipped.push(j);
+      }
+      for (const [jobNum, xml] of shippedJobIndex) {
+        if (!xml.shippedAt) continue;
+        if (allShipped.find(j => j.job_id === jobNum)) continue;
+        allShipped.push({ job_id: jobNum, lastSeen: xml.shippedAt, status: 'SHIPPED' });
+      }
+      const shippedToday = allShipped.filter(j => j.lastSeen >= todayMs).length;
+      const shippedThisWeek = allShipped.filter(j => j.lastSeen >= weekStart.getTime()).length;
+
+      // Breakage / Rush / Aging
+      const breakageJobs = allTraceJobs.filter(j => j.hasBreakage || j.stage === 'BREAKAGE');
+      const breakageRate = wipJobs.length > 0 ? ((breakageJobs.length / wipJobs.length) * 100).toFixed(1) : '0.0';
+      const rushJobs = wipJobs.filter(j => j.rush === 'Y' || j.Rush === 'Y');
+      const agedJobs = wipJobs.filter(j => j.daysInLab > 1).length;
+      const criticalAged = wipJobs.filter(j => j.daysInLab > 3).length;
+
+      // SOM
+      let somDeviceCount = 0, machineAlertCount = 0;
+      try {
+        const somResult = som.getDevices ? som.getDevices() : {};
+        const somDevices = Array.isArray(somResult.devices) ? somResult.devices : (Array.isArray(somResult) ? somResult : []);
+        somDeviceCount = somDevices.length;
+        machineAlertCount = somDevices.filter(d => d.severity === 'error' || d.severity === 'warning').length;
+      } catch(e) { /* SOM unavailable */ }
+
+      const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+
+      // Build CSV
+      const rows = [
+        ['Pair Eyewear — Irvine Lens Lab — ' + title],
+        ['Generated', dateStr + ' ' + timeStr],
+        [''],
+        ['KEY PERFORMANCE INDICATORS'],
+        ['Metric', 'Value'],
+        ['Total WIP', wipJobs.length],
+        ['Shipped Today', shippedToday],
+        ['Shipped This Week', shippedThisWeek],
+        ['Rush Active', rushJobs.length],
+        ['Breakage Rate', breakageRate + '%'],
+        ['WIP >24h', agedJobs],
+        ['Critical (>3d)', criticalAged],
+        ['Machine Alerts', machineAlertCount],
+        ['SOM Devices', somDeviceCount],
+        [''],
+        ['WIP BY STAGE'],
+        ['Stage', 'Count'],
+        ...stages.map(s => [s, wipByStage[s] || 0]),
+        [''],
+        ['SHIPPED — 14 DAY HISTORY'],
+        ['Date', 'Day', 'Count'],
+      ];
+
+      // 14-day shipped history
+      for (let d = 13; d >= 0; d--) {
+        const dayDate = new Date(Date.now() - d * 86400000);
+        const key = dayDate.toISOString().slice(0, 10);
+        const label = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+        let count = 0;
+        for (const j of allShipped) {
+          if (new Date(j.lastSeen).toISOString().slice(0, 10) === key) count++;
+        }
+        rows.push([key, label, count]);
+      }
+
+      // WIP detail
+      rows.push(['']);
+      rows.push(['WIP JOB DETAIL']);
+      rows.push(['Job ID', 'Stage', 'Days In Lab', 'Rush', 'Last Seen']);
+      for (const j of wipJobs) {
+        rows.push([
+          j.job_id || j.jobId || '',
+          j.stage || '',
+          (j.daysInLab || 0).toFixed(1),
+          (j.rush === 'Y' || j.Rush === 'Y') ? 'Y' : 'N',
+          j.lastSeen ? new Date(j.lastSeen).toISOString() : ''
+        ]);
+      }
+
+      // CSV escape
+      const csvContent = rows.map(row =>
+        row.map(cell => {
+          const s = String(cell);
+          return s.includes(',') || s.includes('"') || s.includes('\n') ? '"' + s.replace(/"/g, '""') + '"' : s;
+        }).join(',')
+      ).join('\r\n');
+
+      cors(res);
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="ShiftReport_${now.toISOString().slice(0,10)}.csv"`,
+      });
+      res.end(csvContent);
+      console.log(`[Report] CSV shift report generated (${(csvContent.length/1024).toFixed(1)}KB, ${wipJobs.length} WIP jobs)`);
+      return;
+    } catch(e) {
+      console.error('[Report] CSV report error:', e);
+      return json(res, { ok:false, error: e.message }, 500);
+    }
+  }
+
   // Body: { title, content, sections, generatedBy, timestamp }
   // Returns: .docx binary stream
   if (req.method==='POST' && url.pathname==='/api/report') {
@@ -2579,7 +3184,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       const {
         Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell,
         HeadingLevel, AlignmentType, BorderStyle, WidthType, ShadingType,
-        LevelFormat, Header, Footer, PageNumber
+        LevelFormat, Header, Footer, PageNumber, PageNumberElement
       } = docxModule;
 
       const title   = body.title   || 'Lab Report';
@@ -2687,7 +3292,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
               border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'CCCCCC', space: 1 } },
               children: [
                 new TextRun({ text: 'CONFIDENTIAL — Pair Eyewear Internal Operations  ', font: 'Arial', size: 16, color: '888888' }),
-                new TextRun({ children: [new PageNumber()], font: 'Arial', size: 16, color: '888888' }),
+                new TextRun({ children: [PageNumber.CURRENT], font: 'Arial', size: 16, color: '888888' }),
               ]
             })
           ]})},
@@ -2731,6 +3336,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       });
       res.end(buffer);
       console.log(`📄 Report generated: ${filename} (${(buffer.length/1024).toFixed(1)}KB)`);
+      return;
 
     } catch(e) {
       console.error('Report generation error:', e);
