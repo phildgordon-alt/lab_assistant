@@ -140,7 +140,7 @@ const getAnthropicApiKey = (settings) => {
 
 // ── Gateway helper — calls MCP gateway or falls back to direct Anthropic ─────
 const callGateway = async (settings, question, { onChunk, agent, userId = 'web-user', context } = {}) => {
-  const gatewayUrl = settings?.gatewayUrl || 'http://localhost:3001';
+  const gatewayUrl = settings?.gatewayUrl || `http://${window.location.hostname}:3001`;
 
   // If streaming with onChunk callback, use SSE endpoint
   if (onChunk) {
@@ -209,7 +209,7 @@ const DEFAULT_SETTINGS = {
   pin: null,           // null = no PIN, otherwise 4-6 digit string
   pinEnabled: false,
   anthropicApiKey: '', // Claude API key for AI features (fallback if no gateway)
-  gatewayUrl: 'http://localhost:3001', // MCP Gateway URL
+  gatewayUrl: `http://${window.location.hostname}:3001`, // MCP Gateway URL — uses current hostname for network access
   // API Connections
   itempathUrl: '',
   itempathToken: '',
@@ -237,7 +237,7 @@ const DEFAULT_SETTINGS = {
     { id: 'eq2', categoryId: 'coaters', name: 'Satis 1200-B', serialNumber: '', location: 'Lab Floor 1' },
     { id: 'eq3', categoryId: 'coaters', name: 'Opticoat S', serialNumber: '', location: 'Lab Floor 2' },
   ],
-  serverUrl: 'http://localhost:3002',
+  serverUrl: `http://${window.location.hostname}:3002`,
   slackWebhook: '',
 };
 
@@ -286,7 +286,7 @@ function DevOpsAICard({settings,connections}){
     if(!question.trim()) return;
     setLoading(true);
     setResponse('');
-    const gwUrl = settings?.gatewayUrl || 'http://localhost:3001';
+    const gwUrl = settings?.gatewayUrl || `http://${window.location.hostname}:3001`;
     try {
       // Build context from connections
       const ctx = connections ? `Current connection status:\n${JSON.stringify(connections.connections,null,2)}` : '';
@@ -382,7 +382,7 @@ function AgentsPanel({settings}){
   const [showCreate,setShowCreate]=useState(false);
   const [newAgentName,setNewAgentName]=useState('');
   const [newAgentContent,setNewAgentContent]=useState('');
-  const gwUrl=settings?.gatewayUrl||'http://localhost:3001';
+  const gwUrl=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
 
   // Load agents on mount
   useEffect(()=>{
@@ -633,7 +633,7 @@ function DataImportPanel({settings}){
   const [dviData,setDviData]=useState(null);
   const [uploads,setUploads]=useState({uploads:[],missingDates:[],missingCount:0});
   const [error,setError]=useState(null);
-  const gwUrl=settings?.gatewayUrl||'http://localhost:3001';
+  const gwUrl=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
   const fileInputRef=useRef(null);
 
   // Load existing DVI data and upload history on mount
@@ -1082,7 +1082,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     try{
       const agent=KPI_AGENTS[modalKpi]||'ShiftReportAgent';
       const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nUse your MCP tools to get real data for this KPI. Do not use any sample or mock data.`;
-      const res=await fetch('http://localhost:3001/web/ask-sync',{
+      const res=await fetch(`http://${window.location.hostname}:3001/web/ask-sync`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({question:aiQuery,agent,userId:'kpi-modal',context})
@@ -1830,7 +1830,7 @@ function useElapsed(startedAt, running) {
 function useSlackConfig(onIncoming, setMessages){
   const KEY="la_slack_v2";
   const DEFAULTS={
-    proxyUrl:"http://localhost:3001/api/slack/messages?channel=C0AJH9LG96D",
+    proxyUrl:`http://${window.location.hostname}:3001/api/slack/messages?channel=C0AJH9LG96D`,
     channel:"lab-assistant",
     channelId:"C0AJH9LG96D"
   };
@@ -1846,7 +1846,7 @@ function useSlackConfig(onIncoming, setMessages){
     setStatus("sending");
     try{
       // Use server proxy endpoint which has the bot token
-      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || 'http://localhost:3001/api/slack/send';
+      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || `http://${window.location.hostname}:3001/api/slack/send`;
       const r=await fetch(sendUrl,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -1969,7 +1969,7 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
   useEffect(()=>{
     const fetchPutWall=async()=>{
       try{
-        const res=await fetch("http://localhost:3002/api/inventory/putwall");
+        const res=await fetch(`http://${window.location.hostname}:3002/api/inventory/putwall`);
         const data=await res.json();
         setPutWallData({
           WH1:data.WH1||{putWallCount:0,laptopCount:0,manualCount:0,totalOrders:0,putWallOrders:[]},
@@ -2179,7 +2179,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
 
   // Poll coating intelligence endpoint with config as query params
   useEffect(()=>{
-    const base=ovenServerUrl||"http://localhost:3002";
+    const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
     let active=true;
     const poll=async()=>{
       try{
@@ -2433,7 +2433,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
   const getAiBatchAdvice=async()=>{
     setAiLoading(true);setAiAdvice("");
     try{
-      const gatewayUrl='http://localhost:3001';
+      const gatewayUrl=`http://${window.location.hostname}:3001`;
       const r=await fetch(`${gatewayUrl}/web/ask`,{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -2764,7 +2764,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
                 <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>Rate this recommendation:</span>
                 {[1,2,3,4,5].map(n=>(
                   <button key={n} onClick={()=>{
-                    fetch('http://localhost:3001/web/ask-sync',{
+                    fetch(`http://${window.location.hostname}:3001/web/ask-sync`,{
                       method:'POST',headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({question:`Record feedback rating ${n}/5 for the most recent batch plan. Call get_coating_batch_history to find the latest plan ID, then note this rating.`,agent:'coating',userId:'coating-feedback'})
                     }).catch(()=>{});
@@ -3113,7 +3113,7 @@ function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
 function OvenStatusView({intel,serverUrl}){
   const [ovenHistory,setOvenHistory]=useState([]);
   useEffect(()=>{
-    const base=serverUrl||"http://localhost:3002";
+    const base=serverUrl||`http://${window.location.hostname}:3002`;
     fetch(`${base}/api/oven-runs?limit=50`).then(r=>r.json()).then(d=>setOvenHistory(d.runs||[])).catch(()=>{});
   },[serverUrl]);
 
@@ -4943,7 +4943,7 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
 // ══════════════════════════════════════════════════════════════
 // ── Claude AI Assistant Tab ───────────────────────────────────
 // ══════════════════════════════════════════════════════════════
-function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl='http://localhost:3002',settings}){
+function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl=`http://${window.location.hostname}:3002`,settings}){
   // Get coater machines from settings (fallback to MACHINES constant)
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
@@ -4971,7 +4971,7 @@ function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl='htt
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const [reportDownloading,setReportDownloading]=useState(null); // messageIdx
-  const [serverUrl,setServerUrl]=useState("http://localhost:3002");
+  const [serverUrl,setServerUrl]=useState(`http://${window.location.hostname}:3002`);
   const chatRef=useRef(null);
 
   const REPORT_KEYWORDS=["report","summary","analysis","generate","write up","breakdown","overview"];
@@ -6747,7 +6747,7 @@ function LabAssistantV2(){
   const [inspections]=useState([]);
   const [breakage,setBreakage]=useState([]);
   const [connected]=useState(true);
-  const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||"http://localhost:3002";}catch{return "http://localhost:3002";} });
+  const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||`http://${window.location.hostname}:3002`;}catch{return `http://${window.location.hostname}:3002`;} });
   const [clock,setClock]=useState(new Date());
 
   // DVI jobs from gateway + shipped stats
@@ -6783,7 +6783,7 @@ function LabAssistantV2(){
   useEffect(()=>{
     const fetchDvi=async()=>{
       try{
-        const res=await fetch("http://localhost:3002/api/dvi/jobs");
+        const res=await fetch(`http://${window.location.hostname}:3002/api/dvi/jobs`);
         if(res.ok){
           const data=await res.json();
           // Filter out CANCELED and SHIPPED jobs — only active WIP
@@ -6805,7 +6805,7 @@ function LabAssistantV2(){
   useEffect(()=>{
     const fetchBreakage=async()=>{
       try{
-        const res=await fetch("http://localhost:3002/api/breakage");
+        const res=await fetch(`http://${window.location.hostname}:3002/api/breakage`);
         if(res.ok){
           const data=await res.json();
           setBreakage(data.breakage||[]);
@@ -6822,7 +6822,7 @@ function LabAssistantV2(){
   useEffect(()=>{
     const fetchHealth=async()=>{
       try{
-        const res=await fetch("http://localhost:3002/api/health");
+        const res=await fetch(`http://${window.location.hostname}:3002/api/health`);
         if(res.ok) setSystemHealth(await res.json());
       }catch(e){ setSystemHealth({status:'down',systems:{server:{status:'down',message:e.message}}}); }
     };
@@ -6837,7 +6837,7 @@ function LabAssistantV2(){
     const stageIcon=(s)=>({INCOMING:"📥",NEL:"🔍",AT_KARDEX:"📦",SURFACING:"⚙",COATING:"🌡",CUTTING:"✂",ASSEMBLY:"🔧",QC:"🔬",SHIPPING:"📤",BREAKAGE:"💥",HOLD:"⏸"}[s]||"📡");
     const fetchEvents=async()=>{
       try{
-        const res=await fetch("http://localhost:3002/api/dvi/trace/events?limit=20");
+        const res=await fetch(`http://${window.location.hostname}:3002/api/dvi/trace/events?limit=20`);
         if(!res.ok)return;
         const data=await res.json();
         const evts=(data.events||data||[]);

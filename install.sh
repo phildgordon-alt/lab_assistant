@@ -76,7 +76,19 @@ if command -v node &>/dev/null; then
 else
   warn "Installing Node.js via Homebrew..."
   brew install node@22
+  brew link --overwrite node@22 2>/dev/null || true
+  # Ensure node/npm are on PATH now
+  export PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
   log "Node.js installed ($(node -v))"
+fi
+
+# Ensure npm is available regardless of install method
+if ! command -v npm &>/dev/null; then
+  export PATH="/opt/homebrew/opt/node@22/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+  if ! command -v npm &>/dev/null; then
+    err "npm still not found after Node install. Open a new terminal and re-run this script."
+    exit 1
+  fi
 fi
 
 # ── 4. Python 3 (required for better-sqlite3 compilation) ────────
@@ -134,13 +146,24 @@ step "Environment configuration"
 if [ ! -f ".env" ]; then
   if [ -f ".env.example" ]; then
     cp .env.example .env
-    warn "Created .env from .env.example — edit with your credentials"
   else
     cat > .env << 'ENVEOF'
-# Lab_Assistant Server Configuration
+# Lab Server (port 3002)
 PORT=3002
 
-# ItemPath / Kardex
+# SOM (Schneider) MySQL
+SOM_HOST=192.168.0.155
+SOM_PORT=3306
+SOM_USER=root
+SOM_PASSWORD=
+SOM_DATABASE=som_lms
+
+# DVI File Sync
+DVI_SYNC_HOST=192.168.0.27
+DVI_SYNC_USER=
+DVI_SYNC_PASSWORD=
+
+# ItemPath (Kardex)
 ITEMPATH_URL=https://paireyewear.itempath.com
 ITEMPATH_TOKEN=
 
@@ -148,43 +171,21 @@ ITEMPATH_TOKEN=
 LIMBLE_URL=https://api.limblecmms.com
 LIMBLE_CLIENT_ID=
 LIMBLE_CLIENT_SECRET=
-
-# SOM / Schneider Optical Machines
-SOM_HOST=192.168.0.155
-SOM_PORT=3306
-SOM_USER=root
-SOM_PASSWORD=schneider
-SOM_DATABASE=som_lms
-SOM_POLL_INTERVAL=30000
-
-# DVI File Sync (SMB)
-DVI_SYNC_HOST=192.168.0.27
-DVI_SYNC_USER=dvi
-DVI_SYNC_PASSWORD=dvi
-
-# Slack (optional)
-SLACK_BOT_TOKEN=
-SLACK_CHANNEL_ID=
-
-# AI (optional — used by server-side Slack AI responder)
-ANTHROPIC_API_KEY=
 ENVEOF
-    warn "Created .env template — edit with your credentials"
   fi
+  warn "Created .env — fill in your credentials"
 else
   log ".env already exists"
 fi
 
-if [ -d "gateway" ] && [ ! -f "gateway/.env" ]; then
+if [ ! -f "gateway/.env" ]; then
   if [ -f "gateway/.env.example" ]; then
     cp gateway/.env.example gateway/.env
-    warn "Created gateway/.env from example — edit with your credentials"
   else
     cat > gateway/.env << 'ENVEOF'
-# Gateway Configuration
-PORT=3001
-NODE_ENV=development
+# Lab Assistant API (existing system)
 LAB_ASSISTANT_API_URL=http://localhost:3002
+LAB_ASSISTANT_API_KEY=
 
 # Anthropic
 ANTHROPIC_API_KEY=
@@ -194,24 +195,32 @@ SLACK_BOT_TOKEN=
 SLACK_SIGNING_SECRET=
 SLACK_APP_TOKEN=
 
-# JWT
-JWT_SECRET=change-this-to-a-random-32-char-string
+# DVI SOAP
+DVI_SOAP_URL=https://dvirx.com:443/DVIRx/services/DVIRxSOAP
+DVI_USERNAME=
+DVI_PASSWORD=
+DVI_APPLICATION=
 
-# ItemPath (same as root .env)
+# ItemPath (Kardex)
 ITEMPATH_URL=https://paireyewear.itempath.com
 ITEMPATH_TOKEN=
 
-# Limble (same as root .env)
+# Limble CMMS
 LIMBLE_URL=https://api.limblecmms.com
 LIMBLE_CLIENT_ID=
 LIMBLE_CLIENT_SECRET=
+
+# Auth
+JWT_SECRET=change-this-to-a-random-string
+
+# Server
+PORT=3001
+NODE_ENV=development
 ENVEOF
-    warn "Created gateway/.env template — edit with your credentials"
   fi
+  warn "Created gateway/.env — fill in your credentials"
 else
-  if [ -d "gateway" ]; then
-    log "gateway/.env already exists"
-  fi
+  log "gateway/.env already exists"
 fi
 
 # ── 10. Data directories ─────────────────────────────────────────
@@ -267,18 +276,20 @@ chmod +x stop.sh
 
 log "Created start.sh and stop.sh"
 
-# ── 13. Create launchd plist for auto-start (optional) ───────────
-step "Auto-start configuration (optional)"
+# ── 13. Create launchd plists for auto-start + crash recovery ─────
+step "Auto-start configuration (all 3 services)"
 PLIST_DIR="$HOME/Library/LaunchAgents"
 PLIST_LAB="$PLIST_DIR/com.paireyewear.labassistant.server.plist"
 PLIST_GW="$PLIST_DIR/com.paireyewear.labassistant.gateway.plist"
+PLIST_FE="$PLIST_DIR/com.paireyewear.labassistant.frontend.plist"
 
 mkdir -p "$PLIST_DIR"
 
-# Find node path
-NODE_PATH=$(which node)
-NPX_PATH=$(which npx)
+# Find absolute paths to node/npx (launchd doesn't inherit shell PATH)
+NODE_PATH=$(which node || echo "/opt/homebrew/bin/node")
+NPX_PATH=$(which npx || echo "/opt/homebrew/bin/npx")
 
+# -- Lab Server (port 3002) --
 cat > "$PLIST_LAB" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -298,12 +309,14 @@ cat > "$PLIST_LAB" << PLISTEOF
     <key>NODE_OPTIONS</key>
     <string>--openssl-legacy-provider</string>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/opt/homebrew/bin:/opt/homebrew/opt/node@22/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>StandardOutPath</key>
   <string>$INSTALL_DIR/server/data/lab-server.log</string>
   <key>StandardErrorPath</key>
@@ -312,6 +325,7 @@ cat > "$PLIST_LAB" << PLISTEOF
 </plist>
 PLISTEOF
 
+# -- Gateway (port 3001) --
 cat > "$PLIST_GW" << PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -330,12 +344,14 @@ cat > "$PLIST_GW" << PLISTEOF
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/opt/homebrew/bin:/opt/homebrew/opt/node@22/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>StandardOutPath</key>
   <string>$INSTALL_DIR/server/data/gateway.log</string>
   <key>StandardErrorPath</key>
@@ -344,15 +360,53 @@ cat > "$PLIST_GW" << PLISTEOF
 </plist>
 PLISTEOF
 
-# Load plists to enable auto-start and start now
+# -- Frontend (port 5173) --
+cat > "$PLIST_FE" << PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.paireyewear.labassistant.frontend</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$NPX_PATH</string>
+    <string>vite</string>
+    <string>--host</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>$INSTALL_DIR</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/opt/node@22/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>StandardOutPath</key>
+  <string>$INSTALL_DIR/server/data/frontend.log</string>
+  <key>StandardErrorPath</key>
+  <string>$INSTALL_DIR/server/data/frontend-error.log</string>
+</dict>
+</plist>
+PLISTEOF
+
+# Unload any old versions, then load all three
 launchctl unload "$PLIST_LAB" 2>/dev/null || true
 launchctl unload "$PLIST_GW" 2>/dev/null || true
+launchctl unload "$PLIST_FE" 2>/dev/null || true
 launchctl load "$PLIST_LAB"
 launchctl load "$PLIST_GW"
-log "Auto-start enabled — both servers will run at login and restart if they crash"
-echo "    To disable auto-start:"
-echo "      launchctl unload $PLIST_LAB"
-echo "      launchctl unload $PLIST_GW"
+launchctl load "$PLIST_FE"
+log "Auto-start enabled for all 3 services"
+echo "    Lab Server  → port 3002 (auto-restart on crash)"
+echo "    Gateway     → port 3001 (auto-restart on crash)"
+echo "    Frontend    → port 5173 (auto-restart on crash)"
+echo "    All start automatically on login/reboot"
 
 # ── 14. Verify ────────────────────────────────────────────────────
 step "Verification"
@@ -374,16 +428,20 @@ else
 fi
 
 echo ""
-echo -e "${BOLD}Quick Start:${NC}"
-echo "  1. Edit .env and gateway/.env with your credentials"
-echo "  2. ./start.sh                  — Start both servers"
-echo "  3. npm run dev                 — Start frontend (dev mode)"
-echo "  4. Open http://localhost:5173  — Lab_Assistant UI"
+LOCAL_IP=$(ipconfig getifaddr en0 2>/dev/null || echo "localhost")
+echo -e "${BOLD}All 3 services are running and will auto-start on reboot:${NC}"
+echo "  Lab Server  → http://$LOCAL_IP:3002"
+echo "  Gateway     → http://$LOCAL_IP:3001"
+echo "  Frontend    → http://$LOCAL_IP:5173"
 echo ""
-echo -e "${BOLD}Modes:${NC}"
-echo "  http://localhost:5173              — Full desktop"
-echo "  http://localhost:5173/?mode=tablet — Tablet (touch-optimized)"
-echo "  http://localhost:5173/?mode=corporate — Corporate (read-only)"
+echo -e "${BOLD}Access from any device on the network:${NC}"
+echo "  http://$LOCAL_IP:5173              — Full desktop"
+echo "  http://$LOCAL_IP:5173/?mode=tablet — Tablet (touch-optimized)"
+echo "  http://$LOCAL_IP:5173/?mode=corporate — Corporate (read-only)"
+echo ""
+echo -e "${BOLD}Manual controls:${NC}"
+echo "  ./start.sh   — Start all services"
+echo "  ./stop.sh    — Stop all services"
 echo ""
 echo -e "${BOLD}Standalone apps (open directly in browser):${NC}"
 echo "  standalone/OvenTimer.html"

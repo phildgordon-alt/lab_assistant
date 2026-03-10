@@ -84,7 +84,9 @@ const anthropic = new Anthropic({
 });
 
 // Model to use for all agents
-const MODEL = 'claude-sonnet-4-20250514';
+// Haiku is 10x cheaper and faster — stays well within rate limits
+// Switch to claude-sonnet-4-20250514 after upgrading Anthropic tier ($5 deposit → 40K tokens/min)
+const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 2048;
 
 // Retry helper for 429 rate limit errors

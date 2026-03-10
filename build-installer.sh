@@ -42,13 +42,13 @@ log "Build directory ready"
 # ── Build frontend first ──────────────────────────────────────────
 step "Building frontend"
 cd "$ROOT"
-npm run build 2>/dev/null && log "Frontend built to dist/" || warn "Frontend build skipped"
+npm run build </dev/null 2>/dev/null && log "Frontend built to dist/" || warn "Frontend build skipped"
 
 # ── Copy source files (exclude unneeded) ──────────────────────────
 step "Copying source files"
 
 # Use rsync to copy only what's needed
-rsync -a --progress \
+rsync -a \
   --exclude='node_modules' \
   --exclude='.git' \
   --exclude='.build-pkg' \
@@ -95,13 +95,8 @@ echo "Installing for user: $REAL_USER (home: $REAL_HOME)"
 # ── 1. Xcode Command Line Tools ──────────────────────────────────
 echo ">> Checking Xcode Command Line Tools..."
 if ! xcode-select -p &>/dev/null; then
-  echo "   Installing Xcode CLT (this may take a few minutes)..."
-  touch /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
-  PROD=$(softwareupdate -l | grep "\*.*Command Line Tools" | tail -1 | sed 's/^[^C]*//')
-  if [ -n "$PROD" ]; then
-    softwareupdate -i "$PROD" --verbose 2>&1 || true
-  fi
-  rm -f /tmp/.com.apple.dt.CommandLineTools.installondemand.in-progress
+  echo "   Xcode CLT not found — please install manually: xcode-select --install"
+  echo "   Continuing without it (may affect native module builds)..."
 fi
 echo "   Xcode CLT: OK"
 
@@ -114,7 +109,7 @@ elif [ -f /usr/local/bin/brew ]; then
   BREW_PATH="/usr/local/bin/brew"
 else
   echo "   Installing Homebrew..."
-  sudo -u "$REAL_USER" /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" || true
+  sudo -u "$REAL_USER" NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" </dev/null || true
   if [ -f /opt/homebrew/bin/brew ]; then
     BREW_PATH="/opt/homebrew/bin/brew"
   else
@@ -144,12 +139,12 @@ echo "   Python 3: $(python3 --version 2>/dev/null || echo 'not found')"
 # ── 5. Install npm dependencies ──────────────────────────────────
 echo ">> Installing root dependencies..."
 cd "$INSTALL_DIR"
-sudo -u "$REAL_USER" npm install --production 2>&1 || npm install --production 2>&1
+sudo -u "$REAL_USER" npm install --production --prefer-offline --no-audit --no-fund </dev/null 2>&1 || npm install --production --prefer-offline --no-audit --no-fund </dev/null 2>&1
 echo "   Root dependencies: OK"
 
 echo ">> Installing gateway dependencies..."
 cd "$INSTALL_DIR/gateway"
-sudo -u "$REAL_USER" npm install --production 2>&1 || npm install --production 2>&1
+sudo -u "$REAL_USER" npm install --production --prefer-offline --no-audit --no-fund </dev/null 2>&1 || npm install --production --prefer-offline --no-audit --no-fund </dev/null 2>&1
 echo "   Gateway dependencies: OK"
 
 cd "$INSTALL_DIR"
@@ -242,7 +237,7 @@ chown "$REAL_USER" "$INSTALL_DIR/.env" "$INSTALL_DIR/gateway/.env" 2>/dev/null |
 # ── 8. Build frontend ────────────────────────────────────────────
 echo ">> Building frontend..."
 cd "$INSTALL_DIR"
-sudo -u "$REAL_USER" npm run build 2>&1 || echo "   Frontend build skipped (dev mode still works)"
+sudo -u "$REAL_USER" npm run build </dev/null 2>&1 || echo "   Frontend build skipped (dev mode still works)"
 
 # ── 9. Create start/stop scripts ─────────────────────────────────
 echo ">> Creating start/stop scripts..."

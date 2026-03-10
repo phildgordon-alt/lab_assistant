@@ -2708,6 +2708,16 @@ async function start(): Promise<void> {
   });
 }
 
+// Prevent Slack auth errors from crashing the whole gateway
+process.on('unhandledRejection', (reason: any) => {
+  const msg = reason?.message || String(reason);
+  if (msg.includes('invalid_auth') || msg.includes('slack') || msg.includes('socket-mode')) {
+    log.warn('Slack connection failed (non-fatal):', msg);
+  } else {
+    log.error('Unhandled rejection:', reason);
+  }
+});
+
 console.log('[DEBUG] Calling start()...');
 start().catch((error) => {
   console.error('[DEBUG] start() failed:', error);
