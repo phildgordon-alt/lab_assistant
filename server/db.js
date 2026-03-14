@@ -682,13 +682,18 @@ function upsertJobs(jobs, dataDate) {
     SELECT id, invoice, tray, stage, coating, rush, entry_date, days_in_lab FROM dvi_jobs WHERE archived = 0
   `).all();
 
-  // Archive jobs that are no longer in the current set (they were shipped/completed)
+  // Archive jobs that are no longer in the current set AND were in SHIPPING stage
+  // Only SHIPPING-stage jobs should be considered "shipped" — other disappearances
+  // are data glitches, restarts, or canceled jobs (not real shipments)
   const archiveStmt = db.prepare(`
     UPDATE dvi_jobs SET archived = 1, shipped_at = datetime('now') WHERE id = ?
   `);
   const historyStmt = db.prepare(`
     INSERT INTO dvi_jobs_history (job_id, invoice, tray, stage, coating, rush, entry_date, days_in_lab, shipped_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `);
+  const archiveCancelStmt = db.prepare(`
+    UPDATE dvi_jobs SET archived = 1 WHERE id = ?
   `);
 
   // Update daily stats
@@ -700,21 +705,27 @@ function upsertJobs(jobs, dataDate) {
   const archiveCompleted = db.transaction(() => {
     for (const existing of existingJobs) {
       if (!currentIds.has(existing.id)) {
-        // This job is no longer active - archive it and record history
-        archiveStmt.run(existing.id);
-        historyStmt.run(
-          existing.id,
-          existing.invoice,
-          existing.tray,
-          existing.stage,
-          existing.coating,
-          existing.rush,
-          existing.entry_date,
-          existing.days_in_lab
-        );
-        shippedCount++;
-        if (existing.rush === 'Y') rushShipped++;
-        if (existing.days_in_lab) totalDaysInLab += existing.days_in_lab;
+        // Only count as shipped if the job was in SHIPPING stage
+        const wasShipping = (existing.stage || '').toUpperCase() === 'SHIPPING';
+        if (wasShipping) {
+          archiveStmt.run(existing.id);
+          historyStmt.run(
+            existing.id,
+            existing.invoice,
+            existing.tray,
+            existing.stage,
+            existing.coating,
+            existing.rush,
+            existing.entry_date,
+            existing.days_in_lab
+          );
+          shippedCount++;
+          if (existing.rush === 'Y') rushShipped++;
+          if (existing.days_in_lab) totalDaysInLab += existing.days_in_lab;
+        } else {
+          // Not shipping — just archive, don't record as shipped
+          archiveCancelStmt.run(existing.id);
+        }
       }
     }
   });
