@@ -298,6 +298,47 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_coating_stage ON coating_queue(stage);
   CREATE INDEX IF NOT EXISTS idx_coating_rush ON coating_queue(rush);
 
+  -- Container registry (tools, oven trays, coating batches)
+  CREATE TABLE IF NOT EXISTS containers (
+    id TEXT PRIMARY KEY,                    -- e.g. TOOL-006, TRAY-003, BATCH-041
+    type TEXT NOT NULL,                     -- tool | oven_tray | coating_batch
+    status TEXT NOT NULL DEFAULT 'open',    -- open | closed | consumed
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    closed_at TEXT,
+    consumed_at TEXT,
+    operator_id TEXT,
+    machine_id TEXT,                        -- for batches: which coating machine
+    coating_type TEXT,                      -- AR, BLUE_CUT, HARD_COAT, etc.
+    notes TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_containers_type_status ON containers(type, status);
+  CREATE INDEX IF NOT EXISTS idx_containers_status ON containers(status);
+
+  -- Jobs written once at scan station, tool level only
+  CREATE TABLE IF NOT EXISTS container_jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    container_id TEXT NOT NULL REFERENCES containers(id),
+    job_number TEXT NOT NULL,
+    eye_side TEXT NOT NULL,                 -- L or R
+    ocr_confidence REAL,                   -- null if manually entered
+    entry_method TEXT NOT NULL DEFAULT 'ocr',  -- ocr | manual
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(container_id, job_number, eye_side)
+  );
+  CREATE INDEX IF NOT EXISTS idx_container_jobs_container ON container_jobs(container_id);
+  CREATE INDEX IF NOT EXISTS idx_container_jobs_job ON container_jobs(job_number);
+
+  -- Parent/child container relationships
+  CREATE TABLE IF NOT EXISTS container_contents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id TEXT NOT NULL REFERENCES containers(id),
+    child_id TEXT NOT NULL REFERENCES containers(id),
+    loaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(parent_id, child_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_container_contents_parent ON container_contents(parent_id);
+  CREATE INDEX IF NOT EXISTS idx_container_contents_child ON container_contents(child_id);
+
   -- ═══════════════════════════════════════════════════════════════════════════
   -- WARM LAYER: Pre-aggregated summaries (auto-refresh on hot layer writes)
   -- Agent queries hit these, not raw data

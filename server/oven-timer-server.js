@@ -51,6 +51,9 @@ som.start();
 const network = require('./network-adapter');
 network.start();
 
+// ── Container Inheritance (Coating Pipeline) ────────────────────
+const containers = require('./container-service');
+
 // ── Early Warning System ────────────────────────────────────────
 const ews = require('./ews-engine');
 const ewsCollectors = require('./ews-collectors');
@@ -3446,6 +3449,85 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       matchRate: scans.length > 0 ? Math.round(scans.filter(s => s.matched).length / scans.length * 100) : 0,
       lastScan: lastScan ? { jobNumber: lastScan.jobNumber, matched: lastScan.matched, at: lastScan.scannedAt } : null
     });
+  }
+
+  // ── Containers (Coating Pipeline Inheritance) ──────────────
+
+  // GET /api/containers/active — all active containers grouped by type
+  if (req.method==='GET' && url.pathname==='/api/containers/active') {
+    try { return json(res, containers.getActiveContainers()); }
+    catch(e) { return json(res, {error:e.message}, 500); }
+  }
+
+  // GET /api/containers/:id/manifest — job manifest for any container
+  if (req.method==='GET' && url.pathname.match(/^\/api\/containers\/[^/]+\/manifest$/)) {
+    const id = decodeURIComponent(url.pathname.split('/')[3]);
+    try { return json(res, { container_id:id, ...containers.getContainerDetails(id), jobs:containers.getManifest(id) }); }
+    catch(e) { return json(res, {error:e.message}, e.code==='NOT_FOUND'?404:500); }
+  }
+
+  // GET /api/containers/:id/location?job_number=X — find job in pipeline
+  if (req.method==='GET' && url.pathname.match(/^\/api\/containers\/[^/]+\/location$/)) {
+    const jobNumber = url.searchParams.get('job_number');
+    if (!jobNumber) { return json(res, {error:'job_number required'}, 400); }
+    try { return json(res, containers.getJobLocation(jobNumber)); }
+    catch(e) { return json(res, {error:e.message}, e.code==='NOT_FOUND'?404:500); }
+  }
+
+  // GET /api/containers/:id — container details
+  if (req.method==='GET' && url.pathname.match(/^\/api\/containers\/[^/]+$/) && !url.pathname.includes('/active')) {
+    const id = decodeURIComponent(url.pathname.split('/')[3]);
+    try { return json(res, containers.getContainerDetails(id)); }
+    catch(e) { return json(res, {error:e.message}, e.code==='NOT_FOUND'?404:500); }
+  }
+
+  // POST /api/containers/tool-session/open
+  if (req.method==='POST' && url.pathname==='/api/containers/tool-session/open') {
+    const body = await readBody(req);
+    try { return json(res, containers.openToolSession(body.tool_id, body.operator_id)); }
+    catch(e) { return json(res, {error:e.message, code:e.code}, e.code==='TOOL_ALREADY_OPEN'?409:400); }
+  }
+
+  // POST /api/containers/tool-session/add-job
+  if (req.method==='POST' && url.pathname==='/api/containers/tool-session/add-job') {
+    const body = await readBody(req);
+    try { return json(res, containers.addJobToTool(body.tool_id, body.job_number, body.eye_side, body.ocr_confidence, body.entry_method||'ocr')); }
+    catch(e) { return json(res, {error:e.message, code:e.code}, e.code==='DUPLICATE_JOB'?409:400); }
+  }
+
+  // POST /api/containers/tool-session/close
+  if (req.method==='POST' && url.pathname==='/api/containers/tool-session/close') {
+    const body = await readBody(req);
+    try { return json(res, containers.closeToolSession(body.tool_id)); }
+    catch(e) { return json(res, {error:e.message}, 400); }
+  }
+
+  // POST /api/containers/transfer/tool-to-tray
+  if (req.method==='POST' && url.pathname==='/api/containers/transfer/tool-to-tray') {
+    const body = await readBody(req);
+    try { return json(res, containers.transferToolsToTray(body.tray_id, body.tool_ids, body.operator_id)); }
+    catch(e) { return json(res, {error:e.message, code:e.code}, 400); }
+  }
+
+  // POST /api/containers/tray/close
+  if (req.method==='POST' && url.pathname==='/api/containers/tray/close') {
+    const body = await readBody(req);
+    try { return json(res, containers.closeTray(body.tray_id)); }
+    catch(e) { return json(res, {error:e.message}, 400); }
+  }
+
+  // POST /api/containers/transfer/tray-to-batch
+  if (req.method==='POST' && url.pathname==='/api/containers/transfer/tray-to-batch') {
+    const body = await readBody(req);
+    try { return json(res, containers.transferTraysToBatch(body.batch_id, body.tray_ids, body.machine_id, body.coating_type, body.operator_id)); }
+    catch(e) { return json(res, {error:e.message, code:e.code}, 400); }
+  }
+
+  // GET /api/containers/orphaned?hours=4 — find orphaned tool sessions
+  if (req.method==='GET' && url.pathname==='/api/containers/orphaned') {
+    const hours = parseInt(url.searchParams.get('hours') || '4');
+    try { return json(res, containers.findOrphanedSessions(hours)); }
+    catch(e) { return json(res, {error:e.message}, 500); }
   }
 
   // ── Network (UniFi) ───────────────────────────────────────
