@@ -239,6 +239,7 @@ const DEFAULT_SETTINGS = {
   ],
   serverUrl: `http://${window.location.hostname}:3002`,
   slackWebhook: '',
+  demoMode: false,
 };
 
 const mono = "'JetBrains Mono','Fira Code',monospace";
@@ -4762,6 +4763,67 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
         </div>
       </Card>
 
+      {/* Operator Merge — map DVI initials to operator names */}
+      {showAssign && (
+        <Card style={{ marginBottom: 20 }}>
+          <SectionHeader>Operator Merge (DVI Initials → Name)</SectionHeader>
+          <p style={{ fontSize: 11, color: T.textDim, fontFamily: mono, margin: '4px 0 12px' }}>
+            Map DVI initials to an operator name. Jobs from those initials merge into that operator's count.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 12 }}>
+            {Object.entries(localOpMap).map(([init, name]) => (
+              <div key={init} style={{ display: 'flex', alignItems: 'center', gap: 6, background: `${T.purple}15`, border: `1px solid ${T.purple}40`, borderRadius: 6, padding: '4px 10px' }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: T.purple, fontFamily: mono }}>{init}</span>
+                <span style={{ fontSize: 10, color: T.textDim }}>→</span>
+                <span style={{ fontSize: 12, color: T.text, fontFamily: mono }}>{name}</span>
+                <button onClick={() => { const m = { ...localOpMap }; delete m[init]; saveAssignments(null, m); }}
+                  style={{ background: 'none', border: 'none', color: T.red, cursor: 'pointer', fontSize: 11, padding: '0 2px' }}>×</button>
+              </div>
+            ))}
+          </div>
+          <form onSubmit={e => {
+            e.preventDefault();
+            const fd = new FormData(e.target);
+            const init = (fd.get('init') || '').trim().toUpperCase();
+            const name = (fd.get('name') || '').trim();
+            if (init && name) {
+              const m = { ...localOpMap, [init]: name };
+              saveAssignments(null, m);
+              e.target.reset();
+            }
+          }} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <input name="init" placeholder="Initials (e.g. AF)" maxLength={4}
+              style={{ width: 80, padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 11, fontFamily: mono }} />
+            <span style={{ color: T.textDim, fontSize: 11 }}>→</span>
+            <input name="name" placeholder="Operator name" list="asm-op-names"
+              style={{ width: 150, padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 11, fontFamily: mono }} />
+            <datalist id="asm-op-names">
+              {[...new Set(Object.values(localAssignments).map(a => a.operatorName))].map(n => <option key={n} value={n} />)}
+            </datalist>
+            <button type="submit" style={{ padding: '6px 12px', background: T.purple, border: 'none', borderRadius: 6, color: '#fff', fontSize: 11, fontFamily: mono, cursor: 'pointer', fontWeight: 700 }}>+ Merge</button>
+          </form>
+          {/* Show unmatched initials from DVI trace */}
+          {asmData?.operatorStats && (() => {
+            const mapped = new Set(Object.keys(localOpMap).map(k => k.toUpperCase()));
+            const assigned = new Set(Object.values(localAssignments).map(a => a.operatorName.toUpperCase()));
+            const unmatched = Object.keys(asmData.operatorStats).filter(init => !mapped.has(init.toUpperCase()) && !assigned.has(init.toUpperCase()));
+            if (unmatched.length === 0) return null;
+            return (
+              <div style={{ marginTop: 10, padding: '8px 10px', background: `${T.amber}10`, borderRadius: 6, border: `1px solid ${T.amber}30` }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: T.amber, marginBottom: 4, fontFamily: mono }}>UNMERGED DVI INITIALS:</div>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {unmatched.map(init => (
+                    <span key={init} style={{ fontSize: 11, color: T.text, fontFamily: mono, background: T.bg, padding: '2px 8px', borderRadius: 4, border: `1px solid ${T.border}` }}>
+                      {init} ({asmData.operatorStats[init]?.jobs || 0} jobs)
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </Card>
+      )}
+
       {/* Leaderboard — uses station assignments to attribute completions */}
       {asmData && (() => {
         const stnComp = asmData.stationCompletions || {};
@@ -5588,6 +5650,497 @@ function BreakageHistory({breakage}){
         })}
       </div>
     </Card>
+  );
+}
+
+// ── Early Warning System Tab ─────────────────────────────────
+function EarlyWarningTab({ovenServerUrl,settings}){
+  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const mono="'JetBrains Mono',monospace";
+
+  const [alerts,setAlerts]=useState([]);
+  const [health,setHealth]=useState(null);
+  const [baselines,setBaselines]=useState([]);
+  const [filter,setFilter]=useState("all");
+  const [expanded,setExpanded]=useState(null);
+  const [lastRefresh,setLastRefresh]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
+  const [selectedMetric,setSelectedMetric]=useState(null);
+  const [metricHistory,setMetricHistory]=useState([]);
+  const [situationReport,setSituationReport]=useState(null);
+  const [aiLoading,setAiLoading]=useState(false);
+
+  // Tier config
+  const TIER={
+    P1:{color:"#ef4444",bg:"rgba(239,68,68,0.08)",border:"rgba(239,68,68,0.25)",label:"CRITICAL",pulse:true},
+    P2:{color:"#f59e0b",bg:"rgba(245,158,11,0.06)",border:"rgba(245,158,11,0.2)",label:"WARNING",pulse:false},
+    P3:{color:"#3b82f6",bg:"rgba(59,130,246,0.05)",border:"rgba(59,130,246,0.15)",label:"WATCH",pulse:false},
+    P4:{color:"#334155",bg:"transparent",border:"#1e2d3d",label:"INFO",pulse:false},
+  };
+
+  // ── DEMO DATA ──────────────────────────────────────────────
+  const DEMO_ALERTS=[
+    {id:"demo_som_error",tier:"P1",status:"firing",system:"SOM",metric:"som_devices_in_error",
+      message:"CRITICAL: 2 machines in error state — CCL-2 (SERR) and DBA-1 (SERR). Production line at risk.",
+      detail:"Two Schneider machines reporting error status. Check SOM Control Center for fault codes. CCL-2 last ran 14 min ago. DBA-1 showing E-047 (spindle overtemp).",
+      deviation:4.2,baseline:0.1,current_val:2,unit:"devices",fired_at:new Date(Date.now()-420000).toISOString(),acknowledged_at:null},
+    {id:"demo_throughput",tier:"P1",status:"firing",system:"DVI",metric:"dvi_throughput_per_hour",
+      message:"DVI throughput 12 jobs/hr — 3.1σ below baseline (normal: 38±8 jobs/hr)",
+      detail:"Production throughput dropped sharply in the last 30 minutes. Correlates with SOM machine errors. Surfacing queue building — 11 jobs waiting.",
+      deviation:3.1,baseline:38,current_val:12,unit:"jobs/hr",fired_at:new Date(Date.now()-600000).toISOString(),acknowledged_at:null},
+    {id:"demo_wip_pileup",tier:"P2",status:"firing",system:"DVI",metric:"dvi_wip_pileup",
+      message:"WARNING: 47 jobs piled up in SURFACING zone — 2.8σ above normal",
+      detail:"WIP accumulating in surfacing. Downstream from picking, upstream of coating. Likely caused by machine downtime in surfacing.",
+      deviation:2.8,baseline:18,current_val:47,unit:"jobs in single zone",fired_at:new Date(Date.now()-540000).toISOString(),acknowledged_at:null},
+    {id:"demo_breakage",tier:"P2",status:"firing",system:"Production",metric:"breakage_rate",
+      message:"WARNING: 7 breakages today — 2.4σ above baseline (normal: 2.1±2.0/day)",
+      detail:"Elevated breakage rate. 4 in surfacing (SUR-01 surface scratch), 2 in cutting (EDG-01 chip), 1 in assembly. Surfacing breakage correlates with tool wear pattern.",
+      deviation:2.4,baseline:2.1,current_val:7,unit:"breaks/day",fired_at:new Date(Date.now()-1800000).toISOString(),acknowledged_at:null},
+    {id:"demo_consumption",tier:"P2",status:"firing",system:"ItemPath",metric:"itempath_consumption_rate",
+      message:"WARNING: Lens blank consumption 42 picks/hr — 2.1σ above normal (baseline: 28±6.5/hr)",
+      detail:"Excessive lens consumption likely driven by elevated breakage/remake rate. Check if remakes are inflating pick counts.",
+      deviation:2.1,baseline:28,current_val:42,unit:"picks/hr",fired_at:new Date(Date.now()-3600000).toISOString(),acknowledged_at:null},
+    {id:"demo_cycle_time",tier:"P3",status:"watch",system:"Surfacing",metric:"cycle_time_surfacing",
+      message:"Surfacing avg cycle time trending up — 1.6σ above 30d baseline (23.4 min vs 18.2 normal)",
+      detail:"Cycle time drift over last 2 hours. Consistent with tool wear pattern. Check diamond point condition on CNC lathes.",
+      deviation:1.6,baseline:18.2,current_val:23.4,unit:"min/job",fired_at:new Date(Date.now()-7200000).toISOString(),acknowledged_at:null},
+    {id:"demo_pattern_tool_wear",tier:"P2",status:"firing",system:"Pattern",metric:"tool-wear-degradation",
+      message:"AI PATTERN: Tool wear degradation detected in Surfacing — cycle time up + breakage up + throughput down",
+      detail:"Pattern match: 3/3 conditions met (100% confidence). Recommend immediate tool inspection on surfacing lathes. Check diamond point hours since last change.",
+      deviation:1.0,baseline:null,current_val:null,unit:null,fired_at:new Date(Date.now()-900000).toISOString(),acknowledged_at:null,auto_correlated:"tool-wear-degradation"},
+    {id:"demo_resolved",tier:"P2",status:"resolved",system:"ItemPath",metric:"itempath_stockouts",
+      message:"RESOLVED: Stockout on CR39-SV-70-AR cleared — replenishment received",
+      detail:"Kardex bin restocked at 09:47. 120 units received from Philippines shipment.",
+      deviation:null,baseline:null,current_val:0,unit:"SKUs",fired_at:new Date(Date.now()-86400000).toISOString(),resolved_at:new Date(Date.now()-82800000).toISOString(),acknowledged_at:new Date(Date.now()-85000000).toISOString()},
+  ];
+  const DEMO_HEALTH={status:"warning",lastPoll:new Date().toISOString(),lastPollDuration:245,pollCount:48,pollInterval:300,
+    collectors:["som_machines","itempath_inventory","dvi_production","breakage","maintenance","oven_timers"],
+    totalReadings:1247,totalAlertsFired:12,activeAlerts:{p1:2,p2:4,p3:1,total:7},thresholds:{P1:3.5,P2:2.5,P3:1.5},baselineDays:30};
+  const DEMO_BASELINES=[
+    {metric:"dvi_throughput_per_hour",shift_slot:"morning",day_of_week:1,mean:38,stddev:8,sample_n:84},
+    {metric:"breakage_rate",shift_slot:"morning",day_of_week:1,mean:2.1,stddev:2.0,sample_n:84},
+    {metric:"itempath_consumption_rate",shift_slot:"morning",day_of_week:1,mean:28,stddev:6.5,sample_n:84},
+    {metric:"som_devices_in_error",shift_slot:"morning",day_of_week:1,mean:0.1,stddev:0.3,sample_n:84},
+    {metric:"cycle_time_surfacing",shift_slot:"morning",day_of_week:1,mean:18.2,stddev:3.2,sample_n:84},
+    {metric:"dvi_wip_pileup",shift_slot:"morning",day_of_week:1,mean:18,stddev:10,sample_n:84},
+  ];
+  const isDemo=settings?.demoMode||false;
+
+  // Fetch alerts + health
+  const fetchData=useCallback(async()=>{
+    if(isDemo){
+      setAlerts(DEMO_ALERTS);setHealth(DEMO_HEALTH);setBaselines(DEMO_BASELINES);
+      setLastRefresh(new Date());setLoading(false);setError(null);return;
+    }
+    try{
+      const[aRes,hRes,bRes]=await Promise.all([
+        fetch(`${base}/api/ews/alerts?filter=${filter==="resolved"?"all":"active"}`),
+        fetch(`${base}/api/ews/health`),
+        fetch(`${base}/api/ews/baselines`),
+      ]);
+      if(aRes.ok){const d=await aRes.json();setAlerts(Array.isArray(d)?d:[]);}
+      if(hRes.ok) setHealth(await hRes.json());
+      if(bRes.ok) setBaselines(await bRes.json());
+      setLastRefresh(new Date());
+      setError(null);
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  },[base,filter,isDemo]);
+
+  useEffect(()=>{fetchData();const t=setInterval(fetchData,15000);return()=>clearInterval(t);},[fetchData]);
+
+  // Fetch metric history when selected
+  useEffect(()=>{
+    if(!selectedMetric)return;
+    if(isDemo){
+      // Generate synthetic history for demo
+      const bl=DEMO_BASELINES.find(b=>b.metric===selectedMetric);
+      const mean=bl?.mean||50,std=bl?.stddev||10;
+      const hist=Array.from({length:24},(_,i)=>({
+        metric:selectedMetric,value:Math.round((mean+(Math.random()-0.4)*std*2)*10)/10,
+        unit:bl?.unit||"",ts:new Date(Date.now()-(23-i)*300000).toISOString()
+      }));
+      setMetricHistory(hist);return;
+    }
+    fetch(`${base}/api/ews/history?metric=${encodeURIComponent(selectedMetric)}&limit=48`)
+      .then(r=>r.ok?r.json():[]).then(setMetricHistory).catch(()=>{});
+  },[selectedMetric,base,isDemo]);
+
+  // Filtered alerts
+  const filtered=useMemo(()=>{
+    if(!Array.isArray(alerts))return[];
+    return alerts.filter(a=>{
+      if(filter==="all")return a.status!=="resolved";
+      if(filter==="resolved")return a.status==="resolved";
+      if(filter==="firing")return a.status==="firing";
+      if(filter==="watch")return a.status==="watch";
+      return a.tier===filter&&a.status!=="resolved";
+    });
+  },[alerts,filter]);
+
+  // Alert counts
+  const p1=alerts.filter(a=>a.tier==="P1"&&a.status==="firing").length;
+  const p2=alerts.filter(a=>a.tier==="P2"&&a.status==="firing").length;
+  const p3=alerts.filter(a=>a.tier==="P3"&&a.status!=="resolved").length;
+  const firing=alerts.filter(a=>a.status==="firing").length;
+  const unacked=alerts.filter(a=>!a.acknowledged_at&&a.status==="firing").length;
+  const watching=alerts.filter(a=>a.status==="watch").length;
+  const resolved=alerts.filter(a=>a.status==="resolved").length;
+
+  // Acknowledge / resolve
+  const ack=async(id)=>{
+    await fetch(`${base}/api/ews/alerts/${encodeURIComponent(id)}/ack`,{method:"POST"});
+    fetchData();
+  };
+  const resolve=async(id)=>{
+    await fetch(`${base}/api/ews/alerts/${encodeURIComponent(id)}/resolve`,{method:"POST"});
+    fetchData();
+  };
+  const forceRefresh=async()=>{
+    setLoading(true);
+    await fetch(`${base}/api/ews/refresh`,{method:"POST"});
+    await fetchData();
+  };
+
+  // Time since helper
+  const timeSince=(iso)=>{
+    if(!iso)return"—";
+    const diff=Date.now()-new Date(iso).getTime();
+    const m=Math.floor(diff/60000);
+    if(m<1)return"just now";
+    if(m<60)return`${m}m ago`;
+    const h=Math.floor(m/60);
+    if(h<24)return`${h}h ago`;
+    return`${Math.floor(h/24)}d ago`;
+  };
+
+  // Sparkline SVG
+  const Sparkline=({data,color})=>{
+    if(!data||data.length<2)return null;
+    const w=120,h=32,pad=2;
+    const vals=data.map(d=>typeof d==="object"?d.value:d);
+    const min=Math.min(...vals),max=Math.max(...vals),range=max-min||1;
+    const pts=vals.map((v,i)=>{
+      const x=pad+(i/(vals.length-1))*(w-pad*2);
+      const y=h-pad-((v-min)/range)*(h-pad*2);
+      return`${x},${y}`;
+    }).join(" ");
+    const last=pts.split(" ").pop().split(",");
+    return(
+      <svg width={w} height={h} style={{display:"block"}}>
+        <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" opacity="0.7"/>
+        <circle cx={last[0]} cy={last[1]} r="2.5" fill={color}/>
+      </svg>
+    );
+  };
+
+  // AI Situation Report
+  const getSituationReport=async()=>{
+    setAiLoading(true);setSituationReport(null);
+    const activeAlerts=alerts.filter(a=>a.status==="firing");
+    const prompt=`You are a senior manufacturing operations engineer monitoring the Pair Eyewear lens lab in Irvine, CA.
+
+ACTIVE EWS ALERTS:
+${activeAlerts.map(a=>`[${a.tier}] ${a.system} — ${a.message}${a.deviation?` (${a.deviation}σ deviation)`:""}`).join("\n")||"None"}
+
+ENGINE HEALTH:
+${health?`Status: ${health.status}, Collectors: ${(health.collectors||[]).join(", ")}, Last poll: ${health.lastPoll}, Total readings: ${health.totalReadings}`:"Unknown"}
+
+Generate a concise situation report:
+1. SITUATION SUMMARY (2-3 sentences)
+2. ROOT CAUSE ASSESSMENT (most likely single root cause)
+3. IMMEDIATE ACTIONS (numbered, specific, by priority)
+4. WATCH LIST (next 30 minutes)
+
+Be direct. No hedging. This is a live production environment.`;
+    try{
+      const gwBase=`http://${window.location.hostname}:3001`;
+      const res=await fetch(`${gwBase}/web/ask`,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:prompt,stream:false}),
+      });
+      if(res.ok){const d=await res.json();setSituationReport(d.response||d.text||JSON.stringify(d));}
+      else setSituationReport(`Gateway error: ${res.status}`);
+    }catch(e){setSituationReport(`Error: ${e.message}. Is the gateway running on port 3001?`);}
+    setAiLoading(false);
+  };
+
+  // Unique metrics for dropdown
+  const metricOptions=useMemo(()=>{
+    const s=new Set();
+    baselines.forEach(b=>s.add(b.metric));
+    alerts.forEach(a=>s.add(a.metric));
+    return[...s].sort();
+  },[baselines,alerts]);
+
+  if(loading&&!lastRefresh)return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:400,color:T.textMuted}}>
+      <div style={{textAlign:"center"}}>
+        <div style={{fontSize:24,marginBottom:8}}>⚡</div>
+        <div style={{fontFamily:mono,fontSize:12,letterSpacing:"0.1em"}}>CONNECTING TO EWS ENGINE...</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{fontFamily:mono}}>
+      {/* ── HEADER ── */}
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:20,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {p1>0&&<div style={{width:8,height:8,borderRadius:"50%",background:"#ef4444",boxShadow:"0 0 10px #ef4444",animation:"pulse 1.8s ease-in-out infinite"}}/>}
+          {p1===0&&<div style={{width:8,height:8,borderRadius:"50%",background:"#10b981",boxShadow:"0 0 8px #10b981"}}/>}
+          <span style={{color:T.blue,fontWeight:600,letterSpacing:"0.12em",fontSize:13}}>EARLY WARNING SYSTEM</span>
+        </div>
+
+        {/* Tier badges */}
+        <div style={{display:"flex",gap:6}}>
+          {[{tier:"P1",count:p1,color:"#ef4444"},{tier:"P2",count:p2,color:"#f59e0b"},{tier:"P3",count:p3,color:"#3b82f6"}].map(b=>(
+            <button key={b.tier} onClick={()=>setFilter(filter===b.tier?"all":b.tier)} style={{
+              padding:"3px 10px",background:filter===b.tier?`${b.color}11`:"transparent",
+              border:`1px solid ${filter===b.tier?`${b.color}44`:T.border}`,borderRadius:3,
+              display:"flex",alignItems:"center",gap:6,cursor:"pointer",
+            }}>
+              <div style={{width:5,height:5,borderRadius:"50%",background:b.count>0?b.color:"#334155"}}/>
+              <span style={{fontSize:10,color:b.count>0?b.color:"#334155",letterSpacing:"0.1em",fontFamily:mono}}>{b.tier} · {b.count}</span>
+            </button>
+          ))}
+        </div>
+
+        <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={getSituationReport} style={{
+            padding:"5px 14px",background:"#1a0f3d",border:"1px solid #3d1a5f",
+            color:"#c084fc",borderRadius:3,fontSize:10,fontFamily:mono,letterSpacing:"0.1em",cursor:"pointer",
+          }}>⬡ SITUATION REPORT</button>
+          <button onClick={forceRefresh} style={{
+            padding:"5px 14px",background:"transparent",border:`1px solid ${T.border}`,
+            color:T.textMuted,borderRadius:3,fontSize:10,fontFamily:mono,letterSpacing:"0.1em",cursor:"pointer",
+          }}>↻ REFRESH</button>
+          {health&&<span style={{fontSize:10,color:health.status==="ok"?T.green:health.status==="warning"?T.amber:T.red}}>
+            ● {health.status.toUpperCase()}
+          </span>}
+          {lastRefresh&&<span style={{fontSize:10,color:"#334155"}}>{lastRefresh.toLocaleTimeString()}</span>}
+        </div>
+      </div>
+
+      {error&&<div style={{padding:"8px 12px",background:T.redDark,border:`1px solid ${T.red}33`,borderRadius:4,marginBottom:12,fontSize:11,color:T.red}}>Connection error: {error}</div>}
+
+      {/* ── MAIN LAYOUT ── */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:16,alignItems:"start"}}>
+
+        {/* ── LEFT: ALERTS + BASELINES ── */}
+        <div>
+          {/* Filter bar */}
+          <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:12}}>
+            <span style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",marginRight:4}}>FILTER</span>
+            {["all","firing","watch","P1","P2","P3","resolved"].map(f=>(
+              <button key={f} onClick={()=>setFilter(f)} style={{
+                padding:"3px 9px",fontSize:9,fontFamily:mono,letterSpacing:"0.08em",
+                background:filter===f?T.blueDark:"transparent",
+                color:filter===f?"#7dd3fc":"#334155",
+                border:`1px solid ${filter===f?T.blue:T.border}`,borderRadius:2,cursor:"pointer",
+              }}>{f.toUpperCase()}</button>
+            ))}
+            <span style={{marginLeft:"auto",fontSize:9,color:"#334155"}}>{filtered.length} alerts</span>
+          </div>
+
+          {/* Alert list */}
+          <div style={{maxHeight:"60vh",overflowY:"auto"}}>
+            {filtered.length===0&&(
+              <div style={{textAlign:"center",padding:"40px 0",color:"#1e3a5f",fontSize:11}}>
+                {filter==="all"?"No active alerts — all systems nominal":"No alerts matching this filter"}
+              </div>
+            )}
+            {filtered.map(alert=>{
+              const tc=TIER[alert.tier]||TIER.P4;
+              const isExp=expanded===alert.id;
+              return(
+                <div key={alert.id} onClick={()=>setExpanded(isExp?null:alert.id)} style={{
+                  marginBottom:8,borderRadius:4,cursor:"pointer",
+                  background:tc.bg,border:`1px solid ${tc.border}`,
+                  opacity:alert.status==="resolved"?0.5:1,
+                  transition:"background 0.15s",
+                }}>
+                  <div style={{padding:"10px 12px",display:"flex",alignItems:"flex-start",gap:10}}>
+                    {/* Tier badge */}
+                    <div style={{
+                      padding:"2px 7px",borderRadius:2,fontSize:8,letterSpacing:"0.12em",
+                      background:alert.status==="resolved"?"transparent":tc.bg,
+                      border:`1px solid ${tc.border}`,color:tc.color,flexShrink:0,marginTop:1,
+                      animation:tc.pulse&&alert.status==="firing"?"blink 1.2s step-end infinite":undefined,
+                    }}>{tc.label}</div>
+
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                        <span style={{fontSize:10,color:"#64748b",letterSpacing:"0.08em"}}>{alert.system}</span>
+                        <span style={{fontSize:9,color:"#1e3a5f"}}>·</span>
+                        <span style={{fontSize:9,color:"#334155"}}>{alert.id.substring(0,20)}</span>
+                        {alert.acknowledged_at&&<span style={{fontSize:8,color:"#334155",marginLeft:"auto"}}>ACK</span>}
+                        <span style={{fontSize:9,color:"#334155",marginLeft:alert.acknowledged_at?0:"auto"}}>{timeSince(alert.fired_at)}</span>
+                      </div>
+                      <div style={{fontSize:11,color:alert.status==="resolved"?"#475569":tc.color,lineHeight:1.5,fontWeight:alert.tier==="P1"?500:400}}>
+                        {alert.message}
+                      </div>
+                      {alert.deviation&&alert.status!=="resolved"&&(
+                        <div style={{marginTop:6,display:"flex",alignItems:"center",gap:8}}>
+                          <div style={{flex:1,height:3,background:"#0d1117",borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${Math.min(100,(alert.deviation/5)*100)}%`,background:tc.color,borderRadius:2,boxShadow:`0 0 6px ${tc.color}`}}/>
+                          </div>
+                          <span style={{fontSize:9,color:tc.color,width:40,flexShrink:0}}>{alert.deviation}σ</span>
+                          {alert.current_val!=null&&(
+                            <span style={{fontSize:9,color:"#475569"}}>
+                              {alert.current_val} {alert.unit} <span style={{color:"#334155"}}>vs {alert.baseline} baseline</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div style={{fontSize:12,color:"#334155",flexShrink:0,transition:"transform 0.15s",transform:isExp?"rotate(90deg)":"rotate(0deg)"}}>›</div>
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isExp&&(
+                    <div style={{padding:"0 12px 12px",borderTop:"1px solid rgba(255,255,255,0.04)"}} onClick={e=>e.stopPropagation()}>
+                      <div style={{fontSize:10,color:"#64748b",lineHeight:1.6,margin:"10px 0 8px"}}>{alert.detail}</div>
+                      {alert.status!=="resolved"&&(
+                        <div style={{display:"flex",gap:6,marginTop:10}}>
+                          {!alert.acknowledged_at&&(
+                            <button onClick={()=>ack(alert.id)} style={{
+                              padding:"4px 12px",fontSize:9,fontFamily:mono,letterSpacing:"0.08em",
+                              background:"transparent",border:`1px solid ${T.border}`,color:"#475569",borderRadius:2,cursor:"pointer",
+                            }}>✓ ACKNOWLEDGE</button>
+                          )}
+                          <button onClick={()=>resolve(alert.id)} style={{
+                            padding:"4px 12px",fontSize:9,fontFamily:mono,letterSpacing:"0.08em",
+                            background:"transparent",border:`1px solid ${T.blueDark}`,color:T.blue,borderRadius:2,cursor:"pointer",
+                          }}>◆ RESOLVE</button>
+                          <button onClick={()=>{setSelectedMetric(alert.metric);}} style={{
+                            padding:"4px 12px",fontSize:9,fontFamily:mono,letterSpacing:"0.08em",
+                            background:"transparent",border:`1px solid ${T.border}`,color:"#475569",borderRadius:2,cursor:"pointer",
+                          }}>📈 HISTORY</button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Metric history chart */}
+          {selectedMetric&&metricHistory.length>0&&(
+            <div style={{marginTop:16,background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                <span style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>METRIC HISTORY — {selectedMetric.replace(/_/g," ").toUpperCase()}</span>
+                <button onClick={()=>setSelectedMetric(null)} style={{fontSize:9,color:"#334155",background:"none",border:"none",cursor:"pointer"}}>✕</button>
+              </div>
+              <Sparkline data={metricHistory} color={T.blue}/>
+              <div style={{display:"flex",gap:16,marginTop:6}}>
+                {metricHistory.slice(0,1).map((r,i)=>(
+                  <span key={i} style={{fontSize:9,color:"#475569"}}>Latest: {typeof r==="object"?r.value:r} {typeof r==="object"?r.unit:""}</span>
+                ))}
+                <span style={{fontSize:9,color:"#334155"}}>{metricHistory.length} readings</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── RIGHT: HEALTH + SUMMARY + AI REPORT ── */}
+        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+
+          {/* Engine health */}
+          {health&&(
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>ENGINE STATUS</div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                {(health.collectors||[]).map(c=>(
+                  <div key={c} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 8px",borderRadius:3,background:"rgba(255,255,255,0.01)",border:`1px solid ${T.border}`}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",background:T.green,boxShadow:`0 0 5px ${T.green}`,flexShrink:0}}/>
+                    <span style={{fontSize:10,color:"#64748b",flex:1}}>{c.replace(/_/g," ")}</span>
+                  </div>
+                ))}
+              </div>
+              <div style={{marginTop:8,fontSize:9,color:"#334155"}}>
+                Polls: {health.pollCount} · Readings: {health.totalReadings} · Interval: {health.pollInterval}s
+              </div>
+            </div>
+          )}
+
+          {/* Alert summary */}
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>ALERT SUMMARY</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+              {[
+                {label:"FIRING",value:firing,color:T.red},
+                {label:"UNACKED",value:unacked,color:T.amber},
+                {label:"WATCHING",value:watching,color:T.blue},
+                {label:"RESOLVED",value:resolved,color:T.green},
+              ].map(s=>(
+                <div key={s.label} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,padding:"8px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:18,fontWeight:600,color:s.color,lineHeight:1}}>{s.value}</div>
+                  <div style={{fontSize:8,color:"#334155",marginTop:3,letterSpacing:"0.1em"}}>{s.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Metric selector */}
+          {metricOptions.length>0&&(
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>INSPECT METRIC</div>
+              <select value={selectedMetric||""} onChange={e=>setSelectedMetric(e.target.value||null)} style={{
+                width:"100%",padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,
+                borderRadius:3,color:T.text,fontFamily:mono,fontSize:10,
+              }}>
+                <option value="">Select metric...</option>
+                {metricOptions.map(m=><option key={m} value={m}>{m.replace(/_/g," ")}</option>)}
+              </select>
+            </div>
+          )}
+
+          {/* AI Situation Report */}
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12,flex:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <span style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>AI SITUATION REPORT</span>
+              {aiLoading&&<div style={{width:6,height:6,borderRadius:"50%",background:"#8b5cf6",animation:"pulse 1.8s ease-in-out infinite"}}/>}
+            </div>
+            {!situationReport&&!aiLoading&&(
+              <div style={{textAlign:"center",padding:"20px 0"}}>
+                <div style={{fontSize:10,color:"#1e3a5f",marginBottom:12,lineHeight:1.6}}>
+                  {p1>0?`${p1} critical alert${p1>1?"s":""} active. Generate a situation report.`:"No critical alerts. Generate a report to review state."}
+                </div>
+                <button onClick={getSituationReport} style={{
+                  padding:"7px 18px",background:"#1a0f3d",border:"1px solid #3d1a5f",
+                  color:"#c084fc",borderRadius:3,fontSize:10,fontFamily:mono,letterSpacing:"0.1em",cursor:"pointer",
+                }}>⬡ GENERATE REPORT</button>
+              </div>
+            )}
+            {aiLoading&&(
+              <div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0"}}>
+                <span style={{fontSize:9,color:"#334155"}}>Correlating alerts...</span>
+              </div>
+            )}
+            {situationReport&&(
+              <div>
+                <div style={{fontSize:10,color:"#94a3b8",lineHeight:1.7,whiteSpace:"pre-wrap",maxHeight:300,overflowY:"auto"}}>{situationReport}</div>
+                <button onClick={getSituationReport} style={{
+                  width:"100%",padding:"5px",background:"transparent",marginTop:8,
+                  border:`1px solid ${T.border}`,color:"#334155",borderRadius:2,
+                  fontSize:9,fontFamily:mono,letterSpacing:"0.08em",cursor:"pointer",
+                }}>↻ REFRESH REPORT</button>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* CSS animations */}
+      <style>{`
+        @keyframes blink{50%{opacity:0}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}
+      `}</style>
+    </div>
   );
 }
 
@@ -7158,6 +7711,7 @@ function LabAssistantV2(){
     {id:"wip",         label:"WIP Feed",    icon:"📋", group:"analytics"},
     {id:"ai",          label:"AI Assistant",icon:"🤖", group:"analytics"},
     {id:"vision",       label:"Vision",     icon:"👁", group:"analytics"},
+    {id:"ews",          label:"EWS",         icon:"⚡", group:"analytics"},
     // Settings (separator before)
     {id:"separator4",  type:"separator"},
     {id:"settings",    label:"Settings",    icon:"⚙️", group:"system"},
@@ -7237,6 +7791,7 @@ function LabAssistantV2(){
         {view==="wip"&&<WIPFeed/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="ews"&&<EarlyWarningTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl} onNavigate={setView}/>}
       </div>
       )}

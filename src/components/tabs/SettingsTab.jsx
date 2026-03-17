@@ -2865,6 +2865,24 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
           </Card>
 
           <Card>
+            <SectionHeader>Demo Mode</SectionHeader>
+            <div style={{display:"flex",alignItems:"center",gap:12}}>
+              <div style={{width:40,height:40,borderRadius:10,background:settings.demoMode?`${T.amber}20`:`${T.textDim}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18}}>
+                {settings.demoMode ? '🎭' : '🎭'}
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:700,color:T.text}}>Demo Mode: {settings.demoMode ? 'ON' : 'OFF'}</div>
+                <div style={{fontSize:11,color:T.textMuted}}>Show realistic mock data across all tabs for demos and presentations. No real data or systems affected.</div>
+              </div>
+              <button onClick={()=>setSettings(prev=>({...prev,demoMode:!prev.demoMode}))}
+                style={{background:settings.demoMode?T.amber:T.surface,border:`1px solid ${settings.demoMode?T.amber:T.border}`,
+                borderRadius:8,padding:"8px 18px",color:settings.demoMode?"#000":T.textMuted,fontSize:12,fontWeight:700,cursor:"pointer",transition:"all 0.2s"}}>
+                {settings.demoMode ? 'DISABLE' : 'ENABLE'}
+              </button>
+            </div>
+          </Card>
+
+          <Card>
             <SectionHeader>Data Management</SectionHeader>
             <div style={{display:"flex",gap:10}}>
               <button onClick={()=>{

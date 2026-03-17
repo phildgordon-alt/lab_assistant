@@ -47,6 +47,11 @@ limble.start();
 const som = require('./som-adapter');
 som.start();
 
+// ── Early Warning System ────────────────────────────────────────
+const ews = require('./ews-engine');
+const ewsCollectors = require('./ews-collectors');
+// Collectors are registered after all adapters are loaded (see setTimeout below)
+
 // ── DVI File Sync integration ─────────────────────────────────
 const dviSync = require('./dvi-sync');
 // Only start if configured (env vars set)
@@ -109,6 +114,19 @@ setTimeout(() => {
     console.log(`[DB] Initial sync: ${enriched.length} DVI jobs to SQLite`);
   } catch (e) { console.warn('[DB] Initial DVI sync error:', e.message); }
 }, 15000); // 15s delay for DVI trace history to load
+
+// ── EWS: Register collectors and start engine (after adapters are up) ──
+setTimeout(() => {
+  ewsCollectors.register(ews, {
+    som,
+    itempath,
+    dviTrace,
+    labDb,
+    limble,
+    getOvenState: () => liveTimers,
+  });
+  ews.start();
+}, 20000); // 20s — after adapters have had time to poll
 
 // ── Periodic SQLite sync for inventory + maintenance ────────────
 setInterval(() => {
@@ -1823,13 +1841,11 @@ Respond with a structured batching plan in this format:
       const sorted = Object.entries(tally).sort((a,b) => b[1] - a[1]);
       if (sorted.length > 0) stationOperators[stn] = sorted[0][0]; // top operator
     }
+    // Calculate jobs/hour using shift hours (not first-to-last job span)
+    const shiftStart = new Date(); shiftStart.setHours(7, 0, 0, 0); // 7 AM shift start
+    const shiftHours = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
     for (const op of Object.values(operatorStats)) {
-      if (op.firstJob && op.lastJob && op.lastJob > op.firstJob) {
-        const hours = (op.lastJob - op.firstJob) / 3600000;
-        op.jobsPerHour = hours > 0 ? (op.jobs / hours) : 0;
-      } else {
-        op.jobsPerHour = 0;
-      }
+      op.jobsPerHour = op.jobs / shiftHours;
     }
 
     // Enrich assembly jobs with XML data
@@ -3425,6 +3441,57 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       matchRate: scans.length > 0 ? Math.round(scans.filter(s => s.matched).length / scans.length * 100) : 0,
       lastScan: lastScan ? { jobNumber: lastScan.jobNumber, matched: lastScan.matched, at: lastScan.scannedAt } : null
     });
+  }
+
+  // ── EWS (Early Warning System) ──────────────────────────────
+
+  // GET /api/ews/alerts — active alerts (or ?filter=all for all)
+  if (req.method==='GET' && url.pathname==='/api/ews/alerts') {
+    const filter = url.searchParams.get('filter') || 'active';
+    return json(res, ews.getAlerts(filter));
+  }
+
+  // GET /api/ews/baselines — current baseline values
+  if (req.method==='GET' && url.pathname==='/api/ews/baselines') {
+    return json(res, ews.getBaselines());
+  }
+
+  // GET /api/ews/history?metric=X&limit=24 — metric reading history
+  if (req.method==='GET' && url.pathname==='/api/ews/history') {
+    const metric = url.searchParams.get('metric');
+    const limit = parseInt(url.searchParams.get('limit') || '24');
+    if (!metric) { cors(res); res.writeHead(400); res.end('{"error":"metric required"}'); return; }
+    return json(res, ews.getMetricHistory(metric, limit));
+  }
+
+  // POST /api/ews/alerts/:id/ack — acknowledge alert
+  if (req.method==='POST' && url.pathname.startsWith('/api/ews/alerts/') && url.pathname.endsWith('/ack')) {
+    const id = decodeURIComponent(url.pathname.split('/')[4]);
+    ews.acknowledge(id);
+    return json(res, { ok: true, id });
+  }
+
+  // POST /api/ews/alerts/:id/resolve — resolve alert
+  if (req.method==='POST' && url.pathname.startsWith('/api/ews/alerts/') && url.pathname.endsWith('/resolve')) {
+    const id = decodeURIComponent(url.pathname.split('/')[4]);
+    ews.resolve(id);
+    return json(res, { ok: true, id });
+  }
+
+  // GET /api/ews/health — EWS engine health
+  if (req.method==='GET' && url.pathname==='/api/ews/health') {
+    return json(res, ews.getHealth());
+  }
+
+  // GET /api/ews/ai-context — AI-ready EWS context
+  if (req.method==='GET' && url.pathname==='/api/ews/ai-context') {
+    return json(res, ews.getAIContext());
+  }
+
+  // POST /api/ews/refresh — force poll
+  if (req.method==='POST' && url.pathname==='/api/ews/refresh') {
+    await ews.poll();
+    return json(res, { ok: true, health: ews.getHealth() });
   }
 
   // ── 404 ─────────────────────────────────────────────────────
