@@ -215,12 +215,17 @@ const HIGH_BAD = new Set([
   'cycle_time_assembly', 'cycle_time_picking',
   // Coating
   'coating_reject_rate', 'oven_temp_deviation',
+  // Network
+  'network_devices_offline', 'network_cpu_high', 'network_vlan_bleed',
+  'network_alarms_active',
 ]);
 
 const LOW_BAD = new Set([
   'dvi_throughput_per_hour', 'dvi_yield_rate',
   'itempath_stock_level', 'som_oee',
   'dvi_shipped_per_hour',
+  // Network
+  'network_wan_status',
 ]);
 
 // ─── ALERT DETAIL TEMPLATES ──────────────────────────────────────────────
@@ -250,6 +255,13 @@ const ALERT_DETAILS = {
   itempath_stock_level: 'Stock levels critically low across multiple SKUs. Check if replenishment orders are in transit.',
   som_oee: 'Overall Equipment Effectiveness below baseline. Review Availability, Performance, and Quality components separately.',
   dvi_shipped_per_hour: 'Ship rate below baseline. Check if assembly/QC is bottlenecked.',
+  // Network
+  network_devices_offline: 'Network device(s) offline. Check UniFi controller for affected APs/switches. Verify PoE power and uplink cables. Offline devices may impact production systems on that VLAN.',
+  network_cpu_high: 'Network device CPU above 85%. Possible broadcast storm, misconfigured client, or firmware issue. Check UniFi controller for the specific device and review traffic patterns.',
+  network_vlan_bleed: 'VLAN isolation violation detected — traffic crossing between VLANs that should be isolated. This is a security event. Check firewall rules and switch port configurations immediately.',
+  network_client_count: 'Client count anomaly. A sudden drop may indicate an AP failure or network partition. A sudden spike may indicate a rogue device or scanning activity.',
+  network_alarms_active: 'Multiple active UniFi alarms. Review alarm list in UniFi controller for connectivity issues, rogue APs, or DPI alerts.',
+  network_wan_status: 'WAN link down at one or both sites. Check ISP status and failover configuration. Production systems relying on cloud APIs (DVI, ItemPath) will be impacted.',
 };
 
 // ─── LAYER 2: RULE-BASED HARD THRESHOLD DETECTION ────────────────────────
@@ -281,6 +293,13 @@ const RULES = [
 
   // Maintenance
   { metric: 'maintenance_active_downtime', op: '>=', threshold: 3, tier: 'P2', message: 'WARNING: 3+ active downtime maintenance events — capacity impact' },
+
+  // Network
+  { metric: 'network_devices_offline', op: '>=', threshold: 3,  tier: 'P1', message: 'CRITICAL: 3+ network devices offline — possible switch failure or PoE outage' },
+  { metric: 'network_devices_offline', op: '>=', threshold: 1,  tier: 'P2', message: 'WARNING: Network device offline — check UniFi controller' },
+  { metric: 'network_vlan_bleed',      op: '>=', threshold: 1,  tier: 'P1', message: 'CRITICAL: VLAN isolation violation — security event, traffic crossing restricted boundary' },
+  { metric: 'network_cpu_high',        op: '>=', threshold: 2,  tier: 'P2', message: 'WARNING: 2+ network devices with CPU > 85% — possible broadcast storm or firmware issue' },
+  { metric: 'network_alarms_active',   op: '>=', threshold: 5,  tier: 'P2', message: 'WARNING: 5+ active UniFi alarms — review controller for systemic network issues' },
 ];
 
 /**

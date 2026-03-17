@@ -11,10 +11,11 @@
  *   4. Oven Timers — temperature compliance, batch timing
  *   5. Maintenance (Limble) — unplanned downtime events
  *   6. Breakage — breakage rate from SQLite
+ *   7. Network (UniFi) — device health, VLAN integrity, WAN status
  *
  * USAGE:
  *   const ews = require('./ews-engine');
- *   require('./ews-collectors').register(ews, { som, itempath, dviTrace, labDb });
+ *   require('./ews-collectors').register(ews, { som, itempath, dviTrace, labDb, network });
  */
 
 'use strict';
@@ -29,9 +30,10 @@
  * @param {object} adapters.labDb - SQLite database (server/db.js)
  * @param {object} adapters.limble - Limble adapter (server/limble-adapter.js)
  * @param {object} adapters.getOvenState - function returning live oven state
+ * @param {object} adapters.network - Network adapter (server/network-adapter.js)
  */
 function register(ews, adapters) {
-  const { som, itempath, dviTrace, labDb, limble, getOvenState } = adapters;
+  const { som, itempath, dviTrace, labDb, limble, getOvenState, network } = adapters;
 
   // ═══════════════════════════════════════════════════════════════════════════
   // 1. SOM (Schneider) — Machine Health
@@ -415,6 +417,112 @@ function register(ews, adapters) {
         }
       } catch (e) {
         console.error('[EWS:Oven] Collection error:', e.message);
+      }
+      return readings;
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 7. Network (UniFi) — Device Health, VLAN Integrity, WAN Status
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  if (network) {
+    ews.registerCollector('network', async () => {
+      const readings = [];
+      try {
+        const health = network.getHealth();
+        if (!health.isLive) return readings;
+
+        const status = network.getStatus();
+        const devices = network.getDevices();
+        const alerts = network.getAlerts();
+
+        // ── Offline devices across both sites ──
+        let offlineCount = 0;
+        for (const site of [devices.irvine1, devices.irvine2]) {
+          if (!site) continue;
+          for (const dev of site) {
+            if (dev.state === 'disconnected' || dev.state === 'offline' || dev.adopted === false) {
+              offlineCount++;
+            }
+          }
+        }
+        readings.push({
+          metric: 'network_devices_offline',
+          system: 'Network',
+          value: offlineCount,
+          unit: 'devices',
+        });
+
+        // ── Devices with CPU > 85% ──
+        let cpuHighCount = 0;
+        for (const site of [devices.irvine1, devices.irvine2]) {
+          if (!site) continue;
+          for (const dev of site) {
+            const cpuPct = dev.system_stats?.cpu ?? dev.cpu ?? null;
+            if (cpuPct !== null && cpuPct > 85) {
+              cpuHighCount++;
+            }
+          }
+        }
+        readings.push({
+          metric: 'network_cpu_high',
+          system: 'Network',
+          value: cpuHighCount,
+          unit: 'devices',
+        });
+
+        // ── VLAN isolation violations ──
+        const bleedViolations = alerts.bleedViolations || [];
+        readings.push({
+          metric: 'network_vlan_bleed',
+          system: 'Network',
+          value: bleedViolations.length,
+          unit: 'violations',
+        });
+
+        // ── Total connected clients across both sites ──
+        let totalClients = 0;
+        for (const site of [status.irvine1, status.irvine2]) {
+          if (!site) continue;
+          totalClients += site.clients || site.num_sta || 0;
+        }
+        readings.push({
+          metric: 'network_client_count',
+          system: 'Network',
+          value: totalClients,
+          unit: 'clients',
+        });
+
+        // ── Active UniFi alarms ──
+        const activeAlarms = (alerts.alerts || []).filter(a =>
+          !a.archived && !a.resolved
+        );
+        readings.push({
+          metric: 'network_alarms_active',
+          system: 'Network',
+          value: activeAlarms.length,
+          unit: 'alarms',
+        });
+
+        // ── WAN status: 1 = both up, 0 = at least one down ──
+        let wansUp = true;
+        for (const site of [status.irvine1, status.irvine2]) {
+          if (!site) { wansUp = false; continue; }
+          const wan = site.wan || site.internet;
+          if (wan === 'down' || wan === false || wan === 0) {
+            wansUp = false;
+          }
+        }
+        readings.push({
+          metric: 'network_wan_status',
+          system: 'Network',
+          value: wansUp ? 1 : 0,
+          unit: 'boolean',
+        });
+
+      } catch (e) {
+        console.error('[EWS:Network] Collection error:', e.message);
       }
       return readings;
     });

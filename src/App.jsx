@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Component } from "react";
-import WIPFeed from "./components/WIPFeed";
+// WIPFeed removed — WIP monitoring now in EWS + Analytics tabs
 // Extracted tab components (reduces App.jsx by ~5,600 lines)
 import SettingsTab from "./components/tabs/SettingsTab";
 import OverviewTab from "./components/tabs/OverviewTab";
@@ -5653,6 +5653,294 @@ function BreakageHistory({breakage}){
   );
 }
 
+// ── Network Operations Tab ───────────────────────────────────
+function NetworkTab({ovenServerUrl,settings}){
+  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const mono="'JetBrains Mono',monospace";
+  const gwBase=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+
+  const [status,setStatus]=useState(null);
+  const [devices,setDevices]=useState({irvine1:[],irvine2:[]});
+  const [events,setEvents]=useState([]);
+  const [vlans,setVlans]=useState([]);
+  const [netAlerts,setNetAlerts]=useState([]);
+  const [health,setHealth]=useState(null);
+  const [activeSite,setActiveSite]=useState("irvine1");
+  const [lastRefresh,setLastRefresh]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
+  const [agentOpen,setAgentOpen]=useState(false);
+  const [messages,setMessages]=useState([]);
+  const [input,setInput]=useState("");
+  const [thinking,setThinking]=useState(false);
+  const chatEndRef=useRef(null);
+
+  const isDemo=settings?.demoMode||false;
+
+  // ── DEMO DATA ──
+  const DEMO_DEVICES={
+    irvine1:[
+      {id:"d1",name:"USG-Pro-4",model:"USG-Pro-4",type:"ugw",ip:"10.0.99.1",status:"online",uptime:2345678,cpu_pct:23,mem_pct:45,tx_bytes:45200000000,rx_bytes:38900000000},
+      {id:"d2",name:"US-48-Pro",model:"US-48-500W",type:"usw",ip:"10.0.99.10",status:"online",uptime:2345678,cpu_pct:12,mem_pct:38,tx_bytes:12300000000,rx_bytes:11800000000},
+      {id:"d3",name:"US-24-OT",model:"US-24-250W",type:"usw",ip:"10.0.99.11",status:"online",uptime:2344000,cpu_pct:18,mem_pct:42,tx_bytes:8900000000,rx_bytes:7600000000},
+      {id:"d4",name:"UAP-AC-HD-1",model:"UAP-AC-HD",type:"uap",ip:"10.0.50.10",status:"online",uptime:2100000,cpu_pct:31,mem_pct:52,tx_bytes:1200000000,rx_bytes:980000000},
+      {id:"d5",name:"UAP-AC-HD-2",model:"UAP-AC-HD",type:"uap",ip:"10.0.50.11",status:"online",uptime:2098000,cpu_pct:28,mem_pct:48,tx_bytes:1100000000,rx_bytes:890000000},
+      {id:"d6",name:"UAP-AC-LR-CAM",model:"UAP-AC-LR",type:"uap",ip:"10.0.10.12",status:"offline",uptime:0,cpu_pct:0,mem_pct:0,tx_bytes:0,rx_bytes:0},
+    ],
+    irvine2:[
+      {id:"d7",name:"USW-Flex-XG",model:"USW-Flex-XG",type:"usw",ip:"10.1.99.10",status:"online",uptime:1234567,cpu_pct:15,mem_pct:35,tx_bytes:9800000000,rx_bytes:8700000000},
+      {id:"d8",name:"US-24-Irvine2",model:"US-24-250W",type:"usw",ip:"10.1.99.11",status:"online",uptime:1230000,cpu_pct:11,mem_pct:30,tx_bytes:4500000000,rx_bytes:4100000000},
+      {id:"d9",name:"UAP-AC-Pro-1",model:"UAP-AC-Pro",type:"uap",ip:"10.1.50.10",status:"online",uptime:1200000,cpu_pct:22,mem_pct:41,tx_bytes:980000000,rx_bytes:760000000},
+      {id:"d10",name:"UAP-AC-Pro-2",model:"UAP-AC-Pro",type:"uap",ip:"10.1.50.11",status:"online",uptime:1198000,cpu_pct:19,mem_pct:38,tx_bytes:870000000,rx_bytes:710000000},
+    ],
+  };
+  const DEMO_EVENTS=[
+    {datetime:new Date(Date.now()-120000).toISOString(),severity:"error",msg:"UAP-AC-LR-CAM (10.0.10.12) disconnected — VLAN 10 Cameras",subsystem:"wlan",site:"irvine1"},
+    {datetime:new Date(Date.now()-340000).toISOString(),severity:"warning",msg:"US-24-OT port 14 STP role change — VLAN 30 OT segment",subsystem:"lan",site:"irvine1"},
+    {datetime:new Date(Date.now()-780000).toISOString(),severity:"warning",msg:"Unknown device (MAC: 7c:83:34:a1:b2:c3) joined Staff WiFi VLAN 50",subsystem:"wlan",site:"irvine2"},
+    {datetime:new Date(Date.now()-1200000).toISOString(),severity:"info",msg:"Admin login from 10.0.99.45",subsystem:"admin",site:"irvine1"},
+    {datetime:new Date(Date.now()-2100000).toISOString(),severity:"error",msg:"US-24-OT port 22 link down — Kardex segment drop (12s)",subsystem:"lan",site:"irvine1"},
+    {datetime:new Date(Date.now()-3600000).toISOString(),severity:"error",msg:"DVI VISION host heartbeat timeout — MSSQL watchdog triggered",subsystem:"lan",site:"irvine1"},
+    {datetime:new Date(Date.now()-7200000).toISOString(),severity:"info",msg:"Phrozen Gateway rejoined OT VLAN — IP reassigned 10.0.30.51",subsystem:"lan",site:"irvine1"},
+  ];
+  const DEMO_VLANS=[
+    {id:30,name:"OT/Industrial",clients:12,pct:78,color:"#ef4444"},
+    {id:1,name:"Main LAN",clients:18,pct:65,color:"#3b82f6"},
+    {id:50,name:"Staff WiFi",clients:24,pct:45,color:"#10b981"},
+    {id:40,name:"NAS",clients:4,pct:38,color:"#06b6d4"},
+    {id:10,name:"Cameras",clients:8,pct:22,color:"#f59e0b"},
+    {id:20,name:"Door Access",clients:3,pct:12,color:"#8b5cf6"},
+    {id:60,name:"EV Charging",clients:2,pct:8,color:"#84cc16"},
+    {id:99,name:"Management",clients:5,pct:5,color:"#e2e8f0"},
+  ];
+  const DEMO_STATUS={irvine1:{devicesUp:5,devicesDown:1,devicesTotal:6,clients:47},irvine2:{devicesUp:4,devicesDown:0,devicesTotal:4,clients:31}};
+  const DEMO_HEALTH={isLive:false,mock:true,lastPoll:new Date().toISOString(),pollCount:0};
+
+  // Helpers
+  const fmtBytes=(b)=>{if(!b)return"0 B";const k=1024,s=["B","KB","MB","GB","TB"];const i=Math.floor(Math.log(b)/Math.log(k));return(b/Math.pow(k,i)).toFixed(1)+" "+s[i];};
+  const fmtUptime=(s)=>{if(!s)return"—";const d=Math.floor(s/86400),h=Math.floor((s%86400)/3600);return d>0?`${d}d ${h}h`:`${h}h`;};
+  const timeSince=(iso)=>{if(!iso)return"—";const diff=Date.now()-new Date(iso).getTime();const m=Math.floor(diff/60000);if(m<60)return`${m}m ago`;const h=Math.floor(m/60);if(h<24)return`${h}h ago`;return`${Math.floor(h/24)}d ago`;};
+  const devIcon=(t)=>t==="ugw"||t==="udm"?"⬡":t==="usw"?"⊞":t==="uap"?"◎":"◆";
+
+  // Fetch data
+  const fetchData=useCallback(async()=>{
+    if(isDemo){
+      setDevices(DEMO_DEVICES);setEvents(DEMO_EVENTS);setVlans(DEMO_VLANS);
+      setStatus(DEMO_STATUS);setHealth(DEMO_HEALTH);setNetAlerts([]);
+      setLastRefresh(new Date());setLoading(false);setError(null);return;
+    }
+    try{
+      const[sRes,dRes,eRes,vRes,aRes,hRes]=await Promise.allSettled([
+        fetch(`${base}/api/network/status`),fetch(`${base}/api/network/devices`),
+        fetch(`${base}/api/network/events`),fetch(`${base}/api/network/vlans`),
+        fetch(`${base}/api/network/alerts`),fetch(`${base}/api/network/health`),
+      ]);
+      if(sRes.status==="fulfilled"&&sRes.value.ok) setStatus(await sRes.value.json());
+      if(dRes.status==="fulfilled"&&dRes.value.ok) setDevices(await dRes.value.json());
+      if(eRes.status==="fulfilled"&&eRes.value.ok) setEvents(await eRes.value.json());
+      if(vRes.status==="fulfilled"&&vRes.value.ok) setVlans(await vRes.value.json());
+      if(aRes.status==="fulfilled"&&aRes.value.ok) setNetAlerts(await aRes.value.json());
+      if(hRes.status==="fulfilled"&&hRes.value.ok) setHealth(await hRes.value.json());
+      setLastRefresh(new Date());setError(null);
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);}
+  },[base,isDemo]);
+
+  useEffect(()=>{fetchData();const t=setInterval(fetchData,30000);return()=>clearInterval(t);},[fetchData]);
+  useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
+
+  // AI NOC Agent
+  const sendNocMessage=async(userMsg)=>{
+    const newMsgs=[...messages,{role:"user",content:userMsg}];
+    setMessages(newMsgs);setInput("");setThinking(true);
+    const siteDevs=(devices[activeSite]||[]);
+    const downDevs=siteDevs.filter(d=>d.status==="offline");
+    const errEvts=(events||[]).filter(e=>e.severity==="error");
+    const ctx=`NETWORK STATE (${activeSite.toUpperCase()}):
+Devices: ${siteDevs.length} total, ${downDevs.length} DOWN
+DOWN: ${downDevs.map(d=>`${d.name} (${d.model}) @ ${d.ip}`).join(", ")||"None"}
+Recent errors: ${errEvts.slice(0,5).map(e=>`[${timeSince(e.datetime)}] ${e.msg}`).join("\n")||"None"}
+VLANs: ${(vlans||[]).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`).join(", ")}`;
+    try{
+      const res=await fetch(`${gwBase}/web/ask`,{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({message:`You are a senior NOC engineer monitoring the Pair Eyewear lens lab network (2 Irvine sites, 8 VLANs, UniFi). Be direct and specific.\n\n${ctx}\n\nUser: ${userMsg}`,stream:false}),
+      });
+      if(res.ok){const d=await res.json();setMessages(p=>[...p,{role:"assistant",content:d.response||d.text||JSON.stringify(d)}]);}
+      else setMessages(p=>[...p,{role:"assistant",content:`Gateway error: ${res.status}`}]);
+    }catch(e){setMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message}`}]);}
+    setThinking(false);
+  };
+
+  const curDevices=devices[activeSite]||[];
+  const upCount=curDevices.filter(d=>d.status==="online").length;
+  const downCount=curDevices.filter(d=>d.status==="offline").length;
+  const errEvents=(events||[]).filter(e=>e.severity==="error");
+  const warnEvents=(events||[]).filter(e=>e.severity==="warning");
+  const siteStatus=status||{};
+  const s1=siteStatus.irvine1||{};
+  const s2=siteStatus.irvine2||{};
+
+  if(loading&&!lastRefresh)return(
+    <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:400,color:T.textMuted}}>
+      <div style={{textAlign:"center"}}><div style={{fontSize:24,marginBottom:8}}>🔀</div>
+        <div style={{fontFamily:mono,fontSize:12,letterSpacing:"0.1em"}}>CONNECTING TO NETWORK ADAPTER...</div>
+      </div>
+    </div>
+  );
+
+  return(
+    <div style={{fontFamily:mono}}>
+      {/* HEADER */}
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <div style={{width:8,height:8,borderRadius:"50%",background:downCount>0?"#ef4444":"#10b981",boxShadow:`0 0 8px ${downCount>0?"#ef4444":"#10b981"}`}}/>
+          <span style={{color:T.blue,fontWeight:600,letterSpacing:"0.12em",fontSize:13}}>NETWORK OPERATIONS</span>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {["irvine1","irvine2"].map(s=>(
+            <button key={s} onClick={()=>setActiveSite(s)} style={{
+              padding:"4px 12px",fontSize:11,fontFamily:mono,
+              background:activeSite===s?T.blueDark:"transparent",
+              color:activeSite===s?"#7dd3fc":"#475569",
+              border:`1px solid ${activeSite===s?T.blue:T.border}`,borderRadius:3,cursor:"pointer",letterSpacing:"0.1em",
+            }}>{s==="irvine1"?"IRVINE 1":"IRVINE 2"}</button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          {errEvents.length>0&&<span style={{fontSize:10,padding:"3px 10px",background:"#1f0d0d",border:"1px solid #3d1a1a",borderRadius:3,color:"#ef4444"}}>{errEvents.length} ERRORS</span>}
+          <span style={{fontSize:10,color:health?.isLive?"#10b981":T.amber}}>● {health?.isLive?"LIVE":isDemo?"DEMO":"POLLING"}</span>
+        </div>
+        <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+          <button onClick={()=>setAgentOpen(!agentOpen)} style={{
+            padding:"5px 14px",background:"#1a0f3d",border:"1px solid #3d1a5f",
+            color:"#c084fc",borderRadius:3,fontSize:10,fontFamily:mono,letterSpacing:"0.1em",cursor:"pointer",
+          }}>⬡ NOC AGENT</button>
+          {lastRefresh&&<span style={{fontSize:10,color:"#334155"}}>{lastRefresh.toLocaleTimeString()}</span>}
+        </div>
+      </div>
+
+      {error&&<div style={{padding:"8px 12px",background:T.redDark,border:`1px solid ${T.red}33`,borderRadius:4,marginBottom:12,fontSize:11,color:T.red}}>Connection error: {error}</div>}
+
+      {/* SITE SUMMARY */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8,marginBottom:16}}>
+        {[
+          {label:"DEVICES UP",value:`${upCount}/${curDevices.length}`,color:downCount>0?T.amber:T.green},
+          {label:"CLIENTS",value:activeSite==="irvine1"?(s1.clients||47):(s2.clients||31),color:T.blue},
+          {label:"ERRORS (24H)",value:errEvents.length,color:errEvents.length>0?T.red:T.green},
+          {label:"WARNINGS",value:warnEvents.length,color:warnEvents.length>0?T.amber:T.green},
+          {label:"VLANS",value:8,color:T.purple},
+          {label:"SD-WAN",value:"ACTIVE",color:T.green},
+        ].map(s=>(
+          <div key={s.label} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:"10px 12px",textAlign:"center"}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>{s.label}</div>
+            <div style={{fontSize:20,fontWeight:600,color:s.color,lineHeight:1}}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:agentOpen?"1fr 1fr 360px":"1fr 1fr",gap:16,alignItems:"start"}}>
+        {/* DEVICES */}
+        <div>
+          <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>DEVICES — {activeSite==="irvine1"?"IRVINE 1":"IRVINE 2"}</div>
+          <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:"50vh",overflowY:"auto"}}>
+            {curDevices.map(d=>(
+              <div key={d.id||d.name} style={{
+                padding:"8px 10px",borderRadius:4,
+                background:d.status==="offline"?"rgba(239,68,68,0.05)":T.card,
+                border:`1px solid ${d.status==="offline"?"rgba(239,68,68,0.2)":T.border}`,
+              }}>
+                <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:d.status==="online"?"#10b981":"#ef4444",boxShadow:`0 0 5px ${d.status==="online"?"#10b981":"#ef4444"}`}}/>
+                  <span style={{fontSize:11,color:d.status==="online"?T.text:"#ef4444",fontWeight:500}}>{d.name}</span>
+                  <span style={{fontSize:10,color:"#475569",marginLeft:"auto"}}>{devIcon(d.type)}</span>
+                </div>
+                <div style={{fontSize:9,color:"#475569",paddingLeft:13}}>{d.model} · {d.ip}</div>
+                {d.status==="online"&&(
+                  <div style={{fontSize:9,color:"#334155",paddingLeft:13,marginTop:2}}>
+                    ↑{fmtBytes(d.tx_bytes)} ↓{fmtBytes(d.rx_bytes)} · up {fmtUptime(d.uptime)}
+                    {d.cpu_pct>0&&<span style={{marginLeft:8,color:d.cpu_pct>85?T.red:d.cpu_pct>60?T.amber:"#334155"}}>CPU {d.cpu_pct}%</span>}
+                  </div>
+                )}
+                {d.status==="offline"&&<div style={{fontSize:9,color:"#ef4444",paddingLeft:13,marginTop:2}}>● DISCONNECTED</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* VLANS + EVENTS */}
+        <div>
+          {/* VLAN Traffic */}
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>VLAN TRAFFIC</div>
+            <div style={{display:"flex",flexDirection:"column",gap:4}}>
+              {(vlans||DEMO_VLANS).map(v=>(
+                <div key={v.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                  <div style={{width:80,fontSize:9,color:"#475569",textAlign:"right",flexShrink:0}}>{v.name}</div>
+                  <div style={{flex:1,height:12,background:"#0d1117",borderRadius:2,overflow:"hidden",border:"1px solid #111827"}}>
+                    <div style={{height:"100%",width:`${v.pct}%`,background:`linear-gradient(90deg,${v.color}55,${v.color}aa)`,borderRadius:2}}/>
+                  </div>
+                  <div style={{width:50,fontSize:9,color:"#334155"}}>{v.pct}% · {v.clients}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Event Log */}
+          <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>EVENT LOG</div>
+          <div style={{maxHeight:"35vh",overflowY:"auto"}}>
+            {(events||[]).map((ev,i)=>{
+              const col=ev.severity==="error"?"#ef4444":ev.severity==="warning"?"#f59e0b":"#475569";
+              return(
+                <div key={i} style={{display:"flex",gap:8,padding:"5px 6px",borderBottom:"1px solid #0d1117",background:ev.severity==="error"?"rgba(239,68,68,0.04)":ev.severity==="warning"?"rgba(245,158,11,0.03)":"transparent",borderRadius:2}}>
+                  <span style={{fontSize:9,color:"#334155",width:55,flexShrink:0}}>{timeSince(ev.datetime)}</span>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:col,marginTop:3,flexShrink:0}}/>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:10,color:col==="#475569"?"#6b7280":col,lineHeight:1.4}}>{ev.msg}</div>
+                    <div style={{fontSize:9,color:"#1e3a5f",marginTop:1}}>{ev.subsystem?.toUpperCase()} · {ev.site?.toUpperCase()}</div>
+                  </div>
+                  <span style={{fontSize:8,padding:"2px 6px",borderRadius:2,background:ev.severity==="error"?"#1f0d0d":ev.severity==="warning"?"#1f1505":"#0d1117",color:col,alignSelf:"flex-start",letterSpacing:"0.1em",flexShrink:0}}>{ev.severity.toUpperCase()}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* NOC AGENT PANEL */}
+        {agentOpen&&(
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,display:"flex",flexDirection:"column",maxHeight:"70vh"}}>
+            <div style={{padding:"10px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:13}}>⬡</span>
+              <div><div style={{fontSize:11,color:"#7dd3fc",fontWeight:600}}>NOC AGENT</div><div style={{fontSize:9,color:"#334155"}}>Network / OT / Factory Systems</div></div>
+              <button onClick={()=>setAgentOpen(false)} style={{marginLeft:"auto",background:"none",border:`1px solid ${T.border}`,borderRadius:3,color:"#334155",width:22,height:22,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:12,minHeight:200}}>
+              {messages.map((m,i)=>(
+                <div key={i} style={{marginBottom:12,display:"flex",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start"}}>
+                  {m.role==="assistant"&&<div style={{fontSize:8,color:"#1e3a5f",letterSpacing:"0.12em",marginBottom:3}}>NOC AGENT</div>}
+                  <div style={{maxWidth:"92%",padding:"8px 12px",borderRadius:4,background:m.role==="user"?"#0f1f3d":"#0d1117",border:`1px solid ${m.role==="user"?"#1e3a5f":T.border}`,fontSize:11,color:m.role==="user"?"#7dd3fc":"#b0c4d8",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div>
+                </div>
+              ))}
+              {thinking&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0"}}><span style={{fontSize:9,color:"#334155"}}>analyzing...</span></div>}
+              <div ref={chatEndRef}/>
+            </div>
+            <div style={{padding:"8px 12px",borderTop:`1px solid ${T.border}`,display:"flex",flexWrap:"wrap",gap:4}}>
+              {["OT VLAN health","Kardex link?","DVI latency","WiFi gaps","SD-WAN status"].map(q=>(
+                <button key={q} onClick={()=>sendNocMessage(q)} style={{padding:"3px 8px",background:"transparent",border:`1px solid ${T.border}`,color:"#475569",borderRadius:2,fontSize:9,fontFamily:mono,cursor:"pointer"}}>{q}</button>
+              ))}
+            </div>
+            <div style={{padding:"8px 12px",borderTop:`1px solid ${T.border}`,display:"flex",gap:6}}>
+              <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&input.trim()){e.preventDefault();sendNocMessage(input.trim());}}}
+                placeholder="Ask NOC agent..." style={{flex:1,padding:"6px 10px",background:T.surface,border:`1px solid ${T.border}`,color:T.text,borderRadius:3,fontSize:11,fontFamily:mono}}/>
+              <button onClick={()=>input.trim()&&sendNocMessage(input.trim())} style={{padding:"0 12px",background:"#0f1f3d",border:"1px solid #1e3a5f",color:T.blue,borderRadius:3,fontSize:14,cursor:"pointer"}}>⮕</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Early Warning System Tab ─────────────────────────────────
 function EarlyWarningTab({ovenServerUrl,settings}){
   const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
@@ -7708,10 +7996,10 @@ function LabAssistantV2(){
     {id:"separator3",  type:"separator"},
     {id:"analytics",   label:"Analytics",   icon:"📊", group:"analytics"},
     {id:"qc",          label:"QC",          icon:"✓",  group:"analytics"},
-    {id:"wip",         label:"WIP Feed",    icon:"📋", group:"analytics"},
     {id:"ai",          label:"AI Assistant",icon:"🤖", group:"analytics"},
     {id:"vision",       label:"Vision",     icon:"👁", group:"analytics"},
     {id:"ews",          label:"EWS",         icon:"⚡", group:"analytics"},
+    {id:"network",      label:"Network",     icon:"🔀", group:"analytics"},
     // Settings (separator before)
     {id:"separator4",  type:"separator"},
     {id:"settings",    label:"Settings",    icon:"⚙️", group:"system"},
@@ -7788,10 +8076,10 @@ function LabAssistantV2(){
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="qc"&&<QCTab trays={trays} dviJobs={mergedJobs} breakage={breakage} setBreakage={setBreakage}/>}
-        {view==="wip"&&<WIPFeed/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="ews"&&<EarlyWarningTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="network"&&<NetworkTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl} onNavigate={setView}/>}
       </div>
       )}

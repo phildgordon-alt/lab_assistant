@@ -344,6 +344,49 @@ const PATTERNS = [
     recommended_action: 'Check if high consumption is driven by remakes (breakage) or genuine demand. Review ItemPath transactions for duplicate picks or mis-picks. If remakes, fix root cause first. If demand, check stock runway and escalate to purchasing if < 2 days of safety stock.',
   },
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // 11. Network outage causing production impact
+  // ══════════════════════════════════════════════════════════════════════════
+  {
+    id: 'network-outage-production-impact',
+    name: 'Network Outage Production Impact',
+    dept: 'Network',
+    severity: 'P1',
+    confidence_required: 0.5, // 2 of 4 — network issue + any production drop
+    conditions: [
+      {
+        metric: 'network_devices_offline',
+        type: 'absolute',
+        direction: 'above',
+        threshold: 1,
+        label: 'Network device(s) offline',
+      },
+      {
+        metric: 'network_wan_status',
+        type: 'absolute',
+        direction: 'below',
+        threshold: 1,
+        label: 'WAN link down',
+      },
+      {
+        metric: 'dvi_throughput_per_hour',
+        type: 'z_score',
+        direction: 'below',
+        threshold: 1.5,
+        label: 'Production throughput dropping',
+      },
+      {
+        metric: 'dvi_shipped_per_hour',
+        type: 'z_score',
+        direction: 'below',
+        threshold: 1.5,
+        label: 'Ship rate declining',
+      },
+    ],
+    message: 'Network outage correlated with production loss — network issue likely causing DVI/ItemPath/SOM connectivity failures.',
+    recommended_action: 'Check UniFi controller for offline devices and WAN status. Verify that DVI, ItemPath, and SOM adapters can reach their endpoints. If WAN is down, check ISP status and failover. Production systems on affected VLANs will stall until connectivity is restored.',
+  },
+
 ];
 
 // ─── PATTERN EVALUATION ENGINE ───────────────────────────────────────────────

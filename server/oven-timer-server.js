@@ -47,6 +47,10 @@ limble.start();
 const som = require('./som-adapter');
 som.start();
 
+// ── Network (UniFi) integration ─────────────────────────────────
+const network = require('./network-adapter');
+network.start();
+
 // ── Early Warning System ────────────────────────────────────────
 const ews = require('./ews-engine');
 const ewsCollectors = require('./ews-collectors');
@@ -123,6 +127,7 @@ setTimeout(() => {
     dviTrace,
     labDb,
     limble,
+    network,
     getOvenState: () => liveTimers,
   });
   ews.start();
@@ -3441,6 +3446,56 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       matchRate: scans.length > 0 ? Math.round(scans.filter(s => s.matched).length / scans.length * 100) : 0,
       lastScan: lastScan ? { jobNumber: lastScan.jobNumber, matched: lastScan.matched, at: lastScan.scannedAt } : null
     });
+  }
+
+  // ── Network (UniFi) ───────────────────────────────────────
+
+  // GET /api/network/status — both sites summary
+  if (req.method==='GET' && url.pathname==='/api/network/status') {
+    return json(res, network.getStatus());
+  }
+
+  // GET /api/network/devices — device list (optional ?site=irvine1)
+  if (req.method==='GET' && url.pathname==='/api/network/devices') {
+    const site = url.searchParams.get('site');
+    return json(res, network.getDevices(site));
+  }
+
+  // GET /api/network/clients — client counts per site/VLAN
+  if (req.method==='GET' && url.pathname==='/api/network/clients') {
+    const site = url.searchParams.get('site');
+    return json(res, network.getClients(site));
+  }
+
+  // GET /api/network/vlans — VLAN health and utilization
+  if (req.method==='GET' && url.pathname==='/api/network/vlans') {
+    return json(res, network.getVlans());
+  }
+
+  // GET /api/network/events — recent events
+  if (req.method==='GET' && url.pathname==='/api/network/events') {
+    return json(res, network.getEvents());
+  }
+
+  // GET /api/network/alerts — active alarms + bleed violations
+  if (req.method==='GET' && url.pathname==='/api/network/alerts') {
+    return json(res, network.getAlerts());
+  }
+
+  // GET /api/network/health — adapter health
+  if (req.method==='GET' && url.pathname==='/api/network/health') {
+    return json(res, network.getHealth());
+  }
+
+  // GET /api/network/ai-context — AI-ready summary
+  if (req.method==='GET' && url.pathname==='/api/network/ai-context') {
+    return json(res, network.getAIContext());
+  }
+
+  // POST /api/network/refresh — force poll
+  if (req.method==='POST' && url.pathname==='/api/network/refresh') {
+    await network.refresh();
+    return json(res, { ok: true, health: network.getHealth() });
   }
 
   // ── EWS (Early Warning System) ──────────────────────────────
