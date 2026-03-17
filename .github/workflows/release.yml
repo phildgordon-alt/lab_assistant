@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Package release
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          # Create tarball with everything needed to deploy
+          tar czf "Lab_Assistant_${VERSION}.tar.gz" \
+            --exclude='node_modules' \
+            --exclude='.git' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='*.tar.gz' \
+            --exclude='*.pkg' \
+            dist/ \
+            server/ \
+            gateway/ \
+            standalone/ \
+            public/ \
+            package.json \
+            package-lock.json \
+            deploy.sh \
+            vite.config.js
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: Lab_Assistant_*.tar.gz
