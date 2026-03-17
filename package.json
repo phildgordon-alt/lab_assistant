@@ -1,6 +1,6 @@
 {
   "name": "pair-lab-assistant",
-  "version": "2.1.0",
+  "version": "1.0.0",
   "description": "Lab_Assistant MES — Pair Eyewear lens lab management system",
   "scripts": {
     "dev": "vite",
