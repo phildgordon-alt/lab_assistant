@@ -2225,14 +2225,274 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
     <ProductionStageTab domain="coating" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16}}>
-        {[{id:"intelligence",label:"Coating",icon:"🎨"},{id:"config",label:"Rules",icon:"⚙"}].map(sv=>(
+        {[{id:"intelligence",label:"Coating",icon:"🎨"},{id:"pipeline",label:"Pipeline",icon:"🔗"},{id:"config",label:"Rules",icon:"⚙"}].map(sv=>(
           <button key={sv.id} onClick={()=>setSubView(sv.id)} style={{background:subView===sv.id?T.blueDark:"transparent",border:`1px solid ${subView===sv.id?T.blue:"transparent"}`,borderRadius:8,padding:"10px 20px",cursor:"pointer",color:subView===sv.id?T.blue:T.textMuted,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,fontFamily:sans}}><span>{sv.icon}</span>{sv.label}</button>
         ))}
       </div>
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
+      {subView==="pipeline"&&<CoatingPipelineView serverUrl={ovenServerUrl} settings={settings}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
     </div>
     </ProductionStageTab>
+  );
+}
+
+// ── Coating Pipeline (Container Inheritance) ─────────────────
+function CoatingPipelineView({serverUrl,settings}){
+  const base=serverUrl||`http://${window.location.hostname}:3002`;
+  const mono="'JetBrains Mono',monospace";
+  const isDemo=settings?.demoMode||false;
+
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
+  const [selectedContainer,setSelectedContainer]=useState(null);
+  const [manifest,setManifest]=useState(null);
+  const [lastRefresh,setLastRefresh]=useState(null);
+
+  // Tool session form
+  const [newToolId,setNewToolId]=useState("");
+  const [newOperator,setNewOperator]=useState("");
+  const [addJobTool,setAddJobTool]=useState("");
+  const [addJobNumber,setAddJobNumber]=useState("");
+  const [addJobEye,setAddJobEye]=useState("L");
+  const [actionMsg,setActionMsg]=useState(null);
+
+  // Demo data
+  const DEMO={
+    tools:[
+      {id:"TOOL-006",status:"open",job_count:8,operator_id:"javier",created_at:new Date(Date.now()-3600000).toISOString()},
+      {id:"TOOL-007",status:"closed",job_count:6,operator_id:"alex",created_at:new Date(Date.now()-7200000).toISOString(),closed_at:new Date(Date.now()-1800000).toISOString()},
+      {id:"TOOL-008",status:"open",job_count:3,operator_id:"jose",created_at:new Date(Date.now()-1200000).toISOString()},
+    ],
+    oven_trays:[
+      {id:"TRAY-003",status:"closed",job_count:14,children:["TOOL-004","TOOL-005"],created_at:new Date(Date.now()-10800000).toISOString()},
+      {id:"TRAY-004",status:"open",job_count:6,children:["TOOL-007"],created_at:new Date(Date.now()-5400000).toISOString()},
+    ],
+    coating_batches:[
+      {id:"BATCH-041",status:"open",job_count:28,machine_id:"CCL-1",coating_type:"AR",children:["TRAY-001","TRAY-002"],created_at:new Date(Date.now()-14400000).toISOString()},
+    ],
+  };
+
+  const fetchData=useCallback(async()=>{
+    if(isDemo){setData(DEMO);setLoading(false);setLastRefresh(new Date());return;}
+    try{
+      const r=await fetch(`${base}/api/containers/active`);
+      if(r.ok){setData(await r.json());setError(null);}
+      else setError(`Server error: ${r.status}`);
+    }catch(e){setError(e.message);}
+    finally{setLoading(false);setLastRefresh(new Date());}
+  },[base,isDemo]);
+
+  useEffect(()=>{fetchData();const t=setInterval(fetchData,15000);return()=>clearInterval(t);},[fetchData]);
+
+  // Fetch manifest for selected container
+  useEffect(()=>{
+    if(!selectedContainer||isDemo){
+      if(isDemo&&selectedContainer) setManifest([
+        {job_number:"407428",eye_side:"L",source_tool:"TOOL-006",entry_method:"ocr",ocr_confidence:0.94},
+        {job_number:"407428",eye_side:"R",source_tool:"TOOL-006",entry_method:"ocr",ocr_confidence:0.91},
+        {job_number:"408112",eye_side:"L",source_tool:"TOOL-006",entry_method:"manual",ocr_confidence:null},
+        {job_number:"408112",eye_side:"R",source_tool:"TOOL-006",entry_method:"ocr",ocr_confidence:0.88},
+        {job_number:"409001",eye_side:"L",source_tool:"TOOL-007",entry_method:"ocr",ocr_confidence:0.96},
+        {job_number:"409001",eye_side:"R",source_tool:"TOOL-007",entry_method:"ocr",ocr_confidence:0.93},
+      ]);
+      return;
+    }
+    fetch(`${base}/api/containers/${encodeURIComponent(selectedContainer)}/manifest`)
+      .then(r=>r.ok?r.json():null).then(d=>{if(d)setManifest(d.jobs||[]);}).catch(()=>{});
+  },[selectedContainer,base,isDemo]);
+
+  // Actions
+  const openTool=async()=>{
+    if(!newToolId.trim())return;
+    try{
+      const r=await fetch(`${base}/api/containers/tool-session/open`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tool_id:newToolId.trim().toUpperCase(),operator_id:newOperator.trim()||null})});
+      const d=await r.json();
+      if(r.ok){setActionMsg({type:"ok",text:`Tool ${newToolId} opened`});setNewToolId("");setNewOperator("");fetchData();}
+      else setActionMsg({type:"err",text:d.error||"Failed"});
+    }catch(e){setActionMsg({type:"err",text:e.message});}
+    setTimeout(()=>setActionMsg(null),4000);
+  };
+
+  const addJob=async()=>{
+    if(!addJobTool.trim()||!addJobNumber.trim())return;
+    try{
+      const r=await fetch(`${base}/api/containers/tool-session/add-job`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tool_id:addJobTool.trim().toUpperCase(),job_number:addJobNumber.trim().toUpperCase(),eye_side:addJobEye,entry_method:"manual"})});
+      const d=await r.json();
+      if(r.ok){setActionMsg({type:"ok",text:`Job ${addJobNumber} (${addJobEye}) added to ${addJobTool}`});setAddJobNumber("");fetchData();}
+      else setActionMsg({type:"err",text:d.error||"Failed"});
+    }catch(e){setActionMsg({type:"err",text:e.message});}
+    setTimeout(()=>setActionMsg(null),4000);
+  };
+
+  const closeTool=async(toolId)=>{
+    try{
+      const r=await fetch(`${base}/api/containers/tool-session/close`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tool_id:toolId})});
+      if(r.ok){setActionMsg({type:"ok",text:`Tool ${toolId} closed`});fetchData();}
+      else{const d=await r.json();setActionMsg({type:"err",text:d.error||"Failed"});}
+    }catch(e){setActionMsg({type:"err",text:e.message});}
+    setTimeout(()=>setActionMsg(null),4000);
+  };
+
+  const timeSince=(iso)=>{if(!iso)return"—";const diff=Date.now()-new Date(iso).getTime();const m=Math.floor(diff/60000);if(m<60)return`${m}m`;const h=Math.floor(m/60);return`${h}h`;};
+
+  const statusColor=(s)=>s==="open"?T.blue:s==="closed"?T.amber:T.textDim;
+  const statusLabel=(s)=>s==="open"?"OPEN":s==="closed"?"READY":"USED";
+
+  if(loading)return <div style={{textAlign:"center",padding:40,color:T.textMuted,fontFamily:mono,fontSize:12}}>Loading pipeline...</div>;
+
+  const tools=(data?.tools||[]);
+  const trays=(data?.oven_trays||[]);
+  const batches=(data?.coating_batches||[]);
+
+  return(
+    <div style={{fontFamily:mono}}>
+      {/* Action feedback */}
+      {actionMsg&&<div style={{padding:"8px 12px",marginBottom:12,borderRadius:4,background:actionMsg.type==="ok"?T.greenDark:T.redDark,border:`1px solid ${actionMsg.type==="ok"?T.green:T.red}33`,fontSize:11,color:actionMsg.type==="ok"?T.green:T.red}}>{actionMsg.text}</div>}
+
+      {error&&<div style={{padding:"8px 12px",marginBottom:12,borderRadius:4,background:T.redDark,border:`1px solid ${T.red}33`,fontSize:11,color:T.red}}>Connection error: {error}</div>}
+
+      {/* Quick actions */}
+      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end"}}>
+        <div>
+          <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>OPEN TOOL</div>
+          <div style={{display:"flex",gap:4}}>
+            <input value={newToolId} onChange={e=>setNewToolId(e.target.value)} placeholder="TOOL-009" style={{width:100,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
+            <input value={newOperator} onChange={e=>setNewOperator(e.target.value)} placeholder="operator" style={{width:80,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
+            <button onClick={openTool} style={{padding:"6px 12px",background:T.blue,border:"none",borderRadius:3,color:"#fff",fontFamily:mono,fontSize:10,fontWeight:700,cursor:"pointer"}}>OPEN</button>
+          </div>
+        </div>
+        <div>
+          <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>ADD JOB TO TOOL</div>
+          <div style={{display:"flex",gap:4}}>
+            <input value={addJobTool} onChange={e=>setAddJobTool(e.target.value)} placeholder="TOOL-006" style={{width:90,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
+            <input value={addJobNumber} onChange={e=>setAddJobNumber(e.target.value)} placeholder="Job #" style={{width:80,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
+            <button onClick={()=>setAddJobEye(addJobEye==="L"?"R":"L")} style={{padding:"6px 10px",background:addJobEye==="L"?T.blueDark:T.purpleDark,border:`1px solid ${addJobEye==="L"?T.blue:T.purple}`,borderRadius:3,color:addJobEye==="L"?T.blue:T.purple,fontFamily:mono,fontSize:11,fontWeight:700,cursor:"pointer"}}>{addJobEye}</button>
+            <button onClick={addJob} style={{padding:"6px 12px",background:T.green,border:"none",borderRadius:3,color:"#000",fontFamily:mono,fontSize:10,fontWeight:700,cursor:"pointer"}}>ADD</button>
+          </div>
+        </div>
+        <div style={{marginLeft:"auto",fontSize:9,color:T.textDim}}>
+          {lastRefresh&&lastRefresh.toLocaleTimeString()}
+        </div>
+      </div>
+
+      {/* Three-column pipeline */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,alignItems:"start"}}>
+
+        {/* TOOLS */}
+        <div>
+          <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.14em",marginBottom:8}}>TOOLS ({tools.length})</div>
+          {tools.length===0&&<div style={{fontSize:10,color:T.textDim,padding:16,textAlign:"center",background:T.card,borderRadius:4,border:`1px solid ${T.border}`}}>No active tools</div>}
+          {tools.map(c=>(
+            <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
+              padding:"10px 12px",marginBottom:6,borderRadius:4,cursor:"pointer",
+              background:selectedContainer===c.id?T.blueDark:T.card,
+              border:`1px solid ${selectedContainer===c.id?T.blue:T.border}`,
+            }}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
+                <span style={{fontSize:13,fontWeight:700,color:T.text}}>{c.id}</span>
+                <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
+              </div>
+              <div style={{display:"flex",gap:12,fontSize:10,color:T.textMuted}}>
+                <span>{c.job_count} jobs</span>
+                {c.operator_id&&<span>op: {c.operator_id}</span>}
+                <span>{timeSince(c.created_at)}</span>
+              </div>
+              {c.status==="open"&&(
+                <button onClick={e=>{e.stopPropagation();closeTool(c.id);}} style={{marginTop:6,padding:"3px 10px",background:"transparent",border:`1px solid ${T.amber}44`,borderRadius:2,color:T.amber,fontSize:9,fontFamily:mono,cursor:"pointer"}}>CLOSE TOOL</button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* OVEN TRAYS */}
+        <div>
+          <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.14em",marginBottom:8}}>OVEN TRAYS ({trays.length})</div>
+          {trays.length===0&&<div style={{fontSize:10,color:T.textDim,padding:16,textAlign:"center",background:T.card,borderRadius:4,border:`1px solid ${T.border}`}}>No active trays</div>}
+          {trays.map(c=>(
+            <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
+              padding:"10px 12px",marginBottom:6,borderRadius:4,cursor:"pointer",
+              background:selectedContainer===c.id?T.blueDark:T.card,
+              border:`1px solid ${selectedContainer===c.id?T.blue:T.border}`,
+            }}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
+                <span style={{fontSize:13,fontWeight:700,color:T.text}}>{c.id}</span>
+                <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
+              </div>
+              <div style={{display:"flex",gap:12,fontSize:10,color:T.textMuted}}>
+                <span>{c.job_count} jobs</span>
+                <span>{(c.children||[]).length} tools</span>
+                <span>{timeSince(c.created_at)}</span>
+              </div>
+              {(c.children||[]).length>0&&(
+                <div style={{marginTop:4,display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {(c.children||[]).map(ch=>(
+                    <span key={ch} style={{fontSize:9,padding:"1px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:2,color:T.textMuted}}>{ch}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {/* COATING BATCHES */}
+        <div>
+          <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.14em",marginBottom:8}}>BATCHES ({batches.length})</div>
+          {batches.length===0&&<div style={{fontSize:10,color:T.textDim,padding:16,textAlign:"center",background:T.card,borderRadius:4,border:`1px solid ${T.border}`}}>No active batches</div>}
+          {batches.map(c=>(
+            <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
+              padding:"10px 12px",marginBottom:6,borderRadius:4,cursor:"pointer",
+              background:selectedContainer===c.id?T.blueDark:T.card,
+              border:`1px solid ${selectedContainer===c.id?T.blue:T.border}`,
+            }}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
+                <span style={{fontSize:13,fontWeight:700,color:T.text}}>{c.id}</span>
+                <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
+              </div>
+              <div style={{display:"flex",gap:12,fontSize:10,color:T.textMuted}}>
+                <span>{c.job_count} jobs</span>
+                {c.machine_id&&<span>{c.machine_id}</span>}
+                {c.coating_type&&<span style={{color:T.amber}}>{c.coating_type}</span>}
+                <span>{timeSince(c.created_at)}</span>
+              </div>
+              {(c.children||[]).length>0&&(
+                <div style={{marginTop:4,display:"flex",gap:4,flexWrap:"wrap"}}>
+                  {(c.children||[]).map(ch=>(
+                    <span key={ch} style={{fontSize:9,padding:"1px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:2,color:T.textMuted}}>{ch}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Manifest panel */}
+      {selectedContainer&&manifest&&(
+        <div style={{marginTop:16,background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <span style={{fontSize:10,color:T.textDim,letterSpacing:"0.14em"}}>MANIFEST — {selectedContainer} ({manifest.length} jobs)</span>
+            <button onClick={()=>{setSelectedContainer(null);setManifest(null);}} style={{fontSize:9,color:T.textDim,background:"none",border:"none",cursor:"pointer"}}>✕ CLOSE</button>
+          </div>
+          {manifest.length===0&&<div style={{fontSize:10,color:T.textDim,padding:8}}>No jobs in this container</div>}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:4,maxHeight:250,overflowY:"auto"}}>
+            {manifest.map((j,i)=>(
+              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",background:T.surface,borderRadius:3,border:`1px solid ${T.border}`}}>
+                <span style={{fontSize:12,fontWeight:700,color:T.green,fontFamily:mono}}>{j.job_number}</span>
+                <span style={{fontSize:10,color:j.eye_side==="L"?T.blue:T.purple,fontWeight:700}}>{j.eye_side}</span>
+                <span style={{fontSize:9,color:T.textDim,marginLeft:"auto"}}>{j.source_tool}</span>
+                <span style={{fontSize:8,color:j.entry_method==="ocr"?T.cyan:T.amber}}>{j.entry_method==="ocr"?"OCR":"MAN"}</span>
+                {j.ocr_confidence&&<span style={{fontSize:8,color:T.textDim}}>{Math.round(j.ocr_confidence*100)}%</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

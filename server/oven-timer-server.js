@@ -3387,10 +3387,11 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
 
   // ── Vision Scanner API ──────────────────────────────────────
   // POST /api/vision/scan — receive scanned job number from iPad LensScanner app
+  // If tool_id is included, also adds the job to the container inheritance system
   if (req.method==='POST' && url.pathname==='/api/vision/scan') {
     try {
       const body = await readBody(req);
-      const { jobNumber, confidence, scannedAt, device } = body;
+      const { jobNumber, confidence, scannedAt, device, tool_id, eye_side } = body;
       if (!jobNumber) return json(res,{success:false,message:'Missing jobNumber'},400);
 
       // Try to match against known DVI jobs
@@ -3413,12 +3414,36 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         matched: !!match,
         matchedJobId: match ? match.job_id : null,
         matchedStage: match ? match.stage : null,
-        matchedTray: match ? match.tray : null
+        matchedTray: match ? match.tray : null,
+        tool_id: tool_id || null
       };
       global._visionScans.unshift(scan);
       if (global._visionScans.length > 500) global._visionScans.length = 500;
 
-      console.log(`👁 Vision scan: ${jobNumber} (${Math.round((confidence||0)*100)}%) → ${match ? `MATCHED ${match.job_id} @ ${match.stage}` : 'NO MATCH'}`);
+      // Container inheritance: if tool_id provided, add job to that tool's session
+      let containerResult = null;
+      if (tool_id) {
+        try {
+          // Auto-open tool session if not already open
+          try { containers.openToolSession(tool_id, device || 'scanner'); } catch(e) {
+            if (e.code !== 'TOOL_ALREADY_OPEN') throw e;
+          }
+          // Add job to tool
+          containerResult = containers.addJobToTool(
+            tool_id,
+            jobNumber,
+            eye_side || 'L',  // default to L if not specified
+            confidence || null,
+            'ocr'
+          );
+          console.log(`🔗 Container: ${jobNumber} (${eye_side||'L'}) → ${tool_id}`);
+        } catch(e) {
+          containerResult = { error: e.message, code: e.code };
+          console.log(`🔗 Container error: ${e.message}`);
+        }
+      }
+
+      console.log(`👁 Vision scan: ${jobNumber} (${Math.round((confidence||0)*100)}%) → ${match ? `MATCHED ${match.job_id} @ ${match.stage}` : 'NO MATCH'}${tool_id ? ` → ${tool_id}` : ''}`);
 
       return json(res, {
         success: true,
@@ -3427,7 +3452,8 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         trayId: match ? match.tray : null,
         stage: match ? match.stage : null,
         station: match ? match.station : null,
-        operator: match ? match.operator : null
+        operator: match ? match.operator : null,
+        container: containerResult
       });
     } catch(e) { return json(res,{success:false,message:e.message},400); }
   }
