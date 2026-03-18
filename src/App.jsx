@@ -6195,10 +6195,48 @@ function NetworkTab({ovenServerUrl,settings}){
         fetch(`${base}/api/network/teleport`),fetch(`${base}/api/network/wan`),
         fetch(`${base}/api/network/clients`),
       ]);
-      if(sRes.status==="fulfilled"&&sRes.value.ok) setStatus(await sRes.value.json());
-      if(dRes.status==="fulfilled"&&dRes.value.ok) setDevices(await dRes.value.json());
-      if(eRes.status==="fulfilled"&&eRes.value.ok) setEvents(await eRes.value.json());
-      if(vRes.status==="fulfilled"&&vRes.value.ok) setVlans(await vRes.value.json());
+      if(sRes.status==="fulfilled"&&sRes.value.ok){
+        const sd=await sRes.value.json();
+        // API returns {sites:{default:{...},site2:{...}}} — normalize to {irvine1:{...},irvine2:{...}}
+        if(sd.sites){
+          const keys=Object.keys(sd.sites);
+          const mapped={};
+          keys.forEach((k,i)=>{mapped[i===0?"irvine1":"irvine2"]=sd.sites[k];});
+          setStatus(mapped);
+        }else setStatus(sd);
+      }
+      if(dRes.status==="fulfilled"&&dRes.value.ok){
+        const dd=await dRes.value.json();
+        // API returns {devices:[...]} flat array with site field — group by site
+        if(dd.devices&&Array.isArray(dd.devices)){
+          const grouped={irvine1:[],irvine2:[]};
+          for(const d of dd.devices){
+            const s=d.site||"default";
+            const key=s.includes("2")||s==="site2"?"irvine2":"irvine1";
+            grouped[key].push(d);
+          }
+          setDevices(grouped);
+        }else if(dd.irvine1||dd.irvine2){
+          setDevices(dd); // already keyed by site
+        }else{
+          setDevices({irvine1:dd.devices||[],irvine2:[]});
+        }
+      }
+      if(eRes.status==="fulfilled"&&eRes.value.ok){
+        const ed=await eRes.value.json();
+        const evts=(ed.events||ed||[]).map(e=>({...e,
+          severity:e.severity||(e.is_negative?"error":(e.key||"").includes("WARN")?"warning":"info"),
+          site:e.site||"irvine1",
+        }));
+        setEvents(evts);
+      }
+      if(vRes.status==="fulfilled"&&vRes.value.ok){
+        const vd=await vRes.value.json();
+        const vlanColors={30:"#ef4444",1:"#3b82f6",50:"#10b981",40:"#06b6d4",10:"#f59e0b",20:"#8b5cf6",60:"#84cc16",99:"#e2e8f0"};
+        const raw=vd.vlans||vd||[];
+        const maxClients=Math.max(...raw.map(v=>v.clientCount||v.clients||1),1);
+        setVlans(raw.map(v=>({id:v.id,name:v.name,clients:v.clientCount||v.clients||0,pct:Math.round(((v.clientCount||v.clients||0)/maxClients)*100),color:vlanColors[v.id]||"#334155",violations:v.violations||0})));
+      }
       if(aRes.status==="fulfilled"&&aRes.value.ok) setNetAlerts(await aRes.value.json());
       if(hRes.status==="fulfilled"&&hRes.value.ok) setHealth(await hRes.value.json());
       if(tRes.status==="fulfilled"&&tRes.value.ok){const td=await tRes.value.json();setTeleport(td.teleport||td);}
