@@ -54,6 +54,9 @@ network.start();
 // ── Container Inheritance (Coating Pipeline) ────────────────────
 const containers = require('./container-service');
 
+// ── Lab Configuration + EWS Settings ────────────────────────────
+const labConfig = require('./lab-config');
+
 // ── Early Warning System ────────────────────────────────────────
 const ews = require('./ews-engine');
 const ewsCollectors = require('./ews-collectors');
@@ -3514,11 +3517,25 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     catch(e) { return json(res, {error:e.message, code:e.code}, e.code==='TOOL_ALREADY_OPEN'?409:400); }
   }
 
-  // POST /api/containers/tool-session/add-job
+  // POST /api/containers/tool-session/add-job — with DVI enrichment + validation
   if (req.method==='POST' && url.pathname==='/api/containers/tool-session/add-job') {
     const body = await readBody(req);
-    try { return json(res, containers.addJobToTool(body.tool_id, body.job_number, body.eye_side, body.ocr_confidence, body.entry_method||'ocr')); }
-    catch(e) { return json(res, {error:e.message, code:e.code}, e.code==='DUPLICATE_JOB'?409:400); }
+    // DVI validation: job MUST exist in DVI to be scanned
+    const xml = dviJobIndex.get(body.job_number);
+    if (!xml) {
+      return json(res, { error: `Job ${body.job_number} not found in DVI. Verify the job number and try again.`, code: 'JOB_NOT_IN_DVI' }, 400);
+    }
+    // DVI enrichment: extract coating/material/rush
+    const traceJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
+    const traceJob = traceJobs.find(j => j.job_id === body.job_number);
+    const dviData = {
+      coating: xml.coating || null,
+      material: xml.lensMat || null,
+      lensType: xml.lensType || null,
+      rush: (traceJob?.rush === 'Y' || traceJob?.Rush === 'Y') ? true : false,
+    };
+    try { return json(res, containers.addJobToTool(body.tool_id, body.job_number, body.eye_side, body.ocr_confidence, body.entry_method||'ocr', dviData)); }
+    catch(e) { return json(res, {error:e.message, code:e.code}, e.code==='DUPLICATE_JOB'||e.code==='JOB_ALREADY_ON_TOOL'?409:400); }
   }
 
   // POST /api/containers/tool-session/close
@@ -3671,6 +3688,104 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   if (req.method==='POST' && url.pathname==='/api/ews/refresh') {
     await ews.poll();
     return json(res, { ok: true, health: ews.getHealth() });
+  }
+
+  // ── EWS Configuration + Lab Baselines ───────────────────────
+
+  // GET /api/ews/rules — all EWS rules
+  if (req.method==='GET' && url.pathname==='/api/ews/rules') {
+    return json(res, labConfig.getRules());
+  }
+
+  // GET /api/ews/rules/:id — single rule with history
+  if (req.method==='GET' && url.pathname.match(/^\/api\/ews\/rules\/\d+$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    const rule = labConfig.getRule(id);
+    return rule ? json(res, rule) : json(res, { error: 'Not found' }, 404);
+  }
+
+  // PUT /api/ews/rules/:id — update rule fields
+  if (req.method==='PUT' && url.pathname.match(/^\/api\/ews\/rules\/\d+$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    const body = await readBody(req);
+    return json(res, labConfig.updateRule(id, body));
+  }
+
+  // POST /api/ews/rules/:id/toggle — enable/disable
+  if (req.method==='POST' && url.pathname.match(/^\/api\/ews\/rules\/\d+\/toggle$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    return json(res, labConfig.toggleRule(id));
+  }
+
+  // POST /api/ews/rules/:id/test — test rule against last 60min
+  if (req.method==='POST' && url.pathname.match(/^\/api\/ews\/rules\/\d+\/test$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    return json(res, labConfig.testRule(id));
+  }
+
+  // POST /api/ews/rules/:id/suppress — snooze/suppress
+  if (req.method==='POST' && url.pathname.match(/^\/api\/ews\/rules\/\d+\/suppress$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    const body = await readBody(req);
+    return json(res, labConfig.suppressRule(id, body.until, body.reason));
+  }
+
+  // DELETE /api/ews/rules/:id/suppress — remove suppression
+  if (req.method==='DELETE' && url.pathname.match(/^\/api\/ews\/rules\/\d+\/suppress$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    return json(res, labConfig.unsuppressRule(id));
+  }
+
+  // GET /api/ews/config — global EWS settings
+  if (req.method==='GET' && url.pathname==='/api/ews/config') {
+    return json(res, labConfig.getConfig());
+  }
+
+  // PUT /api/ews/config — update global settings
+  if (req.method==='PUT' && url.pathname==='/api/ews/config') {
+    const body = await readBody(req);
+    return json(res, labConfig.setConfig(body));
+  }
+
+  // GET /api/lab/baselines — all lab baselines
+  if (req.method==='GET' && url.pathname==='/api/lab/baselines') {
+    return json(res, labConfig.getLabBaselines());
+  }
+
+  // PUT /api/lab/baselines — update a baseline value
+  if (req.method==='PUT' && url.pathname==='/api/lab/baselines') {
+    const body = await readBody(req);
+    return json(res, labConfig.setLabBaseline(body));
+  }
+
+  // GET /api/lab/baselines/history — baseline change log
+  if (req.method==='GET' && url.pathname==='/api/lab/baselines/history') {
+    const dept = url.searchParams.get('department');
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+    return json(res, labConfig.getBaselineHistory(dept, limit));
+  }
+
+  // GET /api/lab/schedule — shift schedule
+  if (req.method==='GET' && url.pathname==='/api/lab/schedule') {
+    return json(res, labConfig.getSchedule());
+  }
+
+  // PUT /api/lab/schedule — update schedule slot
+  if (req.method==='PUT' && url.pathname==='/api/lab/schedule') {
+    const body = await readBody(req);
+    return json(res, labConfig.setScheduleSlot(body));
+  }
+
+  // GET /api/lab/backlog — current backlog per department
+  if (req.method==='GET' && url.pathname==='/api/lab/backlog') {
+    return json(res, labConfig.getBacklog());
+  }
+
+  // GET /api/lab/backlog/trend — 30-day backlog trend
+  if (req.method==='GET' && url.pathname==='/api/lab/backlog/trend') {
+    const dept = url.searchParams.get('department');
+    const days = parseInt(url.searchParams.get('days') || '30');
+    return json(res, labConfig.getBacklogTrend(dept, days));
   }
 
   // ── 404 ─────────────────────────────────────────────────────

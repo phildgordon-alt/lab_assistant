@@ -45,7 +45,7 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "         10000039072",
+      "lastOrder": "         10000039306",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -103,7 +103,7 @@
       "counts": {
         "count1": 8159,
         "count2": 0,
-        "count3": "B;0;53;200;Temperature Tank1;2026-03-17 18:15:12\r\nB;1;0;200;Temperature Tank2;2026-03-17 18:15:12"
+        "count3": "B;0;53;200;Temperature Tank1;2026-03-18 09:43:09\r\nB;1;0;200;Temperature Tank2;2026-03-18 09:43:09"
       },
       "cycleTime": "60.00",
       "isActive": 1
@@ -119,16 +119,16 @@
       "statusLabel": "Engaged",
       "statusColor": "green",
       "severity": "ok",
-      "event": "Waiting for trays",
-      "eventOriginal": "Waiting for trays",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "         10000039223",
+      "lastOrder": "            10912961",
       "counts": {
-        "count1": 222103,
+        "count1": 222228,
         "count2": 0,
         "count3": 0
       },
@@ -153,9 +153,9 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "         10000039221",
+      "lastOrder": "            10912987",
       "counts": {
-        "count1": 61449,
+        "count1": 61581,
         "count2": 0,
         "count3": 0
       },
@@ -335,18 +335,18 @@
       "statusLabel": "Blocked",
       "statusColor": "amber",
       "severity": "warning",
-      "event": "Error, alignment station: Reports vacuum monitoring triggered",
-      "eventOriginal": "Error, alignment station: Reports vacuum monitoring triggered",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
       "led": {
-        "green": false,
-        "red": false,
-        "status": "idle"
+        "green": true,
+        "red": true,
+        "status": "warning"
       },
-      "lastOrder": "            10912403",
+      "lastOrder": "            10913054",
       "counts": {
-        "count1": 85405,
+        "count1": 85592,
         "count2": 0,
-        "count3": "B;0;8;10;Blockpiece magazine;2026-03-17 18:19:42\r\nB;1;76;100;Fillinglevel Tank;2026-03-17 18:19:42"
+        "count3": "B;0;7;10;Blockpiece magazine;2026-03-18 09:44:21\r\nB;1;68;100;Fillinglevel Tank;2026-03-18 09:44:21"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -389,18 +389,18 @@
       "statusLabel": "SPOL",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Position is empty and there is no job data.",
-      "eventOriginal": "Position is empty and there is no job data.",
+      "event": "SPOL",
+      "eventOriginal": "SPOL",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "         10000039223",
+      "lastOrder": "            10912961",
       "counts": {
-        "count1": 83511,
+        "count1": 83640,
         "count2": 0,
-        "count3": "B;0;5060;12000;S+_U_L;2026-03-17 17:58:29\r\nB;1;5096;12000;S+_U_R;2026-03-17 17:58:29\r\nB;2;2018;6000;B_D_L;2026-03-17 17:58:29\r\nB;3;2000;6000;B_D_R;2026-03-17 17:58:29"
+        "count3": "B;0;8514;12000;S+_U_L;2026-03-18 09:42:16\r\nB;1;8514;12000;S+_U_R;2026-03-18 09:42:16\r\nB;2;2696;6000;B_D_L;2026-03-18 09:42:16\r\nB;3;2666;6000;B_D_R;2026-03-18 09:42:16"
       },
       "cycleTime": "69.23",
       "isActive": 1
@@ -423,11 +423,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "         10000039221",
+      "lastOrder": "            10912977",
       "counts": {
-        "count1": 95745,
+        "count1": 95859,
         "count2": 0,
-        "count3": "B;0;4050;12000;S+_U_L;2026-03-17 17:10:57\r\nB;1;3951;12000;S+_U_R;2026-03-17 17:10:57\r\nB;2;2740;6000;B_D_L;2026-03-17 17:10:57\r\nB;3;2698;6000;B_D_R;2026-03-17 17:10:57"
+        "count3": "B;0;7182;12000;S+_U_L;2026-03-18 09:43:54\r\nB;1;7243;12000;S+_U_R;2026-03-18 09:43:54\r\nB;2;3326;6000;B_D_L;2026-03-18 09:43:54\r\nB;3;3306;6000;B_D_R;2026-03-18 09:43:54"
       },
       "cycleTime": "69.23",
       "isActive": 1
@@ -443,18 +443,18 @@
       "statusLabel": "SPOL",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Polishing liquid supply: setpoint temperature for polishing liquid not yet reached",
-      "eventOriginal": "Polishing liquid supply: setpoint temperature for polishing liquid not yet reached",
+      "event": "Waiting for trays",
+      "eventOriginal": "Waiting for trays",
       "led": {
         "green": true,
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10912269",
+      "lastOrder": "            10912458",
       "counts": {
-        "count1": 52940,
+        "count1": 52960,
         "count2": 0,
-        "count3": "B;0;8430;12000;S+_U_L;2026-03-17 15:46:14\r\nB;1;8355;12000;S+_U_R;2026-03-17 15:46:14\r\nB;2;1390;6000;B_D_L;2026-03-17 15:46:14\r\nB;3;1372;6000;B_D_R;2026-03-17 15:46:14"
+        "count3": "B;0;9017;12000;S+_U_L;2026-03-18 08:24:19\r\nB;1;8942;12000;S+_U_R;2026-03-18 08:24:19\r\nB;2;1500;6000;B_D_L;2026-03-18 08:24:19\r\nB;3;1482;6000;B_D_R;2026-03-18 08:24:19"
       },
       "cycleTime": "69.23",
       "isActive": 1
@@ -477,11 +477,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "         10000039220",
+      "lastOrder": "            10912946",
       "counts": {
         "count1": 146391,
         "count2": 0,
-        "count3": "B;0;10;10;Unempty magazine tubes;2026-03-17 16:02:37\r\nB;1;61;100;Tank level;2026-03-17 18:14:36"
+        "count3": "B;0;10;10;Unempty magazine tubes;2026-03-18 08:50:25\r\nB;1;61;100;Tank level;2026-03-18 08:31:04"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -551,16 +551,16 @@
       "statusLabel": "SDBA",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Waiting for trays ...",
-      "eventOriginal": "Waiting for trays ...",
+      "event": "Tray(s) in process ...",
+      "eventOriginal": "Tray(s) in process ...",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
       "lastOrder": "              XXXXXX",
       "counts": {
-        "count1": 436843,
+        "count1": 437081,
         "count2": 0,
         "count3": 0
       },
@@ -587,7 +587,7 @@
       },
       "lastOrder": "              XXXXXX",
       "counts": {
-        "count1": 68303,
+        "count1": 68315,
         "count2": 0,
         "count3": 0
       },
@@ -612,7 +612,7 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10911196",
+      "lastOrder": "             1605336",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -686,18 +686,18 @@
       "statusLabel": "Unknown",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Backflow at machine! Pos: 95",
-      "eventOriginal": "Backflow at machine! Pos: 95",
+      "event": "Backflow at machine! Pos: 96",
+      "eventOriginal": "Backflow at machine! Pos: 96",
       "led": {
         "green": false,
         "red": false,
         "status": "idle"
       },
-      "lastOrder": "            10912413",
+      "lastOrder": "            10913028",
       "counts": {
         "count1": 0,
         "count2": 0,
-        "count3": "B;0;0;0;Traycount;2026-03-17 18:19:45"
+        "count3": "B;0;0;0;Traycount;2026-03-18 09:43:44"
       },
       "cycleTime": "0.00",
       "isActive": 1
@@ -713,18 +713,18 @@
       "statusLabel": "Unknown",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Unreadable barcode at position: 46",
-      "eventOriginal": "Unreadable barcode at position: 46",
+      "event": "PLC could not execute the move command possibly caused by a backflow in front of the machine! Pos: 36",
+      "eventOriginal": "PLC could not execute the move command possibly caused by a backflow in front of the machine! Pos: 36",
       "led": {
         "green": true,
         "red": false,
         "status": "running"
       },
-      "lastOrder": "              YYYYYY",
+      "lastOrder": "            10913016",
       "counts": {
         "count1": 0,
         "count2": 0,
-        "count3": "B;0;0;35;Traycount;2026-03-17 18:20:11"
+        "count3": "B;0;2;35;Traycount;2026-03-18 09:44:09"
       },
       "cycleTime": "0.00",
       "isActive": 1
@@ -740,18 +740,18 @@
       "statusLabel": "Unknown",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Rueckstau vor Maschine! Pos: 89",
-      "eventOriginal": "Rueckstau vor Maschine! Pos: 89",
+      "event": "Rueckstau vor Maschine! Pos: 100",
+      "eventOriginal": "Rueckstau vor Maschine! Pos: 100",
       "led": {
         "green": false,
         "red": false,
         "status": "idle"
       },
-      "lastOrder": "            10912408",
+      "lastOrder": "              ZZZZZZ",
       "counts": {
         "count1": 0,
         "count2": 0,
-        "count3": "B;0;0;20;Traycount;2026-03-17 18:20:03"
+        "count3": "B;0;0;20;Traycount;2026-03-18 09:44:02"
       },
       "cycleTime": "0.00",
       "isActive": 1
@@ -794,14 +794,14 @@
       "statusLabel": "Unknown",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": " Position 2 status changed from Marked to Block piece removed",
-      "eventOriginal": " Position 2 status changed from Marked to Block piece removed",
+      "event": " Execute script Position 2 changed from do not run to run Position 2 status changed from Not present to Block piece removed Ready for production indicator changes from 0 to 2",
+      "eventOriginal": " Execute script Position 2 changed from do not run to run Position 2 status changed from Not present to Block piece removed Ready for production indicator changes from 0 to 2",
       "led": {
         "green": false,
         "red": false,
         "status": "idle"
       },
-      "lastOrder": "         10000039171",
+      "lastOrder": "         10000039305",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -875,14 +875,14 @@
       "statusLabel": "ACOT",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Tray(s) in process",
-      "eventOriginal": "Tray(s) in process",
+      "event": "Maintenance interval is reached or exceeded for: XTAL 1. Please clean or replace the mentioned part!",
+      "eventOriginal": "Maintenance interval is reached or exceeded for: XTAL 1. Please clean or replace the mentioned part!",
       "led": {
         "green": true,
-        "red": false,
-        "status": "running"
+        "red": true,
+        "status": "warning"
       },
-      "lastOrder": "            10911584",
+      "lastOrder": "            10912298",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -936,7 +936,7 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10912298",
+      "lastOrder": "            10912451",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -963,7 +963,7 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "             1605085",
+      "lastOrder": "            10912655",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -983,18 +983,18 @@
       "statusLabel": "SEDG",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Control panel emergency stop active",
-      "eventOriginal": "Control panel emergency stop active",
+      "event": "Machine in reset",
+      "eventOriginal": "Machine in reset",
       "led": {
         "green": false,
-        "red": false,
-        "status": "idle"
+        "red": true,
+        "status": "error"
       },
       "lastOrder": "             1599613",
       "counts": {
         "count1": 374371,
         "count2": 0,
-        "count3": "B;1;0;2200;Rough Cut Tool_1_L;2026-03-13 08:45:16\r\nB;2;0;0;Empty;2026-03-13 08:45:16\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-13 08:45:16\r\nB;4;19;2000;Combi Tool_Groove_3_L;2026-03-13 08:45:16\r\nB;5;0;2000;Universal Polish 100 Plastic_4_L;2026-03-13 08:45:16\r\nB;6;2003;7200;Combi Tool_SFB_5_L;2026-03-13 08:45:16\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-13 08:45:16\r\nB;8;366;8000;Combi Tool_Flat_6_L;2026-03-13 08:45:16\r\nB;9;3108;8000;Combi Tool_VBevelPlastic_6_L;2026-03-13 08:45:16\r\nB;10;1799;2200;Rough Cut Tool_1_R;2026-03-13 08:45:16\r\nB;11;0;0;Empty;2026-03-13 08:45:16\r\nB;12;16;1000;Combi Tool_Drill1.2_3_R;2026-03-13 08:45:16\r\nB;13;9;2000;Combi Tool_Groove_3_R;2026-03-13 08:45:16\r\nB;14;11;2000;Universal Polish 100 Plastic_4_R;2026-03-13 08:45:16\r\nB;15;2614;7200;Combi Tool_SFB_5_R;2026-03-13 08:45:16\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-13 08:45:16\r\nB;17;282;8000;Combi Tool_Flat_6_R;2026-03-13 08:45:16\r\nB;18;5728;8000;Combi Tool_VBevelPlastic_6_R;2026-03-13 08:45:16"
+        "count3": "B;1;0;2200;Rough Cut Tool_1_L;2026-03-18 06:11:42\r\nB;2;0;0;Empty;2026-03-18 06:11:42\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-18 06:11:42\r\nB;4;19;2000;Combi Tool_Groove_3_L;2026-03-18 06:11:42\r\nB;5;0;2000;Universal Polish 100 Plastic_4_L;2026-03-18 06:11:42\r\nB;6;2003;7200;Combi Tool_SFB_5_L;2026-03-18 06:11:42\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-18 06:11:42\r\nB;8;366;8000;Combi Tool_Flat_6_L;2026-03-18 06:11:42\r\nB;9;3108;8000;Combi Tool_VBevelPlastic_6_L;2026-03-18 06:11:42\r\nB;10;1799;2200;Rough Cut Tool_1_R;2026-03-18 06:11:42\r\nB;11;0;0;Empty;2026-03-18 06:11:42\r\nB;12;16;1000;Combi Tool_Drill1.2_3_R;2026-03-18 06:11:42\r\nB;13;9;2000;Combi Tool_Groove_3_R;2026-03-18 06:11:42\r\nB;14;11;2000;Universal Polish 100 Plastic_4_R;2026-03-18 06:11:42\r\nB;15;2614;7200;Combi Tool_SFB_5_R;2026-03-18 06:11:42\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-18 06:11:42\r\nB;17;282;8000;Combi Tool_Flat_6_R;2026-03-18 06:11:42\r\nB;18;5728;8000;Combi Tool_VBevelPlastic_6_R;2026-03-18 06:11:42"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1010,18 +1010,18 @@
       "statusLabel": "SEDG",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Tray(s) in process",
-      "eventOriginal": "Tray(s) in process",
+      "event": "C2_2 sucker: Vacuum monitoring triggered (10",
+      "eventOriginal": "C2_2 sucker: Vacuum monitoring triggered (10",
       "led": {
-        "green": true,
+        "green": false,
         "red": false,
-        "status": "running"
+        "status": "idle"
       },
-      "lastOrder": "            10912408",
+      "lastOrder": "            10912562",
       "counts": {
-        "count1": 456107,
+        "count1": 456189,
         "count2": 0,
-        "count3": "B;1;131;2200;Rough Cut Tool_1_L;2026-03-17 17:32:18\r\nB;2;0;0;Empty;2026-03-17 14:26:47\r\nB;3;0;1000;Combi Tool_Drill1.2_3_L;2026-03-17 14:26:47\r\nB;4;7;2000;Combi Tool_Groove_3_L;2026-03-17 14:26:47\r\nB;5;13;2000;Universal Polish 100 Plastic_4_L;2026-03-17 14:26:47\r\nB;6;2265;7200;Combi Tool_SFB_5_L;2026-03-17 17:32:18\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-17 14:26:47\r\nB;8;392;8000;Combi Tool_Flat_6_L;2026-03-17 14:26:47\r\nB;9;4602;8000;Combi Tool_VBevelPlastic_6_L;2026-03-17 17:32:18\r\nB;10;100811;2200;Rough Cut Tool_1_R;2026-03-17 14:26:47\r\nB;11;0;0;Empty;2026-03-17 14:26:47\r\nB;12;10;1000;Combi Tool_Drill1.2_3_R;2026-03-17 14:26:47\r\nB;13;3;2000;Combi Tool_Groove_3_R;2026-03-17 14:26:47\r\nB;14;20;2000;Universal Polish 100 Plastic_4_R;2026-03-17 14:26:47\r\nB;15;3094;7200;Combi Tool_SFB_5_R;2026-03-17 14:26:47\r\nB;16;4;4000;Combi Tool_Shelf_5_R;2026-03-17 14:26:47\r\nB;17;246;8000;Combi Tool_Flat_6_R;2026-03-17 14:26:47\r\nB;18;7250;8000;Combi Tool_VBevelPlastic_6_R;2026-03-17 14:26:47"
+        "count3": "B;1;2164;2200;Rough Cut Tool_1_L;2026-03-17 04:59:18\r\nB;2;0;0;Empty;2026-03-17 20:45:57\r\nB;3;0;1000;Combi Tool_Drill1.2_3_L;2026-03-17 20:45:57\r\nB;4;7;2000;Combi Tool_Groove_3_L;2026-03-17 20:45:57\r\nB;5;13;2000;Universal Polish 100 Plastic_4_L;2026-03-17 20:45:57\r\nB;6;2093;7200;Combi Tool_SFB_5_L;2026-03-17 04:59:18\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-17 20:45:57\r\nB;8;392;8000;Combi Tool_Flat_6_L;2026-03-17 20:45:57\r\nB;9;4430;8000;Combi Tool_VBevelPlastic_6_L;2026-03-17 04:59:18\r\nB;10;100811;2200;Rough Cut Tool_1_R;2026-03-17 20:45:57\r\nB;11;0;0;Empty;2026-03-17 20:45:57\r\nB;12;10;1000;Combi Tool_Drill1.2_3_R;2026-03-17 20:45:57\r\nB;13;3;2000;Combi Tool_Groove_3_R;2026-03-17 20:45:57\r\nB;14;20;2000;Universal Polish 100 Plastic_4_R;2026-03-17 20:45:57\r\nB;15;3094;7200;Combi Tool_SFB_5_R;2026-03-17 20:45:57\r\nB;16;4;4000;Combi Tool_Shelf_5_R;2026-03-17 20:45:57\r\nB;17;246;8000;Combi Tool_Flat_6_R;2026-03-17 20:45:57\r\nB;18;7250;8000;Combi Tool_VBevelPlastic_6_R;2026-03-17 20:45:57"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1044,11 +1044,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10912411",
+      "lastOrder": "         10000039307",
       "counts": {
-        "count1": 470714,
+        "count1": 470938,
         "count2": 0,
-        "count3": "B;1;748;2200;Rough Cut Tool_1_L;2026-03-17 18:09:10\r\nB;2;0;0;Empty;2026-03-17 11:59:56\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-17 11:59:56\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-17 11:59:56\r\nB;5;9;2000;Universal Polish 100 Plastic_4_L;2026-03-17 11:59:56\r\nB;6;633;7200;Combi Tool_SFB_5_L;2026-03-17 18:09:10\r\nB;7;5;4000;Combi Tool_Shelf_5_L;2026-03-17 11:59:56\r\nB;8;327;8000;Combi Tool_Flat_6_L;2026-03-17 11:59:56\r\nB;9;2033;8000;Combi Tool_VBevelPlastic_6_L;2026-03-17 18:09:10\r\nB;10;2041;2200;Rough Cut Tool_1_R;2026-03-17 18:09:10\r\nB;11;0;0;Empty;2026-03-17 11:59:56\r\nB;12;11;1000;Combi Tool_Drill1.2_3_R;2026-03-17 11:59:56\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-17 11:59:56\r\nB;14;6;2000;Universal Polish 100 Plastic_4_R;2026-03-17 11:59:56\r\nB;15;2012;7200;Combi Tool_SFB_5_R;2026-03-17 18:09:10\r\nB;16;5;4000;Combi Tool_Shelf_5_R;2026-03-17 11:59:56\r\nB;17;506;8000;Combi Tool_Flat_6_R;2026-03-17 11:59:56\r\nB;18;5894;8000;Combi Tool_VBevelPlastic_6_R;2026-03-17 18:09:10"
+        "count3": "B;1;870;2200;Rough Cut Tool_1_L;2026-03-18 09:20:16\r\nB;2;0;0;Empty;2026-03-18 08:55:19\r\nB;3;18;1000;Combi Tool_Drill1.2_3_L;2026-03-18 08:55:19\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-18 08:55:19\r\nB;5;9;2000;Universal Polish 100 Plastic_4_L;2026-03-18 08:55:19\r\nB;6;754;7200;Combi Tool_SFB_5_L;2026-03-18 09:20:16\r\nB;7;5;4000;Combi Tool_Shelf_5_L;2026-03-18 08:55:19\r\nB;8;327;8000;Combi Tool_Flat_6_L;2026-03-18 08:55:19\r\nB;9;2154;8000;Combi Tool_VBevelPlastic_6_L;2026-03-18 09:20:16\r\nB;10;2144;2200;Rough Cut Tool_1_R;2026-03-18 09:19:47\r\nB;11;0;0;Empty;2026-03-18 08:55:19\r\nB;12;11;1000;Combi Tool_Drill1.2_3_R;2026-03-18 08:55:19\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-18 08:55:19\r\nB;14;6;2000;Universal Polish 100 Plastic_4_R;2026-03-18 08:55:19\r\nB;15;2114;7200;Combi Tool_SFB_5_R;2026-03-18 09:19:47\r\nB;16;5;4000;Combi Tool_Shelf_5_R;2026-03-18 08:55:19\r\nB;17;506;8000;Combi Tool_Flat_6_R;2026-03-18 08:55:19\r\nB;18;5996;8000;Combi Tool_VBevelPlastic_6_R;2026-03-18 09:19:47"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1064,18 +1064,18 @@
       "statusLabel": "SEDG",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Initialization in progress...",
-      "eventOriginal": "Initialization in progress...",
+      "event": "Close and lock safety screens",
+      "eventOriginal": "Close and lock safety screens",
       "led": {
         "green": false,
         "red": true,
         "status": "error"
       },
-      "lastOrder": "            10911749",
+      "lastOrder": "            10912646",
       "counts": {
-        "count1": 337886,
+        "count1": 337894,
         "count2": 0,
-        "count3": "B;1;1857;3000;Rough Cut Tool_1_L;2026-03-17 07:28:14\r\nB;2;0;0;Empty;2026-03-17 07:28:14\r\nB;3;4;1000;Combi Tool_Drill1.2_3_L;2026-03-17 07:28:14\r\nB;4;0;2000;Combi Tool_Groove_3_L;2026-03-17 07:28:14\r\nB;5;0;2000;Universal Polish 100 Plastic_4_L;2026-03-17 07:28:14\r\nB;6;3647;7200;Combi Tool_SFB_5_L;2026-03-17 07:28:14\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-17 07:28:14\r\nB;8;3;8000;Combi Tool_Flat_6_L;2026-03-17 07:28:14\r\nB;9;2371;8000;Combi Tool_VBevelPlastic_6_L;2026-03-17 07:28:14\r\nB;10;1148;3000;Rough Cut Tool_1_R;2026-03-17 07:28:14\r\nB;11;0;0;Empty;2026-03-17 07:28:14\r\nB;12;2;1000;Combi Tool_Drill1.2_3_R;2026-03-17 07:28:14\r\nB;13;0;2000;Combi Tool_Groove_3_R;2026-03-17 07:28:14\r\nB;14;0;2000;Universal Polish 100 Plastic_4_R;2026-03-17 07:28:14\r\nB;15;3800;7200;Combi Tool_SFB_5_R;2026-03-17 07:28:14\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-17 07:28:14\r\nB;17;261;8000;Combi Tool_Flat_6_R;2026-03-17 07:28:14\r\nB;18;510;8000;Combi Tool_VBevelPlastic_6_R;2026-03-17 07:28:14"
+        "count3": "B;1;1861;3000;Rough Cut Tool_1_L;2026-03-18 07:52:54\r\nB;2;0;0;Empty;2026-03-18 07:52:54\r\nB;3;4;1000;Combi Tool_Drill1.2_3_L;2026-03-18 07:52:54\r\nB;4;0;2000;Combi Tool_Groove_3_L;2026-03-18 07:52:54\r\nB;5;0;2000;Universal Polish 100 Plastic_4_L;2026-03-18 07:52:54\r\nB;6;3651;7200;Combi Tool_SFB_5_L;2026-03-18 07:52:54\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-18 07:52:54\r\nB;8;3;8000;Combi Tool_Flat_6_L;2026-03-18 07:52:54\r\nB;9;2375;8000;Combi Tool_VBevelPlastic_6_L;2026-03-18 07:52:54\r\nB;10;1152;3000;Rough Cut Tool_1_R;2026-03-18 07:52:54\r\nB;11;0;0;Empty;2026-03-18 07:52:54\r\nB;12;2;1000;Combi Tool_Drill1.2_3_R;2026-03-18 07:52:54\r\nB;13;0;2000;Combi Tool_Groove_3_R;2026-03-18 07:52:54\r\nB;14;0;2000;Universal Polish 100 Plastic_4_R;2026-03-18 07:52:54\r\nB;15;3804;7200;Combi Tool_SFB_5_R;2026-03-18 07:52:54\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-18 07:52:54\r\nB;17;261;8000;Combi Tool_Flat_6_R;2026-03-18 07:52:54\r\nB;18;514;8000;Combi Tool_VBevelPlastic_6_R;2026-03-18 07:52:54"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1098,11 +1098,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10912414",
+      "lastOrder": "         10000039307",
       "counts": {
-        "count1": 68166,
+        "count1": 68461,
         "count2": 0,
-        "count3": "B;1;397;2200;Rough Cut Tool_1_L;2026-03-17 17:40:37\r\nB;2;0;0;Empty;2026-03-17 12:04:57\r\nB;3;3;1000;Combi Tool_Drill1.2_3_L;2026-03-17 12:04:57\r\nB;4;1;2000;Combi Tool_Groove_3_L;2026-03-17 12:04:57\r\nB;5;18;2000;Universal Polish 100 Plastic_4_L;2026-03-17 12:04:57\r\nB;6;1367;7200;Combi Tool_SFB_5_L;2026-03-17 17:40:37\r\nB;7;9;4000;Combi Tool_Shelf_5_L;2026-03-17 12:04:57\r\nB;8;157;8000;Combi Tool_Flat_6_L;2026-03-17 12:04:57\r\nB;9;4648;8000;Combi Tool_VBevelPlastic_6_L;2026-03-17 17:40:37\r\nB;10;1271;2200;Rough Cut Tool_1_R;2026-03-17 17:40:37\r\nB;11;0;0;Empty;2026-03-17 12:04:57\r\nB;12;3;1000;Combi Tool_Drill1.2_3_R;2026-03-17 12:04:57\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-17 12:04:57\r\nB;14;1;2000;Universal Polish 100 Plastic_4_R;2026-03-17 12:04:57\r\nB;15;1964;7200;Combi Tool_SFB_5_R;2026-03-17 17:40:37\r\nB;16;6;4000;Combi Tool_Shelf_5_R;2026-03-17 12:04:57\r\nB;17;121;8000;Combi Tool_Flat_6_R;2026-03-17 12:04:57\r\nB;18;7194;8000;Combi Tool_VBevelPlastic_6_R;2026-03-17 17:40:37"
+        "count3": "B;1;564;2200;Rough Cut Tool_1_L;2026-03-18 09:34:39\r\nB;2;0;0;Empty;2026-03-18 05:35:12\r\nB;3;3;1000;Combi Tool_Drill1.2_3_L;2026-03-18 05:35:12\r\nB;4;1;2000;Combi Tool_Groove_3_L;2026-03-18 05:35:12\r\nB;5;18;2000;Universal Polish 100 Plastic_4_L;2026-03-18 05:35:12\r\nB;6;1533;7200;Combi Tool_SFB_5_L;2026-03-18 09:34:39\r\nB;7;9;4000;Combi Tool_Shelf_5_L;2026-03-18 05:35:12\r\nB;8;157;8000;Combi Tool_Flat_6_L;2026-03-18 05:35:12\r\nB;9;4814;8000;Combi Tool_VBevelPlastic_6_L;2026-03-18 09:34:39\r\nB;10;1399;2200;Rough Cut Tool_1_R;2026-03-18 09:34:39\r\nB;11;0;0;Empty;2026-03-18 05:35:12\r\nB;12;3;1000;Combi Tool_Drill1.2_3_R;2026-03-18 05:35:12\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-18 05:35:12\r\nB;14;1;2000;Universal Polish 100 Plastic_4_R;2026-03-18 05:35:12\r\nB;15;2091;7200;Combi Tool_SFB_5_R;2026-03-18 09:34:39\r\nB;16;6;4000;Combi Tool_Shelf_5_R;2026-03-18 05:35:12\r\nB;17;121;8000;Combi Tool_Flat_6_R;2026-03-18 05:35:12\r\nB;18;7321;8000;Combi Tool_VBevelPlastic_6_R;2026-03-18 09:34:39"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1125,11 +1125,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10912380",
+      "lastOrder": "            10913053",
       "counts": {
-        "count1": 109295,
+        "count1": 109556,
         "count2": 0,
-        "count3": "B;1;1024;2200;Rough Cut Tool_1_L;2026-03-17 16:08:21\r\nB;2;0;0;Empty;2026-03-17 12:00:36\r\nB;3;1;1000;Combi Tool_Drill1.2_3_L;2026-03-17 12:00:36\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-17 12:00:36\r\nB;5;16;2000;Universal Polish 100 Plastic_4_L;2026-03-17 12:00:36\r\nB;6;410;7200;Combi Tool_SFB_5_L;2026-03-17 16:08:21\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-17 12:00:36\r\nB;8;4;8000;Combi Tool_Flat_6_L;2026-03-17 12:00:36\r\nB;9;1201;8000;Combi Tool_VBevelPlastic_6_L;2026-03-17 16:08:21\r\nB;10;818;2200;Rough Cut Tool_1_R;2026-03-17 15:20:22\r\nB;11;0;0;Empty;2026-03-17 12:00:36\r\nB;12;0;1000;Combi Tool_Drill1.2_3_R;2026-03-17 12:00:36\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-17 12:00:36\r\nB;14;14;2000;Universal Polish 100 Plastic_4_R;2026-03-17 12:00:36\r\nB;15;2689;7200;Combi Tool_SFB_5_R;2026-03-17 15:20:22\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-17 12:00:36\r\nB;17;21;8000;Combi Tool_Flat_6_R;2026-03-17 12:00:36\r\nB;18;5033;8000;Combi Tool_VBevelPlastic_6_R;2026-03-17 15:20:22"
+        "count3": "B;1;1164;2200;Rough Cut Tool_1_L;2026-03-18 09:32:38\r\nB;2;0;0;Empty;2026-03-18 05:11:22\r\nB;3;1;1000;Combi Tool_Drill1.2_3_L;2026-03-18 05:11:22\r\nB;4;2;2000;Combi Tool_Groove_3_L;2026-03-18 05:11:22\r\nB;5;16;2000;Universal Polish 100 Plastic_4_L;2026-03-18 05:11:22\r\nB;6;550;7200;Combi Tool_SFB_5_L;2026-03-18 09:32:38\r\nB;7;0;4000;Combi Tool_Shelf_5_L;2026-03-18 05:11:22\r\nB;8;4;8000;Combi Tool_Flat_6_L;2026-03-18 05:11:22\r\nB;9;1341;8000;Combi Tool_VBevelPlastic_6_L;2026-03-18 09:32:38\r\nB;10;939;2200;Rough Cut Tool_1_R;2026-03-18 09:32:38\r\nB;11;0;0;Empty;2026-03-18 05:11:22\r\nB;12;0;1000;Combi Tool_Drill1.2_3_R;2026-03-18 05:11:22\r\nB;13;2;2000;Combi Tool_Groove_3_R;2026-03-18 05:11:22\r\nB;14;14;2000;Universal Polish 100 Plastic_4_R;2026-03-18 05:11:22\r\nB;15;2810;7200;Combi Tool_SFB_5_R;2026-03-18 09:32:38\r\nB;16;0;4000;Combi Tool_Shelf_5_R;2026-03-18 05:11:22\r\nB;17;21;8000;Combi Tool_Flat_6_R;2026-03-18 05:11:22\r\nB;18;5154;8000;Combi Tool_VBevelPlastic_6_R;2026-03-18 09:32:38"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1152,11 +1152,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10912413",
+      "lastOrder": "            10913052",
       "counts": {
-        "count1": 128862,
+        "count1": 129158,
         "count2": 0,
-        "count3": "B;1;1594;2200;Rough Cut Tool_1_L;2026-03-17 17:42:17\r\nB;2;0;0;Empty;2026-03-17 11:55:32\r\nB;3;3;1000;Combi Tool_Drill1.2_3_L;2026-03-17 11:55:32\r\nB;4;5;2000;Combi Tool_Groove_3_L;2026-03-17 11:55:32\r\nB;5;15;2000;Universal Polish 100 Plastic_4_L;2026-03-17 11:55:32\r\nB;6;4166;7200;Combi Tool_SFB_5_L;2026-03-17 17:42:17\r\nB;7;3;4000;Combi Tool_Shelf_5_L;2026-03-17 11:55:32\r\nB;8;157;8000;Combi Tool_Flat_6_L;2026-03-17 11:55:32\r\nB;9;4162;8000;Combi Tool_VBevelPlastic_6_L;2026-03-17 17:42:17\r\nB;10;1381;2200;Rough Cut Tool_1_R;2026-03-17 17:42:17\r\nB;11;0;0;Empty;2026-03-17 11:55:32\r\nB;12;2;1000;Combi Tool_Drill1.2_3_R;2026-03-17 11:55:32\r\nB;13;4;2000;Combi Tool_Groove_3_R;2026-03-17 11:55:32\r\nB;14;11;2000;Universal Polish 100 Plastic_4_R;2026-03-17 11:55:32\r\nB;15;4611;7200;Combi Tool_SFB_5_R;2026-03-17 17:42:17\r\nB;16;2;4000;Combi Tool_Shelf_5_R;2026-03-17 11:55:32\r\nB;17;24;8000;Combi Tool_Flat_6_R;2026-03-17 11:55:32\r\nB;18;6658;8000;Combi Tool_VBevelPlastic_6_R;2026-03-17 17:42:17"
+        "count3": "B;1;1753;2200;Rough Cut Tool_1_L;2026-03-18 09:33:01\r\nB;2;0;0;Empty;2026-03-18 07:19:50\r\nB;3;3;1000;Combi Tool_Drill1.2_3_L;2026-03-18 07:19:50\r\nB;4;5;2000;Combi Tool_Groove_3_L;2026-03-18 07:19:50\r\nB;5;15;2000;Universal Polish 100 Plastic_4_L;2026-03-18 07:19:50\r\nB;6;4322;7200;Combi Tool_SFB_5_L;2026-03-18 09:33:01\r\nB;7;3;4000;Combi Tool_Shelf_5_L;2026-03-18 07:19:50\r\nB;8;157;8000;Combi Tool_Flat_6_L;2026-03-18 07:19:50\r\nB;9;4318;8000;Combi Tool_VBevelPlastic_6_L;2026-03-18 09:33:01\r\nB;10;1518;2200;Rough Cut Tool_1_R;2026-03-18 09:33:01\r\nB;11;0;0;Empty;2026-03-18 07:19:50\r\nB;12;2;1000;Combi Tool_Drill1.2_3_R;2026-03-18 07:19:50\r\nB;13;4;2000;Combi Tool_Groove_3_R;2026-03-18 07:19:50\r\nB;14;11;2000;Universal Polish 100 Plastic_4_R;2026-03-18 07:19:50\r\nB;15;4745;7200;Combi Tool_SFB_5_R;2026-03-18 09:33:01\r\nB;16;2;4000;Combi Tool_Shelf_5_R;2026-03-18 07:19:50\r\nB;17;24;8000;Combi Tool_Flat_6_R;2026-03-18 07:19:50\r\nB;18;6792;8000;Combi Tool_VBevelPlastic_6_R;2026-03-18 09:33:01"
       },
       "cycleTime": "30.00",
       "isActive": 1
@@ -1172,18 +1172,18 @@
       "statusLabel": "SGEN",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Waiting for trays",
-      "eventOriginal": "Waiting for trays",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
-        "red": true,
-        "status": "warning"
+        "red": false,
+        "status": "running"
       },
-      "lastOrder": "         10000039223",
+      "lastOrder": "            10913017",
       "counts": {
-        "count1": 221976,
+        "count1": 222107,
         "count2": 0,
-        "count3": "B;0;4516;35000;Generating Tool;2026-03-17 17:55:16\r\nB;1;157;5000;Cutting Tool Z-Axis;2026-03-17 17:55:16\r\nB;2;9;2000;Fine Cutting Tool Z-Axis;2026-03-17 17:55:16\r\nB;4;4521;4500;Fine Cutting Tool V-Axis;2026-03-17 17:55:16"
+        "count3": "B;0;4647;35000;Generating Tool;2026-03-18 09:41:37\r\nB;1;157;5000;Cutting Tool Z-Axis;2026-03-18 09:41:37\r\nB;2;9;2000;Fine Cutting Tool Z-Axis;2026-03-18 09:41:37\r\nB;4;4652;4500;Fine Cutting Tool V-Axis;2026-03-18 09:41:37"
       },
       "cycleTime": "45.00",
       "isActive": 1
@@ -1206,11 +1206,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "         10000039222",
+      "lastOrder": "              XXXXXX",
       "counts": {
-        "count1": 203441,
+        "count1": 203483,
         "count2": 0,
-        "count3": "B;0;5549;35000;Generating Tool;2026-03-17 16:59:09\r\nB;1;533;5000;Cutting Tool Z-Axis;2026-03-17 16:59:09\r\nB;2;6;2000;Fine Cutting Tool Z-Axis;2026-03-17 16:59:09\r\nB;4;360;4500;Fine Cutting Tool V-Axis;2026-03-17 16:59:09"
+        "count3": "B;0;5591;35000;Generating Tool;2026-03-18 08:21:19\r\nB;1;533;5000;Cutting Tool Z-Axis;2026-03-18 08:21:19\r\nB;2;6;2000;Fine Cutting Tool Z-Axis;2026-03-18 08:21:19\r\nB;4;402;4500;Fine Cutting Tool V-Axis;2026-03-18 08:21:19"
       },
       "cycleTime": "45.00",
       "isActive": 1
@@ -1233,11 +1233,11 @@
         "red": true,
         "status": "warning"
       },
-      "lastOrder": "            10912313",
+      "lastOrder": "            10912987",
       "counts": {
-        "count1": 86348,
+        "count1": 86440,
         "count2": 0,
-        "count3": "B;0;17506;35000;Generating Tool;2026-03-17 15:49:38\r\nB;1;199;5000;Cutting Tool Z-Axis;2026-03-17 15:49:38\r\nB;2;0;2000;Fine Cutting Tool Z-Axis;2026-03-17 15:49:38\r\nB;4;4014;4500;Fine Cutting Tool V-Axis;2026-03-17 15:49:38"
+        "count3": "B;0;17598;35000;Generating Tool;2026-03-18 09:38:29\r\nB;1;199;5000;Cutting Tool Z-Axis;2026-03-18 09:38:29\r\nB;2;0;2000;Fine Cutting Tool Z-Axis;2026-03-18 09:38:29\r\nB;4;4106;4500;Fine Cutting Tool V-Axis;2026-03-18 09:38:29"
       },
       "cycleTime": "45.00",
       "isActive": 1
@@ -1253,16 +1253,16 @@
       "statusLabel": "SLCU",
       "statusColor": "gray",
       "severity": "unknown",
-      "event": "Lens not to be processed",
-      "eventOriginal": "Lens not to be processed",
+      "event": "Tray(s) in process",
+      "eventOriginal": "Tray(s) in process",
       "led": {
         "green": true,
         "red": false,
         "status": "running"
       },
-      "lastOrder": "         10000039223",
+      "lastOrder": "            10912946",
       "counts": {
-        "count1": 247,
+        "count1": 220,
         "count2": 0,
         "count3": 0
       },
@@ -1287,7 +1287,7 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10911111",
+      "lastOrder": "            10911804",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -1314,7 +1314,7 @@
         "red": false,
         "status": "running"
       },
-      "lastOrder": "            10910857",
+      "lastOrder": "         10000039090",
       "counts": {
         "count1": 0,
         "count2": 0,
@@ -1370,7 +1370,7 @@
       },
       "lastOrder": "              XXXXXX",
       "counts": {
-        "count1": 66757,
+        "count1": 66770,
         "count2": 0,
         "count3": 0
       },
@@ -1382,12 +1382,12 @@
     {
       "id": "L000_SP001_003",
       "position": "L000_SP001_003",
-      "status": 4,
-      "statusLabel": "Error",
-      "statusColor": "red",
-      "severity": "critical",
-      "event": "Error, backup at belt 1 - Position: 003",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_004",
@@ -1397,7 +1397,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_005",
@@ -1407,7 +1407,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_006",
@@ -1417,7 +1417,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_007",
@@ -1427,7 +1427,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_009",
@@ -1437,7 +1437,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_010",
@@ -1447,17 +1447,17 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_011",
       "position": "L000_SP001_011",
-      "status": 4,
-      "statusLabel": "Error",
-      "statusColor": "red",
-      "severity": "critical",
-      "event": "Error, backup at belt 2 - Position: 011",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "status": 1,
+      "statusLabel": "OK",
+      "statusColor": "green",
+      "severity": "ok",
+      "event": "No error",
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_012",
@@ -1467,7 +1467,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP001_013",
@@ -1477,7 +1477,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP003_008",
@@ -1487,7 +1487,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP003_014",
@@ -1497,7 +1497,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP010_001",
@@ -1507,7 +1507,7 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     },
     {
       "id": "L000_SP010_002",
@@ -1517,13 +1517,13 @@
       "statusColor": "green",
       "severity": "ok",
       "event": "No error",
-      "lastUpdate": "2026-03-17T22:40:04.000Z"
+      "lastUpdate": "2026-03-18T15:46:44.000Z"
     }
   ],
   "oee": [
     {
       "DeviceID": "CU1001",
-      "Time": "2026-03-18T00:18:04.000Z",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -1532,16 +1532,16 @@
     },
     {
       "DeviceID": "DBA001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.12",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.24",
       "Availability": "1.00",
-      "Performance": "0.12",
+      "Performance": "0.24",
       "Quality": "1.00",
-      "Lenses": 21
+      "Lenses": 44
     },
     {
       "DeviceID": "TSA001",
-      "Time": "2026-03-18T00:18:04.000Z",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
       "Availability": null,
       "Performance": null,
@@ -1550,7 +1550,7 @@
     },
     {
       "DeviceID": "TSA002",
-      "Time": "2026-03-18T00:18:04.000Z",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -1559,547 +1559,34 @@
     },
     {
       "DeviceID": "HSQ005",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.02",
-      "Availability": "1.00",
-      "Performance": "0.02",
-      "Quality": "1.00",
-      "Lenses": 2
-    },
-    {
-      "DeviceID": "HSQ006",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CBB001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "0.00",
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CP1001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "0.00",
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "LC1001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.10",
-      "Availability": "0.96",
-      "Performance": "0.11",
-      "Quality": "1.00",
-      "Lenses": 25
-    },
-    {
-      "DeviceID": "HXS003",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CCL001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.08",
-      "Availability": "1.00",
-      "Performance": "0.08",
-      "Quality": "1.00",
-      "Lenses": 9
-    },
-    {
-      "DeviceID": "CCU001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "0.32",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ003",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.06",
-      "Availability": "1.00",
-      "Performance": "0.07",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.38",
+      "Availability": "0.95",
+      "Performance": "0.45",
       "Quality": "0.88",
-      "Lenses": 8
-    },
-    {
-      "DeviceID": "HXS002",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CCL002",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.02",
-      "Availability": "0.98",
-      "Performance": "0.02",
-      "Quality": "1.00",
-      "Lenses": 2
-    },
-    {
-      "DeviceID": "DBA002",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ007",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.03",
-      "Availability": "1.00",
-      "Performance": "0.03",
-      "Quality": "1.00",
-      "Lenses": 4
-    },
-    {
-      "DeviceID": "HXS001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.10",
-      "Availability": "1.00",
-      "Performance": "0.10",
-      "Quality": "1.00",
-      "Lenses": 8
-    },
-    {
-      "DeviceID": "CP1002",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.17",
-      "Availability": "1.00",
-      "Performance": "0.17",
-      "Quality": "1.00",
-      "Lenses": 9
-    },
-    {
-      "DeviceID": "CP1003",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ002",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": "0.07",
-      "Availability": "1.00",
-      "Performance": "0.07",
-      "Quality": "1.00",
-      "Lenses": 8
-    },
-    {
-      "DeviceID": "HSQ004",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CCS001",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "0.00",
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CP1004",
-      "Time": "2026-03-18T00:18:04.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "DBA001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.18",
-      "Availability": "1.00",
-      "Performance": "0.18",
-      "Quality": "1.00",
-      "Lenses": 33
-    },
-    {
-      "DeviceID": "CP1002",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.44",
-      "Availability": "1.00",
-      "Performance": "0.44",
-      "Quality": "1.00",
-      "Lenses": 23
-    },
-    {
-      "DeviceID": "CU1001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ006",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ003",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "LC1001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.20",
-      "Availability": "0.96",
-      "Performance": "0.22",
-      "Quality": "0.98",
-      "Lenses": 50
-    },
-    {
-      "DeviceID": "CBB001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ005",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.02",
-      "Availability": "1.00",
-      "Performance": "0.02",
-      "Quality": "1.00",
-      "Lenses": 2
-    },
-    {
-      "DeviceID": "CP1001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "0.00",
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ002",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "DBA002",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ004",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CCL001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.19",
-      "Availability": "1.00",
-      "Performance": "0.19",
-      "Quality": "1.00",
-      "Lenses": 23
-    },
-    {
-      "DeviceID": "HXS001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.21",
-      "Availability": "1.00",
-      "Performance": "0.21",
-      "Quality": "1.00",
-      "Lenses": 17
-    },
-    {
-      "DeviceID": "TSA002",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HXS003",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "0.00",
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CCL002",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.05",
-      "Availability": "0.84",
-      "Performance": "0.06",
-      "Quality": "1.00",
-      "Lenses": 6
-    },
-    {
-      "DeviceID": "CP1004",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ007",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.03",
-      "Availability": "1.00",
-      "Performance": "0.03",
-      "Quality": "1.00",
-      "Lenses": 4
-    },
-    {
-      "DeviceID": "TSA001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": null,
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CCS001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "0.00",
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CP1003",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.12",
-      "Availability": "1.00",
-      "Performance": "0.12",
-      "Quality": "1.00",
-      "Lenses": 6
-    },
-    {
-      "DeviceID": "CCU001",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": "0.03",
-      "Availability": "0.54",
-      "Performance": "0.05",
-      "Quality": "1.00",
-      "Lenses": 3
-    },
-    {
-      "DeviceID": "HXS002",
-      "Time": "2026-03-18T00:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CP1002",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.98",
-      "Availability": "1.00",
-      "Performance": "0.98",
-      "Quality": "1.00",
       "Lenses": 51
     },
     {
-      "DeviceID": "HXS003",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CP1001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": null,
-      "Availability": "0.00",
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "DBA002",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.18",
-      "Availability": "1.00",
-      "Performance": "0.18",
-      "Quality": "1.00",
+      "DeviceID": "HSQ006",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.26",
+      "Availability": "0.99",
+      "Performance": "0.27",
+      "Quality": "0.97",
       "Lenses": 32
     },
     {
-      "DeviceID": "HSQ005",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.00",
-      "Availability": "0.96",
-      "Performance": "0.01",
-      "Quality": "0.00",
-      "Lenses": 1
-    },
-    {
       "DeviceID": "CBB001",
-      "Time": "2026-03-17T23:00:00.000Z",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
       "Quality": null,
       "Lenses": 0
-    },
-    {
-      "DeviceID": "DBA001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.66",
-      "Availability": "0.74",
-      "Performance": "0.90",
-      "Quality": "1.00",
-      "Lenses": 102
-    },
-    {
-      "DeviceID": "CP1003",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.49",
-      "Availability": "0.72",
-      "Performance": "0.68",
-      "Quality": "1.00",
-      "Lenses": 25
-    },
-    {
-      "DeviceID": "HSQ004",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "HSQ002",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "TSA001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": null,
-      "Availability": null,
-      "Performance": null,
-      "Quality": null,
-      "Lenses": 0
-    },
-    {
-      "DeviceID": "CCL001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.43",
-      "Availability": "1.00",
-      "Performance": "0.43",
-      "Quality": "1.00",
-      "Lenses": 51
-    },
-    {
-      "DeviceID": "CU1001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.07",
-      "Availability": "1.00",
-      "Performance": "0.10",
-      "Quality": "0.67",
-      "Lenses": 12
-    },
-    {
-      "DeviceID": "HXS001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.41",
-      "Availability": "1.00",
-      "Performance": "0.41",
-      "Quality": "1.00",
-      "Lenses": 33
     },
     {
       "DeviceID": "HSQ001",
-      "Time": "2026-03-17T23:00:00.000Z",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
       "Availability": "0.00",
       "Performance": null,
@@ -2107,80 +1594,62 @@
       "Lenses": 0
     },
     {
-      "DeviceID": "HXS002",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.05",
-      "Availability": "1.00",
-      "Performance": "0.05",
-      "Quality": "1.00",
-      "Lenses": 4
-    },
-    {
-      "DeviceID": "HSQ003",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.05",
-      "Availability": "1.00",
-      "Performance": "0.08",
-      "Quality": "0.67",
-      "Lenses": 9
-    },
-    {
-      "DeviceID": "HSQ006",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.01",
-      "Availability": "1.00",
-      "Performance": "0.01",
-      "Quality": "1.00",
-      "Lenses": 1
-    },
-    {
-      "DeviceID": "CCL002",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.26",
-      "Availability": "1.00",
-      "Performance": "0.26",
-      "Quality": "1.00",
-      "Lenses": 31
-    },
-    {
-      "DeviceID": "CCU001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.14",
-      "Availability": "1.00",
-      "Performance": "0.14",
-      "Quality": "1.00",
-      "Lenses": 17
-    },
-    {
-      "DeviceID": "LC1001",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.35",
-      "Availability": "1.00",
-      "Performance": "0.35",
-      "Quality": "1.00",
-      "Lenses": 85
-    },
-    {
-      "DeviceID": "CP1004",
-      "Time": "2026-03-17T23:00:00.000Z",
+      "DeviceID": "CP1001",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
-      "Availability": "1.00",
-      "Performance": "0.00",
+      "Availability": "0.00",
+      "Performance": null,
       "Quality": null,
       "Lenses": 0
     },
     {
-      "DeviceID": "TSA002",
-      "Time": "2026-03-17T23:00:00.000Z",
-      "OEE": "0.19",
+      "DeviceID": "LC1001",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.22",
       "Availability": "1.00",
-      "Performance": "0.19",
+      "Performance": "0.24",
+      "Quality": "0.91",
+      "Lenses": 57
+    },
+    {
+      "DeviceID": "HXS003",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.03",
+      "Availability": "1.00",
+      "Performance": "0.03",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "CCL001",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.28",
+      "Availability": "0.91",
+      "Performance": "0.31",
       "Quality": "1.00",
       "Lenses": 34
     },
     {
-      "DeviceID": "HSQ007",
-      "Time": "2026-03-17T23:00:00.000Z",
+      "DeviceID": "CCU001",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.23",
+      "Availability": "1.00",
+      "Performance": "0.23",
+      "Quality": "1.00",
+      "Lenses": 27
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.05",
+      "Availability": "1.00",
+      "Performance": "0.07",
+      "Quality": "0.71",
+      "Lenses": 7
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -2188,8 +1657,62 @@
       "Lenses": 0
     },
     {
-      "DeviceID": "CCS001",
-      "Time": "2026-03-17T23:00:00.000Z",
+      "DeviceID": "CCL002",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.03",
+      "Availability": "1.00",
+      "Performance": "0.03",
+      "Quality": "1.00",
+      "Lenses": 4
+    },
+    {
+      "DeviceID": "DBA002",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ007",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.42",
+      "Availability": "0.93",
+      "Performance": "0.47",
+      "Quality": "0.96",
+      "Lenses": 52
+    },
+    {
+      "DeviceID": "HXS001",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.46",
+      "Availability": "1.00",
+      "Performance": "0.46",
+      "Quality": "1.00",
+      "Lenses": 37
+    },
+    {
+      "DeviceID": "CP1002",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": "0.71",
+      "Availability": "1.00",
+      "Performance": "0.73",
+      "Quality": "0.97",
+      "Lenses": 38
+    },
+    {
+      "DeviceID": "CP1003",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ002",
+      "Time": "2026-03-18T15:42:13.000Z",
       "OEE": null,
       "Availability": "0.00",
       "Performance": null,
@@ -2197,26 +1720,314 @@
       "Lenses": 0
     },
     {
-      "DeviceID": "CCU001",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.11",
-      "Availability": "0.57",
-      "Performance": "0.22",
-      "Quality": "0.87",
-      "Lenses": 15
+      "DeviceID": "HSQ004",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
     },
     {
-      "DeviceID": "TSA002",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.37",
+      "DeviceID": "CCS001",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1004",
+      "Time": "2026-03-18T15:42:13.000Z",
+      "OEE": null,
       "Availability": "1.00",
-      "Performance": "0.37",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "DBA001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.70",
+      "Availability": "1.00",
+      "Performance": "0.70",
       "Quality": "1.00",
-      "Lenses": 66
+      "Lenses": 126
+    },
+    {
+      "DeviceID": "CP1002",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "1.00",
+      "Availability": "1.00",
+      "Performance": "1.19",
+      "Quality": "1.00",
+      "Lenses": 62
+    },
+    {
+      "DeviceID": "CU1001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.02",
+      "Availability": "1.00",
+      "Performance": "0.02",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "HSQ006",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.57",
+      "Availability": "0.99",
+      "Performance": "0.61",
+      "Quality": "0.95",
+      "Lenses": 73
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.18",
+      "Availability": "0.98",
+      "Performance": "0.30",
+      "Quality": "0.63",
+      "Lenses": 16
+    },
+    {
+      "DeviceID": "LC1001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.50",
+      "Availability": "1.00",
+      "Performance": "0.52",
+      "Quality": "0.96",
+      "Lenses": 125
+    },
+    {
+      "DeviceID": "CBB001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ005",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.59",
+      "Availability": "0.96",
+      "Performance": "0.67",
+      "Quality": "0.92",
+      "Lenses": 77
+    },
+    {
+      "DeviceID": "CP1001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ002",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
     },
     {
       "DeviceID": "DBA002",
-      "Time": "2026-03-17T22:00:00.000Z",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.02",
+      "Availability": "1.00",
+      "Performance": "0.02",
+      "Quality": "1.00",
+      "Lenses": 4
+    },
+    {
+      "DeviceID": "HSQ004",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCL001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.52",
+      "Availability": "1.00",
+      "Performance": "0.52",
+      "Quality": "1.00",
+      "Lenses": 63
+    },
+    {
+      "DeviceID": "HXS001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.71",
+      "Availability": "1.00",
+      "Performance": "0.71",
+      "Quality": "1.00",
+      "Lenses": 57
+    },
+    {
+      "DeviceID": "TSA002",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.02",
+      "Availability": "1.00",
+      "Performance": "0.02",
+      "Quality": "1.00",
+      "Lenses": 4
+    },
+    {
+      "DeviceID": "HXS003",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.20",
+      "Availability": "1.00",
+      "Performance": "0.20",
+      "Quality": "1.00",
+      "Lenses": 16
+    },
+    {
+      "DeviceID": "HSQ001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCL002",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.47",
+      "Availability": "1.00",
+      "Performance": "0.47",
+      "Quality": "1.00",
+      "Lenses": 56
+    },
+    {
+      "DeviceID": "CP1004",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.23",
+      "Availability": "1.00",
+      "Performance": "0.23",
+      "Quality": "1.00",
+      "Lenses": 12
+    },
+    {
+      "DeviceID": "HSQ007",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.68",
+      "Availability": "1.00",
+      "Performance": "0.69",
+      "Quality": "0.98",
+      "Lenses": 83
+    },
+    {
+      "DeviceID": "TSA001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": null,
+      "Availability": null,
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCS001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CP1003",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.77",
+      "Availability": "1.00",
+      "Performance": "0.77",
+      "Quality": "1.00",
+      "Lenses": 40
+    },
+    {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.32",
+      "Availability": "1.00",
+      "Performance": "0.32",
+      "Quality": "1.00",
+      "Lenses": 39
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-18T15:00:00.000Z",
+      "OEE": "0.26",
+      "Availability": "0.95",
+      "Performance": "0.30",
+      "Quality": "0.91",
+      "Lenses": 23
+    },
+    {
+      "DeviceID": "CP1002",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.38",
+      "Availability": "1.00",
+      "Performance": "0.38",
+      "Quality": "1.00",
+      "Lenses": 20
+    },
+    {
+      "DeviceID": "HXS003",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.90",
+      "Availability": "1.00",
+      "Performance": "0.90",
+      "Quality": "1.00",
+      "Lenses": 72
+    },
+    {
+      "DeviceID": "CP1001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "DBA002",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.01",
+      "Availability": "1.00",
+      "Performance": "0.01",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "HSQ005",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.76",
+      "Availability": "0.89",
+      "Performance": "1.11",
+      "Quality": "0.86",
+      "Lenses": 119
+    },
+    {
+      "DeviceID": "CBB001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "DBA001",
+      "Time": "2026-03-18T14:00:00.000Z",
       "OEE": "0.34",
       "Availability": "1.00",
       "Performance": "0.34",
@@ -2224,8 +2035,197 @@
       "Lenses": 62
     },
     {
+      "DeviceID": "CP1003",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "1.00",
+      "Availability": "1.00",
+      "Performance": "1.08",
+      "Quality": "1.00",
+      "Lenses": 56
+    },
+    {
+      "DeviceID": "HSQ004",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HSQ002",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "TSA001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": null,
+      "Availability": null,
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCL001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.17",
+      "Availability": "1.00",
+      "Performance": "0.17",
+      "Quality": "1.00",
+      "Lenses": 21
+    },
+    {
+      "DeviceID": "CU1001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.13",
+      "Availability": "1.00",
+      "Performance": "0.13",
+      "Quality": "1.00",
+      "Lenses": 16
+    },
+    {
+      "DeviceID": "HXS001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.47",
+      "Availability": "0.99",
+      "Performance": "0.61",
+      "Quality": "0.78",
+      "Lenses": 46
+    },
+    {
+      "DeviceID": "HSQ001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "HXS002",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.01",
+      "Availability": "0.05",
+      "Performance": "0.27",
+      "Quality": "1.00",
+      "Lenses": 1
+    },
+    {
+      "DeviceID": "HSQ003",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.32",
+      "Availability": "0.98",
+      "Performance": "0.41",
+      "Quality": "0.79",
+      "Lenses": 48
+    },
+    {
+      "DeviceID": "HSQ006",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.61",
+      "Availability": "0.85",
+      "Performance": "0.89",
+      "Quality": "0.80",
+      "Lenses": 91
+    },
+    {
+      "DeviceID": "CCL002",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.48",
+      "Availability": "0.93",
+      "Performance": "0.51",
+      "Quality": "1.00",
+      "Lenses": 56
+    },
+    {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.22",
+      "Availability": "1.00",
+      "Performance": "0.22",
+      "Quality": "1.00",
+      "Lenses": 27
+    },
+    {
+      "DeviceID": "LC1001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.15",
+      "Availability": "1.00",
+      "Performance": "0.15",
+      "Quality": "1.00",
+      "Lenses": 36
+    },
+    {
+      "DeviceID": "CP1004",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.15",
+      "Availability": "1.00",
+      "Performance": "0.15",
+      "Quality": "1.00",
+      "Lenses": 8
+    },
+    {
+      "DeviceID": "TSA002",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.01",
+      "Availability": "1.00",
+      "Performance": "0.01",
+      "Quality": "1.00",
+      "Lenses": 2
+    },
+    {
+      "DeviceID": "HSQ007",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": "0.59",
+      "Availability": "0.65",
+      "Performance": "1.05",
+      "Quality": "0.91",
+      "Lenses": 82
+    },
+    {
+      "DeviceID": "CCS001",
+      "Time": "2026-03-18T14:00:00.000Z",
+      "OEE": null,
+      "Availability": "0.00",
+      "Performance": null,
+      "Quality": null,
+      "Lenses": 0
+    },
+    {
+      "DeviceID": "CCU001",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.64",
+      "Availability": "1.00",
+      "Performance": "0.64",
+      "Quality": "1.00",
+      "Lenses": 77
+    },
+    {
+      "DeviceID": "TSA002",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.03",
+      "Availability": "1.00",
+      "Performance": "0.03",
+      "Quality": "1.00",
+      "Lenses": 6
+    },
+    {
+      "DeviceID": "DBA002",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.05",
+      "Availability": "1.00",
+      "Performance": "0.05",
+      "Quality": "1.00",
+      "Lenses": 8
+    },
+    {
       "DeviceID": "CBB001",
-      "Time": "2026-03-17T22:00:00.000Z",
+      "Time": "2026-03-18T13:00:00.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -2234,34 +2234,34 @@
     },
     {
       "DeviceID": "HSQ007",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.10",
-      "Availability": "0.99",
-      "Performance": "0.13",
-      "Quality": "0.80",
-      "Lenses": 15
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.90",
+      "Availability": "1.00",
+      "Performance": "1.04",
+      "Quality": "0.90",
+      "Lenses": 115
     },
     {
       "DeviceID": "HXS001",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.56",
-      "Availability": "0.71",
-      "Performance": "0.81",
-      "Quality": "0.98",
-      "Lenses": 46
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
     },
     {
       "DeviceID": "CU1001",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.10",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.57",
       "Availability": "1.00",
-      "Performance": "0.10",
+      "Performance": "0.57",
       "Quality": "1.00",
-      "Lenses": 12
+      "Lenses": 68
     },
     {
       "DeviceID": "TSA001",
-      "Time": "2026-03-17T22:00:00.000Z",
+      "Time": "2026-03-18T13:00:00.000Z",
       "OEE": null,
       "Availability": null,
       "Performance": null,
@@ -2270,79 +2270,79 @@
     },
     {
       "DeviceID": "CP1002",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.75",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.35",
       "Availability": "1.00",
-      "Performance": "0.75",
+      "Performance": "0.35",
       "Quality": "1.00",
-      "Lenses": 39
+      "Lenses": 18
     },
     {
       "DeviceID": "CP1004",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.63",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": null,
       "Availability": "1.00",
-      "Performance": "0.63",
-      "Quality": "1.00",
-      "Lenses": 33
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
     },
     {
       "DeviceID": "CCL001",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.43",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.15",
       "Availability": "1.00",
-      "Performance": "0.43",
+      "Performance": "0.15",
       "Quality": "1.00",
-      "Lenses": 51
+      "Lenses": 18
     },
     {
       "DeviceID": "HXS002",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.65",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.29",
       "Availability": "1.00",
-      "Performance": "0.65",
-      "Quality": "1.00",
-      "Lenses": 52
+      "Performance": "0.32",
+      "Quality": "0.91",
+      "Lenses": 22
     },
     {
       "DeviceID": "CP1001",
-      "Time": "2026-03-17T22:00:00.000Z",
+      "Time": "2026-03-18T13:00:00.000Z",
       "OEE": null,
-      "Availability": "0.00",
+      "Availability": null,
       "Performance": null,
       "Quality": null,
       "Lenses": 0
     },
     {
       "DeviceID": "HSQ006",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.07",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.90",
       "Availability": "1.00",
-      "Performance": "0.09",
-      "Quality": "0.73",
-      "Lenses": 11
+      "Performance": "1.50",
+      "Quality": "0.90",
+      "Lenses": 105
     },
     {
       "DeviceID": "CP1003",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.48",
-      "Availability": "0.91",
-      "Performance": "0.53",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.08",
+      "Availability": "1.00",
+      "Performance": "0.08",
       "Quality": "1.00",
-      "Lenses": 25
+      "Lenses": 4
     },
     {
       "DeviceID": "HSQ002",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.17",
-      "Availability": "0.98",
-      "Performance": "0.18",
-      "Quality": "0.95",
-      "Lenses": 21
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": null,
+      "Availability": "1.00",
+      "Performance": "0.00",
+      "Quality": null,
+      "Lenses": 0
     },
     {
       "DeviceID": "HSQ004",
-      "Time": "2026-03-17T22:00:00.000Z",
+      "Time": "2026-03-18T13:00:00.000Z",
       "OEE": null,
       "Availability": "1.00",
       "Performance": "0.00",
@@ -2351,110 +2351,110 @@
     },
     {
       "DeviceID": "CCL002",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.33",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.03",
       "Availability": "1.00",
-      "Performance": "0.34",
-      "Quality": "0.98",
-      "Lenses": 41
+      "Performance": "0.03",
+      "Quality": "1.00",
+      "Lenses": 4
     },
     {
       "DeviceID": "HSQ001",
-      "Time": "2026-03-17T22:00:00.000Z",
+      "Time": "2026-03-18T13:00:00.000Z",
       "OEE": null,
-      "Availability": "0.00",
+      "Availability": null,
       "Performance": null,
       "Quality": null,
       "Lenses": 0
     },
     {
       "DeviceID": "HSQ003",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.44",
-      "Availability": "0.97",
-      "Performance": "0.48",
-      "Quality": "0.95",
-      "Lenses": 56
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.15",
+      "Availability": "1.00",
+      "Performance": "0.22",
+      "Quality": "0.69",
+      "Lenses": 26
     },
     {
       "DeviceID": "HXS003",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.45",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.03",
       "Availability": "1.00",
-      "Performance": "0.45",
+      "Performance": "0.03",
       "Quality": "1.00",
-      "Lenses": 36
+      "Lenses": 2
     },
     {
       "DeviceID": "LC1001",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.25",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.07",
       "Availability": "1.00",
-      "Performance": "0.25",
+      "Performance": "0.07",
       "Quality": "1.00",
-      "Lenses": 60
+      "Lenses": 16
     },
     {
       "DeviceID": "DBA001",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.77",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.22",
       "Availability": "1.00",
-      "Performance": "0.77",
+      "Performance": "0.22",
       "Quality": "1.00",
-      "Lenses": 9
+      "Lenses": 24
     },
     {
       "DeviceID": "CCS001",
-      "Time": "2026-03-17T22:00:00.000Z",
+      "Time": "2026-03-18T13:00:00.000Z",
       "OEE": null,
-      "Availability": "0.00",
+      "Availability": null,
       "Performance": null,
       "Quality": null,
       "Lenses": 0
     },
     {
       "DeviceID": "HSQ005",
-      "Time": "2026-03-17T22:00:00.000Z",
-      "OEE": "0.17",
+      "Time": "2026-03-18T13:00:00.000Z",
+      "OEE": "0.89",
       "Availability": "1.00",
-      "Performance": "0.19",
-      "Quality": "0.87",
-      "Lenses": 23
+      "Performance": "1.11",
+      "Quality": "0.89",
+      "Lenses": 115
     }
   ],
   "orders": {
-    "total": 80944,
-    "todayTotal": 1375,
+    "total": 80694,
+    "todayTotal": 711,
     "byDepartment": [
       {
         "departmentId": 9,
         "departmentName": "Complete",
         "zone": "ship",
-        "jobs": 55188
+        "jobs": 55178
       },
       {
         "departmentId": 4,
         "departmentName": "Production",
         "zone": "surfacing",
-        "jobs": 17784
+        "jobs": 17602
       },
       {
         "departmentId": null,
         "departmentName": "Unassigned",
         "zone": "picking",
-        "jobs": 4706
+        "jobs": 4702
       },
       {
         "departmentId": 10,
         "departmentName": "Control",
         "zone": "control",
-        "jobs": 2508
+        "jobs": 2449
       },
       {
         "departmentId": -1,
         "departmentName": "Error",
         "zone": "error",
-        "jobs": 586
+        "jobs": 591
       },
       {
         "departmentId": 8,
@@ -2468,37 +2468,37 @@
         "departmentId": 9,
         "departmentName": "Complete",
         "zone": "ship",
-        "jobs": 719
+        "jobs": 549
       },
       {
         "departmentId": 4,
         "departmentName": "Production",
         "zone": "surfacing",
-        "jobs": 580
+        "jobs": 153
       },
       {
         "departmentId": null,
         "departmentName": "Unassigned",
         "zone": "picking",
-        "jobs": 56
+        "jobs": 3
       },
       {
         "departmentId": -1,
         "departmentName": "Error",
         "zone": "error",
-        "jobs": 8
-      },
-      {
-        "departmentId": 10,
-        "departmentName": "Control",
-        "zone": "control",
-        "jobs": 8
+        "jobs": 3
       },
       {
         "departmentId": 8,
         "departmentName": "Processing",
         "zone": "coating",
-        "jobs": 4
+        "jobs": 2
+      },
+      {
+        "departmentId": 10,
+        "departmentName": "Control",
+        "zone": "control",
+        "jobs": 1
       }
     ],
     "byStation": []
@@ -2512,7 +2512,7 @@
       "category": "blocking",
       "severity": "warning",
       "message": "Waiting for trays ...",
-      "timestamp": "2026-03-18T01:19:14.060Z"
+      "timestamp": "2026-03-18T16:43:27.528Z"
     },
     {
       "id": "dev-CCU001",
@@ -2521,8 +2521,8 @@
       "model": "CCU",
       "category": "blocking",
       "severity": "warning",
-      "message": "Error, alignment station: Reports vacuum monitoring triggered",
-      "timestamp": "2026-03-18T01:19:14.060Z"
+      "message": "Waiting for trays",
+      "timestamp": "2026-03-18T16:43:27.528Z"
     },
     {
       "id": "dev-CU1001",
@@ -2532,25 +2532,9 @@
       "category": "blocking",
       "severity": "warning",
       "message": "Waiting for trays",
-      "timestamp": "2026-03-18T01:19:14.060Z"
-    },
-    {
-      "id": "conv-L000_SP001_003",
-      "type": "conveyor",
-      "source": "L000_SP001_003",
-      "severity": "critical",
-      "message": "Error, backup at belt 1 - Position: 003",
-      "timestamp": "2026-03-17T22:40:04.000Z"
-    },
-    {
-      "id": "conv-L000_SP001_011",
-      "type": "conveyor",
-      "source": "L000_SP001_011",
-      "severity": "critical",
-      "message": "Error, backup at belt 2 - Position: 011",
-      "timestamp": "2026-03-17T22:40:04.000Z"
+      "timestamp": "2026-03-18T16:43:27.528Z"
     }
   ],
-  "lastSuccessfulPoll": "2026-03-18T01:19:14.060Z",
-  "savedAt": "2026-03-18T01:19:14.548Z"
+  "lastSuccessfulPoll": "2026-03-18T16:43:27.528Z",
+  "savedAt": "2026-03-18T16:43:28.155Z"
 }

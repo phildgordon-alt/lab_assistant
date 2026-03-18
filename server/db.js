@@ -338,6 +338,22 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_container_contents_parent ON container_contents(parent_id);
   CREATE INDEX IF NOT EXISTS idx_container_contents_child ON container_contents(child_id);
+`);
+
+// Container enrichment migration — add coating/material/rush/lens_type to container_jobs
+// and material to containers. Safe: try/catch for existing columns.
+const containerMigrations = [
+  'ALTER TABLE container_jobs ADD COLUMN coating TEXT',
+  'ALTER TABLE container_jobs ADD COLUMN material TEXT',
+  'ALTER TABLE container_jobs ADD COLUMN rush INTEGER DEFAULT 0',
+  'ALTER TABLE container_jobs ADD COLUMN lens_type TEXT',
+  'ALTER TABLE containers ADD COLUMN material TEXT',
+];
+for (const sql of containerMigrations) {
+  try { db.exec(sql); } catch (e) { /* column already exists */ }
+}
+
+db.exec(`
 
   -- ═══════════════════════════════════════════════════════════════════════════
   -- WARM LAYER: Pre-aggregated summaries (auto-refresh on hot layer writes)

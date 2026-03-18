@@ -347,13 +347,24 @@ function detectRuleViolations(readings) {
   const alerts = [];
   const firedMetrics = new Set(); // Track which metrics already fired (highest tier wins)
 
+  // Load rules from database (cached 5-min) with fallback to hardcoded
+  let labConfig;
+  try { labConfig = require('./lab-config'); } catch (e) { labConfig = null; }
+  const activeRules = labConfig ? labConfig.getRules() : RULES;
+
   // Sort rules: P1 first, then P2, so highest severity fires first per metric
-  const sortedRules = [...RULES].sort((a, b) => {
+  const sortedRules = [...activeRules].sort((a, b) => {
     const tierOrder = { P1: 1, P2: 2, P3: 3 };
     return (tierOrder[a.tier] || 9) - (tierOrder[b.tier] || 9);
   });
 
   for (const rule of sortedRules) {
+    // Skip disabled rules
+    if (rule.enabled === 0 || rule.enabled === false) continue;
+
+    // Skip suppressed rules
+    if (rule.suppress_until && new Date(rule.suppress_until) > new Date()) continue;
+
     // Skip if we already fired a higher-severity rule for this metric
     if (firedMetrics.has(rule.metric)) continue;
 
@@ -381,6 +392,11 @@ function detectRuleViolations(readings) {
     insertAlert.run(alertId, rule.tier, reading.system, reading.metric,
       rule.message, detail, null, rule.threshold, reading.value, reading.unit, null);
     logAlertEvent.run(alertId, 'fired', `${rule.tier} RULE: ${rule.message} (value: ${reading.value})`);
+
+    // Record fire in rules DB
+    if (labConfig && rule.id) {
+      try { labConfig.recordRuleFire(rule.id); } catch (e) { /* ignore */ }
+    }
 
     alerts.push({
       id: alertId,

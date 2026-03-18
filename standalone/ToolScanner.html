@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Tool Scanner — DIP Station</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#070A0F;--surface:#0D1117;--card:#111820;
+  --border:#1C2733;--borderLt:#2A3A4A;--text:#E8EDF2;--dim:#8899AA;--dimmer:#445566;
+  --green:#10B981;--greenDk:#052E1A;--red:#EF4444;--redDk:#3F0A0A;
+  --amber:#F59E0B;--amberDk:#451A00;--blue:#3B82F6;--blueDk:#0A1F40;
+  --cyan:#06B6D4;--purple:#8B5CF6;--purpleDk:#2D1B69;
+  --mono:'JetBrains Mono',monospace;--sans:'DM Sans',sans-serif;--disp:'Bebas Neue',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;}
+.hdr{background:var(--surface);border-bottom:2px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:14px;flex-shrink:0;}
+.logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#06B6D4,#0891B2);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800;font-size:15px;color:#fff;flex-shrink:0;}
+.hdr-title{font-family:var(--disp);font-size:28px;letter-spacing:1px;}
+.hdr-sub{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
+.srv-dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
+.srv-dot.ok{background:var(--green);box-shadow:0 0 10px var(--green);}
+.srv-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);}
+.hdr-btn{background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-family:var(--mono);font-size:11px;color:var(--dim);cursor:pointer;}
+.main{flex:1;overflow-y:auto;padding:20px;display:flex;flex-direction:column;gap:16px;max-width:600px;margin:0 auto;width:100%;}
+.card{background:var(--card);border:2px solid var(--border);border-radius:14px;padding:18px;}
+.sec-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:10px;}
+.inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:10px;padding:16px;color:var(--text);font-family:var(--mono);font-size:22px;font-weight:700;outline:none;text-align:center;}
+.inp:focus{border-color:var(--cyan);}
+.inp-sm{padding:12px;font-size:16px;}
+.row{display:flex;gap:8px;}
+.btn{width:100%;padding:18px;border-radius:12px;border:none;font-weight:800;font-size:18px;cursor:pointer;font-family:var(--sans);transition:all .15s;-webkit-user-select:none;}
+.btn:active{transform:scale(.98);}
+.btn-cyan{background:var(--cyan);color:#000;}
+.btn-green{background:var(--green);color:#000;}
+.btn-amber{background:var(--amber);color:#000;}
+.btn-red{background:var(--red);color:#fff;}
+.btn-dim{background:var(--border);color:var(--dimmer);cursor:not-allowed;}
+.eye-btn{flex:1;padding:14px;border-radius:10px;border:2px solid var(--border);font-family:var(--mono);font-size:18px;font-weight:800;cursor:pointer;background:transparent;color:var(--dim);text-align:center;}
+.eye-btn.sel-l{border-color:var(--blue);background:var(--blueDk);color:var(--blue);}
+.eye-btn.sel-r{border-color:var(--purple);background:var(--purpleDk);color:var(--purple);}
+.badge{display:inline-block;font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:4px;font-weight:700;}
+.job-row{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--surface);border-radius:8px;border:1px solid var(--border);margin-bottom:4px;}
+.job-num{font-family:var(--mono);font-size:16px;font-weight:800;}
+.tool-hdr{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+.tool-id{font-family:var(--mono);font-size:20px;font-weight:800;color:var(--cyan);}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-family:var(--mono);font-size:13px;font-weight:700;z-index:999;animation:fadeUp .2s ease;}
+.toast.ok{background:var(--greenDk);color:var(--green);border:1px solid var(--green);}
+.toast.err{background:var(--redDk);color:var(--red);border:1px solid var(--red);}
+.toast.warn{background:var(--amberDk);color:var(--amber);border:1px solid var(--amber);}
+@keyframes fadeUp{from{opacity:0;transform:translateX(-50%) translateY(10px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:center;justify-content:center;}
+.modal{background:var(--card);border:2px solid var(--border);border-radius:16px;padding:24px;width:90%;max-width:400px;}
+.m-inp{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;margin-bottom:10px;}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="logo">TS</div>
+  <div>
+    <div class="hdr-title" id="toolLabel">DIP STATION</div>
+    <div class="hdr-sub">TOOL SCANNER — SCAN LENSES → TOOLS</div>
+  </div>
+  <div class="hdr-right">
+    <div style="display:flex;align-items:center;gap:5px;"><div class="srv-dot" id="srvDot"></div><span class="srv-lbl" id="srvLbl">OFFLINE</span></div>
+    <button class="hdr-btn" onclick="openSetup()">⚙ SETUP</button>
+  </div>
+</div>
+<div class="main" id="app"></div>
+<div id="toastZone"></div>
+<div id="modalZone"></div>
+
+<script>
+// ─── PERSISTENCE ───
+const K={CFG:'ts_cfg',TOOL:'ts_tool'};
+function lsGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d;}catch{return d;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
+
+let cfg=lsGet(K.CFG,{});
+let serverUrl=cfg.serverUrl||'http://localhost:3002';
+let operator=cfg.operator||'';
+let stationName=cfg.stationName||'DIP STATION';
+
+// Active tool state
+let activeTool=null; // {id, jobs:[]}
+let eye='L';
+let serverOk=false;
+
+function persistCfg(){lsSet(K.CFG,{serverUrl,operator,stationName});}
+
+// ─── SERVER CHECK ───
+async function checkServer(){
+  const dot=document.getElementById('srvDot');
+  const lbl=document.getElementById('srvLbl');
+  try{const r=await fetch(`${serverUrl}/health`,{signal:AbortSignal.timeout(2500)});serverOk=r.ok;}
+  catch{serverOk=false;}
+  dot.className=`srv-dot ${serverOk?'ok':''}`;
+  lbl.textContent=serverOk?serverUrl.replace(/https?:\/\//,'').split('/')[0].slice(0,22):'OFFLINE';
+}
+setInterval(checkServer,10000);checkServer();
+
+// ─── TOAST ───
+function toast(msg,type='ok'){
+  const el=document.createElement('div');
+  el.className=`toast ${type}`;el.textContent=msg;
+  document.getElementById('toastZone').appendChild(el);
+  setTimeout(()=>el.remove(),4000);
+}
+
+// ─── API ───
+async function apiPost(path,body){
+  const r=await fetch(`${serverUrl}${path}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(!r.ok)throw new Error(d.error||`Server error ${r.status}`);
+  return d;
+}
+
+// ─── ACTIONS ───
+async function openTool(){
+  const toolId=document.getElementById('inpToolId').value.trim().toUpperCase();
+  if(!toolId){toast('Enter a tool ID','err');return;}
+  try{
+    const result=await apiPost('/api/containers/tool-session/open',{tool_id:toolId,operator_id:operator||null});
+    activeTool={id:toolId,jobs:[]};
+    toast(`Tool ${toolId} opened`);
+    render();
+  }catch(e){toast(e.message,'err');}
+}
+
+async function scanJob(){
+  const jobNum=document.getElementById('inpJobNum').value.trim().toUpperCase();
+  if(!jobNum){toast('Enter a job number','err');return;}
+  if(!activeTool){toast('No tool open','err');return;}
+  try{
+    const result=await apiPost('/api/containers/tool-session/add-job',{
+      tool_id:activeTool.id,job_number:jobNum,eye_side:eye,entry_method:'manual'
+    });
+    // Result may be array (jobs) or object with {jobs, warning}
+    const jobs=Array.isArray(result)?result:(result.jobs||[]);
+    activeTool.jobs=jobs;
+    document.getElementById('inpJobNum').value='';
+    if(result.warning)toast(result.warning,'warn');
+    else toast(`${jobNum} ${eye} added`);
+    // Auto-toggle eye
+    eye=eye==='L'?'R':'L';
+    render();
+    // Refocus the job input
+    setTimeout(()=>document.getElementById('inpJobNum')?.focus(),100);
+  }catch(e){toast(e.message,'err');}
+}
+
+async function closeTool(){
+  if(!activeTool)return;
+  try{
+    await apiPost('/api/containers/tool-session/close',{tool_id:activeTool.id});
+    toast(`Tool ${activeTool.id} closed — ${activeTool.jobs.length} jobs — ready for tray`);
+    activeTool=null;
+    render();
+  }catch(e){toast(e.message,'err');}
+}
+
+// ─── RENDER ───
+function render(){
+  const app=document.getElementById('app');
+  document.getElementById('toolLabel').textContent=stationName;
+
+  if(!activeTool){
+    // No active tool — show open tool form
+    app.innerHTML=`
+      <div class="card">
+        <div class="sec-lbl">OPEN NEW TOOL</div>
+        <input class="inp" id="inpToolId" placeholder="TOOL-009" autocomplete="off"
+          onkeydown="if(event.key==='Enter')openTool()"/>
+        <div style="height:12px"></div>
+        <button class="btn btn-cyan" onclick="openTool()">OPEN TOOL SESSION</button>
+      </div>
+      <div style="text-align:center;padding:40px 0;color:var(--dimmer);font-family:var(--mono);font-size:11px;">
+        Open a tool to start scanning lenses
+      </div>`;
+    return;
+  }
+
+  // Active tool — show scan form + job list
+  const coatingBadge=(c)=>c?`<span class="badge" style="background:${coatingBg(c)};color:${coatingColor(c)}">${c}</span>`:'';
+  const matBadge=(m)=>m?`<span class="badge" style="background:#1e293b;color:#cbd5e1;border:1px solid #334155">${m}</span>`:'';
+
+  const jobsHtml=activeTool.jobs.slice().reverse().map(j=>`
+    <div class="job-row">
+      <span class="job-num" style="color:${j.rush?'var(--amber)':'var(--green)'}">${j.job_number}</span>
+      <span class="badge" style="background:${j.eye_side==='L'?'var(--blueDk)':'var(--purpleDk)'};color:${j.eye_side==='L'?'var(--blue)':'var(--purple)'}">${j.eye_side}</span>
+      ${coatingBadge(j.coating)}
+      ${matBadge(j.material)}
+      ${j.rush?'<span class="badge" style="background:#7c2d12;color:var(--amber)">RUSH</span>':''}
+    </div>`).join('');
+
+  app.innerHTML=`
+    <div class="card">
+      <div class="tool-hdr">
+        <span class="tool-id">${activeTool.id}</span>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--dim)">${activeTool.jobs.length} jobs</span>
+        <span style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-left:auto">op: ${operator||'—'}</span>
+      </div>
+
+      <div class="sec-lbl">SCAN JOB</div>
+      <input class="inp" id="inpJobNum" placeholder="Job # (e.g. 407428)" autocomplete="off"
+        onkeydown="if(event.key==='Enter')scanJob()"/>
+      <div style="height:10px"></div>
+      <div class="row">
+        <button class="eye-btn ${eye==='L'?'sel-l':''}" onclick="eye='L';render();">L — LEFT</button>
+        <button class="eye-btn ${eye==='R'?'sel-r':''}" onclick="eye='R';render();">R — RIGHT</button>
+      </div>
+      <div style="height:10px"></div>
+      <button class="btn btn-green" onclick="scanJob()">SCAN → ADD TO TOOL</button>
+    </div>
+
+    <div class="card" style="border-color:var(--amber)">
+      <div class="sec-lbl">CLOSE TOOL WHEN FULL</div>
+      <button class="btn btn-amber" onclick="closeTool()">CLOSE ${activeTool.id} (${activeTool.jobs.length} JOBS)</button>
+    </div>
+
+    ${activeTool.jobs.length>0?`
+    <div class="card">
+      <div class="sec-lbl">JOBS ON TOOL (${activeTool.jobs.length})</div>
+      ${jobsHtml}
+    </div>`:''}`;
+
+  // Auto-focus the job input
+  setTimeout(()=>document.getElementById('inpJobNum')?.focus(),50);
+}
+
+// Coating color helpers
+function coatingColor(ct){const m={'AR':'#3b82f6','Blue Cut':'#06b6d4','Mirror':'#a855f7','Transitions':'#f97316','Polarized':'#ec4899','Hard Coat':'#84cc16'};return m[ct]||'var(--dim)';}
+function coatingBg(ct){const m={'AR':'#1e3a5f','Blue Cut':'#164e63','Mirror':'#581c87','Transitions':'#7c2d12','Polarized':'#831843','Hard Coat':'#365314'};return m[ct]||'var(--surface)';}
+
+// ─── SETUP MODAL ───
+function openSetup(){
+  document.getElementById('modalZone').innerHTML=`
+    <div class="modal-bg" onclick="closeSetup()">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="sec-lbl">SETUP</div>
+        <label style="font-family:var(--mono);font-size:9px;color:var(--dim);display:block;margin-bottom:4px;">STATION NAME</label>
+        <input class="m-inp" id="mStation" value="${stationName}"/>
+        <label style="font-family:var(--mono);font-size:9px;color:var(--dim);display:block;margin-bottom:4px;">OPERATOR</label>
+        <input class="m-inp" id="mOp" value="${operator}"/>
+        <label style="font-family:var(--mono);font-size:9px;color:var(--dim);display:block;margin-bottom:4px;">SERVER URL</label>
+        <input class="m-inp" id="mSrv" value="${serverUrl}"/>
+        <div style="display:flex;gap:8px;margin-top:12px;">
+          <button class="btn btn-cyan" style="font-size:14px;padding:12px;" onclick="saveSetup()">Save</button>
+          <button class="btn" style="font-size:14px;padding:12px;background:var(--border);color:var(--dim);" onclick="closeSetup()">Cancel</button>
+        </div>
+      </div>
+    </div>`;
+}
+function closeSetup(){document.getElementById('modalZone').innerHTML='';}
+function saveSetup(){
+  stationName=document.getElementById('mStation').value.trim()||'DIP STATION';
+  operator=document.getElementById('mOp').value.trim();
+  const srv=document.getElementById('mSrv').value.trim();
+  if(srv)serverUrl=srv;
+  persistCfg();closeSetup();checkServer();render();
+  toast('Setup saved');
+}
+
+// ─── INIT ───
+render();
+</script>
+</body>
+</html>

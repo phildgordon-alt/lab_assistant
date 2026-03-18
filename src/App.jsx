@@ -2261,28 +2261,44 @@ function CoatingPipelineView({serverUrl,settings}){
   const [addJobEye,setAddJobEye]=useState("L");
   const [actionMsg,setActionMsg]=useState(null);
 
+  // Transfer forms
+  const [xferToolIds,setXferToolIds]=useState("");
+  const [xferTrayId,setXferTrayId]=useState("");
+  const [batchTrayIds,setBatchTrayIds]=useState("");
+  const [batchId,setBatchId]=useState("");
+  const [batchMachine,setBatchMachine]=useState("EB9 #1");
+  const [batchCoatingType,setBatchCoatingType]=useState("AR");
+  const [intelligence,setIntelligence]=useState(null);
+
   // Demo data
   const DEMO={
     tools:[
-      {id:"TOOL-006",status:"open",job_count:8,operator_id:"javier",created_at:new Date(Date.now()-3600000).toISOString()},
-      {id:"TOOL-007",status:"closed",job_count:6,operator_id:"alex",created_at:new Date(Date.now()-7200000).toISOString(),closed_at:new Date(Date.now()-1800000).toISOString()},
-      {id:"TOOL-008",status:"open",job_count:3,operator_id:"jose",created_at:new Date(Date.now()-1200000).toISOString()},
+      {id:"TOOL-006",status:"open",job_count:8,operator_id:"javier",created_at:new Date(Date.now()-3600000).toISOString(),coating_type:"AR",material:"PLY"},
+      {id:"TOOL-007",status:"closed",job_count:6,operator_id:"alex",created_at:new Date(Date.now()-7200000).toISOString(),closed_at:new Date(Date.now()-1800000).toISOString(),coating_type:"AR",material:"PLY"},
+      {id:"TOOL-008",status:"open",job_count:3,operator_id:"jose",created_at:new Date(Date.now()-1200000).toISOString(),coating_type:"Blue Cut",material:"H67"},
+      {id:"TOOL-009",status:"closed",job_count:4,operator_id:"maria",created_at:new Date(Date.now()-5400000).toISOString(),closed_at:new Date(Date.now()-900000).toISOString(),coating_type:"AR",material:"PLY"},
+      {id:"TOOL-010",status:"closed",job_count:5,operator_id:"alex",created_at:new Date(Date.now()-4800000).toISOString(),closed_at:new Date(Date.now()-600000).toISOString(),coating_type:"Blue Cut",material:"H67"},
     ],
     oven_trays:[
-      {id:"TRAY-003",status:"closed",job_count:14,children:["TOOL-004","TOOL-005"],created_at:new Date(Date.now()-10800000).toISOString()},
-      {id:"TRAY-004",status:"open",job_count:6,children:["TOOL-007"],created_at:new Date(Date.now()-5400000).toISOString()},
+      {id:"TRAY-003",status:"closed",job_count:14,children:["TOOL-004","TOOL-005"],created_at:new Date(Date.now()-10800000).toISOString(),coating_type:"AR",material:"PLY"},
+      {id:"TRAY-004",status:"open",job_count:6,children:["TOOL-007"],created_at:new Date(Date.now()-5400000).toISOString(),coating_type:"AR",material:"PLY"},
+      {id:"TRAY-005",status:"closed",job_count:10,children:["TOOL-003"],created_at:new Date(Date.now()-7200000).toISOString(),coating_type:"Blue Cut",material:"H67"},
     ],
     coating_batches:[
-      {id:"BATCH-041",status:"open",job_count:28,machine_id:"CCL-1",coating_type:"AR",children:["TRAY-001","TRAY-002"],created_at:new Date(Date.now()-14400000).toISOString()},
+      {id:"BATCH-041",status:"open",job_count:28,machine_id:"CCL-1",coating_type:"AR",material:"PLY",children:["TRAY-001","TRAY-002"],created_at:new Date(Date.now()-14400000).toISOString()},
     ],
   };
 
   const fetchData=useCallback(async()=>{
-    if(isDemo){setData(DEMO);setLoading(false);setLastRefresh(new Date());return;}
+    if(isDemo){setData(DEMO);setIntelligence({recommendation:{batchSuggestions:[{coatingType:"AR",material:"PLY",jobCount:18,lensCount:36,rushCount:1,fillPct:82,ready:true,suggestedCoater:"EB9 #1"},{coatingType:"Blue Cut",material:"H67",jobCount:8,lensCount:16,rushCount:0,fillPct:45,ready:false,suggestedCoater:"E1400"}]}});setLoading(false);setLastRefresh(new Date());return;}
     try{
-      const r=await fetch(`${base}/api/containers/active`);
-      if(r.ok){setData(await r.json());setError(null);}
-      else setError(`Server error: ${r.status}`);
+      const [cRes,iRes]=await Promise.all([
+        fetch(`${base}/api/containers/active`),
+        fetch(`${base}/api/coating/intelligence`).catch(()=>null),
+      ]);
+      if(cRes.ok){setData(await cRes.json());setError(null);}
+      else setError(`Server error: ${cRes.status}`);
+      if(iRes?.ok) setIntelligence(await iRes.json());
     }catch(e){setError(e.message);}
     finally{setLoading(false);setLastRefresh(new Date());}
   },[base,isDemo]);
@@ -2338,10 +2354,53 @@ function CoatingPipelineView({serverUrl,settings}){
     setTimeout(()=>setActionMsg(null),4000);
   };
 
+  // Transfer: Tools → Tray
+  const transferToolsToTray=async()=>{
+    if(!xferTrayId.trim()||!xferToolIds.trim())return;
+    const toolIds=xferToolIds.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean);
+    try{
+      const r=await fetch(`${base}/api/containers/transfer/tool-to-tray`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tray_id:xferTrayId.trim().toUpperCase(),tool_ids:toolIds,operator_id:null})});
+      const d=await r.json();
+      if(r.ok){const msg=`Loaded ${d.loaded?.length||0} tools → ${xferTrayId}`;const rej=d.rejected?.length?` | ${d.rejected.length} rejected: ${d.rejected.map(r=>r.id+": "+r.reason).join("; ")}`:"";setActionMsg({type:d.rejected?.length?"warn":"ok",text:msg+rej});setXferToolIds("");setXferTrayId("");fetchData();}
+      else setActionMsg({type:"err",text:d.error||"Failed"});
+    }catch(e){setActionMsg({type:"err",text:e.message});}
+    setTimeout(()=>setActionMsg(null),6000);
+  };
+
+  // Close Tray
+  const closeTrayAction=async(trayId)=>{
+    try{
+      const r=await fetch(`${base}/api/containers/tray/close`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({tray_id:trayId})});
+      if(r.ok){setActionMsg({type:"ok",text:`Tray ${trayId} closed — ready for batch`});fetchData();}
+      else{const d=await r.json();setActionMsg({type:"err",text:d.error||"Failed"});}
+    }catch(e){setActionMsg({type:"err",text:e.message});}
+    setTimeout(()=>setActionMsg(null),4000);
+  };
+
+  // Transfer: Trays → Batch
+  const assignTraysToBatch=async()=>{
+    if(!batchId.trim()||!batchTrayIds.trim())return;
+    const trayIds=batchTrayIds.split(",").map(s=>s.trim().toUpperCase()).filter(Boolean);
+    try{
+      const r=await fetch(`${base}/api/containers/transfer/tray-to-batch`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({batch_id:batchId.trim().toUpperCase(),tray_ids:trayIds,machine_id:batchMachine,coating_type:batchCoatingType,operator_id:null})});
+      const d=await r.json();
+      if(r.ok){const msg=`Assigned ${d.loaded?.length||0} trays → ${batchId}`;const rej=d.rejected?.length?` | ${d.rejected.length} rejected: ${d.rejected.map(r=>r.id+": "+r.reason).join("; ")}`:"";setActionMsg({type:d.rejected?.length?"warn":"ok",text:msg+rej});setBatchTrayIds("");setBatchId("");fetchData();}
+      else setActionMsg({type:"err",text:d.error||"Failed"});
+    }catch(e){setActionMsg({type:"err",text:e.message});}
+    setTimeout(()=>setActionMsg(null),6000);
+  };
+
   const timeSince=(iso)=>{if(!iso)return"—";const diff=Date.now()-new Date(iso).getTime();const m=Math.floor(diff/60000);if(m<60)return`${m}m`;const h=Math.floor(m/60);return`${h}h`;};
 
   const statusColor=(s)=>s==="open"?T.blue:s==="closed"?T.amber:T.textDim;
   const statusLabel=(s)=>s==="open"?"OPEN":s==="closed"?"READY":"USED";
+
+  // Badge helpers
+  const coatingColor=(ct)=>{const m={"AR":"#3b82f6","Blue Cut":"#06b6d4","Mirror":"#a855f7","Transitions":"#f97316","Polarized":"#ec4899","Hard Coat":"#84cc16"};return m[ct]||T.textMuted;};
+  const coatingBg=(ct)=>{const m={"AR":"#1e3a5f","Blue Cut":"#164e63","Mirror":"#581c87","Transitions":"#7c2d12","Polarized":"#831843","Hard Coat":"#365314"};return m[ct]||T.surface;};
+  const coatingBadge=(ct)=>ct?<span style={{fontSize:8,padding:"1px 6px",borderRadius:2,background:coatingBg(ct),color:coatingColor(ct),fontWeight:700,letterSpacing:"0.05em"}}>{ct}</span>:null;
+  const materialBadge=(mat)=>mat?<span style={{fontSize:8,padding:"1px 6px",borderRadius:2,background:"#1e293b",color:"#cbd5e1",border:"1px solid #334155",fontWeight:600}}>{mat}</span>:null;
+  const rushBadge=()=><span style={{fontSize:8,padding:"1px 6px",borderRadius:2,background:"#7c2d12",color:"#f97316",fontWeight:700}}>RUSH</span>;
 
   if(loading)return <div style={{textAlign:"center",padding:40,color:T.textMuted,fontFamily:mono,fontSize:12}}>Loading pipeline...</div>;
 
@@ -2356,23 +2415,45 @@ function CoatingPipelineView({serverUrl,settings}){
 
       {error&&<div style={{padding:"8px 12px",marginBottom:12,borderRadius:4,background:T.redDark,border:`1px solid ${T.red}33`,fontSize:11,color:T.red}}>Connection error: {error}</div>}
 
-      {/* Quick actions */}
-      <div style={{display:"flex",gap:8,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end"}}>
+      {/* Quick actions — 4 groups */}
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap",alignItems:"flex-end"}}>
         <div>
-          <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>OPEN TOOL</div>
-          <div style={{display:"flex",gap:4}}>
-            <input value={newToolId} onChange={e=>setNewToolId(e.target.value)} placeholder="TOOL-009" style={{width:100,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
-            <input value={newOperator} onChange={e=>setNewOperator(e.target.value)} placeholder="operator" style={{width:80,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
-            <button onClick={openTool} style={{padding:"6px 12px",background:T.blue,border:"none",borderRadius:3,color:"#fff",fontFamily:mono,fontSize:10,fontWeight:700,cursor:"pointer"}}>OPEN</button>
+          <div style={{fontSize:8,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>OPEN TOOL</div>
+          <div style={{display:"flex",gap:3}}>
+            <input value={newToolId} onChange={e=>setNewToolId(e.target.value)} placeholder="TOOL-009" style={{width:90,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <input value={newOperator} onChange={e=>setNewOperator(e.target.value)} placeholder="operator" style={{width:70,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <button onClick={openTool} style={{padding:"5px 10px",background:T.blue,border:"none",borderRadius:3,color:"#fff",fontFamily:mono,fontSize:9,fontWeight:700,cursor:"pointer"}}>OPEN</button>
           </div>
         </div>
         <div>
-          <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>ADD JOB TO TOOL</div>
-          <div style={{display:"flex",gap:4}}>
-            <input value={addJobTool} onChange={e=>setAddJobTool(e.target.value)} placeholder="TOOL-006" style={{width:90,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
-            <input value={addJobNumber} onChange={e=>setAddJobNumber(e.target.value)} placeholder="Job #" style={{width:80,padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
-            <button onClick={()=>setAddJobEye(addJobEye==="L"?"R":"L")} style={{padding:"6px 10px",background:addJobEye==="L"?T.blueDark:T.purpleDark,border:`1px solid ${addJobEye==="L"?T.blue:T.purple}`,borderRadius:3,color:addJobEye==="L"?T.blue:T.purple,fontFamily:mono,fontSize:11,fontWeight:700,cursor:"pointer"}}>{addJobEye}</button>
-            <button onClick={addJob} style={{padding:"6px 12px",background:T.green,border:"none",borderRadius:3,color:"#000",fontFamily:mono,fontSize:10,fontWeight:700,cursor:"pointer"}}>ADD</button>
+          <div style={{fontSize:8,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>ADD JOB TO TOOL</div>
+          <div style={{display:"flex",gap:3}}>
+            <input value={addJobTool} onChange={e=>setAddJobTool(e.target.value)} placeholder="TOOL-006" style={{width:80,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <input value={addJobNumber} onChange={e=>setAddJobNumber(e.target.value)} placeholder="Job #" style={{width:70,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <button onClick={()=>setAddJobEye(addJobEye==="L"?"R":"L")} style={{padding:"5px 8px",background:addJobEye==="L"?T.blueDark:T.purpleDark,border:`1px solid ${addJobEye==="L"?T.blue:T.purple}`,borderRadius:3,color:addJobEye==="L"?T.blue:T.purple,fontFamily:mono,fontSize:10,fontWeight:700,cursor:"pointer"}}>{addJobEye}</button>
+            <button onClick={addJob} style={{padding:"5px 10px",background:T.green,border:"none",borderRadius:3,color:"#000",fontFamily:mono,fontSize:9,fontWeight:700,cursor:"pointer"}}>ADD</button>
+          </div>
+        </div>
+        <div>
+          <div style={{fontSize:8,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>LOAD TOOLS → TRAY</div>
+          <div style={{display:"flex",gap:3}}>
+            <input value={xferTrayId} onChange={e=>setXferTrayId(e.target.value)} placeholder="TRAY-003" style={{width:85,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <input value={xferToolIds} onChange={e=>setXferToolIds(e.target.value)} placeholder="TOOL-007,TOOL-009" style={{width:140,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <button onClick={transferToolsToTray} style={{padding:"5px 10px",background:T.amber,border:"none",borderRadius:3,color:"#000",fontFamily:mono,fontSize:9,fontWeight:700,cursor:"pointer"}}>LOAD</button>
+          </div>
+        </div>
+        <div>
+          <div style={{fontSize:8,color:T.textDim,letterSpacing:"0.1em",marginBottom:3}}>ASSIGN TRAYS → BATCH</div>
+          <div style={{display:"flex",gap:3}}>
+            <input value={batchId} onChange={e=>setBatchId(e.target.value)} placeholder="BATCH-042" style={{width:90,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <input value={batchTrayIds} onChange={e=>setBatchTrayIds(e.target.value)} placeholder="TRAY-003,TRAY-005" style={{width:140,padding:"5px 7px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <select value={batchMachine} onChange={e=>setBatchMachine(e.target.value)} style={{padding:"5px 4px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:9}}>
+              <option>EB9 #1</option><option>EB9 #2</option><option>E1400</option>
+            </select>
+            <select value={batchCoatingType} onChange={e=>setBatchCoatingType(e.target.value)} style={{padding:"5px 4px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:9}}>
+              {["AR","Blue Cut","Mirror","Transitions","Polarized","Hard Coat"].map(c=><option key={c}>{c}</option>)}
+            </select>
+            <button onClick={assignTraysToBatch} style={{padding:"5px 10px",background:"#a855f7",border:"none",borderRadius:3,color:"#fff",fontFamily:mono,fontSize:9,fontWeight:700,cursor:"pointer"}}>ASSIGN</button>
           </div>
         </div>
         <div style={{marginLeft:"auto",fontSize:9,color:T.textDim}}>
@@ -2380,32 +2461,63 @@ function CoatingPipelineView({serverUrl,settings}){
         </div>
       </div>
 
-      {/* Three-column pipeline */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,alignItems:"start"}}>
+      {/* Three-column pipeline with badges + transfer buttons */}
+      {(()=>{
+        // Match closed trays to ready batch suggestions for auto-fill highlighting
+        const suggestions=intelligence?.recommendation?.batchSuggestions||[];
+        const matchedTrays=new Map();
+        for(const s of suggestions){
+          if(!s.ready)continue;
+          trays.filter(t=>t.status==="closed"&&t.coating_type===s.coatingType&&t.material===s.material)
+            .forEach(t=>matchedTrays.set(t.id,s));
+        }
+        // Group by coating::material
+        const groupKey=(c)=>`${c.coating_type||"?"}::${c.material||"?"}`;
+        const toolsByGroup={};
+        tools.forEach(t=>{const k=groupKey(t);if(!toolsByGroup[k])toolsByGroup[k]=[];toolsByGroup[k].push(t);});
+        const sortedToolGroups=Object.entries(toolsByGroup).sort(([a],[b])=>a.localeCompare(b));
+        // Sort within groups: closed first, then by age
+        for(const[,arr]of sortedToolGroups)arr.sort((a,b)=>(a.status==="closed"?0:1)-(b.status==="closed"?0:1)||new Date(a.created_at)-new Date(b.created_at));
+
+        return(
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,alignItems:"start"}}>
 
         {/* TOOLS */}
         <div>
           <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.14em",marginBottom:8}}>TOOLS ({tools.length})</div>
           {tools.length===0&&<div style={{fontSize:10,color:T.textDim,padding:16,textAlign:"center",background:T.card,borderRadius:4,border:`1px solid ${T.border}`}}>No active tools</div>}
-          {tools.map(c=>(
-            <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
-              padding:"10px 12px",marginBottom:6,borderRadius:4,cursor:"pointer",
-              background:selectedContainer===c.id?T.blueDark:T.card,
-              border:`1px solid ${selectedContainer===c.id?T.blue:T.border}`,
-            }}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
-                <span style={{fontSize:13,fontWeight:700,color:T.text}}>{c.id}</span>
-                <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
+          {sortedToolGroups.map(([gk,gTools])=>(
+            <div key={gk}>
+              <div style={{display:"flex",gap:4,alignItems:"center",marginBottom:4,marginTop:8}}>
+                {coatingBadge(gTools[0]?.coating_type)}{materialBadge(gTools[0]?.material)}
+                <span style={{fontSize:9,color:T.textDim,marginLeft:4}}>{gTools.length}</span>
               </div>
-              <div style={{display:"flex",gap:12,fontSize:10,color:T.textMuted}}>
-                <span>{c.job_count} jobs</span>
-                {c.operator_id&&<span>op: {c.operator_id}</span>}
-                <span>{timeSince(c.created_at)}</span>
-              </div>
-              {c.status==="open"&&(
-                <button onClick={e=>{e.stopPropagation();closeTool(c.id);}} style={{marginTop:6,padding:"3px 10px",background:"transparent",border:`1px solid ${T.amber}44`,borderRadius:2,color:T.amber,fontSize:9,fontFamily:mono,cursor:"pointer"}}>CLOSE TOOL</button>
-              )}
+              {gTools.map(c=>(
+                <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
+                  padding:"8px 10px",marginBottom:4,borderRadius:4,cursor:"pointer",
+                  background:selectedContainer===c.id?T.blueDark:T.card,
+                  border:`1px solid ${selectedContainer===c.id?T.blue:T.border}`,
+                }}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                    <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
+                    <span style={{fontSize:12,fontWeight:700,color:T.text}}>{c.id}</span>
+                    <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
+                  </div>
+                  <div style={{display:"flex",gap:8,fontSize:9,color:T.textMuted,flexWrap:"wrap",alignItems:"center"}}>
+                    <span>{c.job_count} jobs</span>
+                    {c.operator&&<span>op: {c.operator}</span>}
+                    <span>{timeSince(c.opened_at||c.created_at)}</span>
+                  </div>
+                  <div style={{display:"flex",gap:4,marginTop:4}}>
+                    {c.status==="open"&&(
+                      <button onClick={e=>{e.stopPropagation();closeTool(c.id);}} style={{padding:"3px 10px",background:"transparent",border:`1px solid ${T.amber}44`,borderRadius:2,color:T.amber,fontSize:9,fontFamily:mono,cursor:"pointer"}}>CLOSE TOOL</button>
+                    )}
+                    {c.status==="closed"&&(
+                      <button onClick={e=>{e.stopPropagation();setXferToolIds(prev=>prev?prev+","+c.id:c.id);}} style={{padding:"3px 10px",background:"transparent",border:`1px solid ${T.green}44`,borderRadius:2,color:T.green,fontSize:9,fontFamily:mono,cursor:"pointer"}}>▶ ADD TO TRAY</button>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -2414,31 +2526,48 @@ function CoatingPipelineView({serverUrl,settings}){
         <div>
           <div style={{fontSize:9,color:T.textDim,letterSpacing:"0.14em",marginBottom:8}}>OVEN TRAYS ({trays.length})</div>
           {trays.length===0&&<div style={{fontSize:10,color:T.textDim,padding:16,textAlign:"center",background:T.card,borderRadius:4,border:`1px solid ${T.border}`}}>No active trays</div>}
-          {trays.map(c=>(
-            <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
-              padding:"10px 12px",marginBottom:6,borderRadius:4,cursor:"pointer",
-              background:selectedContainer===c.id?T.blueDark:T.card,
-              border:`1px solid ${selectedContainer===c.id?T.blue:T.border}`,
-            }}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
-                <span style={{fontSize:13,fontWeight:700,color:T.text}}>{c.id}</span>
-                <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
-              </div>
-              <div style={{display:"flex",gap:12,fontSize:10,color:T.textMuted}}>
-                <span>{c.job_count} jobs</span>
-                <span>{(c.children||[]).length} tools</span>
-                <span>{timeSince(c.created_at)}</span>
-              </div>
-              {(c.children||[]).length>0&&(
-                <div style={{marginTop:4,display:"flex",gap:4,flexWrap:"wrap"}}>
-                  {(c.children||[]).map(ch=>(
-                    <span key={ch} style={{fontSize:9,padding:"1px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:2,color:T.textMuted}}>{ch}</span>
-                  ))}
+          {trays.map(c=>{
+            const matched=matchedTrays.get(c.id);
+            return(
+              <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
+                padding:"8px 10px",marginBottom:4,borderRadius:4,cursor:"pointer",
+                background:selectedContainer===c.id?T.blueDark:matched?"rgba(16,185,129,0.04)":T.card,
+                border:`1px solid ${selectedContainer===c.id?T.blue:matched?"rgba(16,185,129,0.2)":T.border}`,
+              }}>
+                <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
+                  <span style={{fontSize:12,fontWeight:700,color:T.text}}>{c.id}</span>
+                  {coatingBadge(c.coating_type)}{materialBadge(c.material)}
+                  <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
                 </div>
-              )}
-            </div>
-          ))}
+                <div style={{display:"flex",gap:8,fontSize:9,color:T.textMuted}}>
+                  <span>{c.job_count} jobs</span>
+                  <span>{(c.tools||c.children||[]).length} tools</span>
+                  <span>{timeSince(c.opened_at||c.created_at)}</span>
+                </div>
+                {(c.tools||c.children||[]).length>0&&(
+                  <div style={{marginTop:3,display:"flex",gap:3,flexWrap:"wrap"}}>
+                    {(c.tools||c.children||[]).map(ch=>(
+                      <span key={ch} style={{fontSize:8,padding:"1px 5px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:2,color:T.textMuted}}>{ch}</span>
+                    ))}
+                  </div>
+                )}
+                {matched&&(
+                  <div style={{marginTop:4,padding:"2px 8px",borderRadius:3,background:"rgba(16,185,129,0.08)",border:"1px solid rgba(16,185,129,0.2)",fontSize:9,color:T.green}}>
+                    READY — matches {matched.coatingType} batch ({matched.suggestedCoater})
+                  </div>
+                )}
+                <div style={{display:"flex",gap:4,marginTop:4}}>
+                  {c.status==="open"&&(
+                    <button onClick={e=>{e.stopPropagation();closeTrayAction(c.id);}} style={{padding:"3px 10px",background:"transparent",border:`1px solid ${T.amber}44`,borderRadius:2,color:T.amber,fontSize:9,fontFamily:mono,cursor:"pointer"}}>CLOSE TRAY</button>
+                  )}
+                  {c.status==="closed"&&(
+                    <button onClick={e=>{e.stopPropagation();setBatchTrayIds(prev=>prev?prev+","+c.id:c.id);if(matched){setBatchCoatingType(matched.coatingType);setBatchMachine(matched.suggestedCoater);}}} style={{padding:"3px 10px",background:"transparent",border:`1px solid ${T.purple}44`,borderRadius:2,color:T.purple,fontSize:9,fontFamily:mono,cursor:"pointer"}}>▶ ADD TO BATCH</button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* COATING BATCHES */}
@@ -2447,32 +2576,34 @@ function CoatingPipelineView({serverUrl,settings}){
           {batches.length===0&&<div style={{fontSize:10,color:T.textDim,padding:16,textAlign:"center",background:T.card,borderRadius:4,border:`1px solid ${T.border}`}}>No active batches</div>}
           {batches.map(c=>(
             <div key={c.id} onClick={()=>setSelectedContainer(selectedContainer===c.id?null:c.id)} style={{
-              padding:"10px 12px",marginBottom:6,borderRadius:4,cursor:"pointer",
+              padding:"8px 10px",marginBottom:4,borderRadius:4,cursor:"pointer",
               background:selectedContainer===c.id?T.blueDark:T.card,
               border:`1px solid ${selectedContainer===c.id?T.blue:T.border}`,
             }}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+              <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
                 <div style={{width:6,height:6,borderRadius:"50%",background:statusColor(c.status)}}/>
-                <span style={{fontSize:13,fontWeight:700,color:T.text}}>{c.id}</span>
+                <span style={{fontSize:12,fontWeight:700,color:T.text}}>{c.id}</span>
+                {coatingBadge(c.coating_type)}{materialBadge(c.material)}
                 <span style={{fontSize:8,color:statusColor(c.status),letterSpacing:"0.1em",marginLeft:"auto"}}>{statusLabel(c.status)}</span>
               </div>
-              <div style={{display:"flex",gap:12,fontSize:10,color:T.textMuted}}>
+              <div style={{display:"flex",gap:8,fontSize:9,color:T.textMuted}}>
                 <span>{c.job_count} jobs</span>
-                {c.machine_id&&<span>{c.machine_id}</span>}
-                {c.coating_type&&<span style={{color:T.amber}}>{c.coating_type}</span>}
-                <span>{timeSince(c.created_at)}</span>
+                {c.machine&&<span>{c.machine}</span>}
+                <span>{(c.trays||c.children||[]).length} trays</span>
+                <span>{timeSince(c.opened_at||c.created_at)}</span>
               </div>
-              {(c.children||[]).length>0&&(
-                <div style={{marginTop:4,display:"flex",gap:4,flexWrap:"wrap"}}>
-                  {(c.children||[]).map(ch=>(
-                    <span key={ch} style={{fontSize:9,padding:"1px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:2,color:T.textMuted}}>{ch}</span>
+              {(c.trays||c.children||[]).length>0&&(
+                <div style={{marginTop:3,display:"flex",gap:3,flexWrap:"wrap"}}>
+                  {(c.trays||c.children||[]).map(ch=>(
+                    <span key={ch} style={{fontSize:8,padding:"1px 5px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:2,color:T.textMuted}}>{ch}</span>
                   ))}
                 </div>
               )}
             </div>
           ))}
         </div>
-      </div>
+        </div>);
+      })()}
 
       {/* Manifest panel */}
       {selectedContainer&&manifest&&(
@@ -2482,14 +2613,16 @@ function CoatingPipelineView({serverUrl,settings}){
             <button onClick={()=>{setSelectedContainer(null);setManifest(null);}} style={{fontSize:9,color:T.textDim,background:"none",border:"none",cursor:"pointer"}}>✕ CLOSE</button>
           </div>
           {manifest.length===0&&<div style={{fontSize:10,color:T.textDim,padding:8}}>No jobs in this container</div>}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:4,maxHeight:250,overflowY:"auto"}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:4,maxHeight:250,overflowY:"auto"}}>
             {manifest.map((j,i)=>(
-              <div key={i} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 8px",background:T.surface,borderRadius:3,border:`1px solid ${T.border}`}}>
-                <span style={{fontSize:12,fontWeight:700,color:T.green,fontFamily:mono}}>{j.job_number}</span>
+              <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 8px",background:T.surface,borderRadius:3,border:`1px solid ${T.border}`}}>
+                <span style={{fontSize:12,fontWeight:700,color:j.rush?T.orange:T.green,fontFamily:mono}}>{j.job_number}</span>
                 <span style={{fontSize:10,color:j.eye_side==="L"?T.blue:T.purple,fontWeight:700}}>{j.eye_side}</span>
-                <span style={{fontSize:9,color:T.textDim,marginLeft:"auto"}}>{j.source_tool}</span>
+                {j.coating&&coatingBadge(j.coating)}
+                {j.material&&materialBadge(j.material)}
+                {j.rush===1&&rushBadge()}
+                <span style={{fontSize:8,color:T.textDim,marginLeft:"auto"}}>{j.source_tool}</span>
                 <span style={{fontSize:8,color:j.entry_method==="ocr"?T.cyan:T.amber}}>{j.entry_method==="ocr"?"OCR":"MAN"}</span>
-                {j.ocr_confidence&&<span style={{fontSize:8,color:T.textDim}}>{Math.round(j.ocr_confidence*100)}%</span>}
               </div>
             ))}
           </div>
@@ -5932,6 +6065,7 @@ function NetworkTab({ovenServerUrl,settings}){
   const [wanData,setWanData]=useState(null);
   const [switchPorts,setSwitchPorts]=useState(null);
   const [switchPortsLoading,setSwitchPortsLoading]=useState(false);
+  const [selectedDevice,setSelectedDevice]=useState(null);
   const [activeSite,setActiveSite]=useState("irvine1");
   const [vlanFilter,setVlanFilter]=useState("all");
   const [lastRefresh,setLastRefresh]=useState(null);
@@ -6277,10 +6411,10 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
           </div>
           <div style={{overflowY:"auto",flex:"1 1 0",minHeight:0,padding:"0 14px 14px"}}>
             {curDevices.map(d=>(
-              <div key={d.id||d.name} className="noc-dev" onClick={()=>{if(d.type==="usw")fetchSwitchPorts(d.mac||d.id,d.name);}} style={{
-                padding:"8px 8px",borderRadius:3,marginBottom:4,cursor:d.type==="usw"?"pointer":"default",
-                background:d.status==="offline"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.01)",
-                border:`1px solid ${d.status==="offline"?"rgba(239,68,68,0.2)":"#111827"}`,
+              <div key={d.id||d.name} className="noc-dev" onClick={()=>{setSelectedDevice(selectedDevice?.id===d.id?null:d);if(d.type==="usw")fetchSwitchPorts(d.mac||d.id,d.name);}} style={{
+                padding:"8px 8px",borderRadius:3,marginBottom:4,cursor:"pointer",
+                background:selectedDevice?.id===d.id?"rgba(59,130,246,0.08)":d.status==="offline"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.01)",
+                border:`1px solid ${selectedDevice?.id===d.id?"#1e3a5f":d.status==="offline"?"rgba(239,68,68,0.2)":"#111827"}`,
               }}>
                 <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:4}}>
                   <div style={{width:6,height:6,borderRadius:"50%",background:d.status==="online"?"#10b981":"#ef4444",flexShrink:0,boxShadow:`0 0 5px ${d.status==="online"?"#10b981":"#ef4444"}`}}/>
@@ -6295,6 +6429,32 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
                   </div>
                 )}
                 {d.status==="offline"&&<div style={{fontSize:9,color:"#ef4444",paddingLeft:13,marginTop:2}}>● DISCONNECTED</div>}
+                {/* Expanded detail for selected device */}
+                {selectedDevice?.id===d.id&&(
+                  <div style={{marginTop:6,paddingTop:6,borderTop:"1px solid #111827"}}>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                      {[
+                        {l:"TYPE",v:d.type==="ugw"||d.type==="udm"?"Gateway":d.type==="usw"?"Switch":d.type==="uap"?"Access Point":d.type},
+                        {l:"MAC",v:d.mac||"—"},
+                        {l:"IP",v:d.ip||"—"},
+                        {l:"MODEL",v:d.model||"—"},
+                        {l:"UPTIME",v:fmtUptime(d.uptime)},
+                        {l:"STATUS",v:d.status==="online"?"Online":"Offline"},
+                        {l:"CPU",v:d.cpu_pct!=null?d.cpu_pct+"%":"—"},
+                        {l:"MEM",v:d.mem_pct!=null?d.mem_pct+"%":"—"},
+                        {l:"TX",v:fmtBytes(d.tx_bytes)},
+                        {l:"RX",v:fmtBytes(d.rx_bytes)},
+                      ].map(item=>(
+                        <div key={item.l} style={{background:"#0a0f14",border:"1px solid #111827",borderRadius:2,padding:"3px 6px"}}>
+                          <div style={{fontSize:7,color:"#334155",letterSpacing:"0.1em"}}>{item.l}</div>
+                          <div style={{fontSize:9,color:"#7dd3fc"}}>{item.v}</div>
+                        </div>
+                      ))}
+                    </div>
+                    {d.type==="usw"&&<div style={{fontSize:8,color:"#334155",marginTop:4,textAlign:"center"}}>Click again for port detail overlay</div>}
+                    <button onClick={e=>{e.stopPropagation();sendNocMessage(`Tell me about device ${d.name} (${d.model}) at ${d.ip}. What should I know about its health and role in the network?`);}} style={{marginTop:6,width:"100%",padding:"4px",background:"transparent",border:"1px solid #1e2d3d",color:"#334155",borderRadius:3,fontSize:8,fontFamily:mono,letterSpacing:"0.06em",cursor:"pointer"}}>⬡ ASK AGENT ABOUT THIS DEVICE</button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -6593,6 +6753,36 @@ function EarlyWarningTab({ovenServerUrl,settings}){
   const [situationReport,setSituationReport]=useState(null);
   const [aiLoading,setAiLoading]=useState(false);
 
+  // Sub-tab state
+  const [ewsSub,setEwsSub]=useState("alerts");
+
+  // Settings sub-tab state
+  const [ewsRules,setEwsRules]=useState([]);
+  const [selectedRule,setSelectedRule]=useState(null);
+  const [ruleDetail,setRuleDetail]=useState(null);
+  const [ruleEdits,setRuleEdits]=useState({});
+  const [ruleSaving,setRuleSaving]=useState(false);
+  const [ruleTestResult,setRuleTestResult]=useState(null);
+  const [globalConfig,setGlobalConfig]=useState({});
+  const [configEdits,setConfigEdits]=useState({});
+  const [ruleSearch,setRuleSearch]=useState("");
+  const [ruleFilter,setRuleFilter]=useState("all");
+
+  // Baselines sub-tab state
+  const [labBaselines,setLabBaselines]=useState([]);
+  const [labSchedule,setLabSchedule]=useState([]);
+  const [baselineDept,setBaselineDept]=useState("surfacing");
+  const [editingCell,setEditingCell]=useState(null);
+  const [editingValue,setEditingValue]=useState("");
+  const [baselineHistory,setBaselineHistory]=useState([]);
+
+  // Backlog sub-tab state
+  const [backlog,setBacklog]=useState([]);
+  const [backlogTrend,setBacklogTrend]=useState([]);
+  const [backlogDept,setBacklogDept]=useState("surfacing");
+  const [catchupTargetRate,setCatchupTargetRate]=useState(40);
+  const [catchupAvailHours,setCatchupAvailHours]=useState(8);
+
   // Tier config
   const TIER={
     P1:{color:"#ef4444",bg:"rgba(239,68,68,0.08)",border:"rgba(239,68,68,0.25)",label:"CRITICAL",pulse:true},
@@ -6727,6 +6917,98 @@ function EarlyWarningTab({ovenServerUrl,settings}){
     fetch(`${base}/api/ews/history?metric=${encodeURIComponent(selectedMetric)}&limit=48`)
       .then(r=>r.ok?r.json():[]).then(setMetricHistory).catch(()=>{});
   },[selectedMetric,base,isDemo]);
+
+  // Fetch sub-tab data when switching
+  useEffect(()=>{
+    if(ewsSub==="settings"&&ewsRules.length===0){
+      if(isDemo){
+        // Generate demo rules from DEMO_ALERTS metrics
+        setEwsRules([
+          {id:1,metric:"som_devices_in_error",op:">=",threshold:2,tier:"P1",message:"CRITICAL: 2+ machines in error",category:"machine",department:"equipment",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-420000).toISOString(),fire_count:3},
+          {id:2,metric:"som_devices_in_error",op:">=",threshold:1,tier:"P2",message:"WARNING: Machine in error state",category:"machine",department:"equipment",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-3600000).toISOString(),fire_count:8},
+          {id:3,metric:"som_conveyor_errors",op:">=",threshold:3,tier:"P1",message:"CRITICAL: 3+ conveyor errors",category:"machine",department:"equipment",enabled:1,cooldown_min:30,window_min:5,last_fired_at:null,fire_count:0},
+          {id:4,metric:"som_downtime_minutes",op:">=",threshold:5,tier:"P2",message:"WARNING: 5+ device-minutes downtime",category:"machine",department:"equipment",enabled:1,cooldown_min:30,window_min:5,last_fired_at:null,fire_count:0},
+          {id:5,metric:"itempath_stockouts",op:">=",threshold:5,tier:"P1",message:"CRITICAL: 5+ SKUs stocked out",category:"inventory",department:"picking",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-86400000).toISOString(),fire_count:2},
+          {id:6,metric:"itempath_stockouts",op:">=",threshold:2,tier:"P2",message:"WARNING: 2+ SKUs stocked out",category:"inventory",department:"picking",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-43200000).toISOString(),fire_count:5},
+          {id:7,metric:"dvi_jobs_in_error",op:">=",threshold:10,tier:"P1",message:"CRITICAL: 10+ jobs in error",category:"production",department:"lab-wide",enabled:1,cooldown_min:30,window_min:5,last_fired_at:null,fire_count:0},
+          {id:8,metric:"dvi_jobs_in_error",op:">=",threshold:5,tier:"P2",message:"WARNING: 5+ jobs in error",category:"production",department:"lab-wide",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-7200000).toISOString(),fire_count:4},
+          {id:9,metric:"dvi_throughput_per_hour",op:"<=",threshold:15,tier:"P1",message:"CRITICAL: Throughput below 15 jobs/hr",category:"production",department:"lab-wide",enabled:0,cooldown_min:60,window_min:10,last_fired_at:null,fire_count:0,suppress_until:null},
+          {id:10,metric:"breakage_rate",op:">=",threshold:10,tier:"P1",message:"CRITICAL: 10+ breakages today",category:"quality",department:"lab-wide",enabled:1,cooldown_min:30,window_min:5,last_fired_at:null,fire_count:0},
+          {id:11,metric:"breakage_rate",op:">=",threshold:5,tier:"P2",message:"WARNING: 5+ breakages today",category:"quality",department:"lab-wide",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-1800000).toISOString(),fire_count:7},
+          {id:12,metric:"coating_reject_rate",op:">=",threshold:15,tier:"P1",message:"CRITICAL: 15%+ coating reject rate",category:"quality",department:"coating",enabled:1,cooldown_min:30,window_min:5,last_fired_at:null,fire_count:0},
+          {id:13,metric:"coating_reject_rate",op:">=",threshold:8,tier:"P2",message:"WARNING: 8%+ coating reject rate",category:"quality",department:"coating",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-14400000).toISOString(),fire_count:3},
+          {id:14,metric:"network_devices_offline",op:">=",threshold:3,tier:"P1",message:"CRITICAL: 3+ devices offline",category:"network",department:"network",enabled:1,cooldown_min:30,window_min:5,last_fired_at:null,fire_count:0},
+          {id:15,metric:"network_latency_avg",op:">=",threshold:50,tier:"P2",message:"WARNING: WAN latency >50ms",category:"network",department:"network",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-300000).toISOString(),fire_count:2},
+          {id:16,metric:"som_oee",op:"<=",threshold:60,tier:"P2",message:"WARNING: OEE below 60%",category:"machine",department:"equipment",enabled:1,cooldown_min:30,window_min:5,last_fired_at:new Date(Date.now()-1200000).toISOString(),fire_count:1},
+          {id:17,metric:"oven_overdue_racks",op:">=",threshold:3,tier:"P1",message:"CRITICAL: 3+ oven racks overdue",category:"oven",department:"coating",enabled:1,cooldown_min:30,window_min:5,last_fired_at:null,fire_count:0},
+          {id:18,metric:"maintenance_open_work_orders",op:">=",threshold:10,tier:"P2",message:"WARNING: 10+ open work orders",category:"maintenance",department:"maintenance",enabled:1,cooldown_min:60,window_min:15,last_fired_at:null,fire_count:0},
+        ]);
+        setGlobalConfig({p1_sigma:"3.5",p2_sigma:"2.5",p3_sigma:"1.5",poll_interval_sec:"300",baseline_days:"30",auto_resolve_hours:"4",min_baseline_samples:"10",dedup_window_min:"30"});
+        return;
+      }
+      fetch(`${base}/api/ews/rules`).then(r=>r.ok?r.json():[]).then(setEwsRules).catch(()=>{});
+      fetch(`${base}/api/ews/config`).then(r=>r.ok?r.json():{}).then(d=>{setGlobalConfig(d);setConfigEdits(d);}).catch(()=>{});
+    }
+    if(ewsSub==="baselines"&&labBaselines.length===0){
+      if(isDemo){
+        setLabBaselines([
+          {department:"surfacing",shift:"morning",metric:"throughput",value:40,unit:"jobs/hr"},
+          {department:"surfacing",shift:"morning",metric:"yield",value:96,unit:"%"},
+          {department:"surfacing",shift:"morning",metric:"labor_rate",value:8,unit:"operators"},
+          {department:"surfacing",shift:"afternoon",metric:"throughput",value:35,unit:"jobs/hr"},
+          {department:"surfacing",shift:"afternoon",metric:"yield",value:95,unit:"%"},
+          {department:"surfacing",shift:"afternoon",metric:"labor_rate",value:7,unit:"operators"},
+          {department:"cutting",shift:"morning",metric:"throughput",value:45,unit:"jobs/hr"},
+          {department:"cutting",shift:"morning",metric:"yield",value:97,unit:"%"},
+          {department:"cutting",shift:"morning",metric:"labor_rate",value:6,unit:"operators"},
+          {department:"cutting",shift:"afternoon",metric:"throughput",value:40,unit:"jobs/hr"},
+          {department:"cutting",shift:"afternoon",metric:"yield",value:96,unit:"%"},
+          {department:"cutting",shift:"afternoon",metric:"labor_rate",value:5,unit:"operators"},
+          {department:"coating",shift:"morning",metric:"throughput",value:30,unit:"jobs/hr"},
+          {department:"coating",shift:"morning",metric:"yield",value:92,unit:"%"},
+          {department:"coating",shift:"morning",metric:"labor_rate",value:6,unit:"operators"},
+          {department:"coating",shift:"afternoon",metric:"throughput",value:25,unit:"jobs/hr"},
+          {department:"coating",shift:"afternoon",metric:"yield",value:91,unit:"%"},
+          {department:"coating",shift:"afternoon",metric:"labor_rate",value:5,unit:"operators"},
+          {department:"assembly",shift:"morning",metric:"throughput",value:35,unit:"jobs/hr"},
+          {department:"assembly",shift:"morning",metric:"yield",value:98,unit:"%"},
+          {department:"assembly",shift:"morning",metric:"labor_rate",value:8,unit:"operators"},
+          {department:"assembly",shift:"afternoon",metric:"throughput",value:30,unit:"jobs/hr"},
+          {department:"assembly",shift:"afternoon",metric:"yield",value:97,unit:"%"},
+          {department:"assembly",shift:"afternoon",metric:"labor_rate",value:7,unit:"operators"},
+          {department:"picking",shift:"morning",metric:"throughput",value:50,unit:"jobs/hr"},
+          {department:"picking",shift:"morning",metric:"yield",value:99,unit:"%"},
+          {department:"picking",shift:"morning",metric:"labor_rate",value:4,unit:"operators"},
+          {department:"picking",shift:"afternoon",metric:"throughput",value:45,unit:"jobs/hr"},
+          {department:"picking",shift:"afternoon",metric:"yield",value:99,unit:"%"},
+          {department:"picking",shift:"afternoon",metric:"labor_rate",value:3,unit:"operators"},
+          {department:"print",shift:"morning",metric:"throughput",value:60,unit:"jobs/hr"},
+          {department:"print",shift:"morning",metric:"yield",value:99,unit:"%"},
+          {department:"print",shift:"morning",metric:"labor_rate",value:2,unit:"operators"},
+          {department:"print",shift:"afternoon",metric:"throughput",value:55,unit:"jobs/hr"},
+          {department:"print",shift:"afternoon",metric:"yield",value:99,unit:"%"},
+          {department:"print",shift:"afternoon",metric:"labor_rate",value:2,unit:"operators"},
+        ]);
+        return;
+      }
+      fetch(`${base}/api/lab/baselines`).then(r=>r.ok?r.json():[]).then(setLabBaselines).catch(()=>{});
+      fetch(`${base}/api/lab/baselines/history?limit=20`).then(r=>r.ok?r.json():[]).then(setBaselineHistory).catch(()=>{});
+    }
+    if(ewsSub==="backlog"&&backlog.length===0){
+      if(isDemo){
+        setBacklog([
+          {department:"surfacing",backlog:47,throughput:28,baseline_throughput:40,recovery_hours:1.7,color:"green",shift:"morning"},
+          {department:"cutting",backlog:12,throughput:42,baseline_throughput:45,recovery_hours:0.3,color:"green",shift:"morning"},
+          {department:"coating",backlog:38,throughput:18,baseline_throughput:30,recovery_hours:2.1,color:"amber",shift:"morning"},
+          {department:"assembly",backlog:84,throughput:22,baseline_throughput:35,recovery_hours:3.8,color:"amber",shift:"morning"},
+        ]);
+        setBacklogTrend(Array.from({length:30},(_,i)=>({day:`2026-02-${String(17+i>28?17+i-28:17+i).padStart(2,"0")}`,avg_backlog:Math.round(20+Math.random()*40),max_backlog:Math.round(40+Math.random()*50),samples:12})));
+        return;
+      }
+      fetch(`${base}/api/lab/backlog`).then(r=>r.ok?r.json():[]).then(setBacklog).catch(()=>{});
+      fetch(`${base}/api/lab/backlog/trend?department=${backlogDept}&days=30`).then(r=>r.ok?r.json():[]).then(setBacklogTrend).catch(()=>{});
+    }
+  },[ewsSub,base,isDemo]);
 
   // Filtered alerts
   const filtered=useMemo(()=>{
@@ -6890,8 +7172,19 @@ Be direct. No hedging. This is a live production environment.`;
 
       {error&&<div style={{padding:"8px 12px",background:T.redDark,border:`1px solid ${T.red}33`,borderRadius:4,marginBottom:12,fontSize:11,color:T.red}}>Connection error: {error}</div>}
 
-      {/* ── MAIN LAYOUT ── */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 380px",gap:16,alignItems:"start"}}>
+      {/* ── SUB-TAB BAR ── */}
+      <div style={{display:"flex",gap:6,marginBottom:16}}>
+        {[{id:"alerts",label:"Alerts",icon:"⚡"},{id:"settings",label:"Settings",icon:"⚙"},{id:"baselines",label:"Baselines",icon:"◊"},{id:"backlog",label:"Backlog",icon:"▤"}].map(tab=>(
+          <button key={tab.id} onClick={()=>setEwsSub(tab.id)} style={{
+            background:ewsSub===tab.id?T.blueDark:"transparent",border:`1px solid ${ewsSub===tab.id?T.blue:"transparent"}`,
+            borderRadius:6,padding:"7px 16px",cursor:"pointer",color:ewsSub===tab.id?"#93C5FD":T.textMuted,
+            fontSize:11,fontWeight:600,fontFamily:mono,letterSpacing:"0.06em",display:"flex",alignItems:"center",gap:6,
+          }}><span>{tab.icon}</span>{tab.label.toUpperCase()}</button>
+        ))}
+      </div>
+
+      {/* ═══ ALERTS SUB-TAB ═══ */}
+      {ewsSub==="alerts"&&<div style={{display:"grid",gridTemplateColumns:"1fr 380px",gap:16,alignItems:"start"}}>
 
         {/* ── LEFT: ALERTS + BASELINES ── */}
         <div>
@@ -7162,7 +7455,363 @@ Be direct. No hedging. This is a live production environment.`;
             )}
           </div>
         </div>
-      </div>
+      </div>}
+
+      {/* ═══ SETTINGS SUB-TAB ═══ */}
+      {ewsSub==="settings"&&(
+        <div style={{display:"grid",gridTemplateColumns:"300px 1fr",gap:16,alignItems:"start"}}>
+          {/* Left: Rule list */}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <input value={ruleSearch} onChange={e=>setRuleSearch(e.target.value)} placeholder="Search rules..." style={{padding:"6px 10px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+            <div style={{display:"flex",gap:4,flexWrap:"wrap"}}>
+              {["all","machine","production","quality","inventory","network","maintenance","oven"].map(f=>(
+                <button key={f} onClick={()=>setRuleFilter(f)} style={{padding:"2px 8px",fontSize:8,fontFamily:mono,background:ruleFilter===f?T.blueDark:"transparent",color:ruleFilter===f?"#7dd3fc":"#475569",border:`1px solid ${ruleFilter===f?T.blue:T.border}`,borderRadius:2,cursor:"pointer",letterSpacing:"0.06em"}}>{f.toUpperCase()}</button>
+              ))}
+            </div>
+            <div style={{maxHeight:"65vh",overflowY:"auto",display:"flex",flexDirection:"column",gap:4}}>
+              {ewsRules.filter(r=>{
+                if(ruleSearch&&!r.metric.toLowerCase().includes(ruleSearch.toLowerCase())&&!r.message.toLowerCase().includes(ruleSearch.toLowerCase()))return false;
+                if(ruleFilter!=="all"&&r.category!==ruleFilter)return false;
+                return true;
+              }).sort((a,b)=>{
+                if(a.last_fired_at&&!b.last_fired_at)return -1;
+                if(!a.last_fired_at&&b.last_fired_at)return 1;
+                if(a.last_fired_at&&b.last_fired_at)return new Date(b.last_fired_at)-new Date(a.last_fired_at);
+                return a.id-b.id;
+              }).map(r=>{
+                const dotColor=!r.enabled?"#334155":r.fire_count>5?"#ef4444":r.last_fired_at?"#f59e0b":"#10b981";
+                return(
+                  <div key={r.id} onClick={()=>{setSelectedRule(r.id);setRuleDetail(r);setRuleEdits({...r});setRuleTestResult(null);}} style={{
+                    padding:"8px 10px",borderRadius:3,cursor:"pointer",
+                    background:selectedRule===r.id?"rgba(59,130,246,0.08)":T.card,
+                    border:`1px solid ${selectedRule===r.id?T.blue:T.border}`,
+                  }}>
+                    <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                      <div style={{width:6,height:6,borderRadius:"50%",background:dotColor,flexShrink:0}}/>
+                      <span style={{fontSize:10,color:r.enabled?T.text:"#475569",flex:1,overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{r.metric}</span>
+                      <span style={{fontSize:8,padding:"1px 5px",borderRadius:2,background:r.tier==="P1"?"#1f0d0d":"#1f1505",color:r.tier==="P1"?"#ef4444":"#f59e0b",letterSpacing:"0.1em"}}>{r.tier}</span>
+                    </div>
+                    <div style={{fontSize:9,color:"#475569",paddingLeft:12}}>
+                      {r.op} {r.threshold} · {r.last_fired_at?`fired ${timeSince(r.last_fired_at)}`:"never fired"} · {r.fire_count} fires
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Right: Rule detail editor */}
+          <div>
+            {!ruleDetail&&<div style={{padding:40,textAlign:"center",color:"#1e3a5f",fontSize:11}}>Select a rule from the list to view and edit</div>}
+            {ruleDetail&&(
+              <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:16}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:16}}>
+                  <span style={{fontSize:13,color:T.blue,fontWeight:600}}>{ruleEdits.metric}</span>
+                  <span style={{fontSize:8,color:"#334155",fontFamily:mono,marginLeft:"auto"}}>{ruleEdits.category} · {ruleEdits.department}</span>
+                </div>
+
+                {/* Editable fields */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:16}}>
+                  {[
+                    {label:"THRESHOLD",key:"threshold",type:"number"},
+                    {label:"OPERATOR",key:"op",type:"select",options:[">=","<=",">","<"]},
+                    {label:"TIER",key:"tier",type:"select",options:["P1","P2","P3"]},
+                  ].map(f=>(
+                    <div key={f.key}>
+                      <div style={{fontSize:8,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>{f.label}</div>
+                      {f.type==="number"&&<input type="number" value={ruleEdits[f.key]||""} onChange={e=>setRuleEdits(p=>({...p,[f.key]:parseFloat(e.target.value)}))} style={{width:"100%",padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>}
+                      {f.type==="select"&&<select value={ruleEdits[f.key]||""} onChange={e=>setRuleEdits(p=>({...p,[f.key]:e.target.value}))} style={{width:"100%",padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}>{f.options.map(o=><option key={o} value={o}>{o}</option>)}</select>}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{marginBottom:16}}>
+                  <div style={{fontSize:8,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>MESSAGE</div>
+                  <input value={ruleEdits.message||""} onChange={e=>setRuleEdits(p=>({...p,message:e.target.value}))} style={{width:"100%",padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+                </div>
+
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12,marginBottom:16}}>
+                  {[
+                    {label:"COOLDOWN (MIN)",key:"cooldown_min",type:"number"},
+                    {label:"WINDOW (MIN)",key:"window_min",type:"number"},
+                    {label:"ENABLED",key:"enabled",type:"toggle"},
+                  ].map(f=>(
+                    <div key={f.key}>
+                      <div style={{fontSize:8,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>{f.label}</div>
+                      {f.type==="number"&&<input type="number" value={ruleEdits[f.key]||""} onChange={e=>setRuleEdits(p=>({...p,[f.key]:parseInt(e.target.value)}))} style={{width:"100%",padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>}
+                      {f.type==="toggle"&&<button onClick={()=>setRuleEdits(p=>({...p,enabled:p.enabled?0:1}))} style={{padding:"6px 16px",background:ruleEdits.enabled?T.green+"22":"#1f0d0d",border:`1px solid ${ruleEdits.enabled?T.green+"44":"#3d1a1a"}`,color:ruleEdits.enabled?T.green:"#ef4444",borderRadius:3,fontSize:10,fontFamily:mono,cursor:"pointer",width:"100%"}}>{ruleEdits.enabled?"ENABLED":"DISABLED"}</button>}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Suppress */}
+                {ruleDetail.suppress_until&&new Date(ruleDetail.suppress_until)>new Date()?(
+                  <div style={{padding:"8px 12px",background:"rgba(245,158,11,0.06)",border:"1px solid rgba(245,158,11,0.2)",borderRadius:3,marginBottom:12,display:"flex",alignItems:"center",gap:8}}>
+                    <span style={{fontSize:10,color:T.amber}}>Suppressed until {new Date(ruleDetail.suppress_until).toLocaleString()}</span>
+                    {ruleDetail.suppress_reason&&<span style={{fontSize:9,color:"#475569"}}>— {ruleDetail.suppress_reason}</span>}
+                    <button onClick={async()=>{if(isDemo)return;await fetch(`${base}/api/ews/rules/${ruleDetail.id}/suppress`,{method:"DELETE"});const r=await(await fetch(`${base}/api/ews/rules/${ruleDetail.id}`)).json();setRuleDetail(r);setRuleEdits({...r});}} style={{marginLeft:"auto",padding:"3px 10px",background:"transparent",border:`1px solid ${T.border}`,color:"#475569",borderRadius:2,fontSize:9,fontFamily:mono,cursor:"pointer"}}>UNSUPPRESS</button>
+                  </div>
+                ):(
+                  <div style={{display:"flex",gap:6,marginBottom:12}}>
+                    {[{label:"1h",min:60},{label:"4h",min:240},{label:"8h",min:480},{label:"24h",min:1440}].map(s=>(
+                      <button key={s.label} onClick={async()=>{const until=new Date(Date.now()+s.min*60000).toISOString();if(isDemo){setRuleDetail(p=>({...p,suppress_until:until}));return;}await fetch(`${base}/api/ews/rules/${ruleDetail.id}/suppress`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({until,reason:`Snoozed ${s.label}`})});const r=await(await fetch(`${base}/api/ews/rules/${ruleDetail.id}`)).json();setRuleDetail(r);setRuleEdits({...r});}} style={{padding:"4px 10px",background:"transparent",border:`1px solid ${T.border}`,color:"#475569",borderRadius:2,fontSize:9,fontFamily:mono,cursor:"pointer"}}>Snooze {s.label}</button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Test + Save buttons */}
+                <div style={{display:"flex",gap:8,marginBottom:12}}>
+                  <button onClick={async()=>{if(isDemo){setRuleTestResult({would_fire:ruleEdits.threshold<=5,readings_evaluated:12,violations:ruleEdits.threshold<=5?3:0});return;}const r=await fetch(`${base}/api/ews/rules/${ruleDetail.id}/test`,{method:"POST"});if(r.ok)setRuleTestResult(await r.json());}} style={{padding:"6px 14px",background:"#0f1f3d",border:"1px solid #1e3a5f",color:"#7dd3fc",borderRadius:3,fontSize:10,fontFamily:mono,cursor:"pointer",letterSpacing:"0.06em"}}>TEST LAST 60 MIN</button>
+                  <button onClick={async()=>{setRuleSaving(true);if(isDemo){setTimeout(()=>{setRuleSaving(false);setEwsRules(p=>p.map(r=>r.id===ruleDetail.id?{...r,...ruleEdits}:r));},500);return;}await fetch(`${base}/api/ews/rules/${ruleDetail.id}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(ruleEdits)});setRuleSaving(false);const updated=await(await fetch(`${base}/api/ews/rules`)).json();setEwsRules(updated);}} disabled={ruleSaving} style={{padding:"6px 14px",background:T.green+"22",border:`1px solid ${T.green}44`,color:T.green,borderRadius:3,fontSize:10,fontFamily:mono,cursor:"pointer",letterSpacing:"0.06em"}}>{ruleSaving?"SAVING...":"SAVE CHANGES"}</button>
+                </div>
+
+                {/* Test result */}
+                {ruleTestResult&&(
+                  <div style={{padding:"8px 12px",background:ruleTestResult.would_fire?"rgba(239,68,68,0.06)":"rgba(16,185,129,0.06)",border:`1px solid ${ruleTestResult.would_fire?"rgba(239,68,68,0.2)":"rgba(16,185,129,0.2)"}`,borderRadius:3,marginBottom:12}}>
+                    <span style={{fontSize:10,color:ruleTestResult.would_fire?"#ef4444":"#10b981",fontWeight:500}}>
+                      {ruleTestResult.would_fire?`WOULD FIRE — ${ruleTestResult.violations} violations in ${ruleTestResult.readings_evaluated} readings`:`WOULD NOT FIRE — ${ruleTestResult.readings_evaluated} readings evaluated, 0 violations`}
+                    </span>
+                  </div>
+                )}
+
+                {/* Rule history */}
+                {ruleDetail.history&&ruleDetail.history.length>0&&(
+                  <div>
+                    <div style={{fontSize:8,color:"#475569",letterSpacing:"0.12em",marginBottom:6}}>CHANGE HISTORY</div>
+                    <div style={{maxHeight:150,overflowY:"auto"}}>
+                      {ruleDetail.history.map((h,i)=>(
+                        <div key={i} style={{fontSize:9,color:"#475569",padding:"3px 0",borderBottom:`1px solid ${T.border}`}}>
+                          <span style={{color:"#334155"}}>{h.changed_at}</span> — {h.field}: {h.old_value} → <span style={{color:T.blue}}>{h.new_value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Global config */}
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:16,marginTop:16}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:12}}>GLOBAL EWS SETTINGS</div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:10}}>
+                {[
+                  {label:"P1 SIGMA",key:"p1_sigma"},{label:"P2 SIGMA",key:"p2_sigma"},{label:"P3 SIGMA",key:"p3_sigma"},
+                  {label:"POLL (SEC)",key:"poll_interval_sec"},{label:"BASELINE DAYS",key:"baseline_days"},
+                  {label:"AUTO-RESOLVE (HR)",key:"auto_resolve_hours"},{label:"MIN SAMPLES",key:"min_baseline_samples"},
+                  {label:"DEDUP (MIN)",key:"dedup_window_min"},
+                ].map(f=>(
+                  <div key={f.key}>
+                    <div style={{fontSize:7,color:"#334155",letterSpacing:"0.1em",marginBottom:3}}>{f.label}</div>
+                    <input type="number" step="0.1" value={configEdits[f.key]||""} onChange={e=>setConfigEdits(p=>({...p,[f.key]:e.target.value}))} style={{width:"100%",padding:"5px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:10}}/>
+                  </div>
+                ))}
+              </div>
+              <button onClick={async()=>{if(isDemo){setGlobalConfig({...configEdits});return;}await fetch(`${base}/api/ews/config`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(configEdits)});const c=await(await fetch(`${base}/api/ews/config`)).json();setGlobalConfig(c);setConfigEdits(c);}} style={{marginTop:10,padding:"6px 14px",background:T.green+"22",border:`1px solid ${T.green}44`,color:T.green,borderRadius:3,fontSize:10,fontFamily:mono,cursor:"pointer"}}>SAVE GLOBAL CONFIG</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ BASELINES SUB-TAB ═══ */}
+      {ewsSub==="baselines"&&(
+        <div>
+          {/* Department tabs */}
+          <div style={{display:"flex",gap:6,marginBottom:16}}>
+            {["surfacing","cutting","coating","assembly","picking","print"].map(d=>(
+              <button key={d} onClick={()=>setBaselineDept(d)} style={{
+                padding:"5px 14px",fontSize:10,fontFamily:mono,letterSpacing:"0.08em",
+                background:baselineDept===d?T.blueDark:"transparent",color:baselineDept===d?"#7dd3fc":"#475569",
+                border:`1px solid ${baselineDept===d?T.blue:T.border}`,borderRadius:3,cursor:"pointer",textTransform:"uppercase",
+              }}>{d}</button>
+            ))}
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 300px",gap:16}}>
+            {/* Baseline table */}
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:10,fontFamily:mono}}>
+                <thead>
+                  <tr style={{borderBottom:`1px solid ${T.border}`,background:"#0a0f14"}}>
+                    <th style={{padding:"8px 12px",textAlign:"left",color:"#475569",letterSpacing:"0.1em",fontSize:9}}>METRIC</th>
+                    {["morning","afternoon","night"].map(s=><th key={s} style={{padding:"8px 12px",textAlign:"center",color:"#475569",letterSpacing:"0.1em",fontSize:9}}>{s.toUpperCase()}</th>)}
+                    <th style={{padding:"8px 12px",textAlign:"left",color:"#475569",letterSpacing:"0.1em",fontSize:9}}>UNIT</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {["throughput","yield","labor_rate"].map(metric=>{
+                    const rows=labBaselines.filter(b=>b.department===baselineDept&&b.metric===metric);
+                    const unit=rows[0]?.unit||"—";
+                    return(
+                      <tr key={metric} style={{borderBottom:`1px solid ${T.border}`}}>
+                        <td style={{padding:"8px 12px",color:T.text,fontWeight:500}}>{metric.replace(/_/g," ")}</td>
+                        {["morning","afternoon","night"].map(shift=>{
+                          const row=rows.find(r=>r.shift===shift);
+                          const val=row?.value||0;
+                          const cellKey=`${baselineDept}_${shift}_${metric}`;
+                          const isEditing=editingCell===cellKey;
+                          return(
+                            <td key={shift} style={{padding:"4px 8px",textAlign:"center"}} onClick={()=>{if(!isEditing){setEditingCell(cellKey);setEditingValue(String(val));}}}>
+                              {isEditing?(
+                                <input autoFocus type="number" value={editingValue} onChange={e=>setEditingValue(e.target.value)}
+                                  onBlur={async()=>{
+                                    const nv=parseFloat(editingValue);
+                                    if(!isNaN(nv)&&nv!==val){
+                                      if(!isDemo){
+                                        await fetch(`${base}/api/lab/baselines`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({department:baselineDept,shift,metric,value:nv,unit})});
+                                        const updated=await(await fetch(`${base}/api/lab/baselines`)).json();
+                                        setLabBaselines(updated);
+                                        const hist=await(await fetch(`${base}/api/lab/baselines/history?department=${baselineDept}&limit=20`)).json();
+                                        setBaselineHistory(hist);
+                                      }else{
+                                        setLabBaselines(p=>p.map(b=>b.department===baselineDept&&b.shift===shift&&b.metric===metric?{...b,value:nv}:b));
+                                        setBaselineHistory(p=>[{department:baselineDept,shift,metric,old_value:val,new_value:nv,changed_by:"user",changed_at:new Date().toISOString()},...p]);
+                                      }
+                                    }
+                                    setEditingCell(null);
+                                  }}
+                                  onKeyDown={e=>{if(e.key==="Enter")e.target.blur();if(e.key==="Escape")setEditingCell(null);}}
+                                  style={{width:60,padding:"4px 6px",background:T.surface,border:`1px solid ${T.blue}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11,textAlign:"center"}}
+                                />
+                              ):(
+                                <span style={{cursor:"pointer",color:val>0?"#7dd3fc":"#334155",padding:"4px 8px",borderRadius:3}} title="Click to edit">{val||"—"}</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td style={{padding:"8px 12px",color:"#475569",fontSize:9}}>{unit}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Change history */}
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>CHANGE HISTORY</div>
+              <div style={{maxHeight:300,overflowY:"auto"}}>
+                {baselineHistory.length===0&&<div style={{fontSize:9,color:"#1e3a5f",padding:"12px 0"}}>No changes recorded</div>}
+                {baselineHistory.map((h,i)=>(
+                  <div key={i} style={{fontSize:9,color:"#475569",padding:"5px 0",borderBottom:`1px solid ${T.border}`}}>
+                    <div style={{color:"#334155",marginBottom:2}}>{h.changed_at?new Date(h.changed_at).toLocaleString():""}</div>
+                    <div><span style={{color:T.text}}>{h.department}</span> · {h.shift} · {h.metric}: <span style={{color:"#ef4444"}}>{h.old_value}</span> → <span style={{color:T.green}}>{h.new_value}</span></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ BACKLOG SUB-TAB ═══ */}
+      {ewsSub==="backlog"&&(
+        <div>
+          {/* Department cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,marginBottom:20}}>
+            {backlog.map(dept=>{
+              const bg=dept.color==="red"?"rgba(239,68,68,0.06)":dept.color==="amber"?"rgba(245,158,11,0.06)":"rgba(16,185,129,0.04)";
+              const bc=dept.color==="red"?"rgba(239,68,68,0.2)":dept.color==="amber"?"rgba(245,158,11,0.15)":"rgba(16,185,129,0.1)";
+              const tc2=dept.color==="red"?"#ef4444":dept.color==="amber"?"#f59e0b":"#10b981";
+              return(
+                <div key={dept.department} onClick={()=>setBacklogDept(dept.department)} style={{
+                  background:bg,border:`1px solid ${bc}`,borderRadius:6,padding:"16px 14px",cursor:"pointer",
+                  outline:backlogDept===dept.department?`2px solid ${T.blue}`:"none",outlineOffset:2,
+                }}>
+                  <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8,textTransform:"uppercase"}}>{dept.department}</div>
+                  <div style={{fontSize:28,fontWeight:700,color:tc2,lineHeight:1,marginBottom:6}}>{dept.backlog}</div>
+                  <div style={{fontSize:9,color:"#475569",marginBottom:2}}>jobs in queue</div>
+                  <div style={{marginTop:8,display:"flex",justifyContent:"space-between",fontSize:9}}>
+                    <div><span style={{color:"#334155"}}>Throughput</span> <span style={{color:"#7dd3fc"}}>{dept.throughput}</span><span style={{color:"#334155"}}> / {dept.baseline_throughput} jobs/hr</span></div>
+                  </div>
+                  <div style={{marginTop:6,fontSize:11,fontWeight:600,color:tc2}}>
+                    {dept.recovery_hours!=null?`Recovery: ${dept.recovery_hours}h`:"No data"}
+                  </div>
+                </div>
+              );
+            })}
+            {backlog.length===0&&<div style={{gridColumn:"1/-1",textAlign:"center",padding:40,color:"#1e3a5f",fontSize:11}}>No backlog data available — DVI queue metrics required</div>}
+          </div>
+
+          {/* Catch-up calculator */}
+          {backlog.length>0&&(()=>{
+            const dept=backlog.find(d=>d.department===backlogDept)||backlog[0];
+            if(!dept)return null;
+            const needed=dept.backlog>0&&catchupAvailHours>0?Math.ceil(dept.backlog/catchupAvailHours*10)/10:0;
+            const daysAtCurrent=dept.throughput>0?Math.round(dept.backlog/dept.throughput/8*10)/10:null;
+            const daysAtBaseline=dept.baseline_throughput>0?Math.round(dept.backlog/dept.baseline_throughput/8*10)/10:null;
+            const daysAtTarget=catchupTargetRate>0?Math.round(dept.backlog/catchupTargetRate/8*10)/10:null;
+            return(
+              <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:16,marginBottom:16}}>
+                <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:12}}>CATCH-UP CALCULATOR — {dept.department.toUpperCase()}</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:12,marginBottom:12}}>
+                  <div>
+                    <div style={{fontSize:8,color:"#334155",marginBottom:3}}>TARGET RATE (JOBS/HR)</div>
+                    <input type="number" value={catchupTargetRate} onChange={e=>setCatchupTargetRate(parseFloat(e.target.value)||0)} style={{width:"100%",padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:8,color:"#334155",marginBottom:3}}>HOURS AVAILABLE</div>
+                    <input type="number" value={catchupAvailHours} onChange={e=>setCatchupAvailHours(parseFloat(e.target.value)||0)} style={{width:"100%",padding:"6px 8px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:8,color:"#334155",marginBottom:3}}>CURRENT BACKLOG</div>
+                    <div style={{padding:"6px 8px",fontSize:14,fontWeight:600,color:"#7dd3fc"}}>{dept.backlog} jobs</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:8,color:"#334155",marginBottom:3}}>JOBS/HR NEEDED</div>
+                    <div style={{padding:"6px 8px",fontSize:14,fontWeight:600,color:needed>dept.baseline_throughput?"#ef4444":"#10b981"}}>{needed}</div>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:12}}>
+                  <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,padding:"8px 10px",textAlign:"center"}}>
+                    <div style={{fontSize:16,fontWeight:600,color:"#7dd3fc"}}>{daysAtCurrent!=null?`${daysAtCurrent}d`:"—"}</div>
+                    <div style={{fontSize:8,color:"#334155",marginTop:2}}>AT CURRENT RATE</div>
+                  </div>
+                  <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,padding:"8px 10px",textAlign:"center"}}>
+                    <div style={{fontSize:16,fontWeight:600,color:T.green}}>{daysAtBaseline!=null?`${daysAtBaseline}d`:"—"}</div>
+                    <div style={{fontSize:8,color:"#334155",marginTop:2}}>AT BASELINE RATE</div>
+                  </div>
+                  <div style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,padding:"8px 10px",textAlign:"center"}}>
+                    <div style={{fontSize:16,fontWeight:600,color:T.purple}}>{daysAtTarget!=null?`${daysAtTarget}d`:"—"}</div>
+                    <div style={{fontSize:8,color:"#334155",marginTop:2}}>AT TARGET RATE</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Backlog trend chart */}
+          {backlogTrend.length>0&&(
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:16}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:12}}>30-DAY BACKLOG TREND — {backlogDept.toUpperCase()}</div>
+              {(()=>{
+                const w=700,h=180,pad=40;
+                const vals=backlogTrend.map(d=>d.avg_backlog);
+                const max=Math.max(...vals,1);
+                const pts=vals.map((v,i)=>{
+                  const x=pad+(i/(vals.length-1))*(w-pad*2);
+                  const y=h-pad-((v/max)*(h-pad*2));
+                  return`${x},${y}`;
+                }).join(" ");
+                return(
+                  <svg width={w} height={h} style={{display:"block",width:"100%",height:"auto"}} viewBox={`0 0 ${w} ${h}`}>
+                    {/* Reference lines */}
+                    <line x1={pad} y1={h-pad-((80/max)*(h-pad*2))} x2={w-pad} y2={h-pad-((80/max)*(h-pad*2))} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4,4" opacity="0.3"/>
+                    <text x={w-pad+4} y={h-pad-((80/max)*(h-pad*2))+3} fill="#f59e0b" fontSize="8" opacity="0.5">8hr</text>
+                    <line x1={pad} y1={h-pad-((20/max)*(h-pad*2))} x2={w-pad} y2={h-pad-((20/max)*(h-pad*2))} stroke="#10b981" strokeWidth="1" strokeDasharray="4,4" opacity="0.3"/>
+                    <text x={w-pad+4} y={h-pad-((20/max)*(h-pad*2))+3} fill="#10b981" fontSize="8" opacity="0.5">2hr</text>
+                    {/* Data line */}
+                    <polyline points={pts} fill="none" stroke="#3b82f6" strokeWidth="2" strokeLinejoin="round"/>
+                    {/* Axis labels */}
+                    {backlogTrend.filter((_,i)=>i%7===0).map((d,i)=>(
+                      <text key={i} x={pad+(i*7/(vals.length-1))*(w-pad*2)} y={h-8} fill="#334155" fontSize="8" textAnchor="middle">{d.day?.slice(5)}</text>
+                    ))}
+                  </svg>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* CSS animations */}
       <style>{`

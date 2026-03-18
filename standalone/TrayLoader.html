@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Tray Loader — Oven Station</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#070A0F;--surface:#0D1117;--card:#111820;
+  --border:#1C2733;--borderLt:#2A3A4A;--text:#E8EDF2;--dim:#8899AA;--dimmer:#445566;
+  --green:#10B981;--greenDk:#052E1A;--red:#EF4444;--redDk:#3F0A0A;
+  --amber:#F59E0B;--amberDk:#451A00;--blue:#3B82F6;--blueDk:#0A1F40;
+  --cyan:#06B6D4;--purple:#8B5CF6;--purpleDk:#2D1B69;
+  --mono:'JetBrains Mono',monospace;--sans:'DM Sans',sans-serif;--disp:'Bebas Neue',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);min-height:100vh;display:flex;flex-direction:column;}
+.hdr{background:var(--surface);border-bottom:2px solid var(--border);padding:12px 20px;display:flex;align-items:center;gap:14px;flex-shrink:0;}
+.logo{width:44px;height:44px;border-radius:10px;background:linear-gradient(135deg,#F59E0B,#B45309);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800;font-size:15px;color:#000;flex-shrink:0;}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:12px;}
+.srv-dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
+.srv-dot.ok{background:var(--green);box-shadow:0 0 10px var(--green);}
+.srv-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);}
+.hdr-btn{background:transparent;border:1px solid var(--border);border-radius:8px;padding:8px 14px;font-family:var(--mono);font-size:11px;color:var(--dim);cursor:pointer;}
+.main{flex:1;overflow-y:auto;padding:20px;display:flex;gap:16px;max-width:1000px;margin:0 auto;width:100%;}
+@media(max-width:700px){.main{flex-direction:column;}}
+.col{flex:1;display:flex;flex-direction:column;gap:12px;min-width:0;}
+.card{background:var(--card);border:2px solid var(--border);border-radius:14px;padding:16px;}
+.sec-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;margin-bottom:8px;}
+.inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:10px;padding:14px;color:var(--text);font-family:var(--mono);font-size:18px;font-weight:700;outline:none;text-align:center;}
+.inp:focus{border-color:var(--amber);}
+.btn{width:100%;padding:16px;border-radius:12px;border:none;font-weight:800;font-size:16px;cursor:pointer;font-family:var(--sans);transition:all .15s;}
+.btn:active{transform:scale(.98);}
+.btn-amber{background:var(--amber);color:#000;}
+.btn-green{background:var(--green);color:#000;}
+.btn-dim{background:var(--border);color:var(--dimmer);cursor:not-allowed;}
+.badge{display:inline-block;font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:4px;font-weight:700;}
+.tool-card{padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer;transition:all .15s;}
+.tool-card:active{border-color:var(--amber);}
+.tool-card.selected{border-color:var(--amber);background:var(--amberDk);}
+.tool-card .name{font-family:var(--mono);font-size:14px;font-weight:800;}
+.tool-card .meta{font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:3px;}
+.tray-card{padding:12px;background:var(--surface);border:2px solid var(--border);border-radius:10px;margin-bottom:8px;}
+.tray-card .name{font-family:var(--mono);font-size:16px;font-weight:800;color:var(--amber);}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-family:var(--mono);font-size:13px;font-weight:700;z-index:999;animation:fadeUp .2s ease;}
+.toast.ok{background:var(--greenDk);color:var(--green);border:1px solid var(--green);}
+.toast.err{background:var(--redDk);color:var(--red);border:1px solid var(--red);}
+.toast.warn{background:var(--amberDk);color:var(--amber);border:1px solid var(--amber);}
+@keyframes fadeUp{from{opacity:0;transform:translateX(-50%) translateY(10px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:200;display:flex;align-items:center;justify-content:center;}
+.modal{background:var(--card);border:2px solid var(--border);border-radius:16px;padding:24px;width:90%;max-width:400px;}
+.m-inp{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;margin-bottom:10px;}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="logo">TL</div>
+  <div>
+    <div style="font-family:var(--disp);font-size:28px;letter-spacing:1px;">TRAY LOADER</div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:2px;">OVEN STATION — LOAD CLOSED TOOLS → OVEN TRAYS</div>
+  </div>
+  <div class="hdr-right">
+    <div style="display:flex;align-items:center;gap:5px;"><div class="srv-dot" id="srvDot"></div><span class="srv-lbl" id="srvLbl">OFFLINE</span></div>
+    <button class="hdr-btn" onclick="openSetup()">⚙ SETUP</button>
+  </div>
+</div>
+<div class="main" id="app"></div>
+<div id="toastZone"></div>
+<div id="modalZone"></div>
+
+<script>
+const K={CFG:'tl_cfg'};
+function lsGet(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch{return d;}}
+function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
+let cfg=lsGet(K.CFG,{});
+let serverUrl=cfg.serverUrl||'http://localhost:3002';
+let operator=cfg.operator||'';
+let serverOk=false;
+function persistCfg(){lsSet(K.CFG,{serverUrl,operator});}
+
+// State
+let closedTools=[];
+let activeTrays=[];
+let selectedTools=new Set();
+let trayId='';
+
+async function checkServer(){
+  const dot=document.getElementById('srvDot'),lbl=document.getElementById('srvLbl');
+  try{const r=await fetch(`${serverUrl}/health`,{signal:AbortSignal.timeout(2500)});serverOk=r.ok;}catch{serverOk=false;}
+  dot.className=`srv-dot ${serverOk?'ok':''}`;
+  lbl.textContent=serverOk?serverUrl.replace(/https?:\/\//,'').split('/')[0].slice(0,22):'OFFLINE';
+}
+setInterval(checkServer,10000);checkServer();
+
+function toast(msg,type='ok'){
+  const el=document.createElement('div');el.className=`toast ${type}`;el.textContent=msg;
+  document.getElementById('toastZone').appendChild(el);setTimeout(()=>el.remove(),4000);
+}
+
+function coatingColor(ct){const m={'AR':'#3b82f6','Blue Cut':'#06b6d4','Mirror':'#a855f7','Transitions':'#f97316','Polarized':'#ec4899','Hard Coat':'#84cc16'};return m[ct]||'var(--dim)';}
+function coatingBg(ct){const m={'AR':'#1e3a5f','Blue Cut':'#164e63','Mirror':'#581c87','Transitions':'#7c2d12','Polarized':'#831843','Hard Coat':'#365314'};return m[ct]||'var(--surface)';}
+
+async function fetchContainers(){
+  if(!serverOk)return;
+  try{
+    const r=await fetch(`${serverUrl}/api/containers/active`);
+    if(!r.ok)return;
+    const d=await r.json();
+    closedTools=(d.tools||[]).filter(t=>t.status==='closed');
+    activeTrays=(d.oven_trays||[]).filter(t=>t.status==='open');
+    render();
+  }catch(e){console.error(e);}
+}
+setInterval(fetchContainers,10000);setTimeout(fetchContainers,1000);
+
+function toggleTool(id){
+  if(selectedTools.has(id))selectedTools.delete(id);else selectedTools.add(id);
+  render();
+}
+
+async function loadToTray(){
+  const tid=document.getElementById('inpTrayId')?.value.trim().toUpperCase()||trayId;
+  if(!tid){toast('Enter a tray ID','err');return;}
+  if(selectedTools.size===0){toast('Select tools to load','err');return;}
+  try{
+    const r=await fetch(`${serverUrl}/api/containers/transfer/tool-to-tray`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({tray_id:tid,tool_ids:[...selectedTools],operator_id:operator||null})
+    });
+    const d=await r.json();
+    if(r.ok){
+      const rej=d.rejected?.length?` | ${d.rejected.length} rejected`:'';
+      toast(`Loaded ${d.loaded?.length||0} tools → ${tid}${rej}`,d.rejected?.length?'warn':'ok');
+      selectedTools.clear();trayId='';fetchContainers();
+    }else toast(d.error||'Failed','err');
+  }catch(e){toast(e.message,'err');}
+}
+
+async function closeTray(id){
+  try{
+    const r=await fetch(`${serverUrl}/api/containers/tray/close`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tray_id:id})});
+    if(r.ok){toast(`Tray ${id} closed — ready for batch`);fetchContainers();}
+    else{const d=await r.json();toast(d.error||'Failed','err');}
+  }catch(e){toast(e.message,'err');}
+}
+
+function render(){
+  const app=document.getElementById('app');
+  // Group closed tools by coating::material
+  const groups={};
+  closedTools.forEach(t=>{
+    const k=`${t.coating_type||'?'}::${t.material||'?'}`;
+    if(!groups[k])groups[k]={coating:t.coating_type,material:t.material,tools:[]};
+    groups[k].tools.push(t);
+  });
+
+  const toolsHtml=Object.entries(groups).map(([k,g])=>`
+    <div style="margin-bottom:12px;">
+      <div style="display:flex;gap:4px;align-items:center;margin-bottom:6px;">
+        ${g.coating?`<span class="badge" style="background:${coatingBg(g.coating)};color:${coatingColor(g.coating)}">${g.coating}</span>`:''}
+        ${g.material?`<span class="badge" style="background:#1e293b;color:#cbd5e1;border:1px solid #334155">${g.material}</span>`:''}
+        <span style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-left:4px;">${g.tools.length} tools</span>
+      </div>
+      ${g.tools.map(t=>`
+        <div class="tool-card ${selectedTools.has(t.id)?'selected':''}" onclick="toggleTool('${t.id}')">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <div style="width:18px;height:18px;border-radius:4px;border:2px solid ${selectedTools.has(t.id)?'var(--amber)':'var(--border)'};display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--amber);flex-shrink:0;">${selectedTools.has(t.id)?'✓':''}</div>
+            <span class="name">${t.id}</span>
+            <span style="font-family:var(--mono);font-size:11px;color:var(--dim);margin-left:auto;">${t.job_count} jobs</span>
+          </div>
+          <div class="meta">op: ${t.operator||'—'}</div>
+        </div>`).join('')}
+    </div>`).join('')||'<div style="text-align:center;color:var(--dimmer);padding:30px;font-family:var(--mono);font-size:11px;">No closed tools available</div>';
+
+  const traysHtml=activeTrays.map(t=>`
+    <div class="tray-card">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <span class="name">${t.id}</span>
+        ${t.coating_type?`<span class="badge" style="background:${coatingBg(t.coating_type)};color:${coatingColor(t.coating_type)}">${t.coating_type}</span>`:''}
+        ${t.material?`<span class="badge" style="background:#1e293b;color:#cbd5e1;border:1px solid #334155">${t.material}</span>`:''}
+      </div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-bottom:6px;">
+        ${t.job_count} jobs · ${(t.tools||[]).length} tools
+      </div>
+      <button class="btn btn-amber" style="font-size:13px;padding:10px;" onclick="closeTray('${t.id}')">CLOSE TRAY — READY FOR BATCH</button>
+    </div>`).join('')||'<div style="text-align:center;color:var(--dimmer);padding:20px;font-family:var(--mono);font-size:11px;">No open trays</div>';
+
+  app.innerHTML=`
+    <div class="col">
+      <div class="card">
+        <div class="sec-lbl">CLOSED TOOLS — TAP TO SELECT</div>
+        ${toolsHtml}
+      </div>
+    </div>
+    <div class="col">
+      <div class="card" style="border-color:var(--amber);">
+        <div class="sec-lbl">LOAD SELECTED → TRAY</div>
+        <input class="inp" id="inpTrayId" placeholder="TRAY-003" value="${trayId}" oninput="trayId=this.value"
+          onkeydown="if(event.key==='Enter')loadToTray()"/>
+        <div style="height:8px"></div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--dim);text-align:center;margin-bottom:8px;">
+          ${selectedTools.size} tools selected
+        </div>
+        <button class="btn ${selectedTools.size>0?'btn-amber':'btn-dim'}" onclick="loadToTray()">
+          LOAD ${selectedTools.size} TOOLS → TRAY
+        </button>
+      </div>
+      <div class="card">
+        <div class="sec-lbl">OPEN TRAYS</div>
+        ${traysHtml}
+      </div>
+    </div>`;
+}
+
+function openSetup(){
+  document.getElementById('modalZone').innerHTML=`
+    <div class="modal-bg" onclick="closeSetup()"><div class="modal" onclick="event.stopPropagation()">
+      <div class="sec-lbl">SETUP</div>
+      <label style="font-family:var(--mono);font-size:9px;color:var(--dim);display:block;margin-bottom:4px;">OPERATOR</label>
+      <input class="m-inp" id="mOp" value="${operator}"/>
+      <label style="font-family:var(--mono);font-size:9px;color:var(--dim);display:block;margin-bottom:4px;">SERVER URL</label>
+      <input class="m-inp" id="mSrv" value="${serverUrl}"/>
+      <button class="btn btn-amber" style="font-size:14px;padding:12px;" onclick="saveSetup()">Save</button>
+    </div></div>`;
+}
+function closeSetup(){document.getElementById('modalZone').innerHTML='';}
+function saveSetup(){
+  operator=document.getElementById('mOp').value.trim();
+  const srv=document.getElementById('mSrv').value.trim();
+  if(srv)serverUrl=srv;
+  persistCfg();closeSetup();checkServer();fetchContainers();toast('Setup saved');
+}
+
+render();
+</script>
+</body>
+</html>

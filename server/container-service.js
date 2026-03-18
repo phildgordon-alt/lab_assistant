@@ -5,6 +5,12 @@
  * Three-table model: containers, container_jobs, container_contents
  * Manifests are always computed by walking the tree, never copied.
  *
+ * DVI Enrichment: When jobs are scanned onto tools, coating/material/rush/lens_type
+ * are stored alongside the job. This enables material validation at every transfer point.
+ *
+ * Material is a HARD constraint — all lenses in a batch MUST be same coating + material.
+ * Validation happens at: tool close (all-same), tool→tray (match tray), tray→batch (match batch).
+ *
  * All functions are synchronous (better-sqlite3).
  * All IDs are strings (e.g. 'TOOL-006', 'TRAY-003', 'BATCH-041').
  */
@@ -32,8 +38,8 @@ const stmts = {
   getContainersByType: db.prepare('SELECT * FROM containers WHERE type = ? AND status != ?'),
 
   insertContainer: db.prepare(`
-    INSERT INTO containers (id, type, status, operator_id, machine_id, coating_type, notes)
-    VALUES (@id, @type, @status, @operator_id, @machine_id, @coating_type, @notes)
+    INSERT INTO containers (id, type, status, operator_id, machine_id, coating_type, material, notes)
+    VALUES (@id, @type, @status, @operator_id, @machine_id, @coating_type, @material, @notes)
   `),
 
   updateContainerStatus: db.prepare(`
@@ -41,11 +47,15 @@ const stmts = {
     WHERE id = @id
   `),
 
+  updateContainerTags: db.prepare(`
+    UPDATE containers SET coating_type = ?, material = ? WHERE id = ?
+  `),
+
   getJobsByContainer: db.prepare('SELECT * FROM container_jobs WHERE container_id = ?'),
 
   insertJob: db.prepare(`
-    INSERT INTO container_jobs (container_id, job_number, eye_side, ocr_confidence, entry_method)
-    VALUES (@container_id, @job_number, @eye_side, @ocr_confidence, @entry_method)
+    INSERT INTO container_jobs (container_id, job_number, eye_side, ocr_confidence, entry_method, coating, material, rush, lens_type)
+    VALUES (@container_id, @job_number, @eye_side, @ocr_confidence, @entry_method, @coating, @material, @rush, @lens_type)
   `),
 
   findJobOnOpenTools: db.prepare(`
@@ -76,6 +86,9 @@ const stmts = {
 
   countJobsByContainer: db.prepare('SELECT COUNT(*) AS cnt FROM container_jobs WHERE container_id = ?'),
 
+  distinctMaterials: db.prepare('SELECT DISTINCT material FROM container_jobs WHERE container_id = ? AND material IS NOT NULL'),
+  distinctCoatings: db.prepare('SELECT DISTINCT coating FROM container_jobs WHERE container_id = ? AND coating IS NOT NULL'),
+
   findOrphans: db.prepare(`
     SELECT * FROM containers
     WHERE type = 'tool' AND status = 'open'
@@ -84,7 +97,7 @@ const stmts = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 1. getManifest(containerId)
+// 1. getManifest(containerId) — recursive, enriched with coating/material
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getManifest(containerId) {
@@ -92,7 +105,6 @@ function getManifest(containerId) {
   if (!container) fail('CONTAINER_NOT_FOUND', `Container ${containerId} not found`);
 
   if (container.type === 'tool') {
-    // Base case: jobs live directly on tools
     const jobs = stmts.getJobsByContainer.all(containerId);
     return jobs.map(j => ({
       job_number: j.job_number,
@@ -100,11 +112,14 @@ function getManifest(containerId) {
       source_tool: containerId,
       entry_method: j.entry_method,
       ocr_confidence: j.ocr_confidence,
+      coating: j.coating,
+      material: j.material,
+      rush: j.rush,
+      lens_type: j.lens_type,
       created_at: j.created_at,
     }));
   }
 
-  // Recursive case: collect from children
   const children = stmts.getChildren.all(containerId);
   const allJobs = [];
   for (const child of children) {
@@ -121,11 +136,9 @@ function getJobLocation(jobNumber) {
   const entries = stmts.getJobEntryByJobNumber.all(jobNumber);
   if (entries.length === 0) return null;
 
-  // Take the most recent entry
   const entry = entries[0];
   const toolId = entry.tool_id;
 
-  // Walk up the tree: tool → tray → batch
   const lineage = [toolId];
   let currentId = toolId;
   let topContainer = stmts.getContainer.get(toolId);
@@ -166,6 +179,7 @@ function openToolSession(toolId, operatorId) {
     operator_id: operatorId || null,
     machine_id: null,
     coating_type: null,
+    material: null,
     notes: null,
   });
 
@@ -173,25 +187,33 @@ function openToolSession(toolId, operatorId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 4. addJobToTool(toolId, jobNumber, eyeSide, ocrConfidence, entryMethod)
+// 4. addJobToTool(toolId, jobNumber, eyeSide, ocrConfidence, entryMethod, dviData)
+//    dviData: { coating, material, rush, lensType } or null
 // ─────────────────────────────────────────────────────────────────────────────
 
-function addJobToTool(toolId, jobNumber, eyeSide, ocrConfidence, entryMethod) {
-  // Validate eye side
+function addJobToTool(toolId, jobNumber, eyeSide, ocrConfidence, entryMethod, dviData) {
   if (eyeSide !== 'L' && eyeSide !== 'R') {
     fail('INVALID_EYE_SIDE', `eye_side must be L or R, got '${eyeSide}'`);
   }
 
-  // Validate tool is open
   const tool = stmts.findOpenToolSession.get(toolId);
   if (!tool) {
     fail('TOOL_NOT_OPEN', `Tool ${toolId} is not open or does not exist`);
   }
 
-  // Cross-tool dedup: check if job+eye exists on any other open tool
+  // Cross-tool dedup
   const duplicate = stmts.findJobOnOpenTools.get(jobNumber, eyeSide);
   if (duplicate) {
     fail('JOB_ALREADY_ON_TOOL', `Job ${jobNumber} ${eyeSide} is already on open tool ${duplicate.tool_id}`);
+  }
+
+  // Scan-time material warning (not a hard reject — hard reject happens at close)
+  let warning = null;
+  if (dviData?.material) {
+    const existingMaterials = stmts.distinctMaterials.all(toolId);
+    if (existingMaterials.length > 0 && !existingMaterials.some(m => m.material === dviData.material)) {
+      warning = `Material mismatch: tool has ${existingMaterials.map(m => m.material).join(',')} but this job is ${dviData.material}. Tool will not close until resolved.`;
+    }
   }
 
   stmts.insertJob.run({
@@ -200,13 +222,21 @@ function addJobToTool(toolId, jobNumber, eyeSide, ocrConfidence, entryMethod) {
     eye_side: eyeSide,
     ocr_confidence: ocrConfidence != null ? ocrConfidence : null,
     entry_method: entryMethod || 'ocr',
+    coating: dviData?.coating || null,
+    material: dviData?.material || null,
+    rush: dviData?.rush ? 1 : 0,
+    lens_type: dviData?.lensType || null,
   });
 
-  return stmts.getJobsByContainer.all(toolId);
+  const jobs = stmts.getJobsByContainer.all(toolId);
+  if (warning) {
+    return { jobs, warning };
+  }
+  return jobs;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 5. closeToolSession(toolId)
+// 5. closeToolSession(toolId) — all-same material check
 // ─────────────────────────────────────────────────────────────────────────────
 
 function closeToolSession(toolId) {
@@ -214,6 +244,26 @@ function closeToolSession(toolId) {
   if (!tool) fail('CONTAINER_NOT_FOUND', `Tool ${toolId} not found`);
   if (tool.type !== 'tool') fail('NOT_A_TOOL', `Container ${toolId} is type '${tool.type}', not 'tool'`);
   if (tool.status !== 'open') fail('TOOL_NOT_OPEN', `Tool ${toolId} status is '${tool.status}', expected 'open'`);
+
+  // All-same material check
+  const jobs = stmts.getJobsByContainer.all(toolId);
+  if (jobs.length > 0) {
+    const nullMat = jobs.filter(j => !j.material);
+    if (nullMat.length > 0) {
+      fail('UNRESOLVED_MATERIAL', `Tool ${toolId} has ${nullMat.length} job(s) with unresolved material (DVI lookup pending). Jobs: ${nullMat.map(j => j.job_number).join(', ')}`);
+    }
+    const materials = [...new Set(jobs.map(j => j.material))];
+    if (materials.length > 1) {
+      fail('MIXED_MATERIAL', `Tool ${toolId} has mixed materials: ${materials.join(', ')}. Remove mismatched lenses before closing.`);
+    }
+    const coatings = [...new Set(jobs.filter(j => j.coating).map(j => j.coating))];
+    if (coatings.length > 1) {
+      fail('MIXED_COATING', `Tool ${toolId} has mixed coatings: ${coatings.join(', ')}. Remove mismatched lenses before closing.`);
+    }
+
+    // Auto-tag tool with coating + material
+    stmts.updateContainerTags.run(coatings[0] || null, materials[0] || null, toolId);
+  }
 
   const now = new Date().toISOString();
   stmts.updateContainerStatus.run({
@@ -227,11 +277,10 @@ function closeToolSession(toolId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 6. transferToolsToTray(trayId, toolIds, operatorId)
+// 6. transferToolsToTray(trayId, toolIds, operatorId) — material validation
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _transferToolsToTray = db.transaction((trayId, toolIds, operatorId) => {
-  // Create tray if it doesn't exist
   let tray = stmts.getContainer.get(trayId);
   if (!tray) {
     stmts.insertContainer.run({
@@ -241,9 +290,25 @@ const _transferToolsToTray = db.transaction((trayId, toolIds, operatorId) => {
       operator_id: operatorId || null,
       machine_id: null,
       coating_type: null,
+      material: null,
       notes: null,
     });
     tray = stmts.getContainer.get(trayId);
+  }
+
+  // Determine tray's current material from existing children
+  let trayMaterial = tray.material || null;
+  let trayCoating = tray.coating_type || null;
+  if (!trayMaterial || !trayCoating) {
+    const existingChildren = stmts.getChildren.all(trayId);
+    for (const child of existingChildren) {
+      const childContainer = stmts.getContainer.get(child.child_id);
+      if (childContainer) {
+        if (!trayMaterial && childContainer.material) trayMaterial = childContainer.material;
+        if (!trayCoating && childContainer.coating_type) trayCoating = childContainer.coating_type;
+      }
+      if (trayMaterial && trayCoating) break;
+    }
   }
 
   const now = new Date().toISOString();
@@ -260,6 +325,20 @@ const _transferToolsToTray = db.transaction((trayId, toolIds, operatorId) => {
       continue;
     }
 
+    // Material validation
+    if (trayMaterial && tool.material && tool.material !== trayMaterial) {
+      results.rejected.push({ id: toolId, reason: `material mismatch: tool has ${tool.material}, tray requires ${trayMaterial}` });
+      continue;
+    }
+    if (trayCoating && tool.coating_type && tool.coating_type !== trayCoating) {
+      results.rejected.push({ id: toolId, reason: `coating mismatch: tool has ${tool.coating_type}, tray requires ${trayCoating}` });
+      continue;
+    }
+
+    // Set tray material/coating from first valid tool
+    if (!trayMaterial && tool.material) trayMaterial = tool.material;
+    if (!trayCoating && tool.coating_type) trayCoating = tool.coating_type;
+
     stmts.insertContents.run({ parent_id: trayId, child_id: toolId });
     stmts.updateContainerStatus.run({
       id: toolId,
@@ -272,6 +351,11 @@ const _transferToolsToTray = db.transaction((trayId, toolIds, operatorId) => {
 
   if (results.loaded.length === 0 && results.rejected.length > 0) {
     fail('NO_TOOLS_TRANSFERRED', `No tools could be transferred: ${JSON.stringify(results.rejected)}`);
+  }
+
+  // Auto-tag tray
+  if (trayMaterial || trayCoating) {
+    stmts.updateContainerTags.run(trayCoating, trayMaterial, trayId);
   }
 
   results.tray = stmts.getContainer.get(trayId);
@@ -305,11 +389,10 @@ function closeTray(trayId) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 8. transferTraysToatch(batchId, trayIds, machineId, coatingType, operatorId)
+// 8. transferTraysToBatch — coating+material validation
 // ─────────────────────────────────────────────────────────────────────────────
 
 const _transferTraysToBatch = db.transaction((batchId, trayIds, machineId, coatingType, operatorId) => {
-  // Create batch if it doesn't exist
   let batch = stmts.getContainer.get(batchId);
   if (!batch) {
     stmts.insertContainer.run({
@@ -319,6 +402,7 @@ const _transferTraysToBatch = db.transaction((batchId, trayIds, machineId, coati
       operator_id: operatorId || null,
       machine_id: machineId || null,
       coating_type: coatingType || null,
+      material: null,
       notes: null,
     });
     batch = stmts.getContainer.get(batchId);
@@ -336,6 +420,23 @@ const _transferTraysToBatch = db.transaction((batchId, trayIds, machineId, coati
     if (tray.status !== 'closed') {
       results.rejected.push({ id: trayId, reason: `status is '${tray.status}', expected 'closed'` });
       continue;
+    }
+
+    // Coating validation
+    if (batch.coating_type && tray.coating_type && tray.coating_type !== batch.coating_type) {
+      results.rejected.push({ id: trayId, reason: `coating mismatch: tray has ${tray.coating_type}, batch requires ${batch.coating_type}` });
+      continue;
+    }
+    // Material validation
+    if (batch.material && tray.material && tray.material !== batch.material) {
+      results.rejected.push({ id: trayId, reason: `material mismatch: tray has ${tray.material}, batch requires ${batch.material}` });
+      continue;
+    }
+
+    // Auto-tag batch material from first valid tray
+    if (!batch.material && tray.material) {
+      db.prepare('UPDATE containers SET material = ? WHERE id = ?').run(tray.material, batchId);
+      batch = stmts.getContainer.get(batchId);
     }
 
     stmts.insertContents.run({ parent_id: batchId, child_id: trayId });
@@ -362,7 +463,7 @@ function transferTraysToBatch(batchId, trayIds, machineId, coatingType, operator
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 9. getActiveContainers()
+// 9. getActiveContainers() — enriched with coating_type + material
 // ─────────────────────────────────────────────────────────────────────────────
 
 function getActiveContainers() {
@@ -374,6 +475,8 @@ function getActiveContainers() {
       job_count: cnt.cnt,
       operator: c.operator_id,
       opened_at: c.created_at,
+      coating_type: c.coating_type,
+      material: c.material,
     };
   });
 
@@ -388,6 +491,8 @@ function getActiveContainers() {
       tools: childIds,
       operator: c.operator_id,
       opened_at: c.created_at,
+      coating_type: c.coating_type,
+      material: c.material,
     };
   });
 
@@ -402,6 +507,7 @@ function getActiveContainers() {
       trays: childIds,
       machine: c.machine_id,
       coating_type: c.coating_type,
+      material: c.material,
       operator: c.operator_id,
       opened_at: c.created_at,
     };
