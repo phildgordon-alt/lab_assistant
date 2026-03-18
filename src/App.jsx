@@ -6072,6 +6072,7 @@ function NetworkTab({ovenServerUrl,settings}){
   const [switchPorts,setSwitchPorts]=useState(null);
   const [switchPortsLoading,setSwitchPortsLoading]=useState(false);
   const [selectedDevice,setSelectedDevice]=useState(null);
+  const [netSearch,setNetSearch]=useState("");
   const [activeSite,setActiveSite]=useState("irvine1");
   const [vlanFilter,setVlanFilter]=useState("all");
   const [lastRefresh,setLastRefresh]=useState(null);
@@ -6355,7 +6356,7 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
   const s2=siteStatus.irvine2||{};
   const tp=teleport||DEMO_TELEPORT;
   const wan=wanData||DEMO_WAN;
-  const filteredClients=vlanFilter==="all"?clientList:clientList.filter(c=>c.vlan===parseInt(vlanFilter));
+  const filteredClients=(vlanFilter==="all"?clientList:clientList.filter(c=>c.vlan===parseInt(vlanFilter))).filter(c=>{if(!netSearch)return true;const q=netSearch.toLowerCase();return(c.hostname||"").toLowerCase().includes(q)||(c.ip||"").includes(q)||(c.mac||"").toLowerCase().includes(q);});
 
   if(loading&&!lastRefresh)return(
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:400,color:T.textMuted}}>
@@ -6452,9 +6453,10 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
               <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>DEVICES</div>
               <div style={{fontSize:9,color:"#334155"}}>{upCount}/{curDevices.length} UP · {activeSite==="irvine1"?(s1.clients||47):(s2.clients||31)} CLIENTS</div>
             </div>
+            <input value={netSearch} onChange={e=>setNetSearch(e.target.value)} placeholder="Search IP, name, MAC..." style={{width:"100%",padding:"6px 10px",background:"#0a0f14",border:"1px solid #111827",borderRadius:4,color:"#c8d6e5",fontFamily:mono,fontSize:10,marginBottom:6,outline:"none"}}/>
           </div>
           <div style={{overflowY:"auto",flex:"1 1 0",minHeight:0,padding:"0 14px 14px"}}>
-            {curDevices.map(d=>(
+            {curDevices.filter(d=>{if(!netSearch)return true;const q=netSearch.toLowerCase();return(d.name||"").toLowerCase().includes(q)||(d.ip||"").includes(q)||(d.mac||"").toLowerCase().includes(q)||(d.model||"").toLowerCase().includes(q);}).map(d=>(
               <div key={d.id||d.name} className="noc-dev" onClick={()=>{setSelectedDevice(selectedDevice?.id===d.id?null:d);if(d.type==="usw")fetchSwitchPorts(d.mac||d.id,d.name);}} style={{
                 padding:"8px 8px",borderRadius:3,marginBottom:4,cursor:"pointer",
                 background:selectedDevice?.id===d.id?"rgba(59,130,246,0.08)":d.status==="offline"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.01)",
