@@ -6671,8 +6671,9 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
               </div>
             </div>
 
-            {/* Event Log */}
+            {/* Event Log — resizable */}
             <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>EVENT LOG — BOTH SITES</div>
+            <div style={{minHeight:100,maxHeight:"60vh",height:250,overflowY:"auto",resize:"vertical",border:`1px solid ${T.border}`,borderRadius:4,padding:4}}>
             {(events||[]).map((ev,i)=>{
               const col=ev.severity==="error"?"#ef4444":ev.severity==="warning"?"#f59e0b":"#475569";
               const bg=ev.severity==="error"?"rgba(239,68,68,0.04)":ev.severity==="warning"?"rgba(245,158,11,0.03)":"transparent";
@@ -6688,6 +6689,7 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
 
