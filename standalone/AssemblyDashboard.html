@@ -805,44 +805,26 @@ function renderLeaderboard(){
     </div>`;
   }).join('') || '<div style="text-align:center;padding:40px;font-family:var(--mono);color:var(--dimmer);">Assign operators to stations to see leaderboard</div>';
 
-  const winner = ranked[0];
-  const bannerHtml = winner && winner.todayJobs>0 ? `
-  <div style="background:linear-gradient(135deg,#2A2200,#1A1000);border:2px solid var(--gold);border-radius:14px;padding:16px;display:flex;align-items:center;gap:16px;">
-    <div style="font-size:${c.awardSize||44}px">🏆</div>
-    <div>
-      <div style="font-family:var(--disp);font-size:${c.winnerSize}px;color:var(--gold);letter-spacing:1px;">${esc(winner.name)}</div>
-      <div style="font-family:var(--mono);font-size:${Math.round(c.winnerSize*0.34)}px;color:var(--amber);">TODAY'S LEADER · ${winner.todayJobs} JOBS · ${(winner.jobsPerHour||0).toFixed(1)}/HR</div>
-    </div>
-    <div style="margin-left:auto;text-align:right;">
-      <div style="font-family:var(--mono);font-size:${Math.round(c.winnerSize*1.25)}px;font-weight:800;color:var(--gold);">${winner.todayJobs}</div>
-      <div style="font-family:var(--mono);font-size:${Math.round(c.winnerSize*0.28)}px;color:var(--amber);">JOBS COMPLETED</div>
-    </div>
-  </div>` : '';
+  const bannerHtml = '';
 
   const totalToday = assemblyData ? (assemblyData.completedToday || 0) : jobs.filter(j=>j.status==='completed' && isToday(j.completedAt)).length;
   const avgRate = shiftH > 0 ? (totalToday / shiftH).toFixed(1) : '—';
 
   return `
-  <div style="text-align:center;padding:18px 0 10px;">
-    <div style="font-family:var(--mono);font-size:${Math.round(c.totalSize*0.17)}px;color:var(--dimmer);letter-spacing:2px;">TOTAL ASSEMBLED TODAY</div>
-    <div style="font-family:var(--disp);font-size:${c.totalSize}px;color:var(--green);line-height:1;">${totalToday}</div>
-    ${c.showAvgRate ? `<div style="font-family:var(--mono);font-size:${Math.round(c.totalSize*0.2)}px;color:var(--dim);">${avgRate} jobs/hr avg</div>` : ''}
-  </div>
-  ${bannerHtml}
-  <div style="text-align:right;padding:4px 0;">
-    <button onclick="toggleLbSettings()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--dim);font-family:var(--mono);font-size:11px;cursor:pointer;">⚙ Display</button>
-  </div>
-  ${lbSettingsOpen ? renderLbSettings() : ''}
-  <div class="card">
-    <div class="card-title">
-      TODAY'S LEADERBOARD
-      <span class="card-badge">${ranked.length} OPERATORS · SHIFT ${shiftH.toFixed(1)}H</span>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;">
+    <div style="display:flex;align-items:baseline;gap:12px;flex:1;justify-content:center;">
+      <div style="font-family:var(--disp);font-size:${Math.round(c.totalSize*0.6)}px;color:var(--green);line-height:1;">${totalToday}</div>
+      <div style="font-family:var(--mono);font-size:${Math.round(c.totalSize*0.14)}px;color:var(--dimmer);letter-spacing:2px;">ASSEMBLED TODAY</div>
+      ${c.showAvgRate ? `<div style="font-family:var(--mono);font-size:${Math.round(c.totalSize*0.14)}px;color:var(--dim);">· ${avgRate}/hr</div>` : ''}
     </div>
-    <div class="lb-list">${rows}</div>
+    <span class="card-badge">${ranked.length} OPERATORS · SHIFT ${shiftH.toFixed(1)}H</span>
   </div>
-  <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);text-align:center;padding:8px;">
-    Tap any row to see operator detail · Data from DVI · Resets at shift start (${shiftStart})
-  </div>`;
+  <div class="lb-list">${rows}</div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
+    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">Tap row for detail · Resets at ${shiftStart}</div>
+    <button onclick="toggleLbSettings()" style="background:none;border:1px solid var(--border);border-radius:8px;padding:4px 10px;color:var(--dim);font-family:var(--mono);font-size:10px;cursor:pointer;">⚙ Display</button>
+  </div>
+  ${lbSettingsOpen ? renderLbSettings() : ''}`;
 }
 
 // ─── JOB QUEUE ───────────────────────────────────────────────────

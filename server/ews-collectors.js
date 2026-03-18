@@ -270,6 +270,33 @@ function register(ews, adapters) {
           unit: 'jobs >3d',
         });
 
+        // ── Per-zone queue depths ──
+        const zoneMap = { SURF: 'surf', SURFACING: 'surf', COAT: 'coat', COATING: 'coat', CUT: 'cut', CUTTING: 'cut', ASSEMBL: 'asse', ASSEMBLY: 'asse', QC: 'qc' };
+        const normalizedZones = {};
+        for (const [zone, count] of Object.entries(zoneCounts)) {
+          const norm = zoneMap[zone] || null;
+          if (norm) normalizedZones[norm] = (normalizedZones[norm] || 0) + count;
+        }
+        for (const [zone, count] of Object.entries(normalizedZones)) {
+          readings.push({
+            metric: `dvi_queue_depth_${zone}`,
+            system: 'DVI',
+            value: count,
+            unit: 'jobs',
+          });
+        }
+
+        // ── Remake rate ──
+        const remakes = activeJobs.filter(j => j.remake === true || j.isRemake === true || (j.trayType || '').toUpperCase().includes('REMAKE'));
+        if (jobs.length > 0) {
+          readings.push({
+            metric: 'dvi_remake_rate',
+            system: 'DVI',
+            value: Math.round((remakes.length / jobs.length) * 10000) / 100,
+            unit: '%',
+          });
+        }
+
       } catch (e) {
         console.error('[EWS:DVI] Collection error:', e.message);
       }
@@ -521,8 +548,73 @@ function register(ews, adapters) {
           unit: 'boolean',
         });
 
+        // ── WAN Latency from both sites ──
+        const wanData = network.getWan ? network.getWan() : null;
+        if (wanData && wanData.wan) {
+          const latencies = Object.values(wanData.wan).map(w => w.latency).filter(l => typeof l === 'number');
+          if (latencies.length > 0) {
+            const avg = latencies.reduce((a, b) => a + b, 0) / latencies.length;
+            readings.push({
+              metric: 'network_latency_avg',
+              system: 'Network',
+              value: Math.round(avg * 10) / 10,
+              unit: 'ms',
+            });
+            readings.push({
+              metric: 'network_latency_max',
+              system: 'Network',
+              value: Math.max(...latencies),
+              unit: 'ms',
+            });
+          }
+        }
+
       } catch (e) {
         console.error('[EWS:Network] Collection error:', e.message);
+      }
+      return readings;
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 8. Cycle Times — Computed from DVI Trace stage timestamps
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  if (dviTrace) {
+    ews.registerCollector('cycle_times', async () => {
+      const readings = [];
+      try {
+        const jobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
+        if (jobs.length === 0) return readings;
+
+        const zones = [
+          { key: 'surfacing', stages: ['SURF', 'SURFACING'] },
+          { key: 'coating',   stages: ['COAT', 'COATING'] },
+          { key: 'cutting',   stages: ['CUT', 'CUTTING'] },
+          { key: 'assembly',  stages: ['ASSEMBL', 'ASSEMBLY'] },
+        ];
+        const twoHoursAgo = Date.now() - 7200000;
+
+        for (const zone of zones) {
+          // Jobs that have moved past this zone recently (have enter + exit timestamps)
+          const completed = jobs.filter(j => {
+            const st = j.stageTimes?.[zone.key];
+            return st && st.entered && st.exited && st.exited > twoHoursAgo;
+          });
+          if (completed.length >= 3) {
+            const avgMinutes = completed.reduce((sum, j) => {
+              return sum + (j.stageTimes[zone.key].exited - j.stageTimes[zone.key].entered) / 60000;
+            }, 0) / completed.length;
+            readings.push({
+              metric: `cycle_time_${zone.key}`,
+              system: 'DVI',
+              value: Math.round(avgMinutes * 10) / 10,
+              unit: 'min',
+            });
+          }
+        }
+      } catch (e) {
+        console.error('[EWS:CycleTimes] Collection error:', e.message);
       }
       return readings;
     });

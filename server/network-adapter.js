@@ -280,13 +280,37 @@ async function fetchUnifi(endpoint) {
 
 async function pollSite(siteId) {
   const prefix = `/proxy/network/api/s/${siteId}`;
-  const [devices, clients, health, alarms, events] = await Promise.all([
+  const [devices, clients, health, alarms, events, vpnSessions] = await Promise.all([
     fetchUnifi(`${prefix}/stat/device`),
     fetchUnifi(`${prefix}/stat/sta`),
     fetchUnifi(`${prefix}/stat/health`),
     fetchUnifi(`${prefix}/list/alarm`),
     fetchUnifi(`${prefix}/stat/event?_limit=50`),
+    fetchUnifi(`${prefix}/stat/remoteuserstat`).catch(() => null),
   ]);
+
+  // Update teleport data from VPN sessions
+  if (vpnSessions) {
+    teleportData = {
+      enabled: true,
+      status: vpnSessions.length > 0 ? 'active' : 'inactive',
+      server_ip: '10.0.99.1',
+      port: 3478,
+      protocol: 'WireGuard',
+      sessions: (vpnSessions || []).map(s => ({
+        name: s.name || s.hostname || 'Unknown',
+        user: s.email || s.name || 'unknown',
+        ip: s.ip || s.fixed_ip || '—',
+        remote_ip: s.remote_ip || '—',
+        connected_at: s.start ? new Date(s.start * 1000).toISOString() : new Date().toISOString(),
+        rx_bytes: s.rx_bytes || 0,
+        tx_bytes: s.tx_bytes || 0,
+        state: 'connected',
+      })),
+      total_ever: vpnSessions.length,
+      last_handshake: new Date().toISOString(),
+    };
+  }
 
   return {
     devices: (devices || []).map(normalizeDevice),
@@ -421,6 +445,20 @@ function generateMockData() {
         signal: -45 - Math.floor(Math.random() * 30), uptime: Math.floor(Math.random() * 28800),
         last_seen: now, ap_mac: 'f0:9f:c2:00:01:20',
       })),
+      // Door Access (20)
+      ...Array.from({ length: 3 }, (_, i) => ({
+        mac: `f0:9f:c2:20:01:${String(i + 1).padStart(2, '0')}`, hostname: `door-ctrl-${['main', 'lab', 'dock'][i]}`,
+        ip: `10.0.20.${100 + i}`, vlan: 20, network: 'Door Access', is_wired: true,
+        tx_bytes: Math.floor(Math.random() * 1e7), rx_bytes: Math.floor(Math.random() * 1e7),
+        signal: null, uptime: uptime30d, last_seen: now, ap_mac: null,
+      })),
+      // NAS (40)
+      ...Array.from({ length: 2 }, (_, i) => ({
+        mac: `f0:9f:c2:40:01:${String(i + 1).padStart(2, '0')}`, hostname: `nas-${['primary', 'backup'][i]}`,
+        ip: `10.0.40.${100 + i}`, vlan: 40, network: 'NAS', is_wired: true,
+        tx_bytes: Math.floor(Math.random() * 5e8), rx_bytes: Math.floor(Math.random() * 5e8),
+        signal: null, uptime: uptime30d, last_seen: now, ap_mac: null,
+      })),
       // EV Charging (60)
       ...Array.from({ length: 3 }, (_, i) => ({
         mac: `f0:9f:c2:60:01:${String(i + 1).padStart(2, '0')}`, hostname: `ev-charger-${i + 1}`,
@@ -438,7 +476,7 @@ function generateMockData() {
     ],
     health: [
       { subsystem: 'wan', status: 'ok', num_adopted: 1, wan_ip: '203.0.113.10', isp_name: 'Cox', tx_bytes_r: 45000, rx_bytes_r: 62000, latency: 8, uptime: uptime30d },
-      { subsystem: 'lan', status: 'ok', num_adopted: 3, num_user: 49, tx_bytes_r: 120000, rx_bytes_r: 180000 },
+      { subsystem: 'lan', status: 'ok', num_adopted: 3, num_user: 54, tx_bytes_r: 120000, rx_bytes_r: 180000 },
       { subsystem: 'wlan', status: 'ok', num_adopted: 4, num_user: 18, tx_bytes_r: 35000, rx_bytes_r: 52000 },
       { subsystem: 'vpn', status: 'ok', num_adopted: 0 },
     ],
@@ -522,9 +560,89 @@ function generateMockData() {
   }
 
   bleedViolations = [];
+  teleportData = generateMockTeleport();
   isLive = false;
   lastPoll = new Date().toISOString();
   lastSuccessfulPoll = null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TELEPORT VPN DATA
+// ─────────────────────────────────────────────────────────────────────────────
+let teleportData = null;
+
+function generateMockTeleport() {
+  return {
+    enabled: true,
+    status: 'active',
+    server_ip: '10.0.99.1',
+    port: 3478,
+    protocol: 'WireGuard',
+    sessions: [
+      {
+        name: "Phil's iPhone",
+        user: 'phil@paireyewear.com',
+        ip: '10.0.99.201',
+        remote_ip: '73.x.x.x',
+        connected_at: new Date(Date.now() - 7200000).toISOString(),
+        rx_bytes: 8400000,
+        tx_bytes: 2100000,
+        state: 'connected',
+      },
+    ],
+    total_ever: 14,
+    last_handshake: new Date(Date.now() - 45000).toISOString(),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SWITCH PORT DATA
+// ─────────────────────────────────────────────────────────────────────────────
+function generateMockSwitchPorts(mac, deviceName) {
+  const portCount = deviceName?.includes('48') ? 48 : 24;
+  const ports = [];
+  const portProfiles = [
+    { name: 'Kardex PLC', vlan: 30, speed: 1000, poe: true, state: 'forwarding' },
+    { name: 'Schneider KMS', vlan: 30, speed: 1000, poe: false, state: 'forwarding' },
+    { name: 'DVI VISION', vlan: 30, speed: 1000, poe: false, state: 'forwarding' },
+    { name: 'Coater-1 PLC', vlan: 30, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'Coater-2 PLC', vlan: 30, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'cam-lobby', vlan: 10, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'cam-lab-floor', vlan: 10, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'cam-assembly', vlan: 10, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'cam-coating', vlan: 10, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'door-ctrl-1', vlan: 20, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'door-ctrl-2', vlan: 20, speed: 100, poe: true, state: 'forwarding' },
+    { name: 'lab-ws-1', vlan: 1, speed: 1000, poe: false, state: 'forwarding' },
+    { name: 'lab-ws-2', vlan: 1, speed: 1000, poe: false, state: 'forwarding' },
+    { name: 'lab-ws-3', vlan: 1, speed: 1000, poe: false, state: 'forwarding' },
+    { name: 'NAS-primary', vlan: 40, speed: 1000, poe: false, state: 'forwarding' },
+    { name: 'ev-charger-1', vlan: 60, speed: 100, poe: false, state: 'forwarding' },
+    { name: '', vlan: null, speed: 0, poe: false, state: 'disabled' },
+    { name: '', vlan: null, speed: 0, poe: false, state: 'link_down' },
+    { name: 'SFP+ Uplink', vlan: 99, speed: 10000, poe: false, state: 'forwarding' },
+  ];
+
+  for (let i = 1; i <= portCount; i++) {
+    const profile = i <= portProfiles.length ? portProfiles[i - 1] : { name: '', vlan: null, speed: 0, poe: false, state: i % 5 === 0 ? 'link_down' : 'disabled' };
+    const isUp = profile.state === 'forwarding';
+    ports.push({
+      port_idx: i,
+      name: profile.name || `Port ${i}`,
+      state: profile.state,
+      speed: profile.speed,
+      is_uplink: i >= portCount - 1,
+      poe_enable: profile.poe,
+      poe_power: profile.poe && isUp ? (5 + Math.random() * 20).toFixed(1) : '0.0',
+      vlan: profile.vlan,
+      vlan_name: profile.vlan ? (VLANS.find(v => v.id === profile.vlan)?.name || `VLAN ${profile.vlan}`) : null,
+      tx_bytes: isUp ? Math.floor(Math.random() * 1e9) : 0,
+      rx_bytes: isUp ? Math.floor(Math.random() * 1e9) : 0,
+      stp_state: isUp ? 'forwarding' : 'disabled',
+      mac_count: isUp ? Math.floor(Math.random() * 5) + 1 : 0,
+    });
+  }
+  return { mac, device: deviceName || 'Unknown Switch', ports, portCount, timestamp: new Date().toISOString() };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -823,6 +941,79 @@ module.exports = {
   },
 
   /**
+   * Teleport VPN session data
+   */
+  getTeleport() {
+    return {
+      teleport: teleportData || { enabled: false, status: 'inactive', sessions: [] },
+      isLive,
+      isMock: MOCK_MODE,
+      lastPoll,
+    };
+  },
+
+  /**
+   * WAN health per site — ISP, latency, uptime, WAN IP, tx/rx rates
+   */
+  getWan() {
+    const wanData = {};
+    for (const [siteId, data] of Object.entries(siteData)) {
+      const wan = (data.health || []).find(h => h.subsystem === 'wan');
+      if (wan) {
+        wanData[siteId] = {
+          status: wan.status,
+          wan_ip: wan.wan_ip,
+          isp: wan.isp_name,
+          latency: wan.latency,
+          uptime: wan.uptime,
+          tx_rate: wan.tx_bytes_r,
+          rx_rate: wan.rx_bytes_r,
+          num_adopted: wan.num_adopted,
+        };
+      }
+    }
+    return {
+      wan: wanData,
+      isLive,
+      isMock: MOCK_MODE,
+      lastPoll,
+    };
+  },
+
+  /**
+   * Switch port detail for a specific device (by MAC)
+   */
+  getSwitchPorts(mac) {
+    if (!mac) return { error: 'mac parameter required' };
+
+    // In live mode, find the device and return port_table if available
+    if (!MOCK_MODE) {
+      for (const [siteId, data] of Object.entries(siteData)) {
+        const device = (data.devices || []).find(d => d.mac === mac);
+        if (device && device.port_table) {
+          return {
+            mac,
+            device: device.name,
+            ports: device.port_table,
+            portCount: device.port_table.length,
+            timestamp: new Date().toISOString(),
+            isLive: true,
+          };
+        }
+      }
+    }
+
+    // Find device name for mock
+    let deviceName = 'Unknown Switch';
+    for (const data of Object.values(siteData)) {
+      const dev = (data.devices || []).find(d => d.mac === mac || d.id === mac);
+      if (dev) { deviceName = dev.name; break; }
+    }
+
+    return { ...generateMockSwitchPorts(mac, deviceName), isLive: false, isMock: true };
+  },
+
+  /**
    * AI-ready summary for Lab Assistant agents
    */
   getAIContext() {
@@ -892,6 +1083,22 @@ module.exports = {
         site: e.site,
         when: new Date(e.datetime).toISOString(),
       })),
+      vpn: teleportData ? {
+        status: teleportData.status,
+        activeSessions: teleportData.sessions.length,
+        sessions: teleportData.sessions.map(s => ({
+          name: s.name,
+          user: s.user,
+          ip: s.ip,
+          connectedAt: s.connected_at,
+        })),
+      } : { status: 'inactive', activeSessions: 0 },
+      wan: Object.fromEntries(
+        Object.entries(siteData).map(([siteId, data]) => {
+          const wan = (data.health || []).find(h => h.subsystem === 'wan');
+          return [siteId, wan ? { status: wan.status, isp: wan.isp_name, latency: wan.latency, wanIp: wan.wan_ip } : null];
+        })
+      ),
     };
   },
 

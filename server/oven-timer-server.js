@@ -3595,6 +3595,22 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, network.getHealth());
   }
 
+  // GET /api/network/teleport — VPN session data
+  if (req.method==='GET' && url.pathname==='/api/network/teleport') {
+    return json(res, network.getTeleport());
+  }
+
+  // GET /api/network/wan — WAN health per site
+  if (req.method==='GET' && url.pathname==='/api/network/wan') {
+    return json(res, network.getWan());
+  }
+
+  // GET /api/network/switch-ports — port detail for a switch (by mac)
+  if (req.method==='GET' && url.pathname==='/api/network/switch-ports') {
+    const mac = url.searchParams.get('mac');
+    return json(res, network.getSwitchPorts(mac));
+  }
+
   // GET /api/network/ai-context — AI-ready summary
   if (req.method==='GET' && url.pathname==='/api/network/ai-context') {
     return json(res, network.getAIContext());

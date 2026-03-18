@@ -217,7 +217,13 @@ const HIGH_BAD = new Set([
   'coating_reject_rate', 'oven_temp_deviation',
   // Network
   'network_devices_offline', 'network_cpu_high', 'network_vlan_bleed',
-  'network_alarms_active',
+  'network_alarms_active', 'network_latency_avg', 'network_latency_max',
+  // WIP volume
+  'dvi_total_wip', 'dvi_aged_wip',
+  'dvi_queue_depth_surf', 'dvi_queue_depth_coat', 'dvi_queue_depth_cut',
+  'dvi_queue_depth_asse', 'dvi_queue_depth_qc',
+  // Maintenance / oven
+  'oven_overdue_racks', 'maintenance_open_work_orders',
 ]);
 
 const LOW_BAD = new Set([
@@ -262,6 +268,16 @@ const ALERT_DETAILS = {
   network_client_count: 'Client count anomaly. A sudden drop may indicate an AP failure or network partition. A sudden spike may indicate a rogue device or scanning activity.',
   network_alarms_active: 'Multiple active UniFi alarms. Review alarm list in UniFi controller for connectivity issues, rogue APs, or DPI alerts.',
   network_wan_status: 'WAN link down at one or both sites. Check ISP status and failover configuration. Production systems relying on cloud APIs (DVI, ItemPath) will be impacted.',
+  network_latency_avg: 'Elevated WAN latency. Cloud-dependent systems (DVI, ItemPath) may experience timeouts or stale data. Check ISP status and Site Magic tunnel health.',
+  network_latency_max: 'WAN latency spike at one or more sites. Check ISP status and failover configuration. May affect API response times for DVI and ItemPath.',
+  dvi_aged_wip: 'Jobs lingering >3 days in production. Check for stuck orders, missing parts, or jobs requiring manual intervention in DVI.',
+  dvi_total_wip: 'Total WIP exceeding capacity threshold. Check if upstream is feeding faster than downstream can process. May need to throttle picking.',
+  dvi_queue_depth_surf: 'Surfacing queue depth above normal. Check machine availability and tool condition on CNC lathes.',
+  dvi_queue_depth_coat: 'Coating queue depth above normal. Check oven availability and batch scheduling.',
+  dvi_queue_depth_cut: 'Cutting/edging queue depth above normal. Check edger availability and wheel condition.',
+  dvi_queue_depth_asse: 'Assembly queue depth above normal. Check station staffing and job complexity mix.',
+  dvi_queue_depth_qc: 'QC queue depth above normal. Check inspector availability and hold rate.',
+  oven_overdue_racks: 'Multiple oven racks running past target time. Check oven temperature setpoints vs actuals. Overcooked lenses may need re-inspection.',
 };
 
 // ─── LAYER 2: RULE-BASED HARD THRESHOLD DETECTION ────────────────────────
@@ -300,6 +316,24 @@ const RULES = [
   { metric: 'network_vlan_bleed',      op: '>=', threshold: 1,  tier: 'P1', message: 'CRITICAL: VLAN isolation violation — security event, traffic crossing restricted boundary' },
   { metric: 'network_cpu_high',        op: '>=', threshold: 2,  tier: 'P2', message: 'WARNING: 2+ network devices with CPU > 85% — possible broadcast storm or firmware issue' },
   { metric: 'network_alarms_active',   op: '>=', threshold: 5,  tier: 'P2', message: 'WARNING: 5+ active UniFi alarms — review controller for systemic network issues' },
+
+  // OEE
+  { metric: 'som_oee',                    op: '<=', threshold: 40,  tier: 'P1', message: 'CRITICAL: OEE below 40% — severe capacity loss, immediate intervention needed' },
+  { metric: 'som_oee',                    op: '<=', threshold: 60,  tier: 'P2', message: 'WARNING: OEE below 60% — review availability and performance components' },
+
+  // WIP volume
+  { metric: 'dvi_aged_wip',               op: '>=', threshold: 20,  tier: 'P2', message: 'WARNING: 20+ aged WIP jobs (>3 days) — review for stuck orders' },
+  { metric: 'dvi_total_wip',              op: '>=', threshold: 100, tier: 'P2', message: 'WARNING: Total WIP exceeding 100 jobs — capacity at risk' },
+
+  // Network latency
+  { metric: 'network_latency_avg',        op: '>=', threshold: 100, tier: 'P1', message: 'CRITICAL: WAN latency >100ms — cloud API reliability degraded' },
+  { metric: 'network_latency_avg',        op: '>=', threshold: 50,  tier: 'P2', message: 'WARNING: WAN latency elevated (>50ms) — monitor API response times' },
+
+  // Maintenance backlog
+  { metric: 'maintenance_open_work_orders', op: '>=', threshold: 10, tier: 'P2', message: 'WARNING: 10+ open maintenance work orders — maintenance backlog growing' },
+
+  // Oven
+  { metric: 'oven_overdue_racks',          op: '>=', threshold: 3,  tier: 'P1', message: 'CRITICAL: 3+ oven racks overdue — coating quality at risk, check temps' },
 ];
 
 /**

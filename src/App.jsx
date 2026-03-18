@@ -1049,6 +1049,9 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
   };
 
   // Compute KPI values from data
+  // NOTE: coating_wip = DVI stage COAT + stations CCL/CCP (jobs physically in coating zone)
+  // This is distinct from oven rack count which tracks batches currently in oven
+  // trays-based KPIs (qc_holds, active_trays) fall back to DVI data when trays not yet wired
   const getKPIValue=(kpiId)=>{
     const {trays=[],batches=[],dviJobs=[],breakage=[],maintenance={},shippedStats={}}=data||{};
     const dviByStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||'').toLowerCase().includes(stage.toLowerCase())).length;
@@ -1066,9 +1069,9 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
       case 'qc_wip': return {value:dviByStage('QC'),sub:"in QC"};
       case 'breakage': return {value:dviJobs.filter(j=>(j.station||'').toUpperCase().includes('BREAKAGE')).length,sub:"today",accent:T.red};
       case 'rush_jobs': return {value:dviJobs.filter(j=>j.rush==='Y'||j.Rush==='Y'||j.priority==='RUSH').length,sub:"in system"};
-      case 'qc_holds': return {value:trays.filter(t=>t.state==='QC_HOLD').length,sub:"held"};
-      case 'active_trays': return {value:trays.filter(t=>t.state!=='IDLE').length,sub:`of ${trays.length}`};
-      case 'avg_batch_fill': return {value:`${batches.length>0?Math.round(batches.reduce((s,b)=>s+(b.jobs||0),0)/batches.length/1.4):0}%`,sub:"of capacity"};
+      case 'qc_holds': return {value:dviJobs.filter(j=>(j.station||'').toUpperCase().includes('QC_HOLD')||((j.stage||'').toUpperCase()==='QC'&&(j.status||'').toUpperCase()==='HOLD')).length,sub:"held"};
+      case 'active_trays': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"active jobs"};
+      case 'avg_batch_fill': return {value:`${batches.length>0?Math.round(batches.reduce((s,b)=>s+(b.jobs||0),0)/batches.length*100/14):0}%`,sub:"of capacity"}; // 14 = max jobs per coating batch rack
       case 'pm_compliance': return {value:maintenance.stats?.pmCompliancePercent!=null?`${maintenance.stats.pmCompliancePercent}%`:'—',sub:"on schedule"};
       case 'open_work_orders': return {value:maintenance.stats?.openWorkOrders||0,sub:"open"};
       case 'equipment_uptime': return {value:maintenance.stats?.uptimePercent!=null?`${maintenance.stats.uptimePercent}%`:'—',sub:"availability"};
@@ -5925,33 +5928,50 @@ function NetworkTab({ovenServerUrl,settings}){
   const [vlans,setVlans]=useState([]);
   const [netAlerts,setNetAlerts]=useState([]);
   const [health,setHealth]=useState(null);
+  const [teleport,setTeleport]=useState(null);
+  const [wanData,setWanData]=useState(null);
+  const [switchPorts,setSwitchPorts]=useState(null);
+  const [switchPortsLoading,setSwitchPortsLoading]=useState(false);
   const [activeSite,setActiveSite]=useState("irvine1");
+  const [vlanFilter,setVlanFilter]=useState("all");
   const [lastRefresh,setLastRefresh]=useState(null);
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState(null);
-  const [agentOpen,setAgentOpen]=useState(false);
-  const [messages,setMessages]=useState([]);
+  const [agentOpen,setAgentOpen]=useState(true);
+  const [messages,setMessages]=useState([{role:"assistant",content:"NOC Agent online. 30 years in the wire and I've seen it all.\n\nI'm watching **Irvine 1** and **Irvine 2** across 8 VLAN segments. I already see a few things that need your attention — run **Analyze Logs** or ask me directly.\n\nCurrent hot items:\n• UAP-AC-LR-CAM is **down** on VLAN 10 (Cameras)\n• US-24-OT port 14 had **two STP role changes** — that's not random noise\n• Port 22 on the Kardex segment had a 12-second link drop\n\nThat last one is the one that'd keep me up at night."}]);
   const [input,setInput]=useState("");
   const [thinking,setThinking]=useState(false);
   const chatEndRef=useRef(null);
 
   const isDemo=settings?.demoMode||false;
 
+  // ── VLAN DEFINITIONS ──
+  const VLAN_DEFS=[
+    {id:10,name:"Cameras",color:"#f59e0b",segment:"10.x.10.x"},
+    {id:20,name:"Door Access",color:"#8b5cf6",segment:"10.x.20.x"},
+    {id:30,name:"OT/Industrial",color:"#ef4444",segment:"10.x.30.x"},
+    {id:40,name:"NAS",color:"#06b6d4",segment:"10.x.40.x"},
+    {id:50,name:"Staff WiFi",color:"#10b981",segment:"10.x.50.x"},
+    {id:60,name:"EV Charging",color:"#84cc16",segment:"10.x.60.x"},
+    {id:1,name:"Main LAN",color:"#3b82f6",segment:"10.x.1.x"},
+    {id:99,name:"Management",color:"#e2e8f0",segment:"10.x.99.x"},
+  ];
+
   // ── DEMO DATA ──
   const DEMO_DEVICES={
     irvine1:[
-      {id:"d1",name:"USG-Pro-4",model:"USG-Pro-4",type:"ugw",ip:"10.0.99.1",status:"online",uptime:2345678,cpu_pct:23,mem_pct:45,tx_bytes:45200000000,rx_bytes:38900000000},
-      {id:"d2",name:"US-48-Pro",model:"US-48-500W",type:"usw",ip:"10.0.99.10",status:"online",uptime:2345678,cpu_pct:12,mem_pct:38,tx_bytes:12300000000,rx_bytes:11800000000},
-      {id:"d3",name:"US-24-OT",model:"US-24-250W",type:"usw",ip:"10.0.99.11",status:"online",uptime:2344000,cpu_pct:18,mem_pct:42,tx_bytes:8900000000,rx_bytes:7600000000},
-      {id:"d4",name:"UAP-AC-HD-1",model:"UAP-AC-HD",type:"uap",ip:"10.0.50.10",status:"online",uptime:2100000,cpu_pct:31,mem_pct:52,tx_bytes:1200000000,rx_bytes:980000000},
-      {id:"d5",name:"UAP-AC-HD-2",model:"UAP-AC-HD",type:"uap",ip:"10.0.50.11",status:"online",uptime:2098000,cpu_pct:28,mem_pct:48,tx_bytes:1100000000,rx_bytes:890000000},
-      {id:"d6",name:"UAP-AC-LR-CAM",model:"UAP-AC-LR",type:"uap",ip:"10.0.10.12",status:"offline",uptime:0,cpu_pct:0,mem_pct:0,tx_bytes:0,rx_bytes:0},
+      {id:"d1",name:"USG-Pro-4",model:"USG-Pro-4",type:"ugw",ip:"10.0.99.1",mac:"f0:9f:c2:00:01:01",status:"online",uptime:2345678,cpu_pct:23,mem_pct:45,tx_bytes:45200000000,rx_bytes:38900000000},
+      {id:"d2",name:"US-48-Pro",model:"US-48-500W",type:"usw",ip:"10.0.99.10",mac:"f0:9f:c2:00:01:10",status:"online",uptime:2345678,cpu_pct:12,mem_pct:38,tx_bytes:12300000000,rx_bytes:11800000000},
+      {id:"d3",name:"US-24-OT",model:"US-24-250W",type:"usw",ip:"10.0.99.11",mac:"f0:9f:c2:00:01:11",status:"online",uptime:2344000,cpu_pct:18,mem_pct:42,tx_bytes:8900000000,rx_bytes:7600000000},
+      {id:"d4",name:"UAP-AC-HD-1",model:"UAP-AC-HD",type:"uap",ip:"10.0.50.10",mac:"f0:9f:c2:00:01:20",status:"online",uptime:2100000,cpu_pct:31,mem_pct:52,tx_bytes:1200000000,rx_bytes:980000000},
+      {id:"d5",name:"UAP-AC-HD-2",model:"UAP-AC-HD",type:"uap",ip:"10.0.50.11",mac:"f0:9f:c2:00:01:21",status:"online",uptime:2098000,cpu_pct:28,mem_pct:48,tx_bytes:1100000000,rx_bytes:890000000},
+      {id:"d6",name:"UAP-AC-LR-CAM",model:"UAP-AC-LR",type:"uap",ip:"10.0.10.12",mac:"f0:9f:c2:00:01:22",status:"offline",uptime:0,cpu_pct:0,mem_pct:0,tx_bytes:0,rx_bytes:0},
     ],
     irvine2:[
-      {id:"d7",name:"USW-Flex-XG",model:"USW-Flex-XG",type:"usw",ip:"10.1.99.10",status:"online",uptime:1234567,cpu_pct:15,mem_pct:35,tx_bytes:9800000000,rx_bytes:8700000000},
-      {id:"d8",name:"US-24-Irvine2",model:"US-24-250W",type:"usw",ip:"10.1.99.11",status:"online",uptime:1230000,cpu_pct:11,mem_pct:30,tx_bytes:4500000000,rx_bytes:4100000000},
-      {id:"d9",name:"UAP-AC-Pro-1",model:"UAP-AC-Pro",type:"uap",ip:"10.1.50.10",status:"online",uptime:1200000,cpu_pct:22,mem_pct:41,tx_bytes:980000000,rx_bytes:760000000},
-      {id:"d10",name:"UAP-AC-Pro-2",model:"UAP-AC-Pro",type:"uap",ip:"10.1.50.11",status:"online",uptime:1198000,cpu_pct:19,mem_pct:38,tx_bytes:870000000,rx_bytes:710000000},
+      {id:"d7",name:"USW-Flex-XG",model:"USW-Flex-XG",type:"usw",ip:"10.1.99.10",mac:"f0:9f:c2:00:02:10",status:"online",uptime:1234567,cpu_pct:15,mem_pct:35,tx_bytes:9800000000,rx_bytes:8700000000},
+      {id:"d8",name:"US-24-Irvine2",model:"US-24-250W",type:"usw",ip:"10.1.99.11",mac:"f0:9f:c2:00:02:11",status:"online",uptime:1230000,cpu_pct:11,mem_pct:30,tx_bytes:4500000000,rx_bytes:4100000000},
+      {id:"d9",name:"UAP-AC-Pro-1",model:"UAP-AC-Pro",type:"uap",ip:"10.1.50.10",mac:"f0:9f:c2:00:02:20",status:"online",uptime:1200000,cpu_pct:22,mem_pct:41,tx_bytes:980000000,rx_bytes:760000000},
+      {id:"d10",name:"UAP-AC-Pro-2",model:"UAP-AC-Pro",type:"uap",ip:"10.1.50.11",mac:"f0:9f:c2:00:02:21",status:"online",uptime:1198000,cpu_pct:19,mem_pct:38,tx_bytes:870000000,rx_bytes:710000000},
     ],
   };
   const DEMO_EVENTS=[
@@ -5962,19 +5982,53 @@ function NetworkTab({ovenServerUrl,settings}){
     {datetime:new Date(Date.now()-2100000).toISOString(),severity:"error",msg:"US-24-OT port 22 link down — Kardex segment drop (12s)",subsystem:"lan",site:"irvine1"},
     {datetime:new Date(Date.now()-3600000).toISOString(),severity:"error",msg:"DVI VISION host heartbeat timeout — MSSQL watchdog triggered",subsystem:"lan",site:"irvine1"},
     {datetime:new Date(Date.now()-7200000).toISOString(),severity:"info",msg:"Phrozen Gateway rejoined OT VLAN — IP reassigned 10.0.30.51",subsystem:"lan",site:"irvine1"},
+    {datetime:new Date(Date.now()-14400000).toISOString(),severity:"warning",msg:"US-24-OT port 14 STP role change — second occurrence",subsystem:"lan",site:"irvine1"},
   ];
   const DEMO_VLANS=[
-    {id:30,name:"OT/Industrial",clients:12,pct:78,color:"#ef4444"},
-    {id:1,name:"Main LAN",clients:18,pct:65,color:"#3b82f6"},
-    {id:50,name:"Staff WiFi",clients:24,pct:45,color:"#10b981"},
-    {id:40,name:"NAS",clients:4,pct:38,color:"#06b6d4"},
-    {id:10,name:"Cameras",clients:8,pct:22,color:"#f59e0b"},
-    {id:20,name:"Door Access",clients:3,pct:12,color:"#8b5cf6"},
-    {id:60,name:"EV Charging",clients:2,pct:8,color:"#84cc16"},
-    {id:99,name:"Management",clients:5,pct:5,color:"#e2e8f0"},
+    {id:50,name:"Staff WiFi",clients:24,pct:78,color:"#10b981"},
+    {id:10,name:"Cameras",clients:16,pct:65,color:"#f59e0b"},
+    {id:1,name:"Main LAN",clients:12,pct:45,color:"#3b82f6"},
+    {id:30,name:"OT/Industrial",clients:6,pct:38,color:"#ef4444"},
+    {id:20,name:"Door Access",clients:3,pct:15,color:"#8b5cf6"},
+    {id:60,name:"EV Charging",clients:3,pct:12,color:"#84cc16"},
+    {id:40,name:"NAS",clients:2,pct:8,color:"#06b6d4"},
+    {id:99,name:"Management",clients:2,pct:5,color:"#e2e8f0"},
   ];
-  const DEMO_STATUS={irvine1:{devicesUp:5,devicesDown:1,devicesTotal:6,clients:47},irvine2:{devicesUp:4,devicesDown:0,devicesTotal:4,clients:31}};
+  const DEMO_STATUS={irvine1:{devicesUp:5,devicesDown:1,devicesTotal:6,clients:54},irvine2:{devicesUp:4,devicesDown:0,devicesTotal:4,clients:14}};
   const DEMO_HEALTH={isLive:false,mock:true,lastPoll:new Date().toISOString(),pollCount:0};
+  const DEMO_TELEPORT={enabled:true,status:"active",server_ip:"10.0.99.1",port:3478,protocol:"WireGuard",sessions:[{name:"Phil's iPhone",user:"phil@paireyewear.com",ip:"10.0.99.201",remote_ip:"73.x.x.x",connected_at:new Date(Date.now()-7200000).toISOString(),rx_bytes:8400000,tx_bytes:2100000,state:"connected"}],total_ever:14,last_handshake:new Date(Date.now()-45000).toISOString()};
+  const DEMO_WAN={irvine1:{status:"ok",wan_ip:"203.0.113.10",isp:"Cox",latency:8,uptime:2592000,tx_rate:45000,rx_rate:62000},irvine2:{status:"ok",wan_ip:"203.0.113.20",isp:"Spectrum",latency:11,uptime:2592000,tx_rate:22000,rx_rate:35000}};
+  const DEMO_CLIENTS=[
+    // Main LAN (1) — 8 site1, 4 site2 = 12
+    ...Array.from({length:8},((_,i)=>({hostname:`lab-ws-${i+1}`,ip:`10.0.1.${100+i}`,vlan:1,is_wired:true,mac:`f0:9f:c2:10:01:${String(i+1).padStart(2,"0")}`,site:"irvine1"}))),
+    ...Array.from({length:4},((_,i)=>({hostname:`irv2-ws-${i+1}`,ip:`10.1.1.${100+i}`,vlan:1,is_wired:true,mac:`f0:9f:c2:10:02:${String(i+1).padStart(2,"0")}`,site:"irvine2"}))),
+    // Cameras (10) — 12 site1, 4 site2 = 16
+    ...["lobby","lab-floor","assembly","coating","shipping","picking","entrance-n","entrance-s","parking-a","parking-b","dock","hallway"].map((n,i)=>({hostname:`cam-${n}`,ip:`10.0.10.${100+i}`,vlan:10,is_wired:true,mac:`f0:9f:c2:20:01:${String(i+1).padStart(2,"0")}`,site:"irvine1"})),
+    ...["entrance","floor","dock","lot"].map((n,i)=>({hostname:`cam-irv2-${n}`,ip:`10.1.10.${100+i}`,vlan:10,is_wired:true,mac:`f0:9f:c2:20:02:${String(i+1).padStart(2,"0")}`,site:"irvine2"})),
+    // Door Access (20) — 3 site1 = 3
+    {hostname:"door-ctrl-main",ip:"10.0.20.100",vlan:20,is_wired:true,mac:"f0:9f:c2:20:03:01",site:"irvine1"},
+    {hostname:"door-ctrl-lab",ip:"10.0.20.101",vlan:20,is_wired:true,mac:"f0:9f:c2:20:03:02",site:"irvine1"},
+    {hostname:"door-ctrl-dock",ip:"10.0.20.102",vlan:20,is_wired:true,mac:"f0:9f:c2:20:03:03",site:"irvine1"},
+    // OT/Industrial (30) — 6 site1 = 6
+    {hostname:"plc-kardex",ip:"10.0.30.100",vlan:30,is_wired:true,mac:"f0:9f:c2:30:01:01",site:"irvine1"},
+    {hostname:"plc-schneider-kms",ip:"10.0.30.101",vlan:30,is_wired:true,mac:"f0:9f:c2:30:01:02",site:"irvine1"},
+    {hostname:"plc-coater-1",ip:"10.0.30.102",vlan:30,is_wired:true,mac:"f0:9f:c2:30:01:03",site:"irvine1"},
+    {hostname:"plc-coater-2",ip:"10.0.30.103",vlan:30,is_wired:true,mac:"f0:9f:c2:30:01:04",site:"irvine1"},
+    {hostname:"dvi-vision",ip:"10.0.30.104",vlan:30,is_wired:true,mac:"f0:9f:c2:30:01:05",site:"irvine1"},
+    {hostname:"phrozen-gw",ip:"10.0.30.51",vlan:30,is_wired:true,mac:"f0:9f:c2:30:01:06",site:"irvine1"},
+    // NAS (40) — 2 site1 = 2
+    {hostname:"nas-primary",ip:"10.0.40.100",vlan:40,is_wired:true,mac:"f0:9f:c2:40:01:01",site:"irvine1"},
+    {hostname:"nas-backup",ip:"10.0.40.101",vlan:40,is_wired:true,mac:"f0:9f:c2:40:01:02",site:"irvine1"},
+    // Staff WiFi (50) — 18 site1, 6 site2 = 24
+    ...Array.from({length:18},((_,i)=>({hostname:i<10?`iphone-staff-${i+1}`:`android-staff-${i-9}`,ip:`10.0.50.${100+i}`,vlan:50,is_wired:false,mac:`f0:9f:c2:50:01:${String(i+1).padStart(2,"0")}`,site:"irvine1"}))),
+    ...Array.from({length:6},((_,i)=>({hostname:`irv2-phone-${i+1}`,ip:`10.1.50.${100+i}`,vlan:50,is_wired:false,mac:`f0:9f:c2:50:02:${String(i+1).padStart(2,"0")}`,site:"irvine2"}))),
+    // EV Charging (60) — 3 site1 = 3
+    ...Array.from({length:3},((_,i)=>({hostname:`ev-charger-${i+1}`,ip:`10.0.60.${100+i}`,vlan:60,is_wired:true,mac:`f0:9f:c2:60:01:${String(i+1).padStart(2,"0")}`,site:"irvine1"}))),
+    // Management (99) — 2 site1 = 2
+    {hostname:"mgmt-controller",ip:"10.0.99.100",vlan:99,is_wired:true,mac:"f0:9f:c2:99:01:01",site:"irvine1"},
+    {hostname:"mgmt-backup",ip:"10.0.99.101",vlan:99,is_wired:true,mac:"f0:9f:c2:99:01:02",site:"irvine1"},
+  ]; // Total: 68 (54 site1 + 14 site2)
+  const [clientList,setClientList]=useState(DEMO_CLIENTS);
 
   // Helpers
   const fmtBytes=(b)=>{if(!b)return"0 B";const k=1024,s=["B","KB","MB","GB","TB"];const i=Math.floor(Math.log(b)/Math.log(k));return(b/Math.pow(k,i)).toFixed(1)+" "+s[i];};
@@ -5982,18 +6036,24 @@ function NetworkTab({ovenServerUrl,settings}){
   const timeSince=(iso)=>{if(!iso)return"—";const diff=Date.now()-new Date(iso).getTime();const m=Math.floor(diff/60000);if(m<60)return`${m}m ago`;const h=Math.floor(m/60);if(h<24)return`${h}h ago`;return`${Math.floor(h/24)}d ago`;};
   const devIcon=(t)=>t==="ugw"||t==="udm"?"⬡":t==="usw"?"⊞":t==="uap"?"◎":"◆";
 
+  // Expert system prompt
+  const EXPERT_SYSTEM=`You are a senior network engineer and IT infrastructure specialist with 30 years of hands-on experience in enterprise networking, switching, large-scale factory automation systems, and OT/IT convergence. You've designed and maintained networks for manufacturing facilities, lens labs, pharmaceutical clean rooms, and automated production lines globally.\n\nYour current assignment is the Pair Eyewear lens lab network across two Irvine, California sites (Irvine 1 and Irvine 2), connected via UniFi Site Magic SD-WAN. The network runs on Ubiquiti UniFi hardware with 8 VLAN segments:\n- VLAN 10: Security Cameras\n- VLAN 20: Door Access Control\n- VLAN 30: OT/Industrial (Kardex automated storage, Schneider KMS conveyor, ItemPath middleware, DVI VISION LMS on MSSQL, Phrozen 3D printer network)\n- VLAN 40: NAS storage\n- VLAN 50: Staff WiFi\n- VLAN 60: EV Charging\n- VLAN 1: Main LAN\n- VLAN 99: Management\n\nCritical systems on the OT/Industrial VLAN include:\n- DVI VISION (Lens Management System, MSSQL) - daily PAIRRX.XML job files\n- Kardex Power Pick automated storage retrieval\n- ItemPath middleware (MSSQL + REST)\n- Schneider KMS conveyor/material flow (MariaDB)\n- Phrozen 3D printer fleet (network gateway)\n\nWhen analyzing logs or device data, you:\n1. Identify root causes, not just symptoms\n2. Flag OT segment issues with HIGH PRIORITY since downtime = production loss\n3. Reference specific UniFi CLI commands or controller UI paths when relevant\n4. Distinguish between transient noise and systemic problems\n5. Quantify impact in manufacturing terms where possible (jobs delayed, throughput affected)\n6. Give concrete remediation steps with priority order\n\nTone: Direct, experienced, no-nonsense. You've seen every failure mode. You don't hedge unnecessarily. When you don't have enough data, you say exactly what additional data you need.`;
+
   // Fetch data
   const fetchData=useCallback(async()=>{
     if(isDemo){
       setDevices(DEMO_DEVICES);setEvents(DEMO_EVENTS);setVlans(DEMO_VLANS);
       setStatus(DEMO_STATUS);setHealth(DEMO_HEALTH);setNetAlerts([]);
+      setTeleport(DEMO_TELEPORT);setWanData(DEMO_WAN);setClientList(DEMO_CLIENTS);
       setLastRefresh(new Date());setLoading(false);setError(null);return;
     }
     try{
-      const[sRes,dRes,eRes,vRes,aRes,hRes]=await Promise.allSettled([
+      const[sRes,dRes,eRes,vRes,aRes,hRes,tRes,wRes,cRes]=await Promise.allSettled([
         fetch(`${base}/api/network/status`),fetch(`${base}/api/network/devices`),
         fetch(`${base}/api/network/events`),fetch(`${base}/api/network/vlans`),
         fetch(`${base}/api/network/alerts`),fetch(`${base}/api/network/health`),
+        fetch(`${base}/api/network/teleport`),fetch(`${base}/api/network/wan`),
+        fetch(`${base}/api/network/clients`),
       ]);
       if(sRes.status==="fulfilled"&&sRes.value.ok) setStatus(await sRes.value.json());
       if(dRes.status==="fulfilled"&&dRes.value.ok) setDevices(await dRes.value.json());
@@ -6001,6 +6061,9 @@ function NetworkTab({ovenServerUrl,settings}){
       if(vRes.status==="fulfilled"&&vRes.value.ok) setVlans(await vRes.value.json());
       if(aRes.status==="fulfilled"&&aRes.value.ok) setNetAlerts(await aRes.value.json());
       if(hRes.status==="fulfilled"&&hRes.value.ok) setHealth(await hRes.value.json());
+      if(tRes.status==="fulfilled"&&tRes.value.ok){const td=await tRes.value.json();setTeleport(td.teleport||td);}
+      if(wRes.status==="fulfilled"&&wRes.value.ok){const wd=await wRes.value.json();setWanData(wd.wan||wd);}
+      if(cRes.status==="fulfilled"&&cRes.value.ok){const cd=await cRes.value.json();setClientList(cd.clients||[]);}
       setLastRefresh(new Date());setError(null);
     }catch(e){setError(e.message);}
     finally{setLoading(false);}
@@ -6009,6 +6072,48 @@ function NetworkTab({ovenServerUrl,settings}){
   useEffect(()=>{fetchData();const t=setInterval(fetchData,30000);return()=>clearInterval(t);},[fetchData]);
   useEffect(()=>{chatEndRef.current?.scrollIntoView({behavior:"smooth"});},[messages]);
 
+  // Switch port fetch
+  const fetchSwitchPorts=async(mac,name)=>{
+    setSwitchPortsLoading(true);
+    if(isDemo){
+      // Generate mock port data client-side for demo
+      const portCount=name?.includes("48")?48:24;
+      const profiles=[
+        {name:"Kardex PLC",vlan:30,speed:1000,state:"forwarding",poe:true},
+        {name:"Schneider KMS",vlan:30,speed:1000,state:"forwarding",poe:false},
+        {name:"DVI VISION",vlan:30,speed:1000,state:"forwarding",poe:false},
+        {name:"Coater-1 PLC",vlan:30,speed:100,state:"forwarding",poe:true},
+        {name:"Coater-2 PLC",vlan:30,speed:100,state:"forwarding",poe:true},
+        {name:"cam-lobby",vlan:10,speed:100,state:"forwarding",poe:true},
+        {name:"cam-lab-floor",vlan:10,speed:100,state:"forwarding",poe:true},
+        {name:"cam-assembly",vlan:10,speed:100,state:"forwarding",poe:true},
+        {name:"cam-coating",vlan:10,speed:100,state:"forwarding",poe:true},
+        {name:"door-ctrl-1",vlan:20,speed:100,state:"forwarding",poe:true},
+        {name:"door-ctrl-2",vlan:20,speed:100,state:"forwarding",poe:true},
+        {name:"lab-ws-1",vlan:1,speed:1000,state:"forwarding",poe:false},
+        {name:"lab-ws-2",vlan:1,speed:1000,state:"forwarding",poe:false},
+        {name:"lab-ws-3",vlan:1,speed:1000,state:"forwarding",poe:false},
+        {name:"NAS-primary",vlan:40,speed:1000,state:"forwarding",poe:false},
+        {name:"ev-charger-1",vlan:60,speed:100,state:"forwarding",poe:false},
+        {name:"",vlan:null,speed:0,state:"disabled",poe:false},
+        {name:"",vlan:null,speed:0,state:"link_down",poe:false},
+        {name:"SFP+ Uplink",vlan:99,speed:10000,state:"forwarding",poe:false},
+      ];
+      const ports=Array.from({length:portCount},(_,i)=>{
+        const p=i<profiles.length?profiles[i]:{name:"",vlan:null,speed:0,state:i%5===0?"link_down":"disabled",poe:false};
+        const isUp=p.state==="forwarding";
+        return{port_idx:i+1,name:p.name||`Port ${i+1}`,state:p.state,speed:p.speed,is_uplink:i>=portCount-2,poe_enable:p.poe,poe_power:p.poe&&isUp?(5+Math.random()*20).toFixed(1):"0.0",vlan:p.vlan,vlan_name:p.vlan?VLAN_DEFS.find(v=>v.id===p.vlan)?.name||`VLAN ${p.vlan}`:null,tx_bytes:isUp?Math.floor(Math.random()*1e9):0,rx_bytes:isUp?Math.floor(Math.random()*1e9):0,stp_state:isUp?"forwarding":"disabled",mac_count:isUp?Math.floor(Math.random()*5)+1:0};
+      });
+      setSwitchPorts({mac,device:name||"Switch",ports,portCount});
+      setSwitchPortsLoading(false);return;
+    }
+    try{
+      const r=await fetch(`${base}/api/network/switch-ports?mac=${encodeURIComponent(mac)}`);
+      if(r.ok) setSwitchPorts(await r.json());
+    }catch(e){console.error("Switch ports fetch failed:",e);}
+    setSwitchPortsLoading(false);
+  };
+
   // AI NOC Agent
   const sendNocMessage=async(userMsg)=>{
     const newMsgs=[...messages,{role:"user",content:userMsg}];
@@ -6016,20 +6121,50 @@ function NetworkTab({ovenServerUrl,settings}){
     const siteDevs=(devices[activeSite]||[]);
     const downDevs=siteDevs.filter(d=>d.status==="offline");
     const errEvts=(events||[]).filter(e=>e.severity==="error");
-    const ctx=`NETWORK STATE (${activeSite.toUpperCase()}):
+    const tp=teleport||DEMO_TELEPORT;
+    const wan=wanData||DEMO_WAN;
+    const ctx=`CURRENT NETWORK STATE (${activeSite.toUpperCase()}):
 Devices: ${siteDevs.length} total, ${downDevs.length} DOWN
-DOWN: ${downDevs.map(d=>`${d.name} (${d.model}) @ ${d.ip}`).join(", ")||"None"}
-Recent errors: ${errEvts.slice(0,5).map(e=>`[${timeSince(e.datetime)}] ${e.msg}`).join("\n")||"None"}
-VLANs: ${(vlans||[]).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`).join(", ")}`;
+Active clients: ${clientList.length}
+Last refresh: ${lastRefresh?.toLocaleTimeString()||"—"}
+
+TELEPORT VPN (UDM-Pro / WireGuard):
+Status: ${(tp.status||"inactive").toUpperCase()}
+Active sessions: ${(tp.sessions||[]).length}
+${(tp.sessions||[]).map(s=>`  - ${s.name} (${s.user}) @ ${s.ip} — connected ${timeSince(s.connected_at)} — ↓${fmtBytes(s.rx_bytes)} ↑${fmtBytes(s.tx_bytes)}`).join("\n")||"  None"}
+Last handshake: ${timeSince(tp.last_handshake)}
+
+WAN HEALTH:
+${Object.entries(wan).map(([site,w])=>`  ${site}: ${w.isp} — ${w.latency}ms latency — ${w.status} — WAN IP ${w.wan_ip}`).join("\n")}
+
+DOWN DEVICES:
+${downDevs.map(d=>`  - ${d.name} (${d.model}) @ ${d.ip}`).join("\n")||"  None"}
+
+RECENT ERROR/WARNING EVENTS (last 4h):
+${errEvts.slice(0,8).map(e=>`  [${timeSince(e.datetime)}] [${(e.severity||"info").toUpperCase()}] ${e.msg}`).join("\n")||"  None"}
+
+FULL RECENT LOG:
+${(events||[]).slice(0,12).map(e=>`  [${timeSince(e.datetime)}] [${e.severity}] ${e.msg}`).join("\n")}
+
+VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`).join(", ")}`;
     try{
       const res=await fetch(`${gwBase}/web/ask`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:`You are a senior NOC engineer monitoring the Pair Eyewear lens lab network (2 Irvine sites, 8 VLANs, UniFi). Be direct and specific.\n\n${ctx}\n\nUser: ${userMsg}`,stream:false}),
+        body:JSON.stringify({message:`${EXPERT_SYSTEM}\n\n${ctx}\n\n---\nUser query: ${userMsg}`,stream:false}),
       });
       if(res.ok){const d=await res.json();setMessages(p=>[...p,{role:"assistant",content:d.response||d.text||JSON.stringify(d)}]);}
       else setMessages(p=>[...p,{role:"assistant",content:`Gateway error: ${res.status}`}]);
     }catch(e){setMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message}`}]);}
     setThinking(false);
+  };
+
+  const analyzeLogs=()=>{
+    const ec=(events||[]).filter(e=>e.severity==="error").length;
+    const wc=(events||[]).filter(e=>e.severity==="warning").length;
+    sendNocMessage(`Analyze the current network logs for Irvine 1 and Irvine 2. I'm seeing ${ec} errors and ${wc} warnings in the recent event log. Give me a prioritized breakdown of what's going on, root causes where you can infer them, and specific remediation steps. Focus especially on anything touching the OT/Industrial VLAN (30) since Kardex, DVI VISION, and the conveyor are on that segment.`);
+  };
+  const analyzeInfra=()=>{
+    sendNocMessage(`Look at the current device inventory and network topology for both Irvine sites. Given what you know about the 8-VLAN architecture and the OT/industrial systems running here (DVI VISION MSSQL, Kardex Power Pick, ItemPath, Schneider KMS, Phrozen 3D printer fleet), what improvements or risk mitigations would you recommend? Think about redundancy, segmentation, and anything that could cause production downtime.`);
   };
 
   const curDevices=devices[activeSite]||[];
@@ -6040,6 +6175,9 @@ VLANs: ${(vlans||[]).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`).join("
   const siteStatus=status||{};
   const s1=siteStatus.irvine1||{};
   const s2=siteStatus.irvine2||{};
+  const tp=teleport||DEMO_TELEPORT;
+  const wan=wanData||DEMO_WAN;
+  const filteredClients=vlanFilter==="all"?clientList:clientList.filter(c=>c.vlan===parseInt(vlanFilter));
 
   if(loading&&!lastRefresh)return(
     <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:400,color:T.textMuted}}>
@@ -6049,69 +6187,103 @@ VLANs: ${(vlans||[]).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`).join("
     </div>
   );
 
+  // Port color helper
+  const portColor=(state)=>state==="forwarding"?"#10b981":state==="link_down"?"#ef4444":state==="disabled"?"#334155":"#f59e0b";
+  const portVlanColor=(vlan)=>{const v=VLAN_DEFS.find(vd=>vd.id===vlan);return v?v.color:"#334155";};
+
   return(
-    <div style={{fontFamily:mono}}>
+    <div style={{fontFamily:mono,position:"relative"}}>
+      {/* CSS animations */}
+      <style>{`
+        .noc-blink{animation:noc-blink 1.4s step-end infinite}
+        @keyframes noc-blink{50%{opacity:0}}
+        .noc-pulse{animation:noc-pulse 2s ease-in-out infinite}
+        @keyframes noc-pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+        .noc-scanline{background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.03) 2px,rgba(0,0,0,0.03) 4px);pointer-events:none;position:absolute;inset:0;z-index:0}
+        .noc-chat-msg{animation:noc-fadeUp 0.2s ease}
+        @keyframes noc-fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+        .noc-dev:hover{background:rgba(59,130,246,0.06)!important}
+        .noc-evt:hover{background:rgba(255,255,255,0.03)!important}
+        .noc-btn{transition:all 0.15s;cursor:pointer;border:none}
+        .noc-btn:hover{filter:brightness(1.2)}
+        .noc-btn:active{transform:scale(0.98)}
+        .noc-agent-panel{transition:width 0.28s cubic-bezier(0.4,0,0.2,1),opacity 0.2s ease;overflow:hidden}
+        .noc-agent-tab{transition:all 0.15s;cursor:pointer;writing-mode:vertical-rl}
+        .noc-agent-tab:hover{background:rgba(59,130,246,0.08)!important}
+      `}</style>
+      <div className="noc-scanline"/>
+
       {/* HEADER */}
-      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:12,flexWrap:"wrap",position:"relative",zIndex:2}}>
         <div style={{display:"flex",alignItems:"center",gap:10}}>
-          <div style={{width:8,height:8,borderRadius:"50%",background:downCount>0?"#ef4444":"#10b981",boxShadow:`0 0 8px ${downCount>0?"#ef4444":"#10b981"}`}}/>
+          <div style={{width:8,height:8,borderRadius:"50%",background:downCount>0?"#ef4444":"#10b981",boxShadow:`0 0 8px ${downCount>0?"#ef4444":"#10b981"}`}} className="noc-pulse"/>
           <span style={{color:T.blue,fontWeight:600,letterSpacing:"0.12em",fontSize:13}}>NETWORK OPERATIONS</span>
         </div>
         <div style={{display:"flex",gap:6}}>
           {["irvine1","irvine2"].map(s=>(
-            <button key={s} onClick={()=>setActiveSite(s)} style={{
+            <button key={s} className="noc-btn" onClick={()=>setActiveSite(s)} style={{
               padding:"4px 12px",fontSize:11,fontFamily:mono,
               background:activeSite===s?T.blueDark:"transparent",
               color:activeSite===s?"#7dd3fc":"#475569",
-              border:`1px solid ${activeSite===s?T.blue:T.border}`,borderRadius:3,cursor:"pointer",letterSpacing:"0.1em",
+              border:`1px solid ${activeSite===s?T.blue:T.border}`,borderRadius:3,letterSpacing:"0.1em",
             }}>{s==="irvine1"?"IRVINE 1":"IRVINE 2"}</button>
           ))}
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          {errEvents.length>0&&<span style={{fontSize:10,padding:"3px 10px",background:"#1f0d0d",border:"1px solid #3d1a1a",borderRadius:3,color:"#ef4444"}}>{errEvents.length} ERRORS</span>}
-          <span style={{fontSize:10,color:health?.isLive?"#10b981":T.amber}}>● {health?.isLive?"LIVE":isDemo?"DEMO":"POLLING"}</span>
-        </div>
-        <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
-          <button onClick={()=>setAgentOpen(!agentOpen)} style={{
-            padding:"5px 14px",background:"#1a0f3d",border:"1px solid #3d1a5f",
-            color:"#c084fc",borderRadius:3,fontSize:10,fontFamily:mono,letterSpacing:"0.1em",cursor:"pointer",
-          }}>⬡ NOC AGENT</button>
-          {lastRefresh&&<span style={{fontSize:10,color:"#334155"}}>{lastRefresh.toLocaleTimeString()}</span>}
-        </div>
-      </div>
-
-      {error&&<div style={{padding:"8px 12px",background:T.redDark,border:`1px solid ${T.red}33`,borderRadius:4,marginBottom:12,fontSize:11,color:T.red}}>Connection error: {error}</div>}
-
-      {/* SITE SUMMARY */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:8,marginBottom:16}}>
-        {[
-          {label:"DEVICES UP",value:`${upCount}/${curDevices.length}`,color:downCount>0?T.amber:T.green},
-          {label:"CLIENTS",value:activeSite==="irvine1"?(s1.clients||47):(s2.clients||31),color:T.blue},
-          {label:"ERRORS (24H)",value:errEvents.length,color:errEvents.length>0?T.red:T.green},
-          {label:"WARNINGS",value:warnEvents.length,color:warnEvents.length>0?T.amber:T.green},
-          {label:"VLANS",value:8,color:T.purple},
-          {label:"SD-WAN",value:"ACTIVE",color:T.green},
-        ].map(s=>(
-          <div key={s.label} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:"10px 12px",textAlign:"center"}}>
-            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>{s.label}</div>
-            <div style={{fontSize:20,fontWeight:600,color:s.color,lineHeight:1}}>{s.value}</div>
+          <div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",background:"#0d1f0d",border:"1px solid #1a3d1a",borderRadius:3}}>
+            <div style={{width:6,height:6,borderRadius:"50%",background:"#10b981"}}/>
+            <span style={{fontSize:10,color:"#10b981",letterSpacing:"0.1em"}}>{health?.isLive?"LIVE":isDemo?"DEMO":"POLLING"}</span>
           </div>
-        ))}
+          {errEvents.length>0&&(
+            <div style={{display:"flex",alignItems:"center",gap:5,padding:"3px 10px",background:"#1f0d0d",border:"1px solid #3d1a1a",borderRadius:3}}>
+              <div style={{width:6,height:6,borderRadius:"50%",background:"#ef4444"}} className="noc-blink"/>
+              <span style={{fontSize:10,color:"#ef4444",letterSpacing:"0.1em"}}>{errEvents.length} ERRORS</span>
+            </div>
+          )}
+        </div>
+        <div style={{marginLeft:"auto",fontSize:10,color:"#334155",letterSpacing:"0.05em"}}>
+          {lastRefresh?.toLocaleTimeString()}
+        </div>
       </div>
 
-      <div style={{display:"grid",gridTemplateColumns:agentOpen?"1fr 1fr 360px":"1fr 1fr",gap:16,alignItems:"start"}}>
-        {/* DEVICES */}
-        <div>
-          <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>DEVICES — {activeSite==="irvine1"?"IRVINE 1":"IRVINE 2"}</div>
-          <div style={{display:"flex",flexDirection:"column",gap:4,maxHeight:"50vh",overflowY:"auto"}}>
+      {error&&<div style={{padding:"8px 12px",background:T.redDark,border:`1px solid ${T.red}33`,borderRadius:4,marginBottom:12,fontSize:11,color:T.red,position:"relative",zIndex:2}}>Connection error: {error}</div>}
+
+      {/* THREE-PANEL LAYOUT */}
+      <div style={{display:"grid",gridTemplateColumns:`300px 1fr ${agentOpen?"380px":"0px"} ${agentOpen?"0px":"32px"}`,gap:0,position:"relative",zIndex:1,overflow:"hidden",height:"calc(100vh - 180px)",transition:"grid-template-columns 0.28s cubic-bezier(0.4,0,0.2,1)"}}>
+
+        {/* ═══ LEFT SIDEBAR ═══ */}
+        <div style={{borderRight:`1px solid ${T.border}`,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+          {/* VLAN Legend */}
+          <div style={{padding:"12px 14px",borderBottom:`1px solid ${T.border}`}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>VLAN SEGMENTS — {activeSite==="irvine1"?"IRVINE 1":"IRVINE 2"}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"4px"}}>
+              {VLAN_DEFS.map(v=>(
+                <div key={v.id} style={{display:"flex",alignItems:"center",gap:5,padding:"3px 6px",background:"#0d1117",borderRadius:2,cursor:"pointer"}} onClick={()=>setVlanFilter(vlanFilter===String(v.id)?"all":String(v.id))}>
+                  <div style={{width:6,height:6,borderRadius:1,background:v.color,flexShrink:0}}/>
+                  <span style={{fontSize:9,color:vlanFilter===String(v.id)?"#c8d6e5":"#64748b",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis",fontWeight:vlanFilter===String(v.id)?600:400}}>
+                    {v.id<10?`0${v.id}`:v.id} {v.name}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Device List */}
+          <div style={{padding:"12px 14px 6px",flexShrink:0}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>DEVICES</div>
+              <div style={{fontSize:9,color:"#334155"}}>{upCount}/{curDevices.length} UP · {activeSite==="irvine1"?(s1.clients||47):(s2.clients||31)} CLIENTS</div>
+            </div>
+          </div>
+          <div style={{overflowY:"auto",flex:"1 1 0",minHeight:0,padding:"0 14px 14px"}}>
             {curDevices.map(d=>(
-              <div key={d.id||d.name} style={{
-                padding:"8px 10px",borderRadius:4,
-                background:d.status==="offline"?"rgba(239,68,68,0.05)":T.card,
-                border:`1px solid ${d.status==="offline"?"rgba(239,68,68,0.2)":T.border}`,
+              <div key={d.id||d.name} className="noc-dev" onClick={()=>{if(d.type==="usw")fetchSwitchPorts(d.mac||d.id,d.name);}} style={{
+                padding:"8px 8px",borderRadius:3,marginBottom:4,cursor:d.type==="usw"?"pointer":"default",
+                background:d.status==="offline"?"rgba(239,68,68,0.05)":"rgba(255,255,255,0.01)",
+                border:`1px solid ${d.status==="offline"?"rgba(239,68,68,0.2)":"#111827"}`,
               }}>
-                <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3}}>
-                  <div style={{width:6,height:6,borderRadius:"50%",background:d.status==="online"?"#10b981":"#ef4444",boxShadow:`0 0 5px ${d.status==="online"?"#10b981":"#ef4444"}`}}/>
+                <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:4}}>
+                  <div style={{width:6,height:6,borderRadius:"50%",background:d.status==="online"?"#10b981":"#ef4444",flexShrink:0,boxShadow:`0 0 5px ${d.status==="online"?"#10b981":"#ef4444"}`}}/>
                   <span style={{fontSize:11,color:d.status==="online"?T.text:"#ef4444",fontWeight:500}}>{d.name}</span>
                   <span style={{fontSize:10,color:"#475569",marginLeft:"auto"}}>{devIcon(d.type)}</span>
                 </div>
@@ -6126,77 +6298,279 @@ VLANs: ${(vlans||[]).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`).join("
               </div>
             ))}
           </div>
-        </div>
 
-        {/* VLANS + EVENTS */}
-        <div>
-          {/* VLAN Traffic */}
-          <div style={{marginBottom:16}}>
-            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>VLAN TRAFFIC</div>
-            <div style={{display:"flex",flexDirection:"column",gap:4}}>
-              {(vlans||DEMO_VLANS).map(v=>(
-                <div key={v.id} style={{display:"flex",alignItems:"center",gap:8}}>
-                  <div style={{width:80,fontSize:9,color:"#475569",textAlign:"right",flexShrink:0}}>{v.name}</div>
-                  <div style={{flex:1,height:12,background:"#0d1117",borderRadius:2,overflow:"hidden",border:"1px solid #111827"}}>
-                    <div style={{height:"100%",width:`${v.pct}%`,background:`linear-gradient(90deg,${v.color}55,${v.color}aa)`,borderRadius:2}}/>
-                  </div>
-                  <div style={{width:50,fontSize:9,color:"#334155"}}>{v.pct}% · {v.clients}</div>
+          {/* TELEPORT VPN PANEL */}
+          <div style={{borderTop:`1px solid ${T.border}`,flexShrink:0,padding:"12px 14px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+              <div style={{display:"flex",alignItems:"center",gap:6}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:tp.status==="active"?"#10b981":tp.status==="error"?"#ef4444":"#475569",boxShadow:tp.status==="active"?"0 0 6px #10b981":"none"}} className={tp.status==="active"?"noc-pulse":""}/>
+                <span style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>TELEPORT VPN</span>
+              </div>
+              <div style={{marginLeft:"auto",fontSize:8,padding:"2px 7px",borderRadius:2,letterSpacing:"0.1em",background:tp.status==="active"?"#0d1f0d":"#1f0d0d",border:`1px solid ${tp.status==="active"?"#1a3d1a":"#3d1a1a"}`,color:tp.status==="active"?"#10b981":"#ef4444"}}>{(tp.status||"inactive").toUpperCase()}</div>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"5px",marginBottom:10}}>
+              {[{label:"PROTOCOL",value:tp.protocol||"WireGuard"},{label:"GATEWAY",value:tp.server_ip||"10.0.99.1"},{label:"PORT",value:tp.port||3478},{label:"HANDSHAKE",value:timeSince(tp.last_handshake)}].map(item=>(
+                <div key={item.label} style={{background:"#0a0f14",border:"1px solid #111827",borderRadius:2,padding:"4px 7px"}}>
+                  <div style={{fontSize:7,color:"#334155",letterSpacing:"0.12em",marginBottom:2}}>{item.label}</div>
+                  <div style={{fontSize:10,color:"#7dd3fc"}}>{item.value}</div>
                 </div>
               ))}
             </div>
+            <div style={{fontSize:8,color:"#334155",letterSpacing:"0.12em",marginBottom:6}}>ACTIVE SESSIONS ({(tp.sessions||[]).length})</div>
+            {(tp.sessions||[]).length===0?(
+              <div style={{fontSize:9,color:"#1e3a5f",padding:"6px 0"}}>No active sessions</div>
+            ):(
+              (tp.sessions||[]).map((s,i)=>(
+                <div key={i} style={{padding:"7px 8px",background:"#0a0f14",border:"1px solid #0f2d1a",borderRadius:3,marginBottom:5}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
+                    <div style={{width:5,height:5,borderRadius:"50%",background:"#10b981",boxShadow:"0 0 4px #10b981",flexShrink:0}}/>
+                    <span style={{fontSize:10,color:"#c8d6e5",fontWeight:500}}>{s.name}</span>
+                    <span style={{fontSize:8,color:"#334155",marginLeft:"auto"}}>{timeSince(s.connected_at)}</span>
+                  </div>
+                  <div style={{fontSize:9,color:"#475569",paddingLeft:11,marginBottom:3}}>{s.user}</div>
+                  <div style={{display:"flex",gap:8,paddingLeft:11}}>
+                    <div style={{fontSize:8,color:"#1e3a5f"}}><span style={{color:"#334155"}}>VPN IP</span> {s.ip}</div>
+                    <div style={{fontSize:8,color:"#1e3a5f",marginLeft:"auto"}}>↓{fmtBytes(s.rx_bytes)} ↑{fmtBytes(s.tx_bytes)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+            {(tp.sessions||[]).length>0&&(
+              <button className="noc-btn" onClick={()=>sendNocMessage(`I can see ${tp.sessions[0].name} is connected via Teleport VPN from ${tp.sessions[0].remote_ip}. What should I know about managing or monitoring this session from a security standpoint?`)} style={{width:"100%",padding:"5px",marginTop:2,background:"transparent",border:`1px solid ${T.border}`,color:"#334155",borderRadius:3,fontSize:9,fontFamily:mono,letterSpacing:"0.08em"}}>
+                ⬡ ASK AGENT ABOUT VPN SESSION
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* ═══ CENTER CONTENT ═══ */}
+        <div style={{display:"flex",flexDirection:"column",overflow:"hidden",borderRight:`1px solid ${T.border}`}}>
+          {/* KPI Row + Analyze buttons */}
+          <div style={{padding:"14px 18px",borderBottom:`1px solid ${T.border}`,display:"flex",gap:16,flexWrap:"wrap",alignItems:"center"}}>
+            {[
+              {label:"DEVICES UP",value:`${upCount}/${curDevices.length}`,color:downCount>0?T.amber:T.green},
+              {label:"CLIENTS",value:activeSite==="irvine1"?(s1.clients||47):(s2.clients||31),color:T.blue},
+              {label:"ERRORS (24H)",value:errEvents.length,color:errEvents.length>0?T.red:T.green},
+              {label:"WARNINGS",value:warnEvents.length,color:warnEvents.length>0?T.amber:T.green},
+              {label:"VLANS",value:8,color:T.purple},
+              {label:"SD-WAN",value:"ACTIVE",color:T.green},
+              {label:"WAN LATENCY",value:`${wan?.irvine1?.latency||wan?.[activeSite]?.latency||8}ms`,color:(wan?.[activeSite]?.latency||8)>20?T.amber:T.green},
+              {label:"TELEPORT",value:(tp.sessions||[]).length>0?"ACTIVE":"IDLE",color:(tp.sessions||[]).length>0?T.green:"#475569"},
+            ].map((stat,i)=>(
+              <div key={i} style={{textAlign:"center",minWidth:65}}>
+                <div style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>{stat.label}</div>
+                <div style={{fontSize:18,fontWeight:600,color:stat.color,lineHeight:1}}>{stat.value}</div>
+              </div>
+            ))}
+            <div style={{marginLeft:"auto",display:"flex",gap:8}}>
+              <button className="noc-btn" onClick={analyzeLogs} style={{padding:"6px 14px",background:"#0f1f3d",border:"1px solid #1e3a5f",color:"#7dd3fc",borderRadius:3,fontSize:10,fontFamily:mono,letterSpacing:"0.1em"}}>⟳ ANALYZE LOGS</button>
+              <button className="noc-btn" onClick={analyzeInfra} style={{padding:"6px 14px",background:"#1a0f3d",border:"1px solid #3d1a5f",color:"#c084fc",borderRadius:3,fontSize:10,fontFamily:mono,letterSpacing:"0.1em"}}>⬡ ANALYZE INFRA</button>
+            </div>
           </div>
 
-          {/* Event Log */}
-          <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>EVENT LOG</div>
-          <div style={{maxHeight:"35vh",overflowY:"auto"}}>
+          {/* Scrollable center content */}
+          <div style={{flex:1,overflowY:"auto",padding:"12px 18px"}}>
+            {/* WAN Metrics */}
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+              {[{label:"IRVINE 1",site:"irvine1"},{label:"IRVINE 2",site:"irvine2"}].map(({label,site})=>{
+                const w=wan?.[site]||{};
+                return(
+                  <div key={site} style={{background:"#0a0f14",border:`1px solid ${activeSite===site?"#1e3a5f":"#111827"}`,borderRadius:4,padding:"12px 14px"}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                      <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>{label} — WAN</div>
+                      <div style={{marginLeft:"auto",fontSize:8,padding:"2px 7px",borderRadius:2,background:w.status==="ok"?"#0d1f0d":"#1f0d0d",border:`1px solid ${w.status==="ok"?"#1a3d1a":"#3d1a1a"}`,color:w.status==="ok"?"#10b981":"#ef4444",letterSpacing:"0.1em"}}>{(w.status||"OK").toUpperCase()}</div>
+                    </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                      {[{l:"ISP",v:w.isp||"—"},{l:"LATENCY",v:`${w.latency||"—"}ms`},{l:"UPTIME",v:fmtUptime(w.uptime)},{l:"WAN IP",v:w.wan_ip||"—"},{l:"TX RATE",v:fmtBytes(w.tx_rate||0)+"/s"},{l:"RX RATE",v:fmtBytes(w.rx_rate||0)+"/s"}].map(item=>(
+                        <div key={item.l}>
+                          <div style={{fontSize:7,color:"#334155",letterSpacing:"0.12em",marginBottom:2}}>{item.l}</div>
+                          <div style={{fontSize:10,color:"#7dd3fc"}}>{item.v}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* VLAN Traffic Bars */}
+            <div style={{marginBottom:16}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>VLAN TRAFFIC VOLUME (RELATIVE)</div>
+              <div style={{display:"flex",flexDirection:"column",gap:4}}>
+                {(vlans||DEMO_VLANS).map(v=>(
+                  <div key={v.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                    <div style={{width:80,fontSize:9,color:"#475569",textAlign:"right",flexShrink:0}}>{v.name}</div>
+                    <div style={{flex:1,height:12,background:"#0d1117",borderRadius:2,overflow:"hidden",border:"1px solid #111827"}}>
+                      <div style={{height:"100%",width:`${v.pct}%`,background:`linear-gradient(90deg,${v.color}55,${v.color}aa)`,borderRadius:2,transition:"width 0.3s"}}/>
+                    </div>
+                    <div style={{width:55,fontSize:9,color:"#334155"}}>{v.pct}% · {v.clients}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Client List with VLAN filter */}
+            <div style={{marginBottom:16}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>CLIENTS</div>
+                <select value={vlanFilter} onChange={e=>setVlanFilter(e.target.value)} style={{fontSize:9,background:"#0d1117",border:`1px solid ${T.border}`,color:"#7dd3fc",borderRadius:3,padding:"2px 6px",fontFamily:mono}}>
+                  <option value="all">ALL VLANs</option>
+                  {VLAN_DEFS.map(v=><option key={v.id} value={v.id}>{v.name} ({v.id})</option>)}
+                </select>
+                <span style={{fontSize:9,color:"#334155"}}>{filteredClients.length} devices</span>
+              </div>
+              <div style={{maxHeight:200,overflowY:"auto",border:`1px solid ${T.border}`,borderRadius:4}}>
+                <table style={{width:"100%",fontSize:9,borderCollapse:"collapse"}}>
+                  <thead>
+                    <tr style={{borderBottom:`1px solid ${T.border}`,background:"#0a0f14"}}>
+                      {["Hostname","IP","VLAN","Type","MAC"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#475569",letterSpacing:"0.1em",fontWeight:500}}>{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredClients.slice(0,50).map((c,i)=>{
+                      const vdef=VLAN_DEFS.find(v=>v.id===c.vlan);
+                      const isOT=c.vlan===30;
+                      return(
+                        <tr key={i} className="noc-evt" style={{borderBottom:"1px solid #0d1117",background:isOT?"rgba(239,68,68,0.02)":"transparent"}}>
+                          <td style={{padding:"4px 8px",color:isOT?"#ef4444":"#c8d6e5"}}>{c.hostname}</td>
+                          <td style={{padding:"4px 8px",color:"#7dd3fc"}}>{c.ip}</td>
+                          <td style={{padding:"4px 8px"}}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:1,background:vdef?.color||"#334155",display:"inline-block"}}/><span style={{color:vdef?.color||"#475569"}}>{vdef?.name||c.vlan}</span></span></td>
+                          <td style={{padding:"4px 8px",color:"#475569"}}>{c.is_wired?"Wired":"WiFi"}</td>
+                          <td style={{padding:"4px 8px",color:"#334155"}}>{c.mac}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Event Log */}
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>EVENT LOG — BOTH SITES</div>
             {(events||[]).map((ev,i)=>{
               const col=ev.severity==="error"?"#ef4444":ev.severity==="warning"?"#f59e0b":"#475569";
+              const bg=ev.severity==="error"?"rgba(239,68,68,0.04)":ev.severity==="warning"?"rgba(245,158,11,0.03)":"transparent";
               return(
-                <div key={i} style={{display:"flex",gap:8,padding:"5px 6px",borderBottom:"1px solid #0d1117",background:ev.severity==="error"?"rgba(239,68,68,0.04)":ev.severity==="warning"?"rgba(245,158,11,0.03)":"transparent",borderRadius:2}}>
-                  <span style={{fontSize:9,color:"#334155",width:55,flexShrink:0}}>{timeSince(ev.datetime)}</span>
+                <div key={i} className="noc-evt" style={{display:"flex",gap:10,padding:"6px 6px",borderBottom:"1px solid #0d1117",background:bg,borderRadius:2}}>
+                  <div style={{fontSize:9,color:"#334155",width:55,flexShrink:0,paddingTop:1}}>{timeSince(ev.datetime)}</div>
                   <div style={{width:6,height:6,borderRadius:"50%",background:col,marginTop:3,flexShrink:0}}/>
                   <div style={{flex:1}}>
                     <div style={{fontSize:10,color:col==="#475569"?"#6b7280":col,lineHeight:1.4}}>{ev.msg}</div>
-                    <div style={{fontSize:9,color:"#1e3a5f",marginTop:1}}>{ev.subsystem?.toUpperCase()} · {ev.site?.toUpperCase()}</div>
+                    <div style={{fontSize:9,color:"#1e3a5f",marginTop:2}}>{ev.subsystem?.toUpperCase()} · {ev.site?.toUpperCase()}</div>
                   </div>
-                  <span style={{fontSize:8,padding:"2px 6px",borderRadius:2,background:ev.severity==="error"?"#1f0d0d":ev.severity==="warning"?"#1f1505":"#0d1117",color:col,alignSelf:"flex-start",letterSpacing:"0.1em",flexShrink:0}}>{ev.severity.toUpperCase()}</span>
+                  <div style={{fontSize:8,padding:"2px 6px",borderRadius:2,background:ev.severity==="error"?"#1f0d0d":ev.severity==="warning"?"#1f1505":"#0d1117",color:col,alignSelf:"flex-start",letterSpacing:"0.1em",flexShrink:0}}>{ev.severity?.toUpperCase()}</div>
                 </div>
               );
             })}
           </div>
         </div>
 
-        {/* NOC AGENT PANEL */}
-        {agentOpen&&(
-          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,display:"flex",flexDirection:"column",maxHeight:"70vh"}}>
-            <div style={{padding:"10px 14px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:13}}>⬡</span>
-              <div><div style={{fontSize:11,color:"#7dd3fc",fontWeight:600}}>NOC AGENT</div><div style={{fontSize:9,color:"#334155"}}>Network / OT / Factory Systems</div></div>
-              <button onClick={()=>setAgentOpen(false)} style={{marginLeft:"auto",background:"none",border:`1px solid ${T.border}`,borderRadius:3,color:"#334155",width:22,height:22,cursor:"pointer",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+        {/* ═══ RIGHT: NOC AGENT (collapsible) ═══ */}
+        <div className="noc-agent-panel" style={{display:"flex",flexDirection:"column",width:agentOpen?380:0,opacity:agentOpen?1:0,borderLeft:agentOpen?`1px solid ${T.border}`:"none",pointerEvents:agentOpen?"all":"none"}}>
+          <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:28,height:28,borderRadius:"50%",background:"#0f1f3d",border:"1px solid #1e3a5f",display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>⬡</div>
+            <div>
+              <div style={{fontSize:11,color:"#7dd3fc",fontWeight:600,letterSpacing:"0.05em"}}>NOC AGENT</div>
+              <div style={{fontSize:9,color:"#334155"}}>30yr · Network / OT / Factory Systems</div>
             </div>
-            <div style={{flex:1,overflowY:"auto",padding:12,minHeight:200}}>
-              {messages.map((m,i)=>(
-                <div key={i} style={{marginBottom:12,display:"flex",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start"}}>
-                  {m.role==="assistant"&&<div style={{fontSize:8,color:"#1e3a5f",letterSpacing:"0.12em",marginBottom:3}}>NOC AGENT</div>}
-                  <div style={{maxWidth:"92%",padding:"8px 12px",borderRadius:4,background:m.role==="user"?"#0f1f3d":"#0d1117",border:`1px solid ${m.role==="user"?"#1e3a5f":T.border}`,fontSize:11,color:m.role==="user"?"#7dd3fc":"#b0c4d8",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{m.content}</div>
+            <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:8}}>
+              <div style={{fontSize:9,color:"#334155",textAlign:"right"}}>
+                <div>IRVINE 1 + 2</div>
+                <div>8 VLANs</div>
+              </div>
+              <button className="noc-btn" onClick={()=>setAgentOpen(false)} style={{width:22,height:22,padding:0,background:"transparent",border:`1px solid ${T.border}`,borderRadius:3,color:"#334155",fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}} title="Collapse agent panel">›</button>
+            </div>
+          </div>
+
+          {/* Chat messages */}
+          <div style={{flex:1,overflowY:"auto",padding:"14px 14px"}}>
+            {messages.map((m,i)=>(
+              <div key={i} className="noc-chat-msg" style={{marginBottom:14,display:"flex",flexDirection:"column",alignItems:m.role==="user"?"flex-end":"flex-start"}}>
+                {m.role==="assistant"&&<div style={{fontSize:8,color:"#1e3a5f",letterSpacing:"0.12em",marginBottom:4}}>NOC AGENT</div>}
+                <div style={{maxWidth:"92%",padding:"8px 12px",borderRadius:4,background:m.role==="user"?"#0f1f3d":"#0d1117",border:`1px solid ${m.role==="user"?"#1e3a5f":T.border}`,fontSize:11,color:m.role==="user"?"#7dd3fc":"#b0c4d8",lineHeight:1.6,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{m.content}</div>
+              </div>
+            ))}
+            {thinking&&(
+              <div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0"}}>
+                <div style={{display:"flex",gap:3}}>
+                  {[0,1,2].map(j=><div key={j} style={{width:4,height:4,borderRadius:"50%",background:"#3b82f6",animation:`noc-pulse 1.2s ease-in-out ${j*0.2}s infinite`}}/>)}
                 </div>
-              ))}
-              {thinking&&<div style={{display:"flex",alignItems:"center",gap:6,padding:"6px 0"}}><span style={{fontSize:9,color:"#334155"}}>analyzing...</span></div>}
-              <div ref={chatEndRef}/>
-            </div>
-            <div style={{padding:"8px 12px",borderTop:`1px solid ${T.border}`,display:"flex",flexWrap:"wrap",gap:4}}>
-              {["OT VLAN health","Kardex link?","DVI latency","WiFi gaps","SD-WAN status"].map(q=>(
-                <button key={q} onClick={()=>sendNocMessage(q)} style={{padding:"3px 8px",background:"transparent",border:`1px solid ${T.border}`,color:"#475569",borderRadius:2,fontSize:9,fontFamily:mono,cursor:"pointer"}}>{q}</button>
-              ))}
-            </div>
-            <div style={{padding:"8px 12px",borderTop:`1px solid ${T.border}`,display:"flex",gap:6}}>
-              <input value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&input.trim()){e.preventDefault();sendNocMessage(input.trim());}}}
-                placeholder="Ask NOC agent..." style={{flex:1,padding:"6px 10px",background:T.surface,border:`1px solid ${T.border}`,color:T.text,borderRadius:3,fontSize:11,fontFamily:mono}}/>
-              <button onClick={()=>input.trim()&&sendNocMessage(input.trim())} style={{padding:"0 12px",background:"#0f1f3d",border:"1px solid #1e3a5f",color:T.blue,borderRadius:3,fontSize:14,cursor:"pointer"}}>⮕</button>
-            </div>
+                <span style={{fontSize:9,color:"#334155"}}>analyzing...</span>
+              </div>
+            )}
+            <div ref={chatEndRef}/>
+          </div>
+
+          {/* Quick prompts */}
+          <div style={{padding:"8px 14px",borderTop:"1px solid #0d1117",display:"flex",flexWrap:"wrap",gap:4}}>
+            {["STP loop risk?","OT VLAN hardening","Kardex link stability","DVI VISION latency","WiFi coverage gaps","SD-WAN failover","Teleport VPN security","VPN split tunneling?"].map(q=>(
+              <button key={q} className="noc-btn" onClick={()=>sendNocMessage(q)} style={{padding:"3px 8px",background:"transparent",border:`1px solid ${T.border}`,color:"#475569",borderRadius:2,fontSize:9,fontFamily:mono,letterSpacing:"0.06em"}}>{q}</button>
+            ))}
+          </div>
+
+          {/* Input */}
+          <div style={{padding:"10px 14px",borderTop:`1px solid ${T.border}`,display:"flex",gap:8}}>
+            <textarea value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&input.trim()){e.preventDefault();sendNocMessage(input.trim());}}} placeholder="Ask the NOC agent..." rows={2} style={{flex:1,padding:"8px 10px",background:"#0d1117",border:`1px solid ${T.border}`,color:"#c8d6e5",borderRadius:3,fontSize:11,fontFamily:mono,lineHeight:1.5,resize:"none"}}/>
+            <button className="noc-btn" onClick={()=>input.trim()&&sendNocMessage(input.trim())} style={{padding:"0 12px",background:"#0f1f3d",border:"1px solid #1e3a5f",color:"#3b82f6",borderRadius:3,fontSize:14,alignSelf:"stretch"}}>⮕</button>
+          </div>
+        </div>
+
+        {/* ═══ COLLAPSED AGENT TAB ═══ */}
+        {!agentOpen&&(
+          <div className="noc-agent-tab" onClick={()=>setAgentOpen(true)} style={{width:32,borderLeft:`1px solid ${T.border}`,background:"#0a0f14",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,cursor:"pointer",userSelect:"none"}} title="Expand NOC Agent">
+            {thinking&&<div style={{width:7,height:7,borderRadius:"50%",background:"#3b82f6",boxShadow:"0 0 6px #3b82f6"}} className="noc-pulse"/>}
+            {!thinking&&messages.length>1&&(
+              <div style={{width:16,height:16,borderRadius:"50%",background:"#1e3a5f",border:"1px solid #3b82f6",fontSize:8,color:"#7dd3fc",display:"flex",alignItems:"center",justifyContent:"center"}}>{messages.filter(m=>m.role==="assistant").length}</div>
+            )}
+            <span style={{fontSize:9,color:"#475569",letterSpacing:"0.18em",writingMode:"vertical-rl",textOrientation:"mixed",transform:"rotate(180deg)"}}>NOC AGENT</span>
+            <span style={{fontSize:12,color:"#1e3a5f"}}>‹</span>
           </div>
         )}
       </div>
+
+      {/* ═══ SWITCH PORT OVERLAY ═══ */}
+      {switchPorts&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.7)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setSwitchPorts(null)}>
+          <div style={{background:"#0d1117",border:`1px solid ${T.border}`,borderRadius:8,padding:24,maxWidth:800,width:"90%",maxHeight:"80vh",overflow:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:16}}>
+              <span style={{fontSize:13}}>⊞</span>
+              <div>
+                <div style={{fontSize:13,color:"#7dd3fc",fontWeight:600}}>{switchPorts.device}</div>
+                <div style={{fontSize:9,color:"#475569"}}>{switchPorts.portCount} ports · {switchPorts.mac}</div>
+              </div>
+              <button className="noc-btn" onClick={()=>setSwitchPorts(null)} style={{marginLeft:"auto",background:"transparent",border:`1px solid ${T.border}`,borderRadius:3,color:"#475569",width:28,height:28,fontSize:14,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:`repeat(${switchPorts.portCount<=24?12:16},1fr)`,gap:4}}>
+              {(switchPorts.ports||[]).map(p=>(
+                <div key={p.port_idx} title={`${p.name}\n${p.vlan_name||"—"}\n${p.state} · ${p.speed?p.speed+"Mbps":"—"}\nPoE: ${p.poe_enable?p.poe_power+"W":"off"}\nMACs: ${p.mac_count}`} style={{
+                  width:"100%",aspectRatio:"1",borderRadius:3,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"default",
+                  background:p.state==="forwarding"?`${portVlanColor(p.vlan)}18`:"#0a0f14",
+                  border:`2px solid ${portColor(p.state)}`,
+                }}>
+                  <div style={{fontSize:8,fontWeight:600,color:portColor(p.state)}}>{p.port_idx}</div>
+                  {p.state==="forwarding"&&p.vlan&&<div style={{width:4,height:4,borderRadius:1,background:portVlanColor(p.vlan),marginTop:1}}/>}
+                </div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:12,marginTop:12,flexWrap:"wrap"}}>
+              {[{label:"Forwarding",color:"#10b981"},{label:"Link Down",color:"#ef4444"},{label:"Disabled",color:"#334155"}].map(l=>(
+                <div key={l.label} style={{display:"flex",alignItems:"center",gap:4}}>
+                  <div style={{width:10,height:10,borderRadius:2,border:`2px solid ${l.color}`}}/>
+                  <span style={{fontSize:9,color:"#475569"}}>{l.label}</span>
+                </div>
+              ))}
+              <div style={{marginLeft:16,display:"flex",gap:8,flexWrap:"wrap"}}>
+                {VLAN_DEFS.filter(v=>(switchPorts.ports||[]).some(p=>p.vlan===v.id)).map(v=>(
+                  <div key={v.id} style={{display:"flex",alignItems:"center",gap:3}}>
+                    <div style={{width:6,height:6,borderRadius:1,background:v.color}}/>
+                    <span style={{fontSize:8,color:"#475569"}}>{v.name}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -6232,39 +6606,69 @@ function EarlyWarningTab({ovenServerUrl,settings}){
     {id:"demo_som_error",tier:"P1",status:"firing",system:"SOM",metric:"som_devices_in_error",
       message:"CRITICAL: 2 machines in error state — CCL-2 (SERR) and DBA-1 (SERR). Production line at risk.",
       detail:"Two Schneider machines reporting error status. Check SOM Control Center for fault codes. CCL-2 last ran 14 min ago. DBA-1 showing E-047 (spindle overtemp).",
-      deviation:4.2,baseline:0.1,current_val:2,unit:"devices",fired_at:new Date(Date.now()-420000).toISOString(),acknowledged_at:null},
+      deviation:4.2,baseline:0.1,current_val:2,unit:"devices",fired_at:new Date(Date.now()-420000).toISOString(),acknowledged_at:null,
+      sparkline:[0,0,0,0,0,1,1,0,1,2,2,2]},
     {id:"demo_throughput",tier:"P1",status:"firing",system:"DVI",metric:"dvi_throughput_per_hour",
       message:"DVI throughput 12 jobs/hr — 3.1σ below baseline (normal: 38±8 jobs/hr)",
       detail:"Production throughput dropped sharply in the last 30 minutes. Correlates with SOM machine errors. Surfacing queue building — 11 jobs waiting.",
-      deviation:3.1,baseline:38,current_val:12,unit:"jobs/hr",fired_at:new Date(Date.now()-600000).toISOString(),acknowledged_at:null},
+      deviation:3.1,baseline:38,current_val:12,unit:"jobs/hr",fired_at:new Date(Date.now()-600000).toISOString(),acknowledged_at:null,
+      sparkline:[42,39,41,38,36,33,28,24,19,16,14,12]},
+    {id:"demo_pattern_cascade",tier:"P1",status:"firing",system:"Pattern",metric:"cascade-queue-buildup",
+      message:"AI PATTERN: Cascade queue buildup — WIP piling in surfacing, throughput dropping, total WIP rising",
+      detail:"Pattern match: 3/3 conditions met (100% confidence). Surfacing zone bottleneck propagating downstream. Recommend redistributing staff and throttling picking until surfacing clears.",
+      deviation:1.0,baseline:null,current_val:null,unit:null,fired_at:new Date(Date.now()-480000).toISOString(),acknowledged_at:null,auto_correlated:"cascade-queue-buildup"},
     {id:"demo_wip_pileup",tier:"P2",status:"firing",system:"DVI",metric:"dvi_wip_pileup",
       message:"WARNING: 47 jobs piled up in SURFACING zone — 2.8σ above normal",
       detail:"WIP accumulating in surfacing. Downstream from picking, upstream of coating. Likely caused by machine downtime in surfacing.",
-      deviation:2.8,baseline:18,current_val:47,unit:"jobs in single zone",fired_at:new Date(Date.now()-540000).toISOString(),acknowledged_at:null},
+      deviation:2.8,baseline:18,current_val:47,unit:"jobs in single zone",fired_at:new Date(Date.now()-540000).toISOString(),acknowledged_at:null,
+      sparkline:[15,17,20,22,26,30,33,37,41,44,46,47]},
     {id:"demo_breakage",tier:"P2",status:"firing",system:"Production",metric:"breakage_rate",
       message:"WARNING: 7 breakages today — 2.4σ above baseline (normal: 2.1±2.0/day)",
       detail:"Elevated breakage rate. 4 in surfacing (SUR-01 surface scratch), 2 in cutting (EDG-01 chip), 1 in assembly. Surfacing breakage correlates with tool wear pattern.",
-      deviation:2.4,baseline:2.1,current_val:7,unit:"breaks/day",fired_at:new Date(Date.now()-1800000).toISOString(),acknowledged_at:null},
+      deviation:2.4,baseline:2.1,current_val:7,unit:"breaks/day",fired_at:new Date(Date.now()-1800000).toISOString(),acknowledged_at:null,
+      sparkline:[1,1,2,2,3,3,4,4,5,6,6,7]},
     {id:"demo_consumption",tier:"P2",status:"firing",system:"ItemPath",metric:"itempath_consumption_rate",
       message:"WARNING: Lens blank consumption 42 picks/hr — 2.1σ above normal (baseline: 28±6.5/hr)",
       detail:"Excessive lens consumption likely driven by elevated breakage/remake rate. Check if remakes are inflating pick counts.",
-      deviation:2.1,baseline:28,current_val:42,unit:"picks/hr",fired_at:new Date(Date.now()-3600000).toISOString(),acknowledged_at:null},
-    {id:"demo_cycle_time",tier:"P3",status:"watch",system:"Surfacing",metric:"cycle_time_surfacing",
-      message:"Surfacing avg cycle time trending up — 1.6σ above 30d baseline (23.4 min vs 18.2 normal)",
-      detail:"Cycle time drift over last 2 hours. Consistent with tool wear pattern. Check diamond point condition on CNC lathes.",
-      deviation:1.6,baseline:18.2,current_val:23.4,unit:"min/job",fired_at:new Date(Date.now()-7200000).toISOString(),acknowledged_at:null},
+      deviation:2.1,baseline:28,current_val:42,unit:"picks/hr",fired_at:new Date(Date.now()-3600000).toISOString(),acknowledged_at:null,
+      sparkline:[26,28,30,31,33,35,36,38,39,40,41,42]},
+    {id:"demo_network_latency",tier:"P2",status:"firing",system:"Network",metric:"network_latency_avg",
+      message:"WARNING: WAN latency elevated — 67ms avg across sites (normal: 10±3ms)",
+      detail:"Latency spike on Cox WAN link at Irvine 1. ItemPath API calls timing out intermittently. Check ISP status page.",
+      deviation:2.3,baseline:10,current_val:67,unit:"ms",fired_at:new Date(Date.now()-300000).toISOString(),acknowledged_at:null,
+      sparkline:[8,9,11,10,12,15,24,38,52,61,67,67]},
+    {id:"demo_som_oee",tier:"P2",status:"firing",system:"SOM",metric:"som_oee",
+      message:"WARNING: OEE at 54% — below 60% threshold (baseline: 78±8%)",
+      detail:"OEE degraded due to machine errors on CCL-2 and DBA-1. Availability component is 68% (normally 92%).",
+      deviation:3.0,baseline:78,current_val:54,unit:"%",fired_at:new Date(Date.now()-1200000).toISOString(),acknowledged_at:null,
+      sparkline:[82,79,80,76,72,68,62,58,55,54,54,54]},
     {id:"demo_pattern_tool_wear",tier:"P2",status:"firing",system:"Pattern",metric:"tool-wear-degradation",
       message:"AI PATTERN: Tool wear degradation detected in Surfacing — cycle time up + breakage up + throughput down",
       detail:"Pattern match: 3/3 conditions met (100% confidence). Recommend immediate tool inspection on surfacing lathes. Check diamond point hours since last change.",
       deviation:1.0,baseline:null,current_val:null,unit:null,fired_at:new Date(Date.now()-900000).toISOString(),acknowledged_at:null,auto_correlated:"tool-wear-degradation"},
+    {id:"demo_total_wip",tier:"P2",status:"firing",system:"DVI",metric:"dvi_total_wip",
+      message:"WARNING: Total WIP at 112 jobs — exceeding 100 job threshold",
+      detail:"WIP building due to coating and surfacing bottleneck. 47 in surfacing, 38 in coating, rest distributed.",
+      deviation:2.1,baseline:65,current_val:112,unit:"jobs",fired_at:new Date(Date.now()-2400000).toISOString(),acknowledged_at:null,
+      sparkline:[58,62,67,72,78,84,91,96,102,108,112,112]},
+    {id:"demo_cycle_time",tier:"P3",status:"watch",system:"Surfacing",metric:"cycle_time_surfacing",
+      message:"Surfacing avg cycle time trending up — 1.6σ above 30d baseline (23.4 min vs 18.2 normal)",
+      detail:"Cycle time drift over last 2 hours. Consistent with tool wear pattern. Check diamond point condition on CNC lathes.",
+      deviation:1.6,baseline:18.2,current_val:23.4,unit:"min/job",fired_at:new Date(Date.now()-7200000).toISOString(),acknowledged_at:null,
+      sparkline:[17.8,18.0,18.5,19.1,19.8,20.4,21.0,21.6,22.1,22.7,23.1,23.4]},
+    {id:"demo_maintenance_wo",tier:"P3",status:"watch",system:"Maintenance",metric:"maintenance_open_work_orders",
+      message:"Maintenance backlog at 8 open work orders — 1.7σ above normal",
+      detail:"3 PM work orders overdue (CCL-1 filter change, DBA-1 coolant flush, conveyor belt inspection). 5 corrective WOs open.",
+      deviation:1.7,baseline:3,current_val:8,unit:"work orders",fired_at:new Date(Date.now()-14400000).toISOString(),acknowledged_at:null,
+      sparkline:[3,3,4,4,5,5,6,6,7,7,8,8]},
     {id:"demo_resolved",tier:"P2",status:"resolved",system:"ItemPath",metric:"itempath_stockouts",
       message:"RESOLVED: Stockout on CR39-SV-70-AR cleared — replenishment received",
       detail:"Kardex bin restocked at 09:47. 120 units received from Philippines shipment.",
       deviation:null,baseline:null,current_val:0,unit:"SKUs",fired_at:new Date(Date.now()-86400000).toISOString(),resolved_at:new Date(Date.now()-82800000).toISOString(),acknowledged_at:new Date(Date.now()-85000000).toISOString()},
   ];
   const DEMO_HEALTH={status:"warning",lastPoll:new Date().toISOString(),lastPollDuration:245,pollCount:48,pollInterval:300,
-    collectors:["som_machines","itempath_inventory","dvi_production","breakage","maintenance","oven_timers"],
-    totalReadings:1247,totalAlertsFired:12,activeAlerts:{p1:2,p2:4,p3:1,total:7},thresholds:{P1:3.5,P2:2.5,P3:1.5},baselineDays:30};
+    collectors:["som_machines","itempath_inventory","dvi_production","breakage","maintenance","oven_timers","network","cycle_times"],
+    totalReadings:2143,totalAlertsFired:18,activeAlerts:{p1:3,p2:7,p3:2,total:12},thresholds:{P1:3.5,P2:2.5,P3:1.5},baselineDays:30};
   const DEMO_BASELINES=[
     {metric:"dvi_throughput_per_hour",shift_slot:"morning",day_of_week:1,mean:38,stddev:8,sample_n:84},
     {metric:"breakage_rate",shift_slot:"morning",day_of_week:1,mean:2.1,stddev:2.0,sample_n:84},
@@ -6272,6 +6676,15 @@ function EarlyWarningTab({ovenServerUrl,settings}){
     {metric:"som_devices_in_error",shift_slot:"morning",day_of_week:1,mean:0.1,stddev:0.3,sample_n:84},
     {metric:"cycle_time_surfacing",shift_slot:"morning",day_of_week:1,mean:18.2,stddev:3.2,sample_n:84},
     {metric:"dvi_wip_pileup",shift_slot:"morning",day_of_week:1,mean:18,stddev:10,sample_n:84},
+    {metric:"network_latency_avg",shift_slot:"morning",day_of_week:1,mean:10,stddev:3,sample_n:84},
+    {metric:"som_oee",shift_slot:"morning",day_of_week:1,mean:78,stddev:8,sample_n:84},
+    {metric:"dvi_total_wip",shift_slot:"morning",day_of_week:1,mean:65,stddev:22,sample_n:84},
+    {metric:"maintenance_open_work_orders",shift_slot:"morning",day_of_week:1,mean:3,stddev:2.9,sample_n:84},
+    {metric:"cycle_time_coating",shift_slot:"morning",day_of_week:1,mean:45,stddev:8,sample_n:84},
+    {metric:"cycle_time_cutting",shift_slot:"morning",day_of_week:1,mean:12,stddev:2.5,sample_n:84},
+    {metric:"cycle_time_assembly",shift_slot:"morning",day_of_week:1,mean:8.5,stddev:2,sample_n:84},
+    {metric:"network_devices_offline",shift_slot:"morning",day_of_week:1,mean:0.2,stddev:0.4,sample_n:84},
+    {metric:"oven_overdue_racks",shift_slot:"morning",day_of_week:1,mean:0.3,stddev:0.5,sample_n:84},
   ];
   const isDemo=settings?.demoMode||false;
 
@@ -6363,10 +6776,10 @@ function EarlyWarningTab({ovenServerUrl,settings}){
     return`${Math.floor(h/24)}d ago`;
   };
 
-  // Sparkline SVG
-  const Sparkline=({data,color})=>{
+  // Sparkline SVG — supports custom width/height for inline use
+  const Sparkline=({data,color,width:sw,height:sh})=>{
     if(!data||data.length<2)return null;
-    const w=120,h=32,pad=2;
+    const w=sw||120,h=sh||32,pad=2;
     const vals=data.map(d=>typeof d==="object"?d.value:d);
     const min=Math.min(...vals),max=Math.max(...vals),range=max-min||1;
     const pts=vals.map((v,i)=>{
@@ -6378,10 +6791,13 @@ function EarlyWarningTab({ovenServerUrl,settings}){
     return(
       <svg width={w} height={h} style={{display:"block"}}>
         <polyline points={pts} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" opacity="0.7"/>
-        <circle cx={last[0]} cy={last[1]} r="2.5" fill={color}/>
+        <circle cx={last[0]} cy={last[1]} r={sw&&sw<80?"1.5":"2.5"} fill={color}/>
       </svg>
     );
   };
+
+  // Collector → primary metric lookup
+  const COLLECTOR_PRIMARY_METRICS={som_machines:"som_devices_in_error",itempath_inventory:"itempath_consumption_rate",dvi_production:"dvi_throughput_per_hour",breakage:"breakage_rate",maintenance:"maintenance_open_work_orders",oven_timers:"oven_overdue_racks",network:"network_devices_offline",cycle_times:"cycle_time_surfacing"};
 
   // AI Situation Report
   const getSituationReport=async()=>{
@@ -6475,12 +6891,12 @@ Be direct. No hedging. This is a live production environment.`;
       {error&&<div style={{padding:"8px 12px",background:T.redDark,border:`1px solid ${T.red}33`,borderRadius:4,marginBottom:12,fontSize:11,color:T.red}}>Connection error: {error}</div>}
 
       {/* ── MAIN LAYOUT ── */}
-      <div style={{display:"grid",gridTemplateColumns:"1fr 320px",gap:16,alignItems:"start"}}>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 380px",gap:16,alignItems:"start"}}>
 
         {/* ── LEFT: ALERTS + BASELINES ── */}
         <div>
-          {/* Filter bar */}
-          <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:12}}>
+          {/* Filter bar (sticky) */}
+          <div style={{display:"flex",gap:6,alignItems:"center",marginBottom:12,position:"sticky",top:0,zIndex:10,background:T.bg,paddingTop:4,paddingBottom:8}}>
             <span style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",marginRight:4}}>FILTER</span>
             {["all","firing","watch","P1","P2","P3","resolved"].map(f=>(
               <button key={f} onClick={()=>setFilter(f)} style={{
@@ -6532,13 +6948,14 @@ Be direct. No hedging. This is a live production environment.`;
                       </div>
                       {alert.deviation&&alert.status!=="resolved"&&(
                         <div style={{marginTop:6,display:"flex",alignItems:"center",gap:8}}>
-                          <div style={{flex:1,height:3,background:"#0d1117",borderRadius:2,overflow:"hidden"}}>
-                            <div style={{height:"100%",width:`${Math.min(100,(alert.deviation/5)*100)}%`,background:tc.color,borderRadius:2,boxShadow:`0 0 6px ${tc.color}`}}/>
+                          {alert.sparkline&&alert.sparkline.length>=2&&<Sparkline data={alert.sparkline} color={tc.color} width={60} height={20}/>}
+                          <div style={{flex:1,height:4,background:"#0d1117",borderRadius:2,overflow:"hidden"}}>
+                            <div style={{height:"100%",width:`${Math.min(100,(alert.deviation/5)*100)}%`,background:alert.deviation>=3.5?"#ef4444":alert.deviation>=2.5?"#f59e0b":"#10b981",borderRadius:2,boxShadow:`0 0 6px ${alert.deviation>=3.5?"#ef4444":alert.deviation>=2.5?"#f59e0b":"#10b981"}`}}/>
                           </div>
-                          <span style={{fontSize:9,color:tc.color,width:40,flexShrink:0}}>{alert.deviation}σ</span>
+                          <span style={{fontSize:10,color:tc.color,fontWeight:600,width:44,flexShrink:0,fontFamily:mono}}>{alert.deviation.toFixed(1)}σ</span>
                           {alert.current_val!=null&&(
                             <span style={{fontSize:9,color:"#475569"}}>
-                              {alert.current_val} {alert.unit} <span style={{color:"#334155"}}>vs {alert.baseline} baseline</span>
+                              {alert.current_val} {alert.unit} <span style={{color:"#334155"}}>vs {alert.baseline}</span>
                             </span>
                           )}
                         </div>
@@ -6594,23 +7011,37 @@ Be direct. No hedging. This is a live production environment.`;
           )}
         </div>
 
-        {/* ── RIGHT: HEALTH + SUMMARY + AI REPORT ── */}
-        <div style={{display:"flex",flexDirection:"column",gap:12}}>
+        {/* ── RIGHT: HEALTH + SUMMARY + HEATMAP + PATTERNS + AI REPORT ── */}
+        <div style={{display:"flex",flexDirection:"column",gap:12,maxHeight:"80vh",overflowY:"auto"}}>
 
-          {/* Engine health */}
+          {/* System Health Grid */}
           {health&&(
             <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
-              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>ENGINE STATUS</div>
-              <div style={{display:"flex",flexDirection:"column",gap:4}}>
-                {(health.collectors||[]).map(c=>(
-                  <div key={c} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 8px",borderRadius:3,background:"rgba(255,255,255,0.01)",border:`1px solid ${T.border}`}}>
-                    <div style={{width:6,height:6,borderRadius:"50%",background:T.green,boxShadow:`0 0 5px ${T.green}`,flexShrink:0}}/>
-                    <span style={{fontSize:10,color:"#64748b",flex:1}}>{c.replace(/_/g," ")}</span>
-                  </div>
-                ))}
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+                <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>SYSTEM HEALTH</div>
+                <div style={{marginLeft:"auto",fontSize:9,color:"#334155"}}>
+                  {health.pollCount} polls · {health.totalReadings} readings · {health.pollInterval}s
+                </div>
               </div>
-              <div style={{marginTop:8,fontSize:9,color:"#334155"}}>
-                Polls: {health.pollCount} · Readings: {health.totalReadings} · Interval: {health.pollInterval}s
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+                {(health.collectors||[]).map(c=>{
+                  const pm=COLLECTOR_PRIMARY_METRICS[c];
+                  const bl=baselines.find(b=>b.metric===pm);
+                  const al=alerts.find(a=>a.metric===pm&&a.status==="firing");
+                  const sc=al?(al.tier==="P1"?"#ef4444":al.tier==="P2"?"#f59e0b":"#3b82f6"):"#10b981";
+                  return(
+                    <div key={c} onClick={()=>setFilter(c.split("_")[0])} style={{
+                      padding:"6px 8px",borderRadius:3,background:"rgba(255,255,255,0.01)",
+                      border:`1px solid ${T.border}`,cursor:"pointer",
+                    }}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:3}}>
+                        <div style={{width:6,height:6,borderRadius:"50%",background:sc,boxShadow:`0 0 5px ${sc}`}}/>
+                        <span style={{fontSize:8,color:"#64748b",flex:1,textTransform:"uppercase",letterSpacing:"0.08em",overflow:"hidden",whiteSpace:"nowrap",textOverflow:"ellipsis"}}>{c.replace(/_/g," ")}</span>
+                      </div>
+                      {bl&&<div style={{fontSize:8,color:"#334155",paddingLeft:12}}>μ={bl.mean.toFixed(1)} σ={bl.stddev.toFixed(1)} n={bl.sample_n}</div>}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -6633,6 +7064,56 @@ Be direct. No hedging. This is a live production environment.`;
             </div>
           </div>
 
+          {/* Metric Heatmap */}
+          {metricOptions.length>0&&(
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>METRIC HEATMAP</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                {metricOptions.map(m=>{
+                  const a=alerts.find(x=>x.metric===m&&x.status==="firing");
+                  const dev=a?.deviation||0;
+                  const bg=dev>=3.5?"rgba(239,68,68,0.3)":dev>=2.5?"rgba(245,158,11,0.25)":dev>=1.5?"rgba(245,158,11,0.1)":"rgba(16,185,129,0.08)";
+                  const color=dev>=3.5?"#ef4444":dev>=2.5?"#f59e0b":dev>=1.5?"#a3a3a3":"#334155";
+                  return(
+                    <div key={m} onClick={()=>setSelectedMetric(m)} title={m} style={{
+                      padding:"3px 6px",borderRadius:2,background:bg,cursor:"pointer",
+                      fontSize:8,color,fontFamily:mono,letterSpacing:"0.04em",
+                      border:`1px solid ${dev>=2.5?color+"33":"transparent"}`,
+                    }}>
+                      {m.replace(/_/g," ").substring(0,18)}{dev>0?` ${dev.toFixed(1)}σ`:""}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Active Patterns */}
+          {(()=>{
+            const patAlerts=alerts.filter(a=>a.auto_correlated||a.id?.startsWith("pattern_"));
+            if(patAlerts.length===0)return null;
+            return(
+              <div style={{background:"rgba(139,92,246,0.04)",border:"1px solid rgba(139,92,246,0.15)",borderRadius:4,padding:12}}>
+                <div style={{fontSize:9,color:"#8b5cf6",letterSpacing:"0.14em",marginBottom:8}}>AI PATTERNS ACTIVE</div>
+                {patAlerts.map(p=>(
+                  <div key={p.id} style={{marginBottom:8,padding:"6px 8px",background:"rgba(139,92,246,0.06)",borderRadius:3}}>
+                    <div style={{fontSize:10,color:"#c084fc",fontWeight:500,marginBottom:4}}>{p.auto_correlated||p.metric}</div>
+                    <div style={{fontSize:9,color:"#94a3b8",lineHeight:1.5}}>{p.message}</div>
+                    {p.deviation!=null&&(
+                      <div style={{marginTop:4,display:"flex",alignItems:"center",gap:6}}>
+                        <span style={{fontSize:8,color:"#7c3aed"}}>CONFIDENCE</span>
+                        <div style={{flex:1,height:3,background:"#1a0f3d",borderRadius:2,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${Math.min(100,p.deviation*100)}%`,background:"#8b5cf6",borderRadius:2}}/>
+                        </div>
+                        <span style={{fontSize:9,color:"#8b5cf6"}}>{Math.round(p.deviation*100)}%</span>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+
           {/* Metric selector */}
           {metricOptions.length>0&&(
             <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
@@ -6648,14 +7129,14 @@ Be direct. No hedging. This is a live production environment.`;
           )}
 
           {/* AI Situation Report */}
-          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12,flex:1}}>
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <span style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>AI SITUATION REPORT</span>
               {aiLoading&&<div style={{width:6,height:6,borderRadius:"50%",background:"#8b5cf6",animation:"pulse 1.8s ease-in-out infinite"}}/>}
             </div>
             {!situationReport&&!aiLoading&&(
-              <div style={{textAlign:"center",padding:"20px 0"}}>
-                <div style={{fontSize:10,color:"#1e3a5f",marginBottom:12,lineHeight:1.6}}>
+              <div style={{textAlign:"center",padding:"16px 0"}}>
+                <div style={{fontSize:10,color:"#1e3a5f",marginBottom:10,lineHeight:1.6}}>
                   {p1>0?`${p1} critical alert${p1>1?"s":""} active. Generate a situation report.`:"No critical alerts. Generate a report to review state."}
                 </div>
                 <button onClick={getSituationReport} style={{
@@ -6671,7 +7152,7 @@ Be direct. No hedging. This is a live production environment.`;
             )}
             {situationReport&&(
               <div>
-                <div style={{fontSize:10,color:"#94a3b8",lineHeight:1.7,whiteSpace:"pre-wrap",maxHeight:300,overflowY:"auto"}}>{situationReport}</div>
+                <div style={{fontSize:10,color:"#94a3b8",lineHeight:1.7,whiteSpace:"pre-wrap",maxHeight:250,overflowY:"auto"}}>{situationReport}</div>
                 <button onClick={getSituationReport} style={{
                   width:"100%",padding:"5px",background:"transparent",marginTop:8,
                   border:`1px solid ${T.border}`,color:"#334155",borderRadius:2,
