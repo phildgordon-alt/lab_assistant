@@ -3781,6 +3781,28 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, labConfig.getBacklog());
   }
 
+  // GET /api/lab/catchup — catch-up calculator (auto-fills from live data if dept provided)
+  if (req.method==='GET' && url.pathname==='/api/lab/catchup') {
+    const params = {
+      department: url.searchParams.get('department') || null,
+      backlog: url.searchParams.has('backlog') ? parseInt(url.searchParams.get('backlog')) : null,
+      incoming: url.searchParams.has('incoming') ? parseInt(url.searchParams.get('incoming')) : null,
+      output: url.searchParams.has('output') ? parseInt(url.searchParams.get('output')) : null,
+      surge: url.searchParams.has('surge') ? parseInt(url.searchParams.get('surge')) : null,
+      target: url.searchParams.has('target') ? parseInt(url.searchParams.get('target')) : 0,
+      targetDate: url.searchParams.get('targetDate') || null,
+      workDaysPerWeek: url.searchParams.has('workDays') ? parseInt(url.searchParams.get('workDays')) : 5,
+      skipWeekends: url.searchParams.get('weekends') !== 'yes',
+    };
+    return json(res, labConfig.getCatchUp(params));
+  }
+
+  // POST /api/lab/catchup — catch-up calculator with body (for AI agents)
+  if (req.method==='POST' && url.pathname==='/api/lab/catchup') {
+    const body = await readBody(req);
+    return json(res, labConfig.getCatchUp(body));
+  }
+
   // GET /api/lab/backlog/trend — 30-day backlog trend
   if (req.method==='GET' && url.pathname==='/api/lab/backlog/trend') {
     const dept = url.searchParams.get('department');

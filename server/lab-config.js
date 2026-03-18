@@ -570,4 +570,114 @@ module.exports = {
 
     return rows;
   },
+
+  /**
+   * Catch-up calculator: given backlog, incoming rate, output rate → burn-down projection
+   * Can compute for a specific department or lab-wide.
+   * Returns: netDaily, daysToZero, clearDate, weeklyMilestones, suggestedOutput (for target date)
+   */
+  getCatchUp({ department, backlog, incoming, output, surge, target, targetDate, workDaysPerWeek, skipWeekends } = {}) {
+    // Auto-fill from live data if params not provided
+    const hour = new Date().getHours();
+    const currentShift = hour >= 6 && hour < 14 ? 'morning' : hour >= 14 && hour < 22 ? 'afternoon' : 'night';
+
+    // If department provided, pull live data
+    if (department && (backlog == null || incoming == null || output == null)) {
+      const zoneMetrics = { surfacing: 'dvi_queue_depth_surf', cutting: 'dvi_queue_depth_cut', coating: 'dvi_queue_depth_coat', assembly: 'dvi_queue_depth_asse' };
+      const queueMetric = zoneMetrics[department];
+      if (queueMetric) {
+        const qr = stmtLatestReading.get(queueMetric);
+        if (qr && backlog == null) backlog = qr.value;
+      }
+      const thr = stmtLatestReading.get('dvi_throughput_per_hour');
+      if (thr && output == null) output = Math.round(thr.value * 8); // 8hr shift → daily
+      const blRow = stmtGetBaselineValue.get(department, currentShift, 'throughput');
+      if (blRow && incoming == null) incoming = Math.round(blRow.value * 8 * 0.9); // assume 90% of baseline is incoming demand
+    }
+
+    backlog = backlog || 0;
+    incoming = incoming || 0;
+    output = output || 0;
+    surge = surge || 0;
+    target = target || 0;
+    workDaysPerWeek = workDaysPerWeek || 5;
+    skipWeekends = skipWeekends !== false;
+
+    const effectiveOutput = surge > 0 ? surge : output;
+    const netDaily = effectiveOutput - incoming;
+
+    // Can't catch up if net <= 0
+    if (netDaily <= 0) {
+      return {
+        department: department || 'lab-wide',
+        backlog, incoming, output, surge, target,
+        netDaily,
+        feasible: false,
+        message: `Output (${effectiveOutput}) does not exceed incoming (${incoming}). Backlog is growing.`,
+      };
+    }
+
+    // Simulate burn-down
+    const startDate = new Date();
+    startDate.setHours(0,0,0,0);
+    let bl = backlog;
+    let workDay = 0;
+    const milestones = [];
+    const calDate = new Date(startDate);
+
+    while (bl > target && workDay < 730) {
+      calDate.setDate(calDate.getDate() + 1);
+      if (skipWeekends && (calDate.getDay() === 0 || calDate.getDay() === 6)) continue;
+      workDay++;
+      bl = Math.max(target, bl - netDaily);
+      if (workDay % workDaysPerWeek === 0 || bl <= target) {
+        milestones.push({
+          week: Math.ceil(workDay / workDaysPerWeek),
+          workDay,
+          date: calDate.toISOString().split('T')[0],
+          backlog: Math.round(bl),
+          pctCleared: Math.round((1 - bl / backlog) * 100),
+        });
+      }
+    }
+
+    const daysToZero = workDay;
+    const weeksToZero = Math.ceil(workDay / workDaysPerWeek);
+    const clearDate = new Date(calDate).toISOString().split('T')[0];
+
+    // Suggested output if target date provided
+    let suggestedOutput = null;
+    if (targetDate) {
+      const end = new Date(targetDate + 'T00:00:00');
+      const start = new Date();
+      start.setHours(0,0,0,0);
+      if (end > start) {
+        let wDays = 0;
+        const cur = new Date(start);
+        while (cur < end) {
+          cur.setDate(cur.getDate() + 1);
+          if (skipWeekends && (cur.getDay() === 0 || cur.getDay() === 6)) continue;
+          wDays++;
+        }
+        if (wDays > 0) {
+          suggestedOutput = Math.ceil((backlog - target) / wDays + incoming);
+        }
+      }
+    }
+
+    return {
+      department: department || 'lab-wide',
+      backlog, incoming, output, surge, target,
+      effectiveOutput,
+      netDaily,
+      feasible: true,
+      daysToZero,
+      weeksToZero,
+      clearDate,
+      milestones,
+      suggestedOutput,
+      targetDate: targetDate || null,
+      message: `At ${effectiveOutput} output/day vs ${incoming} incoming/day (net +${netDaily}/day), backlog of ${backlog} clears in ${daysToZero} working days (${weeksToZero} weeks) by ${clearDate}.`,
+    };
+  },
 };

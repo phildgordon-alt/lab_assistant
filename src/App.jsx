@@ -3699,6 +3699,7 @@ const DOMAIN_CONFIGS = {
       { icon: "🔴", label: "Rush Jobs", text: "List all rush jobs in surfacing and recommended priority order." },
       { icon: "🔧", label: "Defect Help", text: "Help me troubleshoot a surfacing defect. What questions should I answer?" },
       { icon: "📊", label: "Machine Health Report", text: "Generate a machine health report — uptime, error patterns, maintenance recommendations.", isReport: true },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Surfacing. Call the API at /api/lab/catchup?department=surfacing to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
     ],
     buildContext: () => `You are the Surfacing Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3727,6 +3728,7 @@ Be direct and technical. Flag urgent issues first. Suggest specific maintenance 
       { icon: "🔴", label: "Rush Priority", text: "Which rush jobs need immediate edging attention?" },
       { icon: "🔧", label: "Edge Issue", text: "Help troubleshoot an edge quality issue. What information do you need?" },
       { icon: "📐", label: "Frame Fit", text: "Guide me through checking frame-to-lens fit parameters." },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Cutting. Call the API at /api/lab/catchup?department=cutting to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
     ],
     buildContext: () => `You are the Cutting/Edging Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3752,6 +3754,7 @@ Be specific with job IDs and frame references.`,
       { icon: "⚠️", label: "Defect Pattern", text: "Are there any defect patterns suggesting equipment issues?" },
       { icon: "🌡", label: "Oven Timing", text: "Review current oven dwell times and recommend adjustments." },
       { icon: "🔴", label: "Rush Coating", text: "Which rush jobs are currently in coating and their ETA?" },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Coating. Call the API at /api/lab/catchup?department=coating to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
     ],
     buildContext: () => `You are the Coating Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3778,6 +3781,7 @@ Flag anything below 90% yield as a concern.`,
       { icon: "⚠️", label: "QC Returns", text: "Analyze recent QC returns and identify patterns." },
       { icon: "📊", label: "Shift Report", text: "Generate current shift assembly summary.", isReport: true },
       { icon: "🔧", label: "Frame Issue", text: "Help troubleshoot a frame assembly problem." },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Assembly. Call the API at /api/lab/catchup?department=assembly to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
     ],
     buildContext: () => `You are the Assembly Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3804,6 +3808,7 @@ Reference specific job IDs.`,
       { icon: "🚚", label: "Carrier Summary", text: "Summarize today's shipments by carrier." },
       { icon: "📊", label: "EOD Report", text: "Generate end-of-day shipping report.", isReport: true },
       { icon: "🔍", label: "Track Job", text: "Help me track a specific job. Which job ID?" },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for the full lab. Call the API at /api/lab/catchup to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. Calculate what daily ship rate we need to hit our target.", isReport: true },
     ],
     buildContext: () => `You are the Shipping Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -5583,6 +5588,7 @@ function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl=`htt
     {icon:"🏭", label:"Machine alerts",       text:"Analyze SOM machine status. Which machines have errors or warnings? Are there repeating issues? What maintenance should we schedule?"},
     {icon:"🔴", label:"Rush jobs",            text:"List all current rush jobs from DVI and their exact stage/station in the lab. Suggest priority routing for any that are behind schedule."},
     {icon:"📋", label:"End of day report",    text:"Generate a comprehensive end-of-day production report including DVI job counts by stage, jobs shipped, breakage summary with root cause patterns, machine alerts, and recommendations for tomorrow's shift.", isReport:true},
+    {icon:"📈", label:"Backlog catch-up",     text:"Run a full backlog catch-up analysis. Call /api/lab/catchup for each department (surfacing, cutting, coating, assembly) and also lab-wide. For each, report: current backlog, daily incoming vs output, net gain/loss, days to clear, projected clear date, and weekly milestones. If any department is falling behind (output < incoming), flag it RED and calculate exactly what output rate is needed to catch up within 2 weeks. Format as a clear table.", isReport:true},
   ];
 
   const buildAgingPrompt=()=>{
