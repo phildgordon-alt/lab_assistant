@@ -6626,7 +6626,7 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
                 </select>
                 <span style={{fontSize:9,color:"#334155"}}>{filteredClients.length} devices</span>
               </div>
-              <div style={{maxHeight:200,overflowY:"auto",border:`1px solid ${T.border}`,borderRadius:4}}>
+              <div style={{minHeight:100,maxHeight:"60vh",height:200,overflowY:"auto",resize:"vertical",border:`1px solid ${T.border}`,borderRadius:4}}>
                 <table style={{width:"100%",fontSize:9,borderCollapse:"collapse"}}>
                   <thead>
                     <tr style={{borderBottom:`1px solid ${T.border}`,background:"#0a0f14"}}>
