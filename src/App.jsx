@@ -6073,6 +6073,7 @@ function NetworkTab({ovenServerUrl,settings}){
   const [switchPortsLoading,setSwitchPortsLoading]=useState(false);
   const [selectedDevice,setSelectedDevice]=useState(null);
   const [netSearch,setNetSearch]=useState("");
+  const [selectedClient,setSelectedClient]=useState(null);
   const [activeSite,setActiveSite]=useState("irvine1");
   const [vlanFilter,setVlanFilter]=useState("all");
   const [lastRefresh,setLastRefresh]=useState(null);
@@ -6633,18 +6634,37 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredClients.slice(0,50).map((c,i)=>{
+                    {filteredClients.slice(0,50).flatMap((c,i)=>{
                       const vdef=VLAN_DEFS.find(v=>v.id===c.vlan);
                       const isOT=c.vlan===30;
-                      return(
-                        <tr key={i} className="noc-evt" style={{borderBottom:"1px solid #0d1117",background:isOT?"rgba(239,68,68,0.02)":"transparent"}}>
+                      const isSel=selectedClient===i;
+                      const rows=[
+                        <tr key={`c${i}`} className="noc-evt" onClick={()=>setSelectedClient(isSel?null:i)} style={{borderBottom:"1px solid #0d1117",background:isSel?"rgba(59,130,246,0.08)":isOT?"rgba(239,68,68,0.02)":"transparent",cursor:"pointer"}}>
                           <td style={{padding:"4px 8px",color:isOT?"#ef4444":"#c8d6e5"}}>{c.hostname}</td>
                           <td style={{padding:"4px 8px",color:"#7dd3fc"}}>{c.ip}</td>
                           <td style={{padding:"4px 8px"}}><span style={{display:"inline-flex",alignItems:"center",gap:4}}><span style={{width:6,height:6,borderRadius:1,background:vdef?.color||"#334155",display:"inline-block"}}/><span style={{color:vdef?.color||"#475569"}}>{vdef?.name||c.vlan}</span></span></td>
                           <td style={{padding:"4px 8px",color:"#475569"}}>{c.is_wired?"Wired":"WiFi"}</td>
                           <td style={{padding:"4px 8px",color:"#334155"}}>{c.mac}</td>
                         </tr>
+                      ];
+                      if(isSel)rows.push(
+                        <tr key={`d${i}`}><td colSpan={5} style={{padding:"8px 10px",background:"#0a0f14",borderBottom:"1px solid #1e2d3d"}}>
+                          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                            {[
+                              {l:"HOSTNAME",v:c.hostname||"—"},{l:"IP ADDRESS",v:c.ip||"—"},{l:"MAC",v:c.mac||"—"},
+                              {l:"VLAN",v:vdef?`${vdef.id} — ${vdef.name}`:(c.vlan||"—")},{l:"TYPE",v:c.is_wired?"Wired":"Wireless"},{l:"SIGNAL",v:c.signal?`${c.signal} dBm`:"N/A"},
+                              {l:"TX",v:c.tx_bytes?fmtBytes(c.tx_bytes):"—"},{l:"RX",v:c.rx_bytes?fmtBytes(c.rx_bytes):"—"},{l:"UPTIME",v:c.uptime?fmtUptime(c.uptime):"—"},
+                            ].map(item=>(
+                              <div key={item.l} style={{background:"#070a0f",border:"1px solid #111827",borderRadius:2,padding:"3px 6px"}}>
+                                <div style={{fontSize:7,color:"#334155",letterSpacing:"0.1em"}}>{item.l}</div>
+                                <div style={{fontSize:9,color:"#7dd3fc"}}>{item.v}</div>
+                              </div>
+                            ))}
+                          </div>
+                          <button onClick={e=>{e.stopPropagation();sendNocMessage(`Tell me about client ${c.hostname||c.mac} at IP ${c.ip} on VLAN ${vdef?.name||c.vlan}. Is it expected on this VLAN? Any concerns?`);}} style={{marginTop:6,width:"100%",padding:"4px",background:"transparent",border:"1px solid #1e2d3d",color:"#334155",borderRadius:3,fontSize:8,fontFamily:mono,letterSpacing:"0.06em",cursor:"pointer"}}>⬡ ASK AGENT ABOUT THIS CLIENT</button>
+                        </td></tr>
                       );
+                      return rows;
                     })}
                   </tbody>
                 </table>
