@@ -179,15 +179,24 @@ const stmtUpsertSchedule = db.prepare(`
 `);
 const stmtScheduleCount = db.prepare('SELECT COUNT(*) as cnt FROM lab_schedule');
 
-// Readings (for backlog + test rule)
-const stmtLatestReading = db.prepare(`
-  SELECT value FROM ews_readings WHERE metric = ? ORDER BY ts DESC LIMIT 1
-`);
-const stmtRecentReadings = db.prepare(`
-  SELECT metric, value, unit, ts FROM ews_readings
-  WHERE metric = ? AND ts >= datetime('now', ?)
-  ORDER BY ts DESC
-`);
+// Readings (for backlog + test rule) — lazy-prepared because ews_readings
+// is created by ews-engine.js which may load after lab-config.js
+let _stmtLatestReading = null;
+let _stmtRecentReadings = null;
+function getStmtLatestReading() {
+  if (!_stmtLatestReading) {
+    try { _stmtLatestReading = db.prepare('SELECT value FROM ews_readings WHERE metric = ? ORDER BY ts DESC LIMIT 1'); }
+    catch (e) { return null; }
+  }
+  return _stmtLatestReading;
+}
+function getStmtRecentReadings() {
+  if (!_stmtRecentReadings) {
+    try { _stmtRecentReadings = db.prepare("SELECT metric, value, unit, ts FROM ews_readings WHERE metric = ? AND ts >= datetime('now', ?) ORDER BY ts DESC"); }
+    catch (e) { return null; }
+  }
+  return _stmtRecentReadings;
+}
 
 // ─── METRIC → CATEGORY/DEPARTMENT MAPPING ──────────────────────────────────
 
@@ -420,7 +429,7 @@ module.exports = {
   testRule(id) {
     const rule = stmtGetRule.get(id);
     if (!rule) return { error: 'Rule not found' };
-    const readings = stmtRecentReadings.all(rule.metric, '-60 minutes');
+    const readings = getStmtRecentReadings()?.all(rule.metric, '-60 minutes') || [];
     const violations = readings.filter(r => {
       if (rule.op === '>=') return r.value >= rule.threshold;
       if (rule.op === '<=') return r.value <= rule.threshold;
@@ -522,10 +531,10 @@ module.exports = {
     const result = [];
     for (const dept of departments) {
       const queueMetric = zoneMetrics[dept];
-      const queueReading = queueMetric ? stmtLatestReading.get(queueMetric) : null;
+      const queueReading = queueMetric ? getStmtLatestReading()?.get(queueMetric) : null;
       const backlog = queueReading ? queueReading.value : 0;
 
-      const throughputReading = stmtLatestReading.get('dvi_throughput_per_hour');
+      const throughputReading = getStmtLatestReading()?.get('dvi_throughput_per_hour');
       const throughput = throughputReading ? throughputReading.value : 0;
 
       const baselineRow = stmtGetBaselineValue.get(dept, currentShift, 'throughput');
@@ -586,10 +595,10 @@ module.exports = {
       const zoneMetrics = { surfacing: 'dvi_queue_depth_surf', cutting: 'dvi_queue_depth_cut', coating: 'dvi_queue_depth_coat', assembly: 'dvi_queue_depth_asse' };
       const queueMetric = zoneMetrics[department];
       if (queueMetric) {
-        const qr = stmtLatestReading.get(queueMetric);
+        const qr = getStmtLatestReading()?.get(queueMetric);
         if (qr && backlog == null) backlog = qr.value;
       }
-      const thr = stmtLatestReading.get('dvi_throughput_per_hour');
+      const thr = getStmtLatestReading()?.get('dvi_throughput_per_hour');
       if (thr && output == null) output = Math.round(thr.value * 8); // 8hr shift → daily
       const blRow = stmtGetBaselineValue.get(department, currentShift, 'throughput');
       if (blRow && incoming == null) incoming = Math.round(blRow.value * 8 * 0.9); // assume 90% of baseline is incoming demand
