@@ -5,40 +5,35 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 LA=~/Library/LaunchAgents
-SRV=com.paireyewear.labassistant.server.plist
-GW=com.paireyewear.labassistant.gateway.plist
-UID_NUM=$(id -u)
 
-echo "Installing plist files..."
-
-# Stop existing
-launchctl bootout gui/$UID_NUM/$LA/$SRV 2>/dev/null
-launchctl bootout gui/$UID_NUM/$LA/$GW 2>/dev/null
+echo "Stopping existing services..."
+launchctl stop com.paireyewear.labassistant.server 2>/dev/null
+launchctl stop com.paireyewear.labassistant.gateway 2>/dev/null
+sleep 2
 lsof -ti:3002 | xargs kill -9 2>/dev/null
 lsof -ti:3001 | xargs kill -9 2>/dev/null
-sleep 2
+sleep 1
 
-# Remove old
-rm -f $LA/$SRV
-rm -f $LA/$GW
+echo "Removing old plists..."
+launchctl unload "$LA/com.paireyewear.labassistant.server.plist" 2>/dev/null
+launchctl unload "$LA/com.paireyewear.labassistant.gateway.plist" 2>/dev/null
+rm -f "$LA/com.paireyewear.labassistant.server.plist"
+rm -f "$LA/com.paireyewear.labassistant.gateway.plist"
 
-# Copy new
-cp $DIR/$SRV $LA/$SRV
-cp $DIR/$GW $LA/$GW
+echo "Copying new plists..."
+cp "$DIR/com.paireyewear.labassistant.server.plist" "$LA/"
+cp "$DIR/com.paireyewear.labassistant.gateway.plist" "$LA/"
 
-# Validate
 echo "Validating..."
-plutil $LA/$SRV
-plutil $LA/$GW
+plutil "$LA/com.paireyewear.labassistant.server.plist"
+plutil "$LA/com.paireyewear.labassistant.gateway.plist"
 
-# Load
-echo "Loading..."
-launchctl bootstrap gui/$UID_NUM $LA/$SRV
-launchctl bootstrap gui/$UID_NUM $LA/$GW
+echo "Loading services..."
+launchctl load "$LA/com.paireyewear.labassistant.server.plist"
+launchctl load "$LA/com.paireyewear.labassistant.gateway.plist"
 
 sleep 3
 
-# Verify
 echo ""
 if curl -sf http://localhost:3002/health >/dev/null 2>&1; then
   echo "Server (3002): UP"
