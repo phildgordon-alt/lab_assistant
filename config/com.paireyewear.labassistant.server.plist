@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_OPTIONS</key>
+        <string>--openssl-legacy-provider</string>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    </dict>
+    <key>KeepAlive</key>
+    <true/>
+    <key>Label</key>
+    <string>com.paireyewear.labassistant.server</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/node</string>
+        <string>/Users/Shared/lab_assistant/server/oven-timer-server.js</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardErrorPath</key>
+    <string>/Users/Shared/lab_assistant/server/data/lab-server-error.log</string>
+    <key>StandardOutPath</key>
+    <string>/Users/Shared/lab_assistant/server/data/lab-server.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/Shared/lab_assistant</string>
+</dict>
+</plist>
