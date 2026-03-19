@@ -15,7 +15,7 @@ import { fileURLToPath } from 'url';
 import Database from 'better-sqlite3';
 import { initCircuitBreaker, getState as getCircuitState, forceHealthCheck } from './circuit-breaker.js';
 import { requestTimingMiddleware, log } from './logger.js';
-import { getRecentRequests, getRequestStats, healthCheck as dbHealthCheck } from './db/client.js';
+import { getRecentRequests, getRequestStats, getUsageStats, healthCheck as dbHealthCheck } from './db/client.js';
 import { getConcurrentCounts, getRateLimits, updateRateLimits } from './limiter.js';
 import { initSlack, startSlack } from './sources/slack.js';
 import { initRestRouter } from './sources/rest.js';
@@ -80,6 +80,19 @@ app.get('/gateway/stats/performance', async (req: Request, res: Response) => {
     rate_limit_hits: stats.by_status['rate_limited'] || 0,
     concurrent_requests: concurrent,
   });
+});
+
+app.get('/gateway/stats/usage', async (req: Request, res: Response) => {
+  const since = (req.query.since as string) || '24h';
+  const stats = await getUsageStats(since);
+  res.json(stats);
+});
+
+app.get('/gateway/stats/cost', async (req: Request, res: Response) => {
+  const weekly = await getUsageStats('7d');
+  const monthly = await getUsageStats('30d');
+  const daily = await getUsageStats('24h');
+  res.json({ daily: daily.totals, weekly: weekly.totals, monthly: monthly.totals, by_agent_30d: monthly.by_agent, by_day_30d: monthly.by_day });
 });
 
 app.get('/gateway/health', async (_req: Request, res: Response) => {

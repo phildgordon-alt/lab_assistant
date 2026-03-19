@@ -58,6 +58,22 @@ try {
     CREATE INDEX IF NOT EXISTS idx_requests_created ON gateway_requests(created_at);
     CREATE INDEX IF NOT EXISTS idx_rate_limits_identifier ON gateway_rate_limits(identifier, hit_at);
 
+    CREATE TABLE IF NOT EXISTS api_usage (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id TEXT,
+      agent_name TEXT NOT NULL,
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL NOT NULL DEFAULT 0,
+      source TEXT,
+      user_id TEXT,
+      created_at INTEGER DEFAULT (strftime('%s', 'now') * 1000)
+    );
+    CREATE INDEX IF NOT EXISTS idx_api_usage_agent ON api_usage(agent_name, created_at);
+    CREATE INDEX IF NOT EXISTS idx_api_usage_created ON api_usage(created_at);
+
     INSERT OR IGNORE INTO gateway_circuit_state (id, is_open, error_count) VALUES (1, 0, 0);
   `);
 
@@ -149,6 +165,90 @@ export async function getRequestStats(since = '24h') {
     by_agent: Object.fromEntries(byAgentRows.map(r => [r.agent_name, r.count])),
     by_source: Object.fromEntries(bySourceRows.map(r => [r.source, r.count])),
     by_status: Object.fromEntries(byStatusRows.map(r => [r.status, r.count])),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// API Usage Tracking
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Pricing per 1M tokens (as of March 2026)
+const MODEL_PRICING: Record<string, { input: number; output: number }> = {
+  'claude-haiku-4-5-20251001': { input: 0.80, output: 4.00 },
+  'claude-sonnet-4-20250514':  { input: 3.00, output: 15.00 },
+  'claude-opus-4-20250514':    { input: 15.00, output: 75.00 },
+};
+
+function calcCost(model: string, inputTokens: number, outputTokens: number): number {
+  const pricing = MODEL_PRICING[model] || MODEL_PRICING['claude-haiku-4-5-20251001'];
+  return (inputTokens / 1_000_000 * pricing.input) + (outputTokens / 1_000_000 * pricing.output);
+}
+
+export async function recordUsage(params: {
+  requestId?: string;
+  agentName: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  source?: string;
+  userId?: string;
+}): Promise<void> {
+  const totalTokens = params.inputTokens + params.outputTokens;
+  const costUsd = calcCost(params.model, params.inputTokens, params.outputTokens);
+  const stmt = db.prepare(`
+    INSERT INTO api_usage (request_id, agent_name, model, input_tokens, output_tokens, total_tokens, cost_usd, source, user_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(params.requestId || null, params.agentName, params.model, params.inputTokens, params.outputTokens, totalTokens, costUsd, params.source || null, params.userId || null);
+}
+
+export async function getUsageStats(since = '24h') {
+  const windowMs = since === '1h' ? 3600000 : since === '7d' ? 604800000 : since === '30d' ? 2592000000 : 86400000;
+  const cutoff = Date.now() - windowMs;
+
+  const totals = db.prepare(`
+    SELECT COUNT(*) as requests, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+           SUM(total_tokens) as total_tokens, SUM(cost_usd) as total_cost
+    FROM api_usage WHERE created_at > ?
+  `).get(cutoff) as any;
+
+  const byAgent = db.prepare(`
+    SELECT agent_name, COUNT(*) as requests, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+           SUM(total_tokens) as total_tokens, SUM(cost_usd) as cost
+    FROM api_usage WHERE created_at > ? GROUP BY agent_name ORDER BY cost DESC
+  `).all(cutoff) as any[];
+
+  const byDay = db.prepare(`
+    SELECT DATE(created_at / 1000, 'unixepoch') as day, COUNT(*) as requests,
+           SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+           SUM(total_tokens) as total_tokens, SUM(cost_usd) as cost
+    FROM api_usage WHERE created_at > ? GROUP BY day ORDER BY day
+  `).all(cutoff) as any[];
+
+  const byModel = db.prepare(`
+    SELECT model, COUNT(*) as requests, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+           SUM(cost_usd) as cost
+    FROM api_usage WHERE created_at > ? GROUP BY model
+  `).all(cutoff) as any[];
+
+  const bySource = db.prepare(`
+    SELECT source, COUNT(*) as requests, SUM(cost_usd) as cost
+    FROM api_usage WHERE created_at > ? GROUP BY source
+  `).all(cutoff) as any[];
+
+  return {
+    period: since,
+    totals: {
+      requests: totals?.requests || 0,
+      input_tokens: totals?.input_tokens || 0,
+      output_tokens: totals?.output_tokens || 0,
+      total_tokens: totals?.total_tokens || 0,
+      cost_usd: Math.round((totals?.total_cost || 0) * 10000) / 10000,
+    },
+    by_agent: byAgent.map(r => ({ ...r, cost: Math.round(r.cost * 10000) / 10000 })),
+    by_day: byDay.map(r => ({ ...r, cost: Math.round(r.cost * 10000) / 10000 })),
+    by_model: byModel.map(r => ({ ...r, cost: Math.round(r.cost * 10000) / 10000 })),
+    by_source: bySource.map(r => ({ ...r, cost: Math.round(r.cost * 10000) / 10000 })),
   };
 }
 

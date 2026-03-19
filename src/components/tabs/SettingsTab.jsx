@@ -1819,6 +1819,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
         {id:"knowledge",icon:"📚",label:"Knowledge Base"},
         {id:"database",icon:"🗄️",label:"Database"},
         {id:"security",icon:"🔒",label:"Security"},
+        {id:"spend",icon:"💰",label:"API Spend"},
         {id:"trayfleet",icon:"📡",label:"Tray Fleet (Dev)"},
       ].map(n=>(
         <button key={n.id} onClick={()=>setSub(n.id)}
@@ -2906,6 +2907,143 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
           </Card>
         </div>
       )}
+
+      {/* ══ API SPEND ══ */}
+      {sub==="spend"&&(
+        <SpendTracker gatewayUrl={settings?.gatewayUrl||`http://${window.location.hostname}:3001`}/>
+      )}
+    </div>
+  );
+}
+
+// ── Spend Tracker Component ──
+function SpendTracker({gatewayUrl}){
+  const [period,setPeriod]=useState("7d");
+  const [data,setData]=useState(null);
+  const [costData,setCostData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const mono="'JetBrains Mono',monospace";
+
+  const fetchData=useCallback(async()=>{
+    try{
+      const [uRes,cRes]=await Promise.all([
+        fetch(`${gatewayUrl}/gateway/stats/usage?since=${period}`),
+        fetch(`${gatewayUrl}/gateway/stats/cost`),
+      ]);
+      if(uRes.ok)setData(await uRes.json());
+      if(cRes.ok)setCostData(await cRes.json());
+    }catch(e){console.error("Spend fetch error:",e);}
+    finally{setLoading(false);}
+  },[gatewayUrl,period]);
+
+  useEffect(()=>{fetchData();const t=setInterval(fetchData,60000);return()=>clearInterval(t);},[fetchData]);
+
+  const fmtCost=(v)=>v!=null?`$${v.toFixed(4)}`:"$0.00";
+  const fmtTokens=(v)=>v!=null?(v>1000000?`${(v/1000000).toFixed(1)}M`:v>1000?`${(v/1000).toFixed(1)}K`:String(v)):"0";
+
+  if(loading)return <div style={{textAlign:"center",padding:40,color:T.textMuted}}>Loading spend data...</div>;
+
+  const totals=data?.totals||{};
+  const daily=costData?.daily||{};
+  const weekly=costData?.weekly||{};
+  const monthly=costData?.monthly||{};
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      {/* Period selector */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:18,fontWeight:800,color:T.text}}>API Spend Tracker</div>
+        <div style={{display:"flex",gap:6}}>
+          {["24h","7d","30d"].map(p=>(
+            <button key={p} onClick={()=>{setPeriod(p);setLoading(true);}} style={{
+              padding:"6px 14px",fontSize:11,fontFamily:mono,fontWeight:700,
+              background:period===p?T.blueDark:"transparent",color:period===p?"#93C5FD":T.textMuted,
+              border:`1px solid ${period===p?T.blue:"transparent"}`,borderRadius:6,cursor:"pointer",
+            }}>{p==="24h"?"TODAY":p==="7d"?"WEEK":"MONTH"}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        {[
+          {label:"TODAY",cost:fmtCost(daily.cost_usd),reqs:daily.requests||0,tokens:fmtTokens(daily.total_tokens)},
+          {label:"THIS WEEK",cost:fmtCost(weekly.cost_usd),reqs:weekly.requests||0,tokens:fmtTokens(weekly.total_tokens)},
+          {label:"THIS MONTH",cost:fmtCost(monthly.cost_usd),reqs:monthly.requests||0,tokens:fmtTokens(monthly.total_tokens)},
+          {label:"PERIOD TOTAL",cost:fmtCost(totals.cost_usd),reqs:totals.requests||0,tokens:fmtTokens(totals.total_tokens)},
+        ].map(c=>(
+          <Card key={c.label}>
+            <div style={{fontSize:9,color:T.textMuted,fontFamily:mono,letterSpacing:"0.12em",marginBottom:8}}>{c.label}</div>
+            <div style={{fontSize:24,fontWeight:800,color:T.green,fontFamily:mono}}>{c.cost}</div>
+            <div style={{fontSize:11,color:T.textMuted,marginTop:4}}>{c.reqs} requests · {c.tokens} tokens</div>
+          </Card>
+        ))}
+      </div>
+
+      {/* By Agent */}
+      <Card>
+        <SectionHeader>Spend by Agent</SectionHeader>
+        {(data?.by_agent||[]).length===0&&<div style={{color:T.textMuted,fontSize:12,padding:12}}>No usage data yet. API calls will appear here once agents are used.</div>}
+        <div style={{display:"flex",flexDirection:"column",gap:4}}>
+          {(data?.by_agent||[]).map(a=>{
+            const maxCost=Math.max(...(data?.by_agent||[]).map(x=>x.cost),0.001);
+            return(
+              <div key={a.agent_name} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 10px",background:T.bg,borderRadius:8,border:`1px solid ${T.border}`}}>
+                <span style={{fontSize:12,fontWeight:700,color:T.text,width:160,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{a.agent_name}</span>
+                <div style={{flex:1,height:8,background:T.surface,borderRadius:4,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:`${(a.cost/maxCost)*100}%`,background:T.blue,borderRadius:4}}/>
+                </div>
+                <span style={{fontSize:11,fontFamily:mono,color:T.green,width:70,textAlign:"right"}}>{fmtCost(a.cost)}</span>
+                <span style={{fontSize:10,fontFamily:mono,color:T.textMuted,width:60,textAlign:"right"}}>{a.requests} req</span>
+                <span style={{fontSize:10,fontFamily:mono,color:T.textDim,width:60,textAlign:"right"}}>{fmtTokens(a.total_tokens)}</span>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+
+      {/* Daily trend */}
+      {(data?.by_day||[]).length>0&&(
+        <Card>
+          <SectionHeader>Daily Cost Trend</SectionHeader>
+          <div style={{display:"flex",gap:4,alignItems:"flex-end",height:120}}>
+            {(data?.by_day||[]).map((d,i)=>{
+              const maxDayCost=Math.max(...(data?.by_day||[]).map(x=>x.cost),0.001);
+              const pct=Math.max(4,(d.cost/maxDayCost)*100);
+              return(
+                <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}} title={`${d.day}: ${fmtCost(d.cost)} · ${d.requests} req`}>
+                  <div style={{width:"100%",height:`${pct}%`,background:T.blue,borderRadius:"3px 3px 0 0",minHeight:4}}/>
+                  <span style={{fontSize:7,color:T.textDim,fontFamily:mono}}>{(d.day||"").slice(5)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* By model + source */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+        <Card>
+          <SectionHeader>By Model</SectionHeader>
+          {(data?.by_model||[]).map(m=>(
+            <div key={m.model} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${T.border}`,fontSize:11}}>
+              <span style={{color:T.text,fontFamily:mono,fontSize:10}}>{m.model.replace("claude-","").replace("-20251001","").replace("-20250514","")}</span>
+              <span style={{color:T.green,fontFamily:mono}}>{fmtCost(m.cost)}</span>
+            </div>
+          ))}
+          {(data?.by_model||[]).length===0&&<div style={{color:T.textMuted,fontSize:11}}>No data</div>}
+        </Card>
+        <Card>
+          <SectionHeader>By Source</SectionHeader>
+          {(data?.by_source||[]).map(s=>(
+            <div key={s.source} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${T.border}`,fontSize:11}}>
+              <span style={{color:T.text,textTransform:"uppercase",fontFamily:mono,fontSize:10}}>{s.source||"unknown"}</span>
+              <span style={{color:T.green,fontFamily:mono}}>{fmtCost(s.cost)}</span>
+            </div>
+          ))}
+          {(data?.by_source||[]).length===0&&<div style={{color:T.textMuted,fontSize:11}}>No data</div>}
+        </Card>
+      </div>
     </div>
   );
 }

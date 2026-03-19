@@ -18,6 +18,7 @@ import {
   getAgentSystemPrompt as getMcpAgentPrompt,
 } from '../mcp/server.js';
 import { getAgentConfigName } from './classifier.js';
+import { recordUsage } from '../db/client.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -282,6 +283,8 @@ export async function runAgent(
       let finalText = '';
       let iterations = 0;
       const MAX_ITERATIONS = 10;
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
 
       while (iterations < MAX_ITERATIONS) {
         iterations++;
@@ -293,6 +296,12 @@ export async function runAgent(
           tools: agentTools as Anthropic.Tool[],
           messages,
         }));
+
+        // Track token usage across iterations
+        if (response.usage) {
+          totalInputTokens += response.usage.input_tokens || 0;
+          totalOutputTokens += response.usage.output_tokens || 0;
+        }
 
         // Check if response contains tool use
         const toolUseBlocks = response.content.filter((c) => c.type === 'tool_use');
@@ -345,6 +354,11 @@ export async function runAgent(
         // Add assistant response and tool results to messages
         messages.push({ role: 'assistant', content: response.content });
         messages.push({ role: 'user', content: toolResults });
+      }
+
+      // Record API usage
+      if (totalInputTokens > 0 || totalOutputTokens > 0) {
+        recordUsage({ agentName, model: MODEL, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, source, userId }).catch(() => {});
       }
 
       return finalText || 'No response generated.';
@@ -416,6 +430,8 @@ export async function runAgentStreaming(
 
       let iterations = 0;
       const MAX_ITERATIONS = 10;
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
 
       while (iterations < MAX_ITERATIONS) {
         iterations++;
@@ -445,6 +461,12 @@ export async function runAgentStreaming(
         // Get the final message to check for tool use
         const finalMessage = await stream.finalMessage();
         currentContent = finalMessage.content;
+
+        // Track token usage across iterations
+        if (finalMessage.usage) {
+          totalInputTokens += finalMessage.usage.input_tokens || 0;
+          totalOutputTokens += finalMessage.usage.output_tokens || 0;
+        }
 
         // Check for tool use blocks
         const toolUseBlocks = currentContent.filter((c) => c.type === 'tool_use');
@@ -494,6 +516,11 @@ export async function runAgentStreaming(
         // Add assistant response and tool results to messages for next iteration
         messages.push({ role: 'assistant', content: currentContent });
         messages.push({ role: 'user', content: toolResults });
+      }
+
+      // Record API usage after agentic loop completes
+      if (totalInputTokens > 0 || totalOutputTokens > 0) {
+        recordUsage({ agentName, model: MODEL, inputTokens: totalInputTokens, outputTokens: totalOutputTokens, source, userId }).catch(() => {});
       }
     });
 
