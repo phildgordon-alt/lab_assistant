@@ -1,5 +1,5 @@
 // SettingsTab — Settings configuration panel extracted from App.jsx
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { T, mono, DEFAULT_SETTINGS } from '../../constants';
 import { Card, SectionHeader } from '../shared';
 
