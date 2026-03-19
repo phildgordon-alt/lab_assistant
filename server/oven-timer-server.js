@@ -704,7 +704,19 @@ const server = http.createServer(async (req, res) => {
   if (req.method==='GET' && url.pathname==='/oven') {
     return html(res, buildStatusPage());
   }
-  if (req.method==='GET' && (url.pathname==='/' || url.pathname==='/status')) {
+  if (req.method==='GET' && url.pathname==='/status') {
+    return html(res, buildLandingPage());
+  }
+
+  // ── Serve frontend SPA from dist/ ─────────────────────────
+  if (req.method==='GET' && (url.pathname==='/' || url.pathname==='/index.html')) {
+    const distIndex = path.join(__dirname, '..', 'dist', 'index.html');
+    if (fs.existsSync(distIndex)) {
+      cors(res);
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(fs.readFileSync(distIndex));
+      return;
+    }
     return html(res, buildLandingPage());
   }
 
@@ -3808,6 +3820,42 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     const dept = url.searchParams.get('department');
     const days = parseInt(url.searchParams.get('days') || '30');
     return json(res, labConfig.getBacklogTrend(dept, days));
+  }
+
+  // ── Static files: dist/ assets + standalone apps ────────────
+  if (req.method==='GET') {
+    const MIME_TYPES = {'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.svg':'image/svg+xml','.ico':'image/x-icon','.woff':'font/woff','.woff2':'font/woff2'};
+    const rootDir = path.join(__dirname, '..');
+
+    // Try dist/ first (built SPA assets), then standalone/, then public/
+    const tryPaths = [
+      path.join(rootDir, 'dist', url.pathname),
+      path.join(rootDir, url.pathname),
+    ];
+
+    for (const filePath of tryPaths) {
+      // Prevent directory traversal
+      if (!filePath.startsWith(rootDir)) continue;
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        const ext = path.extname(filePath).toLowerCase();
+        const mime = MIME_TYPES[ext] || 'application/octet-stream';
+        cors(res);
+        res.writeHead(200, { 'Content-Type': mime });
+        res.end(fs.readFileSync(filePath));
+        return;
+      }
+    }
+
+    // SPA fallback: any non-API, non-file route serves index.html
+    if (!url.pathname.startsWith('/api/') && !url.pathname.includes('.')) {
+      const distIndex = path.join(rootDir, 'dist', 'index.html');
+      if (fs.existsSync(distIndex)) {
+        cors(res);
+        res.writeHead(200, { 'Content-Type': 'text/html' });
+        res.end(fs.readFileSync(distIndex));
+        return;
+      }
+    }
   }
 
   // ── 404 ─────────────────────────────────────────────────────
