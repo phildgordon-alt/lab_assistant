@@ -6387,9 +6387,9 @@ ${(events||[]).slice(0,12).map(e=>`  [${timeSince(e.datetime)}] [${e.severity}] 
 
 VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`).join(", ")}`;
     try{
-      const res=await fetch(`${gwBase}/web/ask`,{
+      const res=await fetch(`${gwBase}/web/ask-sync`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:`${EXPERT_SYSTEM}\n\n${ctx}\n\n---\nUser query: ${userMsg}`,stream:false}),
+        body:JSON.stringify({question:`${EXPERT_SYSTEM}\n\n${ctx}\n\n---\nUser query: ${userMsg}`,agent:"network"}),
       });
       if(res.ok){const d=await res.json();setMessages(p=>[...p,{role:"assistant",content:d.response||d.text||JSON.stringify(d)}]);}
       else setMessages(p=>[...p,{role:"assistant",content:`Gateway error: ${res.status}`}]);
@@ -7748,10 +7748,10 @@ Generate a concise situation report:
 Be direct. No hedging. This is a live production environment.`;
     try{
       const gwBase=`http://${window.location.hostname}:3001`;
-      const res=await fetch(`${gwBase}/web/ask`,{
+      const res=await fetch(`${gwBase}/web/ask-sync`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({message:prompt,stream:false}),
+        body:JSON.stringify({question:prompt,agent:"lab"}),
       });
       if(res.ok){const d=await res.json();setSituationReport(d.response||d.text||JSON.stringify(d));}
       else setSituationReport(`Gateway error: ${res.status}`);
