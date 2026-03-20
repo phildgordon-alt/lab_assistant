@@ -3842,13 +3842,35 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       days: parseInt(url.searchParams.get('days') || '14'),
       stage: url.searchParams.get('stage') || null,
     });
-    // Enrich with full names from assembly config operator map
-    const nameMap = assemblyConfig.operatorMap || {};
+    // Build name map from ALL sources: operatorMap + assignments
+    const nameMap = { ...(assemblyConfig.operatorMap || {}) };
+    const assignments = assemblyConfig.assignments || {};
+    // Also extract names from station assignments (STN-01: {operatorName: "John D"})
+    // and build initials→name from the operators roster
+    const operators = assemblyConfig.operators || {};
+    for (const [id, op] of Object.entries(operators)) {
+      if (op.name) nameMap[id] = op.name;
+    }
+
+    // Build set of real assigned operator names (from station assignments)
+    const assignedNames = new Set();
+    for (const stn of Object.values(assignments)) {
+      if (stn.operatorName) assignedNames.add(stn.operatorName);
+    }
+
     if (result.operators) {
       result.operators = result.operators.map(op => ({
         ...op,
         name: nameMap[op.operator] || op.operator,
       }));
+
+      // If querying assembly, filter to operators whose name is in station assignments
+      const stageParam = url.searchParams.get('stage') || '';
+      if (stageParam.toUpperCase().includes('ASSEMBL') && assignedNames.size > 0) {
+        result.operators = result.operators.filter(op => assignedNames.has(op.name) || assignedNames.has(nameMap[op.operator]));
+        result.operators.forEach((op, i) => op.rank = i + 1);
+        result.operatorCount = result.operators.length;
+      }
     }
     return json(res, result);
   }
