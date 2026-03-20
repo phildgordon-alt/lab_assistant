@@ -4964,16 +4964,19 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const [localOpMap,setLocalOpMap]=useState({});
   const [editingStn,setEditingStn]=useState(null);
   const [editName,setEditName]=useState('');
+  const [asmHistory,setAsmHistory]=useState([]);
 
   // Fetch assembly leaderboard data + operator config
   useEffect(()=>{
     const fetchAsm=async()=>{
       try{
-        const [jobsRes, cfgRes] = await Promise.all([
+        const [jobsRes, cfgRes, histRes] = await Promise.all([
           fetch(`${ovenServerUrl}/api/assembly/jobs`),
-          fetch(`${ovenServerUrl}/api/assembly/config`)
+          fetch(`${ovenServerUrl}/api/assembly/config`),
+          fetch(`${ovenServerUrl}/api/assembly/history?days=30`),
         ]);
         if(jobsRes.ok) setAsmData(await jobsRes.json());
+        if(histRes.ok){const hd=await histRes.json();setAsmHistory(hd.history||[]);}
         if(cfgRes.ok){
           const cfg = await cfgRes.json();
           setAsmConfig(cfg);
@@ -5355,6 +5358,45 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </Card>
         ) : null;
       })()}
+
+      {/* Historical Assembly Data — daily totals with per-operator breakdown */}
+      {asmHistory.length>0&&(
+        <Card style={{marginTop:20}}>
+          <SectionHeader>Assembly History — Daily Totals</SectionHeader>
+          <div style={{maxHeight:400,overflowY:"auto"}}>
+            <table style={{width:"100%",fontSize:10,fontFamily:mono,borderCollapse:"collapse"}}>
+              <thead>
+                <tr style={{borderBottom:`1px solid ${T.border}`,position:"sticky",top:0,background:T.card}}>
+                  {["Date","Jobs","Events","Operators","Top Performers"].map(h=><th key={h} style={{padding:"6px 10px",textAlign:"left",color:T.textMuted,fontSize:9,letterSpacing:"0.08em"}}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {asmHistory.map(day=>{
+                  const ops=Object.entries(day.byOperator||{}).sort((a,b)=>b[1]-a[1]);
+                  return(
+                    <tr key={day.date} style={{borderBottom:`1px solid #0d1117`}}>
+                      <td style={{padding:"6px 10px",color:T.text,fontWeight:600}}>{day.date}</td>
+                      <td style={{padding:"6px 10px",color:T.green,fontWeight:700,fontSize:14}}>{day.jobs}</td>
+                      <td style={{padding:"6px 10px",color:"#475569"}}>{day.events}</td>
+                      <td style={{padding:"6px 10px",color:T.blue}}>{day.operators}</td>
+                      <td style={{padding:"6px 10px"}}>
+                        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                          {ops.slice(0,5).map(([name,count],i)=>(
+                            <span key={name} style={{fontSize:9,padding:"1px 6px",borderRadius:3,background:i===0?`${T.green}22`:T.surface,border:`1px solid ${i===0?`${T.green}44`:T.border}`,color:i===0?T.green:T.text}}>
+                              {name}: {count}
+                            </span>
+                          ))}
+                          {ops.length>5&&<span style={{fontSize:9,color:T.textDim}}>+{ops.length-5} more</span>}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </ProductionStageTab>
   );
 }
