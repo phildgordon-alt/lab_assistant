@@ -6852,7 +6852,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
     }catch(e){setSelectedJob(null);}
   };
 
-  const fmtDays=(d)=>d!=null?d<0.05?`${Math.round(d*24*60)}m`:d<1?`${Math.round(d*24)}h`:`${d}d`:"—";
+  const fmtDays=(d)=>{if(d==null)return"—";const abs=Math.abs(d);const neg=d<0?"-":"";if(abs<0.05)return`${neg}${Math.round(abs*24*60)}m`;if(abs<1)return`${neg}${Math.round(abs*24)}h`;return`${neg}${Math.round(abs*10)/10}d`;};
   const stageColor=(s)=>({INCOMING:"#64748b",SURFACING:"#06b6d4",COATING:"#f59e0b",CUTTING:"#3b82f6",ASSEMBLY:"#8b5cf6",QC:"#10b981",SHIPPED:"#10b981"}[s]||"#475569");
   const slaColor=(s)=>s==="met"||s==="on_track"?"#10b981":s==="at_risk"?"#f59e0b":s==="critical"||s==="breached"?"#ef4444":"#475569";
 

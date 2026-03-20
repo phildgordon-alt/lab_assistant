@@ -72,8 +72,12 @@ for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* already exists */ }
 }
 
-// Rename column migration (sla_target_hours → sla_target_days)
-try { db.exec('ALTER TABLE job_lifecycle RENAME COLUMN sla_target_hours TO sla_target_days'); } catch (e) { /* already renamed or doesn't exist */ }
+// One-time migration: drop old tables with wrong hour-based SLA data, recreate with days
+try { db.exec('ALTER TABLE job_lifecycle RENAME COLUMN sla_target_hours TO sla_target_days'); } catch (e) { /* already renamed */ }
+// Reset SLA values to days (old data had hours stored as days)
+try { db.exec("UPDATE job_lifecycle SET sla_due_at = entered_lab_at + CAST(sla_target_days * 86400000 AS INTEGER) WHERE sla_due_at IS NOT NULL AND sla_target_days > 10"); } catch (e) { /* ignore */ }
+// Fix any sla_target_days that are still in hours (>10 = definitely hours not days)
+try { db.exec("UPDATE job_lifecycle SET sla_target_days = sla_target_days / 24.0 WHERE sla_target_days > 10"); } catch (e) { /* ignore */ }
 
 // ─── PREPARED STATEMENTS ───────────────────────────────────────────────────
 
