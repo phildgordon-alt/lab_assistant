@@ -1960,18 +1960,52 @@ Respond with a structured batching plan in this format:
     }
     const fullNameMap = { ...nameFromAssign, ...opMap };
 
+    // Also count per-station for the day (more reliable than per-operator)
+    const byDayStation = {};
+    for (const job of allJobs) {
+      const history2 = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
+      if (!history2 || !history2.events) continue;
+      for (const evt of history2.events) {
+        if (!evt.timestamp || evt.timestamp < sinceMs) continue;
+        const m = evt.station?.match(/^ASSEMBLY #(\d+)/);
+        if (!m) continue;
+        const day = new Date(evt.timestamp).toISOString().slice(0, 10);
+        if (!byDayStation[day]) byDayStation[day] = {};
+        if (!byDayStation[day][evt.station]) byDayStation[day][evt.station] = new Set();
+        byDayStation[day][evt.station].add(job.job_id);
+      }
+    }
+
+    // Use station assignments to attribute station counts to operators
+    const ASM_STN2 = [];
+    for (let i = 1; i <= 15; i++) ASM_STN2.push({ id: `STN-${String(i).padStart(2,'0')}`, dvi: `ASSEMBLY #${i}` });
+    const stnToName = {};
+    for (const [stnId, info] of Object.entries(assignments)) {
+      if (!info?.operatorName) continue;
+      const stn = ASM_STN2.find(s => s.id === stnId);
+      if (stn) stnToName[stn.dvi] = info.operatorName;
+    }
+
     const history = Object.values(byDay)
-      .map(d => ({
-        date: d.date,
-        jobs: d.jobs.size,
-        events: d.events,
-        operators: d.operators.size,
-        byOperator: Object.fromEntries(
-          Object.entries(d.byOperator)
-            .map(([init, jobSet]) => [fullNameMap[init] || init, jobSet.size])
-            .sort((a, b) => b[1] - a[1])
-        ),
-      }))
+      .map(d => {
+        // Build operator attribution from station assignments
+        const dayStations = byDayStation[d.date] || {};
+        const opJobs = {};
+        for (const [station, jobSet] of Object.entries(dayStations)) {
+          const name = stnToName[station] || station.replace('ASSEMBLY ', 'Stn ');
+          opJobs[name] = (opJobs[name] || 0) + jobSet.size;
+        }
+
+        return {
+          date: d.date,
+          jobs: d.jobs.size,
+          events: d.events,
+          operators: Object.keys(opJobs).length,
+          byOperator: Object.fromEntries(
+            Object.entries(opJobs).sort((a, b) => b[1] - a[1])
+          ),
+        };
+      })
       .sort((a, b) => b.date.localeCompare(a.date));
 
     return json(res, { history, days });
