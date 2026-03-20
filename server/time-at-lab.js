@@ -40,7 +40,7 @@ const migrations = [
     current_stage TEXT DEFAULT 'INCOMING',
     current_station TEXT,
     minutes_total REAL,
-    sla_target_hours REAL DEFAULT 48,
+    sla_target_days REAL DEFAULT 48,
     sla_due_at INTEGER,
     sla_met INTEGER,
     rework_count INTEGER DEFAULT 0,
@@ -76,8 +76,8 @@ for (const sql of migrations) {
 
 const stmts = {
   upsertJob: db.prepare(`
-    INSERT INTO job_lifecycle (job_id, coating, lens_material, lens_type, is_rush, entered_lab_at, current_stage, current_station, sla_target_hours, sla_due_at, event_count, updated_at)
-    VALUES (@job_id, @coating, @lens_material, @lens_type, @is_rush, @entered_lab_at, @current_stage, @current_station, @sla_target_hours, @sla_due_at, 1, @updated_at)
+    INSERT INTO job_lifecycle (job_id, coating, lens_material, lens_type, is_rush, entered_lab_at, current_stage, current_station, sla_target_days, sla_due_at, event_count, updated_at)
+    VALUES (@job_id, @coating, @lens_material, @lens_type, @is_rush, @entered_lab_at, @current_stage, @current_station, @sla_target_days, @sla_due_at, 1, @updated_at)
     ON CONFLICT(job_id) DO UPDATE SET
       current_stage = excluded.current_stage,
       current_station = excluded.current_station,
@@ -105,8 +105,8 @@ const stmts = {
   getSummary: db.prepare(`
     SELECT coating, lens_material, lens_type, current_stage,
       COUNT(*) as job_count,
-      ROUND(AVG(CASE WHEN shipped_at IS NOT NULL THEN (shipped_at - entered_lab_at) / 3600000.0 END), 1) as avg_hours,
-      ROUND(AVG(CASE WHEN shipped_at IS NULL THEN (? - entered_lab_at) / 3600000.0 END), 1) as avg_hours_active
+      ROUND(AVG(CASE WHEN shipped_at IS NOT NULL THEN (shipped_at - entered_lab_at) / 86400000.0 END), 1) as avg_days,
+      ROUND(AVG(CASE WHEN shipped_at IS NULL THEN (? - entered_lab_at) / 86400000.0 END), 1) as avg_days_active
     FROM job_lifecycle
     WHERE entered_lab_at >= ?
     GROUP BY coating, lens_material, lens_type, current_stage
@@ -115,9 +115,9 @@ const stmts = {
   getShippedStats: db.prepare(`
     SELECT
       COUNT(*) as total,
-      ROUND(AVG((shipped_at - entered_lab_at) / 3600000.0), 1) as avg_hours,
-      ROUND(MIN((shipped_at - entered_lab_at) / 3600000.0), 1) as min_hours,
-      ROUND(MAX((shipped_at - entered_lab_at) / 3600000.0), 1) as max_hours,
+      ROUND(AVG((shipped_at - entered_lab_at) / 86400000.0), 1) as avg_days,
+      ROUND(MIN((shipped_at - entered_lab_at) / 86400000.0), 1) as min_days,
+      ROUND(MAX((shipped_at - entered_lab_at) / 86400000.0), 1) as max_days,
       SUM(CASE WHEN sla_met = 1 THEN 1 ELSE 0 END) as sla_met,
       SUM(CASE WHEN sla_met = 0 THEN 1 ELSE 0 END) as sla_missed
     FROM job_lifecycle
@@ -136,8 +136,8 @@ const stmts = {
 
   getActiveWip: db.prepare(`
     SELECT current_stage, COUNT(*) as count,
-      ROUND(AVG((? - entered_lab_at) / 3600000.0), 1) as avg_hours,
-      ROUND(MAX((? - entered_lab_at) / 3600000.0), 1) as oldest_hours
+      ROUND(AVG((? - entered_lab_at) / 86400000.0), 1) as avg_days,
+      ROUND(MAX((? - entered_lab_at) / 86400000.0), 1) as oldest_days
     FROM job_lifecycle
     WHERE shipped_at IS NULL AND current_stage != 'SHIPPED'
     GROUP BY current_stage
@@ -145,18 +145,18 @@ const stmts = {
 
   getAtRisk: db.prepare(`
     SELECT job_id, coating, lens_material, lens_type, current_stage, entered_lab_at,
-      sla_target_hours, sla_due_at,
-      ROUND((? - entered_lab_at) / 3600000.0, 1) as hours_elapsed,
-      ROUND((sla_due_at - ?) / 3600000.0, 1) as hours_remaining
+      sla_target_days, sla_due_at,
+      ROUND((? - entered_lab_at) / 86400000.0, 1) as days_elapsed,
+      ROUND((sla_due_at - ?) / 86400000.0, 1) as days_remaining
     FROM job_lifecycle
     WHERE shipped_at IS NULL AND sla_due_at IS NOT NULL
-    ORDER BY hours_remaining ASC
+    ORDER BY days_remaining ASC
     LIMIT 50
   `),
 
   getRecentShipped: db.prepare(`
     SELECT job_id, coating, lens_material, lens_type, is_rush, entered_lab_at, shipped_at,
-      ROUND((shipped_at - entered_lab_at) / 3600000.0, 1) as total_hours, sla_met
+      ROUND((shipped_at - entered_lab_at) / 86400000.0, 1) as total_days, sla_met
     FROM job_lifecycle
     WHERE shipped_at IS NOT NULL
     ORDER BY shipped_at DESC
@@ -168,15 +168,13 @@ const stmts = {
 
 // ─── SLA RULES ─────────────────────────────────────────────────────────────
 
-function getSlaHours(lensType, coating, isRush) {
-  if (isRush) return 24;
-  // Progressive + complex coatings get more time
-  if (lensType === 'P' && (coating === 'TRANSITIONS' || coating === 'POLARIZED' || coating === 'MIRROR')) return 12;
-  if (lensType === 'P') return 8;
-  if (coating === 'TRANSITIONS' || coating === 'POLARIZED') return 8;
-  // Simple SV + hard coat
-  if (lensType === 'S' && (coating === 'HARD_COAT' || coating === 'HARD COAT')) return 4;
-  return 6; // default
+function getSlaDays(lensType, coating, isRush) {
+  if (isRush) return 1;       // 1 day
+  if (lensType === 'P' && (coating === 'TRANSITIONS' || coating === 'POLARIZED' || coating === 'MIRROR')) return 3;
+  if (lensType === 'P') return 2;
+  if (coating === 'TRANSITIONS' || coating === 'POLARIZED') return 2;
+  if (lensType === 'S' && (coating === 'HARD_COAT' || coating === 'HARD COAT')) return 1;
+  return 2; // default
 }
 
 // ─── STAGE MAPPING ─────────────────────────────────────────────────────────
@@ -221,7 +219,7 @@ function processEvent(evt) {
   const lensType = xml.lensType || null;
   const isRush = (xml.rush === 'Y' || evt.rush === 'Y') ? 1 : 0;
 
-  const slaHours = getSlaHours(lensType, coating, isRush);
+  const slaDays = getSlaDays(lensType, coating, isRush);
 
   // Upsert job lifecycle
   try {
@@ -234,8 +232,8 @@ function processEvent(evt) {
       entered_lab_at: timestamp,
       current_stage: stage,
       current_station: station,
-      sla_target_hours: slaHours,
-      sla_due_at: timestamp + (slaHours * 3600000),
+      sla_target_days: slaDays,
+      sla_due_at: timestamp + (slaDays * 86400000),
       updated_at: now,
     });
   } catch (e) { /* ignore duplicate */ }
@@ -336,9 +334,9 @@ module.exports = {
 
     return {
       ...job,
-      hoursElapsed: job.shipped_at
-        ? Math.round((job.shipped_at - job.entered_lab_at) / 3600000 * 10) / 10
-        : Math.round((now - job.entered_lab_at) / 3600000 * 10) / 10,
+      daysElapsed: job.shipped_at
+        ? Math.round((job.shipped_at - job.entered_lab_at) / 86400000 * 10) / 10
+        : Math.round((now - job.entered_lab_at) / 86400000 * 10) / 10,
       stageDurations,
       transitions,
       slaStatus: job.sla_met === 1 ? 'met' : job.sla_met === 0 ? 'missed' : (job.sla_due_at && now > job.sla_due_at ? 'breached' : 'on_track'),
@@ -364,9 +362,9 @@ module.exports = {
       period,
       shipped: {
         total: shipped?.total || 0,
-        avgHours: shipped?.avg_hours || 0,
-        minHours: shipped?.min_hours || 0,
-        maxHours: shipped?.max_hours || 0,
+        avgHours: shipped?.avg_days || 0,
+        minHours: shipped?.min_days || 0,
+        maxHours: shipped?.max_days || 0,
         slaCompliance: shipped?.total > 0 ? Math.round(((shipped.sla_met || 0) / shipped.total) * 1000) / 10 : 100,
         slaMet: shipped?.sla_met || 0,
         slaMissed: shipped?.sla_missed || 0,
@@ -376,17 +374,17 @@ module.exports = {
       wip: wip.map(w => ({
         stage: w.current_stage,
         count: w.count,
-        avgHours: w.avg_hours,
-        oldestHours: w.oldest_hours,
+        avgHours: w.avg_days,
+        oldestHours: w.oldest_days,
       })),
-      atRisk: atRisk.filter(j => j.hours_remaining != null && j.hours_remaining < j.sla_target_hours * 0.5).map(j => ({
+      atRisk: atRisk.filter(j => j.days_remaining != null && j.days_remaining < j.sla_target_days * 0.5).map(j => ({
         jobId: j.job_id,
         coating: j.coating,
         stage: j.current_stage,
-        hoursElapsed: j.hours_elapsed,
-        hoursRemaining: j.hours_remaining,
-        slaHours: j.sla_target_hours,
-        status: j.hours_remaining <= 0 ? 'breached' : j.hours_remaining < 2 ? 'critical' : 'at_risk',
+        daysElapsed: j.days_elapsed,
+        daysRemaining: j.days_remaining,
+        slaDays: j.sla_target_days,
+        status: j.days_remaining <= 0 ? 'breached' : j.days_remaining < 2 ? 'critical' : 'at_risk',
       })),
       totalTracked: stmts.getJobCount.get()?.cnt || 0,
     };

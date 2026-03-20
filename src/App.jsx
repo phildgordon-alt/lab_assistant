@@ -6819,13 +6819,13 @@ function TimeAtLabTab({ovenServerUrl,settings}){
   const [lastRefresh,setLastRefresh]=useState(null);
 
   // Demo data
-  const DEMO_SUMMARY={period:"7d",shipped:{total:842,avgHours:6.8,minHours:1.2,maxHours:38.4,slaCompliance:94.2,slaMet:793,slaMissed:49},
+  const DEMO_SUMMARY={period:"7d",shipped:{total:842,avgDays:1.8,minDays:0.3,maxDays:4.2,slaCompliance:94.2,slaMet:793,slaMissed:49},
     stageDwells:[{stage:"COATING",avg_min:142,min_min:45,max_min:380,transitions:890},{stage:"SURFACING",avg_min:98,min_min:22,max_min:240,transitions:845},{stage:"ASSEMBLY",avg_min:52,min_min:12,max_min:180,transitions:830},{stage:"CUTTING",avg_min:38,min_min:8,max_min:120,transitions:840},{stage:"QC",avg_min:24,min_min:5,max_min:90,transitions:825},{stage:"INCOMING",avg_min:18,min_min:2,max_min:60,transitions:842}],
     bottleneck:{stage:"COATING",avgMinutes:142},
-    wip:[{stage:"INCOMING",count:22,avgHours:0.8,oldestHours:3.2},{stage:"SURFACING",count:45,avgHours:2.1,oldestHours:6.8},{stage:"COATING",count:68,avgHours:3.4,oldestHours:12.1},{stage:"CUTTING",count:34,avgHours:1.2,oldestHours:4.5},{stage:"ASSEMBLY",count:52,avgHours:1.8,oldestHours:8.2},{stage:"QC",count:18,avgHours:0.6,oldestHours:2.1}],
-    atRisk:[{jobId:"421690",coating:"TRANS",stage:"COATING",hoursElapsed:10.2,hoursRemaining:1.8,slaHours:12,status:"critical"},{jobId:"421672",coating:"AR",stage:"ASSEMBLY",hoursElapsed:5.1,hoursRemaining:0.9,slaHours:6,status:"critical"},{jobId:"421688",coating:"POLAR",stage:"SURFACING",hoursElapsed:6.4,hoursRemaining:5.6,slaHours:12,status:"at_risk"}],
+    wip:[{stage:"INCOMING",count:22,avgDays:0.03,oldestDays:0.13},{stage:"SURFACING",count:45,avgDays:0.09,oldestDays:0.28},{stage:"COATING",count:68,avgDays:0.14,oldestDays:0.5},{stage:"CUTTING",count:34,avgDays:0.05,oldestDays:0.19},{stage:"ASSEMBLY",count:52,avgDays:0.08,oldestDays:0.34},{stage:"QC",count:18,avgDays:0.03,oldestDays:0.09}],
+    atRisk:[{jobId:"421690",coating:"TRANS",stage:"COATING",daysElapsed:2.4,daysRemaining:0.6,slaDays:3,status:"critical"},{jobId:"421672",coating:"AR",stage:"ASSEMBLY",daysElapsed:1.8,daysRemaining:0.2,slaDays:2,status:"critical"},{jobId:"421688",coating:"POLAR",stage:"SURFACING",daysElapsed:1.2,daysRemaining:1.8,slaDays:3,status:"at_risk"}],
     totalTracked:2847};
-  const DEMO_RECENT=Array.from({length:20},(_,i)=>({job_id:`42${1695-i}`,coating:["AR","Blue Cut","Hard Coat","Transitions","Mirror"][i%5],lens_material:["PLY","H67","CR39"][i%3],lens_type:["P","S","B"][i%3],is_rush:i%7===0?1:0,total_hours:Math.round((2+Math.random()*12)*10)/10,sla_met:Math.random()>0.1?1:0,shipped_at:Date.now()-i*3600000,entered_lab_at:Date.now()-(i+6)*3600000}));
+  const DEMO_RECENT=Array.from({length:20},(_,i)=>({job_id:`42${1695-i}`,coating:["AR","Blue Cut","Hard Coat","Transitions","Mirror"][i%5],lens_material:["PLY","H67","CR39"][i%3],lens_type:["P","S","B"][i%3],is_rush:i%7===0?1:0,total_days:Math.round((0.5+Math.random()*3)*10)/10,sla_met:Math.random()>0.1?1:0,shipped_at:Date.now()-i*86400000,entered_lab_at:Date.now()-(i+1.5)*86400000}));
 
   const fetchData=useCallback(async()=>{
     if(isDemo){setSummary(DEMO_SUMMARY);setRecentJobs(DEMO_RECENT);setLoading(false);setLastRefresh(new Date());return;}
@@ -6845,14 +6845,14 @@ function TimeAtLabTab({ovenServerUrl,settings}){
 
   const searchJob=async()=>{
     if(!jobSearch.trim())return;
-    if(isDemo){setSelectedJob({job_id:jobSearch,coating:"AR",lens_material:"PLY",lens_type:"P",hoursElapsed:6.8,current_stage:"ASSEMBLY",slaStatus:"on_track",stageDurations:{INCOMING:12,SURFACING:95,COATING:140,CUTTING:35,ASSEMBLY:28},transitions:[{from_stage:"INCOMING",to_stage:"SURFACING",transition_at:Date.now()-7*3600000,dwell_minutes:12},{from_stage:"SURFACING",to_stage:"COATING",transition_at:Date.now()-5.4*3600000,dwell_minutes:95},{from_stage:"COATING",to_stage:"CUTTING",transition_at:Date.now()-3*3600000,dwell_minutes:140},{from_stage:"CUTTING",to_stage:"ASSEMBLY",transition_at:Date.now()-2.4*3600000,dwell_minutes:35}]});return;}
+    if(isDemo){setSelectedJob({job_id:jobSearch,coating:"AR",lens_material:"PLY",lens_type:"P",daysElapsed:1.8,current_stage:"ASSEMBLY",slaStatus:"on_track",stageDurations:{INCOMING:12,SURFACING:95,COATING:140,CUTTING:35,ASSEMBLY:28},transitions:[{from_stage:"INCOMING",to_stage:"SURFACING",transition_at:Date.now()-1.8*86400000,dwell_minutes:12},{from_stage:"SURFACING",to_stage:"COATING",transition_at:Date.now()-1.5*86400000,dwell_minutes:95},{from_stage:"COATING",to_stage:"CUTTING",transition_at:Date.now()-0.8*86400000,dwell_minutes:140},{from_stage:"CUTTING",to_stage:"ASSEMBLY",transition_at:Date.now()-0.5*86400000,dwell_minutes:35}]});return;}
     try{
       const r=await fetch(`${base}/api/time-at-lab/job/${encodeURIComponent(jobSearch.trim())}`);
       if(r.ok) setSelectedJob(await r.json()); else setSelectedJob(null);
     }catch(e){setSelectedJob(null);}
   };
 
-  const fmtHrs=(h)=>h!=null?h<1?`${Math.round(h*60)}m`:`${h}h`:"—";
+  const fmtDays=(d)=>d!=null?d<0.05?`${Math.round(d*24*60)}m`:d<1?`${Math.round(d*24)}h`:`${d}d`:"—";
   const stageColor=(s)=>({INCOMING:"#64748b",SURFACING:"#06b6d4",COATING:"#f59e0b",CUTTING:"#3b82f6",ASSEMBLY:"#8b5cf6",QC:"#10b981",SHIPPED:"#10b981"}[s]||"#475569");
   const slaColor=(s)=>s==="met"||s==="on_track"?"#10b981":s==="at_risk"?"#f59e0b":s==="critical"||s==="breached"?"#ef4444":"#475569";
 
@@ -6890,7 +6890,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
       {/* KPI Row */}
       <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
         {[
-          {label:"AVG TIME",value:fmtHrs(s.shipped.avgHours),color:s.shipped.avgHours>12?T.red:s.shipped.avgHours>8?T.amber:T.green},
+          {label:"AVG TIME",value:fmtDays(s.shipped.avgDays),color:s.shipped.avgDays>3?T.red:s.shipped.avgDays>2?T.amber:T.green},
           {label:"SLA COMPLIANCE",value:`${s.shipped.slaCompliance}%`,color:s.shipped.slaCompliance>=95?T.green:s.shipped.slaCompliance>=90?T.amber:T.red},
           {label:"SHIPPED",value:s.shipped.total,color:T.blue},
           {label:"TOTAL WIP",value:totalWip,color:T.purple},
@@ -6931,7 +6931,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
                 <div key={w.stage} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:4,padding:"8px 10px",textAlign:"center"}}>
                   <div style={{fontSize:18,fontWeight:700,color:stageColor(w.stage)}}>{w.count}</div>
                   <div style={{fontSize:8,color:"#475569",letterSpacing:"0.1em",marginTop:2}}>{w.stage}</div>
-                  <div style={{fontSize:9,color:"#334155",marginTop:2}}>avg {fmtHrs(w.avgHours)}</div>
+                  <div style={{fontSize:9,color:"#334155",marginTop:2}}>avg {fmtDays(w.avgDays)}</div>
                 </div>
               ))}
             </div>
@@ -6949,7 +6949,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
                   <span style={{fontSize:11,fontWeight:700,color:slaColor(j.status),fontFamily:mono}}>{j.jobId}</span>
                   <span style={{fontSize:9,color:stageColor(j.stage)}}>{j.stage}</span>
                   <span style={{fontSize:9,color:"#475569"}}>{j.coating}</span>
-                  <span style={{fontSize:9,color:slaColor(j.status),marginLeft:"auto",fontWeight:600}}>{fmtHrs(j.hoursRemaining)} left</span>
+                  <span style={{fontSize:9,color:slaColor(j.status),marginLeft:"auto",fontWeight:600}}>{fmtDays(j.daysRemaining)} left</span>
                 </div>
               ))}
             </div>
@@ -6964,7 +6964,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
                   <span style={{fontWeight:700,color:T.green,width:60}}>{j.job_id}</span>
                   <span style={{color:"#475569",width:60}}>{j.coating}</span>
                   <span style={{color:"#334155",width:30}}>{j.lens_type}</span>
-                  <span style={{color:j.sla_met?T.green:T.red,fontWeight:600,marginLeft:"auto"}}>{j.total_hours}h</span>
+                  <span style={{color:j.sla_met?T.green:T.red,fontWeight:600,marginLeft:"auto"}}>{j.total_days}d</span>
                   {j.is_rush===1&&<span style={{fontSize:8,color:T.amber,fontWeight:700}}>RUSH</span>}
                   <span style={{width:14,textAlign:"center"}}>{j.sla_met?<span style={{color:T.green}}>✓</span>:<span style={{color:T.red}}>✗</span>}</span>
                 </div>
@@ -6983,7 +6983,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
             {selectedJob.coating&&<span style={{fontSize:10,color:"#7dd3fc"}}>{selectedJob.coating}</span>}
             {selectedJob.lens_material&&<span style={{fontSize:10,color:"#475569"}}>{selectedJob.lens_material}</span>}
             <span style={{fontSize:10,color:slaColor(selectedJob.slaStatus),marginLeft:"auto",fontWeight:600}}>SLA: {selectedJob.slaStatus?.toUpperCase()}</span>
-            <span style={{fontSize:11,fontWeight:700,color:T.text}}>{fmtHrs(selectedJob.hoursElapsed)} total</span>
+            <span style={{fontSize:11,fontWeight:700,color:T.text}}>{fmtDays(selectedJob.daysElapsed)} total</span>
             <button onClick={()=>setSelectedJob(null)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:3,color:"#334155",width:22,height:22,cursor:"pointer",fontSize:11}}>✕</button>
           </div>
 
