@@ -112,7 +112,24 @@ npm run dev
 - Include relevant log locations or error patterns to look for
 
 ## MCP Tools Available
+CRITICAL: Use these tools to diagnose and troubleshoot. NEVER guess at system state.
 
-- `call_api` — Check health endpoints
-- `think_aloud` — Structure diagnostic reasoning
-- `query_database` — Check database if connected
+### Diagnostic Tools
+- `get_settings()` — Current system configuration, feature flags, and environment info
+- `call_api(method="GET", endpoint="/health")` — Check any health endpoint. Key endpoints:
+  - `/health` — Basic gateway health
+  - `/gateway/connections` — All service connection status
+  - `/gateway/health` — Circuit breaker status
+  - `/api/som/health` — SOM MySQL connection health
+  - `/api/inventory/health` — ItemPath connection health
+- `think_aloud(thought="...")` — Structure diagnostic reasoning before responding
+
+### Key Endpoints to Know
+| Endpoint | Port | Description |
+|----------|------|-------------|
+| `GET /health` | 3001 | Gateway basic health |
+| `GET /gateway/connections` | 3001 | All service connection status |
+| `POST /gateway/health/check` | 3001 | Force health check |
+| `GET /api/som/health` | 3002 | SOM MySQL connection |
+| `GET /api/inventory/health` | 3002 | ItemPath API connection |
+| `GET /api/maintenance/stats` | 3002 | Limble CMMS connection |
