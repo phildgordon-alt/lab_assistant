@@ -475,6 +475,57 @@ module.exports = {
     return { mode, totalJobs, buckets: result, filters: { lensType: params.lensType, coating: params.coating, stage: params.stage } };
   },
 
+  /** Operator leaderboard — pre-aggregated, filterable by department and period */
+  getOperatorLeaderboard(params = {}) {
+    const days = params.days || 14;
+    const since = Date.now() - (days * 86400000);
+    const stage = params.stage || null; // e.g., 'ASSEMBLY', 'SURFACING'
+
+    let stageFilter = '';
+    let stageParams = [since];
+    if (stage) {
+      stageFilter = "AND (to_stage LIKE ? OR from_stage LIKE ?)";
+      stageParams = [since, `%${stage}%`, `%${stage}%`];
+    }
+
+    const operators = db.prepare(`
+      SELECT operator_id,
+        COUNT(*) as total_events,
+        COUNT(DISTINCT job_id) as unique_jobs,
+        MIN(transition_at) as first_seen,
+        MAX(transition_at) as last_seen,
+        ROUND(AVG(CASE WHEN dwell_minutes > 0 AND dwell_minutes < 480 THEN dwell_minutes END), 1) as avg_dwell_min
+      FROM stage_transitions
+      WHERE operator_id IS NOT NULL
+        AND transition_at > ?
+        ${stageFilter}
+      GROUP BY operator_id
+      ORDER BY unique_jobs DESC
+    `).all(...stageParams);
+
+    // Compute jobs/day for each operator
+    const result = operators.map((op, idx) => {
+      const activeDays = Math.max(1, (op.last_seen - op.first_seen) / 86400000);
+      return {
+        rank: idx + 1,
+        operator: op.operator_id,
+        totalJobs: op.unique_jobs,
+        totalEvents: op.total_events,
+        jobsPerDay: Math.round((op.unique_jobs / Math.min(activeDays, days)) * 10) / 10,
+        avgDwellMin: op.avg_dwell_min,
+        firstSeen: op.first_seen,
+        lastSeen: op.last_seen,
+      };
+    });
+
+    return {
+      period: `${days}d`,
+      stage: stage || 'ALL',
+      operatorCount: result.length,
+      operators: result,
+    };
+  },
+
   /** AI-ready context */
   getAIContext() {
     const summary = this.getSummary({ period: '24h' });

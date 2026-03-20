@@ -3833,6 +3833,14 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     }));
   }
 
+  // GET /api/time-at-lab/operators — operator leaderboard
+  if (req.method==='GET' && url.pathname==='/api/time-at-lab/operators') {
+    return json(res, timeAtLab.getOperatorLeaderboard({
+      days: parseInt(url.searchParams.get('days') || '14'),
+      stage: url.searchParams.get('stage') || null,
+    }));
+  }
+
   // GET /api/time-at-lab/ai-context — AI-ready summary
   if (req.method==='GET' && url.pathname==='/api/time-at-lab/ai-context') {
     return json(res, timeAtLab.getAIContext());

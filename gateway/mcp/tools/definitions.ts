@@ -922,10 +922,26 @@ For "when will we catch up" or "how far behind are we" questions.`,
   },
 };
 
+export const get_operator_leaderboard = {
+  name: 'get_operator_leaderboard',
+  description: `USE THIS for "who are the top performers", "best assemblers", "operator rankings", or any operator comparison question.
+WHAT: Returns pre-aggregated operator leaderboard: rank, operator initials, total jobs, jobs/day, avg dwell time. Sorted by total jobs desc.
+HOW: Optional days (default 14) and stage filter (ASSEMBLY, SURFACING, COATING, CUTTING, QC).
+Data comes from historical stage transitions — covers weeks of data, not just today.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      days: { type: 'number', description: 'Look back N days. Default 14.', default: 14 },
+      stage: { type: 'string', description: 'Filter by stage: ASSEMBLY, SURFACING, COATING, CUTTING, QC. Omit for all.' },
+    },
+  },
+};
+
 export const OPERATIONS_TOOLS = [
   get_som_status,
   get_dvi_operator_data,
   get_backlog_catchup,
+  get_operator_leaderboard,
 ];
 
 // All tools (for backwards compatibility)

@@ -81,12 +81,8 @@ CRITICAL: Use these tools to get ALL data. NEVER invent data. NEVER say you "don
 - `get_aging_report(department="A")` — Jobs bucketed by age (0-1d, 1-2d, etc.)
 
 ### Operator & Performance Tools
-- `get_dvi_operator_data(department="A")` — **USE THIS for operator performance questions.** Returns pre-aggregated data:
-  - `operatorStats` — object keyed by operator initials. Each has: `jobs` (count), `jobsPerHour`, `rush` (count), `firstJob`/`lastJob` (timestamps). **Use this directly for leaderboard and top performers.**
-  - `stationOperators` — which operator is assigned to which station (e.g. `{"ASSEMBLY #5": "AF", "ASSEMBLY #7": "EY"}`)
-  - `byStation` — job counts per station
-  - `stationCompletions` — completions per station today
-  - `jobs` — individual assembly job records with operator field
+- `get_operator_leaderboard(stage="ASSEMBLY", days=14)` — **USE THIS FIRST for "who are top performers", "best assemblers", "operator rankings".** Returns pre-aggregated historical data: rank, operator initials, total jobs, jobs/day, avg dwell time. Covers weeks of data, not just today. This is the go-to tool for any operator comparison.
+- `get_dvi_operator_data(department="A")` — Today's live data: operatorStats (jobs, jobsPerHour, rush), stationOperators (who is at which station), byStation completions. Use for "who is working right now" or "today's stats."
 - `get_throughput_trend(days=14)` — Daily shipped counts for 2 weeks
 
 ### Time & SLA Tools

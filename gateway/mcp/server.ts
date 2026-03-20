@@ -396,6 +396,13 @@ export async function handleToolCall(
     case 'get_backlog_catchup':
       return handleCallApi('GET', `/api/lab/catchup${toolInput.department ? '?department=' + toolInput.department : ''}`);
 
+    case 'get_operator_leaderboard': {
+      const params = new URLSearchParams();
+      if (toolInput.days) params.set('days', String(toolInput.days));
+      if (toolInput.stage) params.set('stage', toolInput.stage as string);
+      return handleCallApi('GET', `/api/time-at-lab/operators?${params}`);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // GENERIC TOOLS
     // ─────────────────────────────────────────────────────────────────────────
