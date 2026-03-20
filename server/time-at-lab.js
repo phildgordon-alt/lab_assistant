@@ -72,6 +72,9 @@ for (const sql of migrations) {
   try { db.exec(sql); } catch (e) { /* already exists */ }
 }
 
+// Rename column migration (sla_target_hours → sla_target_days)
+try { db.exec('ALTER TABLE job_lifecycle RENAME COLUMN sla_target_hours TO sla_target_days'); } catch (e) { /* already renamed or doesn't exist */ }
+
 // ─── PREPARED STATEMENTS ───────────────────────────────────────────────────
 
 const stmts = {
