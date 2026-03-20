@@ -1870,8 +1870,10 @@ Respond with a structured batching plan in this format:
     // Calculate jobs/hour using shift hours (not first-to-last job span)
     const shiftStart = new Date(); shiftStart.setHours(7, 0, 0, 0); // 7 AM shift start
     const shiftHours = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
+    const nameMap = assemblyConfig.operatorMap || {};
     for (const op of Object.values(operatorStats)) {
       op.jobsPerHour = op.jobs / shiftHours;
+      op.name = nameMap[op.initials] || op.initials;
     }
 
     // Enrich assembly jobs with XML data
@@ -1883,6 +1885,7 @@ Respond with a structured batching plan in this format:
         station: j.station,
         stationNum: j.stationNum,
         operator: j.operator,
+        operatorName: nameMap[j.operator] || j.operator,
         status: 'active',
         coating: xml?.coating || '',
         lensStyle: xml?.lensStyle || '',
