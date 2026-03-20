@@ -890,9 +890,10 @@ For surfacing questions: machines include generators, polishers, blockers, deblo
 export const get_dvi_operator_data = {
   name: 'get_dvi_operator_data',
   description: `USE THIS for questions about operator performance, who is working on what, jobs per operator, or top performers.
-WHAT: Returns DVI job data enriched with operator assignments, station info, and stage timings.
-HOW: Optional department filter. Data includes operator field on each job for performance grouping.
-For "top assemblers" or "who is fastest": group returned jobs by operator, count per operator, calculate avg time per job.`,
+WHAT: Returns DVI job data with operator assignments and performance metrics.
+HOW: Optional department filter.
+IMPORTANT for Assembly (department="A"): Returns pre-aggregated operatorStats with jobs completed, jobsPerHour, rush count, first/last job time per operator. Also returns stationOperators mapping (which operator is at which station) and byStation completion counts. Use operatorStats to answer "who are top performers" directly.
+For other departments: Returns job records with operator field for manual grouping.`,
   input_schema: {
     type: 'object',
     properties: {

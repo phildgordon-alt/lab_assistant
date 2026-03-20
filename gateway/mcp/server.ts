@@ -384,8 +384,14 @@ export async function handleToolCall(
     case 'get_som_status':
       return handleCallApi('GET', '/api/som/devices');
 
-    case 'get_dvi_operator_data':
+    case 'get_dvi_operator_data': {
+      const dept = toolInput.department as string | undefined;
+      // Assembly has a dedicated endpoint with pre-aggregated operator stats
+      if (dept === 'A' || dept === 'assembly') {
+        return handleCallApi('GET', '/api/assembly/jobs');
+      }
       return handleCallApi('GET', '/api/dvi/jobs');
+    }
 
     case 'get_backlog_catchup':
       return handleCallApi('GET', `/api/lab/catchup${toolInput.department ? '?department=' + toolInput.department : ''}`);
