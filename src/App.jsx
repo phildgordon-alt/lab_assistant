@@ -6917,7 +6917,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
                   <div style={{flex:1,height:14,background:"#0d1117",borderRadius:3,overflow:"hidden",border:"1px solid #111827"}}>
                     <div style={{height:"100%",width:`${pct}%`,background:stageColor(d.stage),borderRadius:3,opacity:0.7}}/>
                   </div>
-                  <div style={{width:50,fontSize:10,color:T.text,fontWeight:600,textAlign:"right"}}>{d.avg_min}m</div>
+                  <div style={{width:50,fontSize:10,color:T.text,fontWeight:600,textAlign:"right"}}>{d.avg_min>=60?`${Math.round(d.avg_min/6)/10}h`:`${d.avg_min}m`}</div>
                 </div>
               );
             })}
