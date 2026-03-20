@@ -385,7 +385,7 @@ export async function handleToolCall(
       return handleCallApi('GET', '/api/som/devices');
 
     case 'get_dvi_operator_data':
-      return handleCallApi('GET', `/api/dvi/data${toolInput.department ? '?department=' + toolInput.department : ''}`);
+      return handleCallApi('GET', '/api/dvi/jobs');
 
     case 'get_backlog_catchup':
       return handleCallApi('GET', `/api/lab/catchup${toolInput.department ? '?department=' + toolInput.department : ''}`);
