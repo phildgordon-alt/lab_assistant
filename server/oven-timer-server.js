@@ -3849,10 +3849,46 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       if (op && typeof op === 'object' && op.name) nameMap[id] = op.name;
       else if (typeof op === 'string') nameMap[id] = op;
     }
-    // Also check assignments for names
+
+    // Cross-reference: station assignments have full names, stationOperators have DVI initials
+    // assignments: { "STN-07": { operatorName: "Terence S." } }
+    // We need to map DVI initials → names using the ASM_STATIONS dvi field
     const assignments = assemblyConfig.assignments || {};
-    for (const [stn, info] of Object.entries(assignments)) {
-      if (info && info.operatorId && info.operatorName) nameMap[info.operatorId] = info.operatorName;
+    const ASM_STATIONS = [
+      {id:'STN-01',dvi:'ASSEMBLY #1'},{id:'STN-02',dvi:'ASSEMBLY #2'},{id:'STN-03',dvi:'ASSEMBLY #3'},
+      {id:'STN-04',dvi:'ASSEMBLY #4'},{id:'STN-05',dvi:'ASSEMBLY #5'},{id:'STN-06',dvi:'ASSEMBLY #6'},
+      {id:'STN-07',dvi:'ASSEMBLY #7'},{id:'STN-08',dvi:'ASSEMBLY #8'},{id:'STN-09',dvi:'ASSEMBLY #9'},
+      {id:'STN-10',dvi:'ASSEMBLY #10'},{id:'STN-11',dvi:'ASSEMBLY #11'},{id:'STN-12',dvi:'ASSEMBLY #12'},
+      {id:'STN-13',dvi:'ASSEMBLY #13'},{id:'STN-14',dvi:'ASSEMBLY #14'},{id:'STN-15',dvi:'ASSEMBLY #15'},
+    ];
+    // Get today's stationOperators from DVI trace (which DVI initials are at which station)
+    const allJobs = dviTrace.getJobs();
+    const todayMs = new Date(); todayMs.setHours(0,0,0,0);
+    const todayStart = todayMs.getTime();
+    // Build station → most active DVI initials today
+    const stnInitials = {};
+    for (const j of allJobs) {
+      if (!j.operator || !j.station || j.lastSeen < todayStart) continue;
+      if (!/^ASSEMBLY #\d+/.test(j.station)) continue;
+      if (!stnInitials[j.station]) stnInitials[j.station] = {};
+      stnInitials[j.station][j.operator] = (stnInitials[j.station][j.operator] || 0) + 1;
+    }
+    // For each station assignment, find the DVI initials working there
+    for (const [stnId, info] of Object.entries(assignments)) {
+      if (!info?.operatorName) continue;
+      const stn = ASM_STATIONS.find(s => s.id === stnId);
+      if (!stn) continue;
+      const dviStation = stn.dvi;
+      const tally = stnInitials[dviStation];
+      if (tally) {
+        // Map ALL initials at this station to this operator's name
+        for (const init of Object.keys(tally)) {
+          if (!nameMap[init]) nameMap[init] = info.operatorName;
+        }
+      }
+      // Also try direct initial match (first 2 chars of name)
+      const directInit = info.operatorName.replace(/[^A-Z]/gi,'').slice(0,2).toUpperCase();
+      if (directInit && !nameMap[directInit]) nameMap[directInit] = info.operatorName;
     }
 
     if (result.operators) {
