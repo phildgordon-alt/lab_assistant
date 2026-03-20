@@ -10043,8 +10043,18 @@ function LabAssistantV2(){
   ];
   // Check if current view is in a menu (for highlighting the parent)
   const menuForView=(v)=>{for(const m of navMenus){if(m.items){for(const i of m.items)if(i.id===v)return m.id;}if(m.id===v)return m.id;}return null;};
-  // Close dropdown when clicking outside
-  useEffect(()=>{if(!openMenu)return;const close=()=>setOpenMenu(null);document.addEventListener("click",close);return()=>document.removeEventListener("click",close);},[openMenu]);
+  // Close dropdown when clicking outside — use mousedown to not interfere with input focus
+  useEffect(()=>{
+    if(!openMenu)return;
+    const close=(e)=>{
+      // Don't close if clicking inside the menu itself
+      if(e.target.closest&&e.target.closest('[data-nav-menu]'))return;
+      setOpenMenu(null);
+    };
+    // Use setTimeout to avoid closing immediately on the click that opened it
+    const timer=setTimeout(()=>document.addEventListener("mousedown",close),0);
+    return()=>{clearTimeout(timer);document.removeEventListener("mousedown",close);};
+  },[openMenu]);
 
   return(
     <div style={{minHeight:"100vh",background:T.bg,color:T.text,fontFamily:sans}}>
