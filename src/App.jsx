@@ -9731,35 +9731,39 @@ function LabAssistantV2(){
 
   const isTablet = appMode==="tablet";
 
-  // Navigation structure: Overview | Production Flow | Support | Settings
-  const navItems=[
-    // System
-    {id:"overview",    label:"Overview",    icon:"◉",  group:"system"},
-    // Production flow (separator before)
-    {id:"separator1",  type:"separator"},
-    {id:"surfacing",   label:"Surfacing",   icon:"🌀", group:"production"},
-    {id:"cutting",     label:"Cutting",     icon:"✂️", group:"production"},
-    {id:"coating",     label:"Coating",     icon:"🌡", group:"production"},
-    {id:"assembly",    label:"Assembly",    icon:"🔧", group:"production"},
-    {id:"shipping",    label:"Shipping",    icon:"📤", group:"production"},
-    // Support (separator before)
-    {id:"separator2",  type:"separator"},
-    {id:"putwall",     label:"Put Wall",    icon:"⬡",  group:"support"},
-    {id:"inventory",   label:"Inventory",   icon:"📦", group:"support"},
-    {id:"maintenance", label:"Maintenance", icon:"🔩", group:"support"},
-    // Analytics & QC (separator before)
-    {id:"separator3",  type:"separator"},
-    {id:"analytics",   label:"Analytics",   icon:"📊", group:"analytics"},
-    {id:"qc",          label:"QC",          icon:"✓",  group:"analytics"},
-    {id:"ai",          label:"AI Assistant",icon:"🤖", group:"analytics"},
-    {id:"vision",       label:"Vision",     icon:"👁", group:"analytics"},
-    {id:"timeatlab",    label:"Time at Lab", icon:"⏱", group:"analytics"},
-    {id:"ews",          label:"EWS",         icon:"⚡", group:"analytics"},
-    {id:"network",      label:"Network",     icon:"🔀", group:"analytics"},
-    // Settings (separator before)
-    {id:"separator4",  type:"separator"},
-    {id:"settings",    label:"Settings",    icon:"⚙️", group:"system"},
+  // Navigation: dropdown menus to keep header clean
+  const [openMenu,setOpenMenu]=useState(null);
+  const navMenus=[
+    {id:"overview",label:"Overview",icon:"◉",type:"button"},
+    {id:"production",label:"Production",icon:"🏭",type:"dropdown",items:[
+      {id:"surfacing",label:"Surfacing",icon:"🌀"},
+      {id:"cutting",label:"Cutting",icon:"✂️"},
+      {id:"coating",label:"Coating",icon:"🌡"},
+      {id:"assembly",label:"Assembly",icon:"🔧"},
+      {id:"shipping",label:"Shipping",icon:"📤"},
+    ]},
+    {id:"inventory_menu",label:"Inventory",icon:"📦",type:"dropdown",items:[
+      {id:"putwall",label:"Put Wall",icon:"⬡"},
+      {id:"inventory",label:"Inventory",icon:"📦"},
+      {id:"maintenance",label:"Maintenance",icon:"🔩"},
+    ]},
+    {id:"analytics_menu",label:"Analytics",icon:"📊",type:"dropdown",items:[
+      {id:"analytics",label:"Analytics",icon:"📊"},
+      {id:"qc",label:"QC & Breakage",icon:"✓"},
+      {id:"timeatlab",label:"Time at Lab",icon:"⏱"},
+    ]},
+    {id:"intelligence",label:"Intelligence",icon:"🧠",type:"dropdown",items:[
+      {id:"ai",label:"AI Assistant",icon:"🤖"},
+      {id:"ews",label:"Early Warning",icon:"⚡"},
+      {id:"network",label:"Network NOC",icon:"🔀"},
+      {id:"vision",label:"Vision",icon:"👁"},
+    ]},
+    {id:"settings",label:"Settings",icon:"⚙️",type:"button"},
   ];
+  // Check if current view is in a menu (for highlighting the parent)
+  const menuForView=(v)=>{for(const m of navMenus){if(m.items){for(const i of m.items)if(i.id===v)return m.id;}if(m.id===v)return m.id;}return null;};
+  // Close dropdown when clicking outside
+  useEffect(()=>{if(!openMenu)return;const close=()=>setOpenMenu(null);document.addEventListener("click",close);return()=>document.removeEventListener("click",close);},[openMenu]);
 
   return(
     <div style={{minHeight:"100vh",background:T.bg,color:T.text,fontFamily:sans}}>
@@ -9777,11 +9781,28 @@ function LabAssistantV2(){
               </div>
             </div>
             <div style={{display:"flex",gap:3,marginLeft:24,alignItems:"center"}}>
-              {navItems.map(n=>n.type==="separator"?(
-                <div key={n.id} style={{width:1,height:24,background:T.border,margin:"0 8px"}}/>
-              ):(
-                <button key={n.id} onClick={()=>setView(n.id)} style={{background:view===n.id?T.blueDark:"transparent",border:`1px solid ${view===n.id?T.blue:"transparent"}`,borderRadius:8,padding:"8px 16px",cursor:"pointer",color:view===n.id?"#93C5FD":T.textMuted,fontSize:13,fontWeight:700,fontFamily:sans,display:"flex",alignItems:"center",gap:6,transition:"all 0.2s"}}><span style={{fontSize:15}}>{n.icon}</span>{n.label}</button>
-              ))}
+              {navMenus.map(m=>{
+                const isActive=m.type==="button"?view===m.id:menuForView(view)===m.id;
+                if(m.type==="button"){
+                  return <button key={m.id} onClick={()=>{setView(m.id);setOpenMenu(null);}} style={{background:isActive?T.blueDark:"transparent",border:`1px solid ${isActive?T.blue:"transparent"}`,borderRadius:8,padding:"8px 16px",cursor:"pointer",color:isActive?"#93C5FD":T.textMuted,fontSize:13,fontWeight:700,fontFamily:sans,display:"flex",alignItems:"center",gap:6,transition:"all 0.2s"}}><span style={{fontSize:15}}>{m.icon}</span>{m.label}</button>;
+                }
+                return(
+                  <div key={m.id} style={{position:"relative"}}>
+                    <button onClick={e=>{e.stopPropagation();setOpenMenu(openMenu===m.id?null:m.id);}} style={{background:isActive?T.blueDark:"transparent",border:`1px solid ${isActive?T.blue:"transparent"}`,borderRadius:8,padding:"8px 16px",cursor:"pointer",color:isActive?"#93C5FD":T.textMuted,fontSize:13,fontWeight:700,fontFamily:sans,display:"flex",alignItems:"center",gap:6,transition:"all 0.2s"}}>
+                      <span style={{fontSize:15}}>{m.icon}</span>{m.label}<span style={{fontSize:10,marginLeft:2,opacity:0.5}}>▾</span>
+                    </button>
+                    {openMenu===m.id&&(
+                      <div style={{position:"absolute",top:"100%",left:0,marginTop:4,background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:4,minWidth:180,zIndex:200,boxShadow:"0 8px 32px rgba(0,0,0,0.4)"}} onClick={e=>e.stopPropagation()}>
+                        {m.items.map(item=>(
+                          <button key={item.id} onClick={()=>{setView(item.id);setOpenMenu(null);}} style={{width:"100%",display:"flex",alignItems:"center",gap:8,padding:"10px 14px",background:view===item.id?T.blueDark:"transparent",border:"none",borderRadius:6,cursor:"pointer",color:view===item.id?"#93C5FD":T.text,fontSize:13,fontWeight:view===item.id?700:500,fontFamily:sans,textAlign:"left",transition:"background 0.15s"}}>
+                            <span style={{fontSize:15,width:22,textAlign:"center"}}>{item.icon}</span>{item.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:18}}>
