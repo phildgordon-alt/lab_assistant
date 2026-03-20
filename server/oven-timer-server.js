@@ -3836,71 +3836,105 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     }));
   }
 
-  // GET /api/time-at-lab/operators — operator leaderboard with full names
+  // GET /api/time-at-lab/operators — operator leaderboard
+  // Uses same logic as the frontend assembly tab: station assignments + DVI trace
   if (req.method==='GET' && url.pathname==='/api/time-at-lab/operators') {
-    const result = timeAtLab.getOperatorLeaderboard({
-      days: parseInt(url.searchParams.get('days') || '14'),
-      stage: url.searchParams.get('stage') || null,
-    });
-    // Build name map from ALL sources
-    const nameMap = { ...(assemblyConfig.operatorMap || {}) };
-    const operators = assemblyConfig.operators || {};
-    for (const [id, op] of Object.entries(operators)) {
-      if (op && typeof op === 'object' && op.name) nameMap[id] = op.name;
-      else if (typeof op === 'string') nameMap[id] = op;
+    const days = parseInt(url.searchParams.get('days') || '14');
+    const stageParam = url.searchParams.get('stage') || null;
+
+    // For non-assembly requests, use the simple initials-based leaderboard
+    if (stageParam && !stageParam.toUpperCase().includes('ASSEMBL')) {
+      const result = timeAtLab.getOperatorLeaderboard({ days, stage: stageParam });
+      return json(res, result);
     }
 
-    // Cross-reference: station assignments have full names, stationOperators have DVI initials
-    // assignments: { "STN-07": { operatorName: "Terence S." } }
-    // We need to map DVI initials → names using the ASM_STATIONS dvi field
+    // ASSEMBLY leaderboard: replicate exactly what the frontend tab does
+    // 1. Get station assignments (STN-07 → "Terence S.")
     const assignments = assemblyConfig.assignments || {};
-    const ASM_STATIONS = [
-      {id:'STN-01',dvi:'ASSEMBLY #1'},{id:'STN-02',dvi:'ASSEMBLY #2'},{id:'STN-03',dvi:'ASSEMBLY #3'},
-      {id:'STN-04',dvi:'ASSEMBLY #4'},{id:'STN-05',dvi:'ASSEMBLY #5'},{id:'STN-06',dvi:'ASSEMBLY #6'},
-      {id:'STN-07',dvi:'ASSEMBLY #7'},{id:'STN-08',dvi:'ASSEMBLY #8'},{id:'STN-09',dvi:'ASSEMBLY #9'},
-      {id:'STN-10',dvi:'ASSEMBLY #10'},{id:'STN-11',dvi:'ASSEMBLY #11'},{id:'STN-12',dvi:'ASSEMBLY #12'},
-      {id:'STN-13',dvi:'ASSEMBLY #13'},{id:'STN-14',dvi:'ASSEMBLY #14'},{id:'STN-15',dvi:'ASSEMBLY #15'},
-    ];
-    // Get today's stationOperators from DVI trace (which DVI initials are at which station)
+    const opMap = assemblyConfig.operatorMap || {};
+
+    // 2. Station layout
+    const ASM_STATIONS = [];
+    for (let i = 1; i <= 15; i++) ASM_STATIONS.push({ id: `STN-${String(i).padStart(2,'0')}`, dvi: `ASSEMBLY #${i}` });
+
+    // 3. Get ALL DVI trace events for assembly over the period
     const allJobs = dviTrace.getJobs();
-    const todayMs = new Date(); todayMs.setHours(0,0,0,0);
-    const todayStart = todayMs.getTime();
-    // Build station → most active DVI initials today
-    const stnInitials = {};
-    for (const j of allJobs) {
-      if (!j.operator || !j.station || j.lastSeen < todayStart) continue;
-      if (!/^ASSEMBLY #\d+/.test(j.station)) continue;
-      if (!stnInitials[j.station]) stnInitials[j.station] = {};
-      stnInitials[j.station][j.operator] = (stnInitials[j.station][j.operator] || 0) + 1;
+    const sinceMs = Date.now() - (days * 86400000);
+
+    // 4. Count completions per station over the period
+    // A "completion" = job that transitioned OUT of an assembly station
+    const stnCompletions = {};
+    const stnOperators = {}; // station → {initials: count}
+    for (const job of allJobs) {
+      const history = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
+      if (!history || !history.events) continue;
+      for (let i = 0; i < history.events.length; i++) {
+        const evt = history.events[i];
+        if (!evt.timestamp || evt.timestamp < sinceMs) continue;
+        if (!/^ASSEMBLY #\d+/.test(evt.station)) continue;
+        // Count this as work at this station
+        stnCompletions[evt.station] = (stnCompletions[evt.station] || 0) + 1;
+        if (evt.operator) {
+          if (!stnOperators[evt.station]) stnOperators[evt.station] = {};
+          stnOperators[evt.station][evt.operator] = (stnOperators[evt.station][evt.operator] || 0) + 1;
+        }
+      }
     }
-    // For each station assignment, find the DVI initials working there
+
+    // 5. Build per-operator stats using station assignments (same as frontend)
+    const opStats = {};
+
+    // Primary: attribute via station assignments
     for (const [stnId, info] of Object.entries(assignments)) {
       if (!info?.operatorName) continue;
       const stn = ASM_STATIONS.find(s => s.id === stnId);
       if (!stn) continue;
-      const dviStation = stn.dvi;
-      const tally = stnInitials[dviStation];
-      if (tally) {
-        // Map ALL initials at this station to this operator's name
-        for (const init of Object.keys(tally)) {
-          if (!nameMap[init]) nameMap[init] = info.operatorName;
-        }
-      }
-      // Also try direct initial match (first 2 chars of name)
-      const directInit = info.operatorName.replace(/[^A-Z]/gi,'').slice(0,2).toUpperCase();
-      if (directInit && !nameMap[directInit]) nameMap[directInit] = info.operatorName;
+      const completed = stnCompletions[stn.dvi] || 0;
+      const key = info.operatorName;
+      if (!opStats[key]) opStats[key] = { name: info.operatorName, jobs: 0, stations: [] };
+      opStats[key].jobs += completed;
+      if (completed > 0) opStats[key].stations.push(stn.dvi.replace('ASSEMBLY ', '#'));
     }
 
-    if (result.operators) {
-      result.operators = result.operators.map(op => ({
-        ...op,
-        name: nameMap[op.operator] || op.operator,
-      }));
+    // Secondary: add trace operator data via merge map for unmerged initials
+    const assignedStations = new Set(
+      Object.entries(assignments)
+        .filter(([, a]) => a?.operatorName)
+        .map(([stnId]) => ASM_STATIONS.find(s => s.id === stnId)?.dvi)
+        .filter(Boolean)
+    );
+
+    for (const [station, initTally] of Object.entries(stnOperators)) {
+      if (assignedStations.has(station)) continue; // already attributed
+      for (const [init, count] of Object.entries(initTally)) {
+        const name = opMap[init.toUpperCase()] || init;
+        if (!opStats[name]) opStats[name] = { name, jobs: 0, stations: [] };
+        opStats[name].jobs += count;
+        if (!opStats[name].stations.includes(station.replace('ASSEMBLY ', '#'))) {
+          opStats[name].stations.push(station.replace('ASSEMBLY ', '#'));
+        }
+      }
     }
-    // Include the name map in response for debugging
-    result._nameMapSize = Object.keys(nameMap).length;
-    result._nameMapKeys = Object.keys(nameMap);
-    return json(res, result);
+
+    // 6. Sort and rank
+    const ranked = Object.values(opStats)
+      .filter(o => o.jobs > 0)
+      .sort((a, b) => b.jobs - a.jobs)
+      .map((o, i) => ({
+        rank: i + 1,
+        name: o.name,
+        operator: o.name,
+        totalJobs: o.jobs,
+        jobsPerDay: Math.round((o.jobs / Math.max(1, days)) * 10) / 10,
+        stations: o.stations,
+      }));
+
+    return json(res, {
+      period: `${days}d`,
+      stage: 'ASSEMBLY',
+      operatorCount: ranked.length,
+      operators: ranked,
+    });
   }
 
   // GET /api/time-at-lab/ai-context — AI-ready summary
