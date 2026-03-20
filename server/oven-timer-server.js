@@ -3861,6 +3861,9 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         name: nameMap[op.operator] || op.operator,
       }));
     }
+    // Include the name map in response for debugging
+    result._nameMapSize = Object.keys(nameMap).length;
+    result._nameMapKeys = Object.keys(nameMap);
     return json(res, result);
   }
 
