@@ -6912,7 +6912,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
       </div>
 
       {/* Histogram: Jobs by Days in Lab */}
-      {histogram&&histogram.buckets&&histogram.buckets.length>0&&(
+      {histogram&&(
         <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14,marginBottom:16}}>
           <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
             <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>JOBS BY DAYS IN LAB</div>
@@ -6939,7 +6939,10 @@ function TimeAtLabTab({ovenServerUrl,settings}){
             </div>
           </div>
           {/* Bar chart */}
-          {(()=>{
+          {(!histogram.buckets||histogram.buckets.length===0)&&(
+            <div style={{textAlign:"center",padding:30,color:"#334155",fontSize:11,fontFamily:mono}}>No jobs found with current filters. Try changing the filter or switching to Active WIP mode.</div>
+          )}
+          {histogram.buckets&&histogram.buckets.length>0&&(()=>{
             const maxCount=Math.max(...histogram.buckets.map(b=>b.count),1);
             return(
               <div style={{display:"flex",alignItems:"flex-end",gap:2,height:140,paddingBottom:20,position:"relative"}}>
@@ -6959,6 +6962,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
               </div>
             );
           })()}
+          {histogram.buckets&&histogram.buckets.length>0&&<>
           {/* Legend */}
           <div style={{display:"flex",gap:12,marginTop:8,justifyContent:"center"}}>
             {[{label:"0-1 day",color:"#10b981"},{label:"1-2 days",color:"#3b82f6"},{label:"2-3 days",color:"#f59e0b"},{label:"3+ days",color:"#ef4444"}].map(l=>(
@@ -6968,6 +6972,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
               </div>
             ))}
           </div>
+          </>}
         </div>
       )}
 
