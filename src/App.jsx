@@ -10120,7 +10120,7 @@ function LabAssistantV2(){
       {view==="vision"?(
         <VisionDashboard ovenServerUrl={ovenServerUrl} settings={settings} isTablet={isTablet}/>
       ):(
-      <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
+      <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto",position:"relative",zIndex:1}}>
         {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events} wipJobs={wipJobs}/>}
         {view==="coating"&&<CoatingTab batches={batches} trays={trays} dviJobs={mergedJobs} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
