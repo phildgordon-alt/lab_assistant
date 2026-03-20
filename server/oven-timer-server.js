@@ -3822,6 +3822,17 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, timeAtLab.getAtRisk());
   }
 
+  // GET /api/time-at-lab/histogram — job count by days-in-lab
+  if (req.method==='GET' && url.pathname==='/api/time-at-lab/histogram') {
+    return json(res, timeAtLab.getHistogram({
+      mode: url.searchParams.get('mode') || 'active',
+      period: url.searchParams.get('period') || '30d',
+      lensType: url.searchParams.get('lensType') || null,
+      coating: url.searchParams.get('coating') || null,
+      stage: url.searchParams.get('stage') || null,
+    }));
+  }
+
   // GET /api/time-at-lab/ai-context — AI-ready summary
   if (req.method==='GET' && url.pathname==='/api/time-at-lab/ai-context') {
     return json(res, timeAtLab.getAIContext());

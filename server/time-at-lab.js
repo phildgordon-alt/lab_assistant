@@ -171,6 +171,30 @@ const stmts = {
   `),
 
   getJobCount: db.prepare('SELECT COUNT(*) as cnt FROM job_lifecycle'),
+
+  // Histogram: count of active jobs by days-in-lab bucket
+  getActiveHistogram: db.prepare(`
+    SELECT
+      CAST(ROUND((? - entered_lab_at) / 86400000.0) AS INTEGER) as day_bucket,
+      COUNT(*) as job_count,
+      coating, lens_type, current_stage
+    FROM job_lifecycle
+    WHERE shipped_at IS NULL AND current_stage != 'SHIPPED'
+    GROUP BY day_bucket, coating, lens_type, current_stage
+    ORDER BY day_bucket
+  `),
+
+  // Shipped histogram: count of shipped jobs by total days-in-lab
+  getShippedHistogram: db.prepare(`
+    SELECT
+      CAST(ROUND((shipped_at - entered_lab_at) / 86400000.0) AS INTEGER) as day_bucket,
+      COUNT(*) as job_count,
+      coating, lens_type
+    FROM job_lifecycle
+    WHERE shipped_at IS NOT NULL AND shipped_at >= ?
+    GROUP BY day_bucket, coating, lens_type
+    ORDER BY day_bucket
+  `),
 };
 
 // ─── SLA RULES ─────────────────────────────────────────────────────────────
@@ -412,6 +436,43 @@ module.exports = {
   getAtRisk() {
     const now = Date.now();
     return stmts.getAtRisk.all(now, now);
+  },
+
+  /** Histogram: job count by days-in-lab, filterable by lens_type, coating, stage */
+  getHistogram(params = {}) {
+    const now = Date.now();
+    const mode = params.mode || 'active'; // 'active' or 'shipped'
+
+    let raw;
+    if (mode === 'shipped') {
+      const periodMs = (params.period === '30d' ? 30 : params.period === '90d' ? 90 : 7) * 86400000;
+      raw = stmts.getShippedHistogram.all(now - periodMs);
+    } else {
+      raw = stmts.getActiveHistogram.all(now);
+    }
+
+    // Apply filters
+    let filtered = raw;
+    if (params.lensType) filtered = filtered.filter(r => r.lens_type === params.lensType);
+    if (params.coating) filtered = filtered.filter(r => r.coating === params.coating);
+    if (params.stage) filtered = filtered.filter(r => r.current_stage === params.stage);
+
+    // Aggregate by day bucket
+    const buckets = {};
+    for (const r of filtered) {
+      const day = r.day_bucket;
+      if (!buckets[day]) buckets[day] = { day, count: 0, byCoating: {}, byLensType: {}, byStage: {} };
+      buckets[day].count += r.job_count;
+      buckets[day].byCoating[r.coating || '?'] = (buckets[day].byCoating[r.coating || '?'] || 0) + r.job_count;
+      buckets[day].byLensType[r.lens_type || '?'] = (buckets[day].byLensType[r.lens_type || '?'] || 0) + r.job_count;
+      if (r.current_stage) buckets[day].byStage[r.current_stage] = (buckets[day].byStage[r.current_stage] || 0) + r.job_count;
+    }
+
+    // Sort by day ascending
+    const result = Object.values(buckets).sort((a, b) => a.day - b.day);
+    const totalJobs = result.reduce((s, b) => s + b.count, 0);
+
+    return { mode, totalJobs, buckets: result, filters: { lensType: params.lensType, coating: params.coating, stage: params.stage } };
   },
 
   /** AI-ready context */

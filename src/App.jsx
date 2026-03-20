@@ -6815,6 +6815,8 @@ function TimeAtLabTab({ovenServerUrl,settings}){
   const [jobSearch,setJobSearch]=useState("");
   const [selectedJob,setSelectedJob]=useState(null);
   const [recentJobs,setRecentJobs]=useState([]);
+  const [histogram,setHistogram]=useState(null);
+  const [histFilter,setHistFilter]=useState({lensType:"",coating:"",stage:"",mode:"active"});
   const [loading,setLoading]=useState(true);
   const [lastRefresh,setLastRefresh]=useState(null);
 
@@ -6828,14 +6830,20 @@ function TimeAtLabTab({ovenServerUrl,settings}){
   const DEMO_RECENT=Array.from({length:20},(_,i)=>({job_id:`42${1695-i}`,coating:["AR","Blue Cut","Hard Coat","Transitions","Mirror"][i%5],lens_material:["PLY","H67","CR39"][i%3],lens_type:["P","S","B"][i%3],is_rush:i%7===0?1:0,total_days:Math.round((0.5+Math.random()*3)*10)/10,sla_met:Math.random()>0.1?1:0,shipped_at:Date.now()-i*86400000,entered_lab_at:Date.now()-(i+1.5)*86400000}));
 
   const fetchData=useCallback(async()=>{
-    if(isDemo){setSummary(DEMO_SUMMARY);setRecentJobs(DEMO_RECENT);setLoading(false);setLastRefresh(new Date());return;}
+    if(isDemo){setSummary(DEMO_SUMMARY);setRecentJobs(DEMO_RECENT);setHistogram({mode:"active",totalJobs:239,buckets:[{day:0,count:82,byCoating:{AR:35,"Blue Cut":20,"Hard Coat":15,Transitions:8,Mirror:4},byLensType:{P:40,S:32,B:10},byStage:{SURFACING:25,COATING:30,CUTTING:15,ASSEMBLY:8,QC:4}},{day:1,count:68,byCoating:{AR:28,"Blue Cut":18,"Hard Coat":12,Transitions:6,Mirror:4},byLensType:{P:35,S:25,B:8},byStage:{COATING:28,ASSEMBLY:20,QC:12,CUTTING:8}},{day:2,count:42,byCoating:{AR:18,"Blue Cut":10,Transitions:8,"Hard Coat":4,Mirror:2},byLensType:{P:22,S:15,B:5},byStage:{COATING:18,ASSEMBLY:14,QC:10}},{day:3,count:24,byCoating:{AR:10,Transitions:6,"Blue Cut":4,"Hard Coat":3,Polarized:1},byLensType:{P:14,S:8,B:2},byStage:{COATING:12,ASSEMBLY:8,QC:4}},{day:4,count:12,byCoating:{Transitions:5,AR:4,"Blue Cut":2,Mirror:1},byLensType:{P:8,S:3,B:1},byStage:{COATING:8,ASSEMBLY:4}},{day:5,count:6,byCoating:{Transitions:3,Polarized:2,AR:1},byLensType:{P:5,S:1},byStage:{COATING:4,HOLD:2}},{day:6,count:3,byCoating:{Transitions:2,Polarized:1},byLensType:{P:3},byStage:{HOLD:2,COATING:1}},{day:7,count:2,byCoating:{Transitions:1,Polarized:1},byLensType:{P:2},byStage:{HOLD:2}}]});setLoading(false);setLastRefresh(new Date());return;}
     try{
-      const [sRes,rRes]=await Promise.all([
+      const histParams=new URLSearchParams({mode:histFilter.mode,period});
+      if(histFilter.lensType)histParams.set("lensType",histFilter.lensType);
+      if(histFilter.coating)histParams.set("coating",histFilter.coating);
+      if(histFilter.stage)histParams.set("stage",histFilter.stage);
+      const [sRes,rRes,hRes]=await Promise.all([
         fetch(`${base}/api/time-at-lab/summary?period=${period}`),
         fetch(`${base}/api/time-at-lab/recent?limit=25`),
+        fetch(`${base}/api/time-at-lab/histogram?${histParams}`),
       ]);
       if(sRes.ok) setSummary(await sRes.json());
       if(rRes.ok) setRecentJobs(await rRes.json());
+      if(hRes.ok) setHistogram(await hRes.json());
       setLastRefresh(new Date());
     }catch(e){console.error(e);}
     finally{setLoading(false);}
@@ -6902,6 +6910,66 @@ function TimeAtLabTab({ovenServerUrl,settings}){
           </div>
         ))}
       </div>
+
+      {/* Histogram: Jobs by Days in Lab */}
+      {histogram&&histogram.buckets&&histogram.buckets.length>0&&(
+        <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14,marginBottom:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12,flexWrap:"wrap"}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em"}}>JOBS BY DAYS IN LAB</div>
+            <div style={{fontSize:10,color:T.text,fontWeight:600}}>{histogram.totalJobs} jobs</div>
+            <div style={{marginLeft:"auto",display:"flex",gap:6,flexWrap:"wrap"}}>
+              <select value={histFilter.lensType} onChange={e=>{setHistFilter(p=>({...p,lensType:e.target.value}));setLoading(true);}} style={{padding:"3px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:9}}>
+                <option value="">All Lens Types</option>
+                <option value="P">Progressive</option>
+                <option value="S">Single Vision</option>
+                <option value="B">Bifocal</option>
+              </select>
+              <select value={histFilter.coating} onChange={e=>{setHistFilter(p=>({...p,coating:e.target.value}));setLoading(true);}} style={{padding:"3px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:9}}>
+                <option value="">All Coatings</option>
+                {["AR","Blue Cut","Hard Coat","Transitions","Mirror","Polarized"].map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+              <select value={histFilter.stage} onChange={e=>{setHistFilter(p=>({...p,stage:e.target.value}));setLoading(true);}} style={{padding:"3px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:9}}>
+                <option value="">All Departments</option>
+                {["SURFACING","COATING","CUTTING","ASSEMBLY","QC"].map(s=><option key={s} value={s}>{s}</option>)}
+              </select>
+              <select value={histFilter.mode} onChange={e=>{setHistFilter(p=>({...p,mode:e.target.value}));setLoading(true);}} style={{padding:"3px 6px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:9}}>
+                <option value="active">Active WIP</option>
+                <option value="shipped">Shipped</option>
+              </select>
+            </div>
+          </div>
+          {/* Bar chart */}
+          {(()=>{
+            const maxCount=Math.max(...histogram.buckets.map(b=>b.count),1);
+            return(
+              <div style={{display:"flex",alignItems:"flex-end",gap:2,height:140,paddingBottom:20,position:"relative"}}>
+                {histogram.buckets.map(b=>{
+                  const pct=Math.max(4,(b.count/maxCount)*100);
+                  const color=b.day<=1?"#10b981":b.day<=2?"#3b82f6":b.day<=3?"#f59e0b":"#ef4444";
+                  return(
+                    <div key={b.day} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}} title={`Day ${b.day}: ${b.count} jobs\n${Object.entries(b.byLensType||{}).map(([k,v])=>`${k}:${v}`).join(", ")}`}>
+                      <div style={{fontSize:9,color:T.text,fontWeight:600}}>{b.count}</div>
+                      <div style={{width:"100%",height:`${pct}%`,background:color,borderRadius:"3px 3px 0 0",minHeight:4}}/>
+                      <div style={{fontSize:8,color:"#475569",fontFamily:mono,position:"absolute",bottom:0}}>
+                        {b.day}d
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+          {/* Legend */}
+          <div style={{display:"flex",gap:12,marginTop:8,justifyContent:"center"}}>
+            {[{label:"0-1 day",color:"#10b981"},{label:"1-2 days",color:"#3b82f6"},{label:"2-3 days",color:"#f59e0b"},{label:"3+ days",color:"#ef4444"}].map(l=>(
+              <div key={l.label} style={{display:"flex",alignItems:"center",gap:4}}>
+                <div style={{width:10,height:10,borderRadius:2,background:l.color}}/>
+                <span style={{fontSize:8,color:"#475569"}}>{l.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,alignItems:"start"}}>
         {/* Left: Stage Breakdown + WIP */}
