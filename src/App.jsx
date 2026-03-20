@@ -4027,8 +4027,8 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
 
       {/* Input */}
       <div style={{ padding: "10px 12px", borderTop: `1px solid ${T.border}`, display: "flex", gap: 8, flexShrink: 0 }}>
-        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } }}
-          placeholder="Ask a question..." disabled={loading}
+        <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey && !loading) { e.preventDefault(); sendMessage(); } }}
+          placeholder={loading ? "Thinking..." : "Ask a question..."}
           style={{ flex: 1, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, padding: "8px 10px", color: T.text, fontSize: 11, fontFamily: mono, outline: "none" }} />
         <button onClick={() => sendMessage()} disabled={!input.trim() || loading}
           style={{ padding: "0 14px", background: input.trim() && !loading ? T.blue : T.border, border: "none", borderRadius: 6, color: input.trim() && !loading ? "#fff" : T.textDim, fontSize: 11, fontWeight: 700, cursor: input.trim() && !loading ? "pointer" : "default", fontFamily: mono }}>
