@@ -396,6 +396,9 @@ export async function handleToolCall(
     case 'get_backlog_catchup':
       return handleCallApi('GET', `/api/lab/catchup${toolInput.department ? '?department=' + toolInput.department : ''}`);
 
+    case 'get_assembly_history':
+      return handleCallApi('GET', `/api/assembly/history?days=${toolInput.days || 30}`);
+
     case 'get_operator_leaderboard': {
       const params = new URLSearchParams();
       if (toolInput.days) params.set('days', String(toolInput.days));
