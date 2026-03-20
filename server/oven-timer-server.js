@@ -56,6 +56,7 @@ const containers = require('./container-service');
 
 // ── Lab Configuration + EWS Settings ────────────────────────────
 const labConfig = require('./lab-config');
+const timeAtLab = require('./time-at-lab');
 
 // ── Early Warning System ────────────────────────────────────────
 const ews = require('./ews-engine');
@@ -137,6 +138,8 @@ setTimeout(() => {
     getOvenState: () => liveTimers,
   });
   ews.start();
+  // Start time-at-lab tracking (listens to DVI trace events + backfills)
+  timeAtLab.start(dviTrace, dviJobIndex);
 }, 20000); // 20s — after adapters have had time to poll
 
 // ── Periodic SQLite sync for inventory + maintenance ────────────
@@ -3786,6 +3789,42 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   if (req.method==='PUT' && url.pathname==='/api/lab/schedule') {
     const body = await readBody(req);
     return json(res, labConfig.setScheduleSlot(body));
+  }
+
+  // ── Time-at-Lab ────────────────────────────────────────────
+
+  // GET /api/time-at-lab/summary — aggregated time-at-lab stats
+  if (req.method==='GET' && url.pathname==='/api/time-at-lab/summary') {
+    const period = url.searchParams.get('period') || '7d';
+    return json(res, timeAtLab.getSummary({ period }));
+  }
+
+  // GET /api/time-at-lab/job/:id — full job lifecycle + transitions
+  if (req.method==='GET' && url.pathname.match(/^\/api\/time-at-lab\/job\/.+$/)) {
+    const jobId = decodeURIComponent(url.pathname.split('/')[4]);
+    const result = timeAtLab.getJob(jobId);
+    return result ? json(res, result) : json(res, { error: 'Job not found' }, 404);
+  }
+
+  // GET /api/time-at-lab/recent — recently shipped jobs
+  if (req.method==='GET' && url.pathname==='/api/time-at-lab/recent') {
+    const limit = parseInt(url.searchParams.get('limit') || '25');
+    return json(res, timeAtLab.getRecent(limit));
+  }
+
+  // GET /api/time-at-lab/wip — current WIP by stage
+  if (req.method==='GET' && url.pathname==='/api/time-at-lab/wip') {
+    return json(res, timeAtLab.getWip());
+  }
+
+  // GET /api/time-at-lab/at-risk — SLA at-risk jobs
+  if (req.method==='GET' && url.pathname==='/api/time-at-lab/at-risk') {
+    return json(res, timeAtLab.getAtRisk());
+  }
+
+  // GET /api/time-at-lab/ai-context — AI-ready summary
+  if (req.method==='GET' && url.pathname==='/api/time-at-lab/ai-context') {
+    return json(res, timeAtLab.getAIContext());
   }
 
   // GET /api/lab/backlog — current backlog per department

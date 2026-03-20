@@ -6804,6 +6804,230 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
 }
 
 // ── Early Warning System Tab ─────────────────────────────────
+// ── Time at Lab Tab ──────────────────────────────────────────
+function TimeAtLabTab({ovenServerUrl,settings}){
+  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const mono="'JetBrains Mono',monospace";
+  const isDemo=settings?.demoMode||false;
+
+  const [summary,setSummary]=useState(null);
+  const [period,setPeriod]=useState("7d");
+  const [jobSearch,setJobSearch]=useState("");
+  const [selectedJob,setSelectedJob]=useState(null);
+  const [recentJobs,setRecentJobs]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [lastRefresh,setLastRefresh]=useState(null);
+
+  // Demo data
+  const DEMO_SUMMARY={period:"7d",shipped:{total:842,avgHours:6.8,minHours:1.2,maxHours:38.4,slaCompliance:94.2,slaMet:793,slaMissed:49},
+    stageDwells:[{stage:"COATING",avg_min:142,min_min:45,max_min:380,transitions:890},{stage:"SURFACING",avg_min:98,min_min:22,max_min:240,transitions:845},{stage:"ASSEMBLY",avg_min:52,min_min:12,max_min:180,transitions:830},{stage:"CUTTING",avg_min:38,min_min:8,max_min:120,transitions:840},{stage:"QC",avg_min:24,min_min:5,max_min:90,transitions:825},{stage:"INCOMING",avg_min:18,min_min:2,max_min:60,transitions:842}],
+    bottleneck:{stage:"COATING",avgMinutes:142},
+    wip:[{stage:"INCOMING",count:22,avgHours:0.8,oldestHours:3.2},{stage:"SURFACING",count:45,avgHours:2.1,oldestHours:6.8},{stage:"COATING",count:68,avgHours:3.4,oldestHours:12.1},{stage:"CUTTING",count:34,avgHours:1.2,oldestHours:4.5},{stage:"ASSEMBLY",count:52,avgHours:1.8,oldestHours:8.2},{stage:"QC",count:18,avgHours:0.6,oldestHours:2.1}],
+    atRisk:[{jobId:"421690",coating:"TRANS",stage:"COATING",hoursElapsed:10.2,hoursRemaining:1.8,slaHours:12,status:"critical"},{jobId:"421672",coating:"AR",stage:"ASSEMBLY",hoursElapsed:5.1,hoursRemaining:0.9,slaHours:6,status:"critical"},{jobId:"421688",coating:"POLAR",stage:"SURFACING",hoursElapsed:6.4,hoursRemaining:5.6,slaHours:12,status:"at_risk"}],
+    totalTracked:2847};
+  const DEMO_RECENT=Array.from({length:20},(_,i)=>({job_id:`42${1695-i}`,coating:["AR","Blue Cut","Hard Coat","Transitions","Mirror"][i%5],lens_material:["PLY","H67","CR39"][i%3],lens_type:["P","S","B"][i%3],is_rush:i%7===0?1:0,total_hours:Math.round((2+Math.random()*12)*10)/10,sla_met:Math.random()>0.1?1:0,shipped_at:Date.now()-i*3600000,entered_lab_at:Date.now()-(i+6)*3600000}));
+
+  const fetchData=useCallback(async()=>{
+    if(isDemo){setSummary(DEMO_SUMMARY);setRecentJobs(DEMO_RECENT);setLoading(false);setLastRefresh(new Date());return;}
+    try{
+      const [sRes,rRes]=await Promise.all([
+        fetch(`${base}/api/time-at-lab/summary?period=${period}`),
+        fetch(`${base}/api/time-at-lab/recent?limit=25`),
+      ]);
+      if(sRes.ok) setSummary(await sRes.json());
+      if(rRes.ok) setRecentJobs(await rRes.json());
+      setLastRefresh(new Date());
+    }catch(e){console.error(e);}
+    finally{setLoading(false);}
+  },[base,period,isDemo]);
+
+  useEffect(()=>{fetchData();const t=setInterval(fetchData,30000);return()=>clearInterval(t);},[fetchData]);
+
+  const searchJob=async()=>{
+    if(!jobSearch.trim())return;
+    if(isDemo){setSelectedJob({job_id:jobSearch,coating:"AR",lens_material:"PLY",lens_type:"P",hoursElapsed:6.8,current_stage:"ASSEMBLY",slaStatus:"on_track",stageDurations:{INCOMING:12,SURFACING:95,COATING:140,CUTTING:35,ASSEMBLY:28},transitions:[{from_stage:"INCOMING",to_stage:"SURFACING",transition_at:Date.now()-7*3600000,dwell_minutes:12},{from_stage:"SURFACING",to_stage:"COATING",transition_at:Date.now()-5.4*3600000,dwell_minutes:95},{from_stage:"COATING",to_stage:"CUTTING",transition_at:Date.now()-3*3600000,dwell_minutes:140},{from_stage:"CUTTING",to_stage:"ASSEMBLY",transition_at:Date.now()-2.4*3600000,dwell_minutes:35}]});return;}
+    try{
+      const r=await fetch(`${base}/api/time-at-lab/job/${encodeURIComponent(jobSearch.trim())}`);
+      if(r.ok) setSelectedJob(await r.json()); else setSelectedJob(null);
+    }catch(e){setSelectedJob(null);}
+  };
+
+  const fmtHrs=(h)=>h!=null?h<1?`${Math.round(h*60)}m`:`${h}h`:"—";
+  const stageColor=(s)=>({INCOMING:"#64748b",SURFACING:"#06b6d4",COATING:"#f59e0b",CUTTING:"#3b82f6",ASSEMBLY:"#8b5cf6",QC:"#10b981",SHIPPED:"#10b981"}[s]||"#475569");
+  const slaColor=(s)=>s==="met"||s==="on_track"?"#10b981":s==="at_risk"?"#f59e0b":s==="critical"||s==="breached"?"#ef4444":"#475569";
+
+  if(loading)return <div style={{textAlign:"center",padding:60,color:T.textMuted,fontFamily:mono,fontSize:12}}>Loading time-at-lab data...</div>;
+
+  const s=summary||DEMO_SUMMARY;
+  const totalWip=s.wip.reduce((sum,w)=>sum+w.count,0);
+  const maxDwell=Math.max(...(s.stageDwells||[]).map(d=>d.avg_min),1);
+
+  return(
+    <div style={{fontFamily:mono}}>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",gap:16,marginBottom:16,flexWrap:"wrap"}}>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <span style={{fontSize:20}}>⏱</span>
+          <span style={{color:T.blue,fontWeight:600,letterSpacing:"0.12em",fontSize:13}}>TIME AT LAB</span>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {["24h","7d","30d"].map(p=>(
+            <button key={p} onClick={()=>{setPeriod(p);setLoading(true);}} style={{
+              padding:"4px 12px",fontSize:11,fontFamily:mono,
+              background:period===p?T.blueDark:"transparent",color:period===p?"#7dd3fc":"#475569",
+              border:`1px solid ${period===p?T.blue:T.border}`,borderRadius:3,cursor:"pointer",letterSpacing:"0.1em",
+            }}>{p.toUpperCase()}</button>
+          ))}
+        </div>
+        <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
+          <input value={jobSearch} onChange={e=>setJobSearch(e.target.value)} onKeyDown={e=>{if(e.key==="Enter")searchJob();}}
+            placeholder="Search job #..." style={{padding:"5px 10px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:11,width:140}}/>
+          <button onClick={searchJob} style={{padding:"5px 10px",background:T.blue,border:"none",borderRadius:3,color:"#fff",fontFamily:mono,fontSize:10,cursor:"pointer"}}>FIND</button>
+          {lastRefresh&&<span style={{fontSize:10,color:"#334155"}}>{lastRefresh.toLocaleTimeString()}</span>}
+        </div>
+      </div>
+
+      {/* KPI Row */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+        {[
+          {label:"AVG TIME",value:fmtHrs(s.shipped.avgHours),color:s.shipped.avgHours>12?T.red:s.shipped.avgHours>8?T.amber:T.green},
+          {label:"SLA COMPLIANCE",value:`${s.shipped.slaCompliance}%`,color:s.shipped.slaCompliance>=95?T.green:s.shipped.slaCompliance>=90?T.amber:T.red},
+          {label:"SHIPPED",value:s.shipped.total,color:T.blue},
+          {label:"TOTAL WIP",value:totalWip,color:T.purple},
+          {label:"BOTTLENECK",value:s.bottleneck?.stage||"—",color:T.amber},
+        ].map(k=>(
+          <div key={k.label} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:"12px 14px",textAlign:"center"}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>{k.label}</div>
+            <div style={{fontSize:22,fontWeight:700,color:k.color,lineHeight:1}}>{k.value}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,alignItems:"start"}}>
+        {/* Left: Stage Breakdown + WIP */}
+        <div>
+          {/* Stage Dwell Times */}
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14,marginBottom:12}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>AVG DWELL TIME BY STAGE</div>
+            {(s.stageDwells||[]).map(d=>{
+              const pct=Math.round((d.avg_min/maxDwell)*100);
+              return(
+                <div key={d.stage} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                  <div style={{width:80,fontSize:9,color:stageColor(d.stage),textAlign:"right",fontWeight:600}}>{d.stage}</div>
+                  <div style={{flex:1,height:14,background:"#0d1117",borderRadius:3,overflow:"hidden",border:"1px solid #111827"}}>
+                    <div style={{height:"100%",width:`${pct}%`,background:stageColor(d.stage),borderRadius:3,opacity:0.7}}/>
+                  </div>
+                  <div style={{width:50,fontSize:10,color:T.text,fontWeight:600,textAlign:"right"}}>{d.avg_min}m</div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Current WIP */}
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>CURRENT WIP BY STAGE</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:6}}>
+              {(s.wip||[]).map(w=>(
+                <div key={w.stage} style={{background:T.surface,border:`1px solid ${T.border}`,borderRadius:4,padding:"8px 10px",textAlign:"center"}}>
+                  <div style={{fontSize:18,fontWeight:700,color:stageColor(w.stage)}}>{w.count}</div>
+                  <div style={{fontSize:8,color:"#475569",letterSpacing:"0.1em",marginTop:2}}>{w.stage}</div>
+                  <div style={{fontSize:9,color:"#334155",marginTop:2}}>avg {fmtHrs(w.avgHours)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Right: At-Risk + Recent */}
+        <div>
+          {/* SLA At Risk */}
+          {(s.atRisk||[]).length>0&&(
+            <div style={{background:"rgba(239,68,68,0.04)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:4,padding:14,marginBottom:12}}>
+              <div style={{fontSize:9,color:"#ef4444",letterSpacing:"0.14em",marginBottom:8}}>SLA AT RISK ({s.atRisk.length})</div>
+              {s.atRisk.map(j=>(
+                <div key={j.jobId} onClick={()=>{setJobSearch(j.jobId);searchJob();}} style={{display:"flex",alignItems:"center",gap:8,padding:"6px 8px",background:"rgba(0,0,0,0.2)",borderRadius:3,marginBottom:4,cursor:"pointer"}}>
+                  <span style={{fontSize:11,fontWeight:700,color:slaColor(j.status),fontFamily:mono}}>{j.jobId}</span>
+                  <span style={{fontSize:9,color:stageColor(j.stage)}}>{j.stage}</span>
+                  <span style={{fontSize:9,color:"#475569"}}>{j.coating}</span>
+                  <span style={{fontSize:9,color:slaColor(j.status),marginLeft:"auto",fontWeight:600}}>{fmtHrs(j.hoursRemaining)} left</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Recent Shipped */}
+          <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14}}>
+            <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>RECENT SHIPPED</div>
+            <div style={{maxHeight:300,overflowY:"auto"}}>
+              {recentJobs.map(j=>(
+                <div key={j.job_id} onClick={()=>{setJobSearch(j.job_id);setSelectedJob(null);searchJob();}} style={{display:"flex",alignItems:"center",gap:6,padding:"5px 6px",borderBottom:`1px solid ${T.border}`,cursor:"pointer",fontSize:10}}>
+                  <span style={{fontWeight:700,color:T.green,width:60}}>{j.job_id}</span>
+                  <span style={{color:"#475569",width:60}}>{j.coating}</span>
+                  <span style={{color:"#334155",width:30}}>{j.lens_type}</span>
+                  <span style={{color:j.sla_met?T.green:T.red,fontWeight:600,marginLeft:"auto"}}>{j.total_hours}h</span>
+                  {j.is_rush===1&&<span style={{fontSize:8,color:T.amber,fontWeight:700}}>RUSH</span>}
+                  <span style={{width:14,textAlign:"center"}}>{j.sla_met?<span style={{color:T.green}}>✓</span>:<span style={{color:T.red}}>✗</span>}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Job Detail (search result) */}
+      {selectedJob&&(
+        <div style={{marginTop:16,background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:16}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+            <span style={{fontSize:18,fontWeight:700,color:T.green,fontFamily:mono}}>{selectedJob.job_id}</span>
+            <span style={{fontSize:10,color:stageColor(selectedJob.current_stage),fontWeight:600,padding:"2px 8px",background:`${stageColor(selectedJob.current_stage)}22`,borderRadius:3}}>{selectedJob.current_stage}</span>
+            {selectedJob.coating&&<span style={{fontSize:10,color:"#7dd3fc"}}>{selectedJob.coating}</span>}
+            {selectedJob.lens_material&&<span style={{fontSize:10,color:"#475569"}}>{selectedJob.lens_material}</span>}
+            <span style={{fontSize:10,color:slaColor(selectedJob.slaStatus),marginLeft:"auto",fontWeight:600}}>SLA: {selectedJob.slaStatus?.toUpperCase()}</span>
+            <span style={{fontSize:11,fontWeight:700,color:T.text}}>{fmtHrs(selectedJob.hoursElapsed)} total</span>
+            <button onClick={()=>setSelectedJob(null)} style={{background:"none",border:`1px solid ${T.border}`,borderRadius:3,color:"#334155",width:22,height:22,cursor:"pointer",fontSize:11}}>✕</button>
+          </div>
+
+          {/* Stage timeline bar */}
+          {selectedJob.stageDurations&&(
+            <div style={{display:"flex",height:28,borderRadius:6,overflow:"hidden",marginBottom:12,border:`1px solid ${T.border}`}}>
+              {Object.entries(selectedJob.stageDurations).map(([stage,min])=>{
+                const totalMin=Object.values(selectedJob.stageDurations).reduce((s,v)=>s+v,0);
+                const pct=totalMin>0?Math.max(2,(min/totalMin)*100):0;
+                return(
+                  <div key={stage} title={`${stage}: ${min}m`} style={{width:`${pct}%`,background:stageColor(stage),display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden",minWidth:pct>8?undefined:0}}>
+                    {pct>10&&<span style={{fontSize:8,color:"#fff",fontWeight:700,textShadow:"0 0 3px rgba(0,0,0,0.5)"}}>{stage.substring(0,4)}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Transition log */}
+          {selectedJob.transitions&&selectedJob.transitions.length>0&&(
+            <div style={{maxHeight:200,overflowY:"auto"}}>
+              <table style={{width:"100%",fontSize:9,borderCollapse:"collapse"}}>
+                <thead><tr style={{borderBottom:`1px solid ${T.border}`}}>
+                  {["From","To","Time","Dwell"].map(h=><th key={h} style={{padding:"4px 8px",textAlign:"left",color:"#475569"}}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {selectedJob.transitions.map((t,i)=>(
+                    <tr key={i} style={{borderBottom:`1px solid #0d1117`}}>
+                      <td style={{padding:"4px 8px",color:stageColor(t.from_stage)}}>{t.from_stage||"—"}</td>
+                      <td style={{padding:"4px 8px",color:stageColor(t.to_stage)}}>{t.to_stage}</td>
+                      <td style={{padding:"4px 8px",color:"#7dd3fc"}}>{t.transition_at?new Date(t.transition_at).toLocaleString():""}</td>
+                      <td style={{padding:"4px 8px",color:T.text}}>{t.dwell_minutes?`${t.dwell_minutes}m`:"—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EarlyWarningTab({ovenServerUrl,settings}){
   const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
   const mono="'JetBrains Mono',monospace";
@@ -9456,6 +9680,7 @@ function LabAssistantV2(){
     {id:"qc",          label:"QC",          icon:"✓",  group:"analytics"},
     {id:"ai",          label:"AI Assistant",icon:"🤖", group:"analytics"},
     {id:"vision",       label:"Vision",     icon:"👁", group:"analytics"},
+    {id:"timeatlab",    label:"Time at Lab", icon:"⏱", group:"analytics"},
     {id:"ews",          label:"EWS",         icon:"⚡", group:"analytics"},
     {id:"network",      label:"Network",     icon:"🔀", group:"analytics"},
     // Settings (separator before)
@@ -9536,6 +9761,7 @@ function LabAssistantV2(){
         {view==="qc"&&<QCTab trays={trays} dviJobs={mergedJobs} breakage={breakage} setBreakage={setBreakage}/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="timeatlab"&&<TimeAtLabTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="ews"&&<EarlyWarningTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="network"&&<NetworkTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl} onNavigate={setView}/>}
