@@ -3942,75 +3942,46 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       return json(res, result);
     }
 
-    // ASSEMBLY leaderboard: replicate exactly what the frontend tab does
-    // 1. Get station assignments (STN-07 → "Terence S.")
+    // ASSEMBLY leaderboard: use station attribution (same as /api/assembly/history)
     const assignments = assemblyConfig.assignments || {};
     const opMap = assemblyConfig.operatorMap || {};
+    const sinceMs = Date.now() - (days * 86400000);
 
-    // 2. Station layout
+    // Station layout
     const ASM_STATIONS = [];
     for (let i = 1; i <= 15; i++) ASM_STATIONS.push({ id: `STN-${String(i).padStart(2,'0')}`, dvi: `ASSEMBLY #${i}` });
 
-    // 3. Get ALL DVI trace events for assembly over the period
-    const allJobs = dviTrace.getJobs();
-    const sinceMs = Date.now() - (days * 86400000);
-
-    // 4. Count completions per station over the period
-    // A "completion" = job that transitioned OUT of an assembly station
-    const stnCompletions = {};
-    const stnOperators = {}; // station → {initials: count}
-    for (const job of allJobs) {
-      const history = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
-      if (!history || !history.events) continue;
-      for (let i = 0; i < history.events.length; i++) {
-        const evt = history.events[i];
-        if (!evt.timestamp || evt.timestamp < sinceMs) continue;
-        if (!/^ASSEMBLY #\d+/.test(evt.station)) continue;
-        // Count this as work at this station
-        stnCompletions[evt.station] = (stnCompletions[evt.station] || 0) + 1;
-        if (evt.operator) {
-          if (!stnOperators[evt.station]) stnOperators[evt.station] = {};
-          stnOperators[evt.station][evt.operator] = (stnOperators[evt.station][evt.operator] || 0) + 1;
-        }
-      }
-    }
-
-    // 5. Build per-operator stats using station assignments (same as frontend)
-    const opStats = {};
-
-    // Primary: attribute via station assignments
+    // Map station → assigned operator name
+    const stnToName = {};
     for (const [stnId, info] of Object.entries(assignments)) {
       if (!info?.operatorName) continue;
       const stn = ASM_STATIONS.find(s => s.id === stnId);
-      if (!stn) continue;
-      const completed = stnCompletions[stn.dvi] || 0;
-      const key = info.operatorName;
-      if (!opStats[key]) opStats[key] = { name: info.operatorName, jobs: 0, stations: [] };
-      opStats[key].jobs += completed;
-      if (completed > 0) opStats[key].stations.push(stn.dvi.replace('ASSEMBLY ', '#'));
+      if (stn) stnToName[stn.dvi] = info.operatorName;
     }
 
-    // Secondary: add trace operator data via merge map for unmerged initials
-    const assignedStations = new Set(
-      Object.entries(assignments)
-        .filter(([, a]) => a?.operatorName)
-        .map(([stnId]) => ASM_STATIONS.find(s => s.id === stnId)?.dvi)
-        .filter(Boolean)
-    );
-
-    for (const [station, initTally] of Object.entries(stnOperators)) {
-      if (assignedStations.has(station)) continue; // already attributed
-      for (const [init, count] of Object.entries(initTally)) {
-        const name = opMap[init.toUpperCase()] || init;
-        if (!opStats[name]) opStats[name] = { name, jobs: 0, stations: [] };
-        opStats[name].jobs += count;
-        if (!opStats[name].stations.includes(station.replace('ASSEMBLY ', '#'))) {
-          opStats[name].stations.push(station.replace('ASSEMBLY ', '#'));
-        }
+    // Count unique jobs per station from DVI trace
+    const stnJobs = {}; // station → Set of job_ids
+    const allJobs = dviTrace.getJobs();
+    for (const job of allJobs) {
+      const history = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
+      if (!history || !history.events) continue;
+      for (const evt of history.events) {
+        if (!evt.timestamp || evt.timestamp < sinceMs) continue;
+        if (!/^ASSEMBLY #\d+/.test(evt.station)) continue;
+        if (!stnJobs[evt.station]) stnJobs[evt.station] = new Set();
+        stnJobs[evt.station].add(job.job_id);
       }
     }
 
-    // 6. Sort and rank
+    // Attribute station jobs to operators
+    const opStats = {};
+    for (const [station, jobSet] of Object.entries(stnJobs)) {
+      const name = stnToName[station] || station.replace('ASSEMBLY ', 'Stn ');
+      if (!opStats[name]) opStats[name] = { name, jobs: 0, stations: [] };
+      opStats[name].jobs += jobSet.size;
+      opStats[name].stations.push(station.replace('ASSEMBLY ', '#'));
+    }
+
     const ranked = Object.values(opStats)
       .filter(o => o.jobs > 0)
       .sort((a, b) => b.jobs - a.jobs)
