@@ -6815,7 +6815,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
   const [jobSearch,setJobSearch]=useState("");
   const [selectedJob,setSelectedJob]=useState(null);
   const [recentJobs,setRecentJobs]=useState([]);
-  const [histogram,setHistogram]=useState(null);
+  const [histogram,setHistogram]=useState({mode:"active",totalJobs:0,buckets:[]});
   const [histFilter,setHistFilter]=useState({lensType:"",coating:"",stage:"",mode:"active"});
   const [loading,setLoading]=useState(true);
   const [lastRefresh,setLastRefresh]=useState(null);
@@ -6843,11 +6843,11 @@ function TimeAtLabTab({ovenServerUrl,settings}){
       ]);
       if(sRes.ok) setSummary(await sRes.json());
       if(rRes.ok) setRecentJobs(await rRes.json());
-      if(hRes.ok) setHistogram(await hRes.json());
+      if(hRes.ok) setHistogram(await hRes.json()); else setHistogram({mode:"active",totalJobs:0,buckets:[]});
       setLastRefresh(new Date());
-    }catch(e){console.error(e);}
+    }catch(e){console.error("TAL fetch error:",e);}
     finally{setLoading(false);}
-  },[base,period,isDemo]);
+  },[base,period,isDemo,histFilter]);
 
   useEffect(()=>{fetchData();const t=setInterval(fetchData,30000);return()=>clearInterval(t);},[fetchData]);
 
