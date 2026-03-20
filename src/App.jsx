@@ -6821,6 +6821,228 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
 }
 
 // ── Early Warning System Tab ─────────────────────────────────
+// ── Vision Dashboard ─────────────────────────────────────────
+function VisionDashboard({ovenServerUrl,settings,isTablet}){
+  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const mono="'JetBrains Mono',monospace";
+  const isDemo=settings?.demoMode||false;
+
+  const [sub,setSub]=useState("dashboard");
+  const [accuracy,setAccuracy]=useState(null);
+  const [exceptions,setExceptions]=useState([]);
+  const [recentReads,setRecentReads]=useState([]);
+  const [period,setPeriod]=useState("7d");
+  const [loading,setLoading]=useState(true);
+  const [resolveId,setResolveId]=useState(null);
+  const [resolveJob,setResolveJob]=useState("");
+
+  const DEMO_ACCURACY={period:"7d",successRate:92.4,totalScans:1847,matchedScans:1707,avgConfidence:0.82,exceptionsPending:12,totalAllTime:8934,
+    byStation:[{station_id:"DIP-1",total:923,matched:862,success_rate:93.4},{station_id:"DIP-2",total:924,matched:845,success_rate:91.5}],
+    byDay:[{day:"2026-03-20",total:294,matched:276,success_rate:93.9,avg_confidence:0.84},{day:"2026-03-19",total:312,matched:288,success_rate:92.3,avg_confidence:0.81},{day:"2026-03-18",total:298,matched:272,success_rate:91.3,avg_confidence:0.80},{day:"2026-03-17",total:276,matched:254,success_rate:92.0,avg_confidence:0.83},{day:"2026-03-16",total:320,matched:298,success_rate:93.1,avg_confidence:0.82},{day:"2026-03-15",total:182,matched:168,success_rate:92.3,avg_confidence:0.79},{day:"2026-03-14",total:165,matched:151,success_rate:91.5,avg_confidence:0.81}],
+    confidenceDistribution:[{bucket:"90-100",count:842,matched:838},{bucket:"80-90",count:534,matched:510},{bucket:"70-80",count:298,matched:248},{bucket:"60-70",count:112,matched:78},{bucket:"50-60",count:42,matched:22},{bucket:"below-50",count:19,matched:11}],
+    labelCounts:{good_read:1707,bad_read:140},model:null};
+  const DEMO_EXCEPTIONS=[
+    {id:1,capture_id:"scan_001",job_number:"301215",eye_side:"L",ocr_confidence:0.42,raw_text:"30I2I5L",validation_reason:"job_not_found",station_id:"DIP-1",scanned_at:"2026-03-20T08:14:00"},
+    {id:2,capture_id:"scan_002",job_number:"407",eye_side:null,ocr_confidence:0.31,raw_text:"407",validation_reason:"job_not_found",station_id:"DIP-2",scanned_at:"2026-03-20T07:52:00"},
+    {id:3,capture_id:"scan_003",job_number:"421695",eye_side:"R",ocr_confidence:0.68,raw_text:"42I695R",validation_reason:"job_not_found",station_id:"DIP-1",scanned_at:"2026-03-19T16:30:00"},
+  ];
+
+  const fetchData=useCallback(async()=>{
+    if(isDemo){setAccuracy(DEMO_ACCURACY);setExceptions(DEMO_EXCEPTIONS);setLoading(false);return;}
+    try{
+      const days=period==="24h"?1:period==="30d"?30:7;
+      const [aRes,eRes,rRes]=await Promise.all([
+        fetch(`${base}/api/vision/accuracy?days=${days}`),
+        fetch(`${base}/api/vision/exceptions?limit=50`),
+        fetch(`${base}/api/vision/reads?limit=20`),
+      ]);
+      if(aRes.ok) setAccuracy(await aRes.json());
+      if(eRes.ok) setExceptions(await eRes.json());
+      if(rRes.ok) setRecentReads(await rRes.json());
+    }catch(e){console.error("Vision fetch:",e);}
+    finally{setLoading(false);}
+  },[base,period,isDemo]);
+
+  useEffect(()=>{fetchData();const t=setInterval(fetchData,30000);return()=>clearInterval(t);},[fetchData]);
+
+  const resolveException=async(id)=>{
+    if(!resolveJob.trim())return;
+    try{
+      await fetch(`${base}/api/vision/exceptions/${id}/resolve`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({correct_job:resolveJob.trim()})});
+      setResolveId(null);setResolveJob("");fetchData();
+    }catch(e){console.error(e);}
+  };
+
+  const a=accuracy||DEMO_ACCURACY;
+  const sColor=(r)=>r>=95?T.green:r>=85?T.amber:T.red;
+
+  if(loading)return <div style={{textAlign:"center",padding:60,color:T.textMuted,fontFamily:mono}}>Loading vision data...</div>;
+
+  return(
+    <div style={{padding:isTablet?"14px 12px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
+      {/* Sub-tabs */}
+      <div style={{display:"flex",gap:6,marginBottom:16,alignItems:"center"}}>
+        <span style={{fontSize:20,marginRight:4}}>👁</span>
+        <span style={{color:T.blue,fontWeight:600,letterSpacing:"0.12em",fontSize:13,marginRight:12}}>VISION SYSTEM</span>
+        {[{id:"dashboard",label:"Dashboard"},{id:"exceptions",label:`Exceptions (${a.exceptionsPending})`},{id:"scanner",label:"Scanner"}].map(tab=>(
+          <button key={tab.id} onClick={()=>setSub(tab.id)} style={{
+            background:sub===tab.id?T.blueDark:"transparent",border:`1px solid ${sub===tab.id?T.blue:"transparent"}`,
+            borderRadius:6,padding:"7px 16px",cursor:"pointer",color:sub===tab.id?"#93C5FD":T.textMuted,
+            fontSize:11,fontWeight:600,fontFamily:mono,
+          }}>{tab.label.toUpperCase()}</button>
+        ))}
+        <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+          {["24h","7d","30d"].map(p=>(
+            <button key={p} onClick={()=>{setPeriod(p);setLoading(true);}} style={{padding:"4px 10px",fontSize:10,fontFamily:mono,background:period===p?T.blueDark:"transparent",color:period===p?"#7dd3fc":"#475569",border:`1px solid ${period===p?T.blue:T.border}`,borderRadius:3,cursor:"pointer"}}>{p.toUpperCase()}</button>
+          ))}
+        </div>
+      </div>
+
+      {/* ═══ DASHBOARD ═══ */}
+      {sub==="dashboard"&&(
+        <div>
+          {/* KPI Row */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+            {[
+              {label:"SUCCESS RATE",value:`${a.successRate}%`,color:sColor(a.successRate)},
+              {label:"TOTAL SCANS",value:a.totalScans,color:T.blue},
+              {label:"EXCEPTIONS",value:a.exceptionsPending,color:a.exceptionsPending>10?T.red:a.exceptionsPending>0?T.amber:T.green},
+              {label:"AVG CONFIDENCE",value:`${Math.round(a.avgConfidence*100)}%`,color:a.avgConfidence>=0.8?T.green:a.avgConfidence>=0.6?T.amber:T.red},
+              {label:"ALL-TIME SCANS",value:a.totalAllTime,color:T.purple},
+            ].map(k=>(
+              <div key={k.label} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:"12px 14px",textAlign:"center"}}>
+                <div style={{fontSize:9,color:"#475569",letterSpacing:"0.12em",marginBottom:4}}>{k.label}</div>
+                <div style={{fontSize:22,fontWeight:700,color:k.color,lineHeight:1}}>{k.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+            {/* Daily Trend */}
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>DAILY SUCCESS RATE</div>
+              <div style={{display:"flex",alignItems:"flex-end",gap:4,height:120}}>
+                {(a.byDay||[]).slice().reverse().map((d,i)=>{
+                  const pct=Math.max(4,d.success_rate);
+                  return(
+                    <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}} title={`${d.day}: ${d.success_rate}% (${d.total} scans)`}>
+                      <div style={{fontSize:8,color:sColor(d.success_rate),fontWeight:600}}>{d.success_rate}%</div>
+                      <div style={{width:"100%",height:`${pct}%`,background:sColor(d.success_rate),borderRadius:"3px 3px 0 0",minHeight:4,opacity:0.7}}/>
+                      <div style={{fontSize:7,color:"#334155"}}>{(d.day||"").slice(5)}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Confidence Distribution */}
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:10}}>CONFIDENCE DISTRIBUTION</div>
+              {(a.confidenceDistribution||[]).map(b=>{
+                const maxCount=Math.max(...(a.confidenceDistribution||[]).map(x=>x.count),1);
+                const pct=Math.round((b.count/maxCount)*100);
+                const matchPct=b.count>0?Math.round((b.matched/b.count)*100):0;
+                return(
+                  <div key={b.bucket} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                    <div style={{width:60,fontSize:9,color:"#475569",textAlign:"right"}}>{b.bucket}%</div>
+                    <div style={{flex:1,height:14,background:"#0d1117",borderRadius:3,overflow:"hidden",border:"1px solid #111827",position:"relative"}}>
+                      <div style={{height:"100%",width:`${pct}%`,background:T.blue,borderRadius:3,opacity:0.6}}/>
+                      <div style={{position:"absolute",top:0,height:"100%",width:`${pct*matchPct/100}%`,background:T.green,borderRadius:3,opacity:0.8}}/>
+                    </div>
+                    <div style={{width:40,fontSize:9,color:"#334155"}}>{b.count}</div>
+                  </div>
+                );
+              })}
+              <div style={{display:"flex",gap:12,marginTop:6,justifyContent:"center"}}>
+                <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:2,background:T.blue,opacity:0.6}}/><span style={{fontSize:8,color:"#475569"}}>Total</span></div>
+                <div style={{display:"flex",alignItems:"center",gap:4}}><div style={{width:8,height:8,borderRadius:2,background:T.green,opacity:0.8}}/><span style={{fontSize:8,color:"#475569"}}>Matched</span></div>
+              </div>
+            </div>
+          </div>
+
+          {/* By Station */}
+          {(a.byStation||[]).length>0&&(
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:14,marginTop:16}}>
+              <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:8}}>ACCURACY BY STATION</div>
+              <table style={{width:"100%",fontSize:10,fontFamily:mono,borderCollapse:"collapse"}}>
+                <thead><tr style={{borderBottom:`1px solid ${T.border}`}}>
+                  {["Station","Scans","Matched","Rate"].map(h=><th key={h} style={{padding:"5px 8px",textAlign:"left",color:"#475569",fontSize:9}}>{h}</th>)}
+                </tr></thead>
+                <tbody>
+                  {(a.byStation||[]).map(s=>(
+                    <tr key={s.station_id} style={{borderBottom:`1px solid #0d1117`}}>
+                      <td style={{padding:"5px 8px",color:T.text,fontWeight:600}}>{s.station_id}</td>
+                      <td style={{padding:"5px 8px",color:"#7dd3fc"}}>{s.total}</td>
+                      <td style={{padding:"5px 8px",color:T.green}}>{s.matched}</td>
+                      <td style={{padding:"5px 8px",color:sColor(s.success_rate),fontWeight:600}}>{s.success_rate}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Training Data Stats */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:10,marginTop:16}}>
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12,textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:700,color:T.green}}>{a.labelCounts?.good_read||0}</div>
+              <div style={{fontSize:9,color:"#475569",marginTop:2}}>GOOD READ LABELS</div>
+            </div>
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12,textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:700,color:T.red}}>{a.labelCounts?.bad_read||0}</div>
+              <div style={{fontSize:9,color:"#475569",marginTop:2}}>BAD READ LABELS</div>
+            </div>
+            <div style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:4,padding:12,textAlign:"center"}}>
+              <div style={{fontSize:20,fontWeight:700,color:T.purple}}>{(a.labelCounts?.good_read||0)+(a.labelCounts?.bad_read||0)}</div>
+              <div style={{fontSize:9,color:"#475569",marginTop:2}}>TOTAL TRAINING SAMPLES</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ EXCEPTIONS ═══ */}
+      {sub==="exceptions"&&(
+        <div>
+          <div style={{fontSize:9,color:"#475569",letterSpacing:"0.14em",marginBottom:12}}>UNRESOLVED EXCEPTIONS — OPERATOR REVIEW NEEDED</div>
+          {exceptions.length===0&&<div style={{textAlign:"center",padding:40,color:"#334155",fontFamily:mono,fontSize:11}}>No pending exceptions. All reads resolved.</div>}
+          {exceptions.map(ex=>(
+            <div key={ex.id} style={{background:T.card,border:`1px solid ${ex.ocr_confidence<0.5?"rgba(239,68,68,0.2)":T.border}`,borderRadius:4,padding:14,marginBottom:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:6}}>
+                <span style={{fontSize:14,fontWeight:700,color:T.red,fontFamily:mono}}>{ex.job_number||"—"}</span>
+                {ex.eye_side&&<span style={{fontSize:10,color:ex.eye_side==="L"?T.blue:T.purple,fontWeight:700}}>{ex.eye_side}</span>}
+                <span style={{fontSize:9,color:"#475569"}}>{ex.validation_reason}</span>
+                <span style={{fontSize:9,color:"#334155",marginLeft:"auto"}}>{ex.station_id||"—"}</span>
+                <span style={{fontSize:9,color:"#334155"}}>{ex.scanned_at?new Date(ex.scanned_at).toLocaleString():""}</span>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:9,color:"#475569"}}>Confidence: {Math.round((ex.ocr_confidence||0)*100)}%</span>
+                {ex.raw_text&&<span style={{fontSize:9,color:"#334155"}}>Raw: "{ex.raw_text}"</span>}
+              </div>
+              {resolveId===ex.id?(
+                <div style={{display:"flex",gap:6,marginTop:8}}>
+                  <input value={resolveJob} onChange={e=>setResolveJob(e.target.value)} placeholder="Correct job #" onKeyDown={e=>{if(e.key==="Enter")resolveException(ex.id);}}
+                    style={{flex:1,padding:"6px 10px",background:T.surface,border:`1px solid ${T.border}`,borderRadius:3,color:T.text,fontFamily:mono,fontSize:12}}/>
+                  <button onClick={()=>resolveException(ex.id)} style={{padding:"6px 14px",background:T.green,border:"none",borderRadius:3,color:"#000",fontFamily:mono,fontSize:10,fontWeight:700,cursor:"pointer"}}>RESOLVE</button>
+                  <button onClick={()=>{setResolveId(null);setResolveJob("");}} style={{padding:"6px 10px",background:"transparent",border:`1px solid ${T.border}`,borderRadius:3,color:"#475569",fontFamily:mono,fontSize:10,cursor:"pointer"}}>CANCEL</button>
+                </div>
+              ):(
+                <button onClick={()=>setResolveId(ex.id)} style={{marginTop:6,padding:"5px 12px",background:"transparent",border:`1px solid ${T.amber}44`,borderRadius:3,color:T.amber,fontFamily:mono,fontSize:9,cursor:"pointer"}}>CORRECT THIS READ</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ═══ SCANNER ═══ */}
+      {sub==="scanner"&&(
+        <div style={{height:isTablet?"calc(100dvh - 160px)":"calc(100dvh - 130px)",overflow:"hidden"}}>
+          <LensScanner/>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Time at Lab Tab ──────────────────────────────────────────
 function TimeAtLabTab({ovenServerUrl,settings}){
   const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
@@ -9854,9 +10076,7 @@ function LabAssistantV2(){
 
       {/* CONTENT */}
       {view==="vision"?(
-        <div style={{height:isTablet?"calc(100dvh - 90px)":"calc(100dvh - 66px)",overflow:"hidden"}}>
-          <LensScanner/>
-        </div>
+        <VisionDashboard ovenServerUrl={ovenServerUrl} settings={settings} isTablet={isTablet}/>
       ):(
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto"}}>
         {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats}/>}
