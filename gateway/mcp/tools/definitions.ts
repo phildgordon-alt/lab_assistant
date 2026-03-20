@@ -925,9 +925,10 @@ For "when will we catch up" or "how far behind are we" questions.`,
 export const get_operator_leaderboard = {
   name: 'get_operator_leaderboard',
   description: `USE THIS for "who are the top performers", "best assemblers", "operator rankings", or any operator comparison question.
-WHAT: Returns pre-aggregated operator leaderboard: rank, operator initials, total jobs, jobs/day, avg dwell time. Sorted by total jobs desc.
+WHAT: Returns pre-aggregated operator leaderboard sorted BEST FIRST. Rank 1 = MOST jobs = TOP performer. Rank 2 = second best. The list is already sorted — show rank 1-5 for "top performers".
+FIELDS: rank (1=best), operator (initials), totalJobs, jobsPerDay, avgDwellMin.
 HOW: Optional days (default 14) and stage filter (ASSEMBLY, SURFACING, COATING, CUTTING, QC).
-Data comes from historical stage transitions — covers weeks of data, not just today.`,
+IMPORTANT: When asked for "top performers", show the FIRST entries (rank 1, 2, 3...). Do NOT reverse or show the bottom.`,
   input_schema: {
     type: 'object',
     properties: {
