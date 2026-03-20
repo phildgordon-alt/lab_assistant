@@ -3694,12 +3694,13 @@ const DOMAIN_CONFIGS = {
     title: "Surfacing AI",
     greeting: "I'm your Surfacing specialist. I can help with machine alerts, error analysis, queue priority, and defect troubleshooting. I monitor SOM machine status in real-time.",
     quickPrompts: [
-      { icon: "🚨", label: "Machine Alerts", text: "Analyze all SOM machine errors and warnings. Which ones are repeating? What maintenance actions should we take?" },
-      { icon: "📋", label: "Queue Status", text: "Summarize current surfacing queue status and priorities." },
-      { icon: "🔴", label: "Rush Jobs", text: "List all rush jobs in surfacing and recommended priority order." },
-      { icon: "🔧", label: "Defect Help", text: "Help me troubleshoot a surfacing defect. What questions should I answer?" },
-      { icon: "📊", label: "Machine Health Report", text: "Generate a machine health report — uptime, error patterns, maintenance recommendations.", isReport: true },
-      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Surfacing. Call the API at /api/lab/catchup?department=surfacing to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
+      { icon: "🚨", label: "Machine Alerts", text: "Use get_som_status() to check all Schneider machine errors and warnings. Which ones are repeating? What maintenance actions should we take?" },
+      { icon: "📋", label: "Queue Status", text: "Use get_wip_jobs(department='S') and get_wip_snapshot() to summarize current surfacing queue status and priorities." },
+      { icon: "🔴", label: "Rush Jobs", text: "Use get_wip_jobs(department='S') to list all rush jobs in surfacing. Show recommended priority order." },
+      { icon: "⏱", label: "Time at Lab", text: "Use get_time_at_lab_summary() to show avg time-at-lab, stage dwell times, and the current bottleneck. What's the surfacing dwell time vs other departments?", isReport: true },
+      { icon: "👤", label: "Operator Stats", text: "Use get_dvi_operator_data(department='S') to show operator performance. Who has the most jobs today? Rank by volume.", isReport: true },
+      { icon: "📊", label: "Machine Health", text: "Use get_som_status() to generate a machine health report — uptime, error patterns, which machines need attention.", isReport: true },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Surfacing. Use get_backlog_catchup(department='surfacing') for the projection data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
     ],
     buildContext: () => `You are the Surfacing Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3726,12 +3727,12 @@ Be direct and technical. Flag urgent issues first.`,
     title: "Cutting AI",
     greeting: "I'm your Cutting/Edging specialist. I can help with edge quality, frame fit, breakage analysis, and axis verification.",
     quickPrompts: [
-      { icon: "📋", label: "Queue Status", text: "What's the current cutting queue status?" },
-      { icon: "💥", label: "Recent Breaks", text: "List any breaks reported in cutting today and their causes." },
-      { icon: "🔴", label: "Rush Priority", text: "Which rush jobs need immediate edging attention?" },
-      { icon: "🔧", label: "Edge Issue", text: "Help troubleshoot an edge quality issue. What information do you need?" },
-      { icon: "📐", label: "Frame Fit", text: "Guide me through checking frame-to-lens fit parameters." },
-      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Cutting. Call the API at /api/lab/catchup?department=cutting to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
+      { icon: "📋", label: "Queue Status", text: "Use get_wip_jobs(department='E') to show current cutting queue depth and priorities." },
+      { icon: "💥", label: "Recent Breaks", text: "Use get_breakage_events(department='E') to list all breaks in cutting today with causes and positions." },
+      { icon: "🔴", label: "Rush Priority", text: "Use get_sla_at_risk() to show which rush jobs need immediate edging attention." },
+      { icon: "⏱", label: "Time at Lab", text: "Use get_time_at_lab_summary() to show cutting dwell times and SLA compliance.", isReport: true },
+      { icon: "👤", label: "Operator Stats", text: "Use get_dvi_operator_data(department='E') to rank cutting operators by jobs completed.", isReport: true },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Cutting. Use get_backlog_catchup(department='cutting'). Give me: current backlog, net daily gain/loss, days to clear, clear date, milestones. What output rate do we need to catch up in 2 weeks?", isReport: true },
     ],
     buildContext: () => `You are the Cutting/Edging Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3754,13 +3755,13 @@ Help with: edge quality, frame-to-lens fit, axis verification, breakage analysis
     title: "Coating AI",
     greeting: "I'm your Coating specialist. I can help with batch timing, yield analysis, defect patterns, and oven/coater optimization.",
     quickPrompts: [
-      { icon: "📊", label: "Batch Status", text: "Summarize all active coating batches and their status." },
-      { icon: "⏱", label: "Fill Prediction", text: "When should we run the next batch for each coating type?" },
-      { icon: "📉", label: "Yield Analysis", text: "Analyze current yield rates and flag any concerns.", isReport: true },
-      { icon: "⚠️", label: "Defect Pattern", text: "Are there any defect patterns suggesting equipment issues?" },
-      { icon: "🌡", label: "Oven Timing", text: "Review current oven dwell times and recommend adjustments." },
-      { icon: "🔴", label: "Rush Coating", text: "Which rush jobs are currently in coating and their ETA?" },
-      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Coating. Call the API at /api/lab/catchup?department=coating to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
+      { icon: "📊", label: "Batch Status", text: "Use get_coating_intelligence() to summarize all active coating batches, fill %, and recommendations." },
+      { icon: "⏱", label: "Fill Prediction", text: "Use get_coating_intelligence() to predict when we should run the next batch for each coating type. Show fill % and ETA to full." },
+      { icon: "📉", label: "Yield Analysis", text: "Use get_breakage_summary(department='C') to analyze coating yield rates. Flag anything below 90%.", isReport: true },
+      { icon: "🌡", label: "Oven Timing", text: "Use get_oven_rack_status() to review current oven dwell times and recommend adjustments." },
+      { icon: "🔴", label: "Rush Coating", text: "Use get_sla_at_risk() and get_coating_queue() to show rush jobs in coating and their ETA." },
+      { icon: "👤", label: "Operator Stats", text: "Use get_dvi_operator_data(department='C') to rank coating operators by performance.", isReport: true },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Coating. Use get_backlog_catchup(department='coating'). Give me: current backlog, net daily gain/loss, days to clear, clear date, milestones. What output rate do we need?", isReport: true },
     ],
     buildContext: () => `You are the Coating Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3786,13 +3787,13 @@ Flag anything below 90% yield as a concern.`,
     title: "Assembly AI",
     greeting: "I'm your Assembly specialist. I can help with station optimization, operator performance, QC returns, and frame troubleshooting.",
     quickPrompts: [
-      { icon: "📋", label: "Station Status", text: "Show current status of all assembly stations." },
-      { icon: "🏆", label: "Leaderboard", text: "Who are today's top performers in assembly?" },
-      { icon: "🔴", label: "Rush Priority", text: "Which rush jobs need immediate assembly attention?" },
-      { icon: "⚠️", label: "QC Returns", text: "Analyze recent QC returns and identify patterns." },
-      { icon: "📊", label: "Shift Report", text: "Generate current shift assembly summary.", isReport: true },
-      { icon: "🔧", label: "Frame Issue", text: "Help troubleshoot a frame assembly problem." },
-      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Assembly. Call the API at /api/lab/catchup?department=assembly to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. If we're falling behind, tell me exactly what output rate we need to catch up within 2 weeks.", isReport: true },
+      { icon: "📋", label: "Station Status", text: "Use get_wip_jobs(department='A') to show current assembly queue depth and job assignments by station." },
+      { icon: "🏆", label: "Top Performers", text: "Use get_dvi_operator_data(department='A') to rank assembly operators by jobs completed today. Show top 5 with jobs/hour rate.", isReport: true },
+      { icon: "🔴", label: "Rush Priority", text: "Use get_sla_at_risk() and get_wip_jobs(department='A') to list rush jobs needing immediate assembly attention." },
+      { icon: "⏱", label: "Time at Lab", text: "Use get_time_at_lab_summary() to show assembly dwell times and overall SLA compliance. Where's the bottleneck?", isReport: true },
+      { icon: "📊", label: "Shift Report", text: "Use get_throughput_trend(days=1), get_breakage_summary(department='A'), and get_dvi_operator_data(department='A') to generate a current shift summary.", isReport: true },
+      { icon: "💥", label: "QC Returns", text: "Use get_breakage_summary(department='A') and get_breakage_events(department='A') to analyze recent QC returns and patterns." },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for Assembly. Use get_backlog_catchup(department='assembly'). Give me: current backlog, net daily gain/loss, days to clear, clear date, milestones. What output rate do we need?", isReport: true },
     ],
     buildContext: () => `You are the Assembly Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -3824,7 +3825,7 @@ Help with: station optimization, operator performance, frame issues, QC returns,
       { icon: "🚚", label: "Carrier Summary", text: "Summarize today's shipments by carrier." },
       { icon: "📊", label: "EOD Report", text: "Generate end-of-day shipping report.", isReport: true },
       { icon: "🔍", label: "Track Job", text: "Help me track a specific job. Which job ID?" },
-      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for the full lab. Call the API at /api/lab/catchup to get live data. Then give me: current backlog, net daily gain/loss, days to clear, clear date, and weekly milestones. Calculate what daily ship rate we need to hit our target.", isReport: true },
+      { icon: "📈", label: "Backlog Catch-Up", text: "Run a backlog catch-up analysis for the full lab. Use get_backlog_catchup() for lab-wide data. Give me: current backlog, net daily gain/loss, days to clear, clear date, milestones. What daily ship rate do we need?", isReport: true },
     ],
     buildContext: () => `You are the Shipping Specialist AI for Pair Eyewear's lens lab.
 TIMESTAMP: ${new Date().toLocaleString()}
@@ -5604,7 +5605,7 @@ function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl=`htt
     {icon:"🏭", label:"Machine alerts",       text:"Analyze SOM machine status. Which machines have errors or warnings? Are there repeating issues? What maintenance should we schedule?"},
     {icon:"🔴", label:"Rush jobs",            text:"List all current rush jobs from DVI and their exact stage/station in the lab. Suggest priority routing for any that are behind schedule."},
     {icon:"📋", label:"End of day report",    text:"Generate a comprehensive end-of-day production report including DVI job counts by stage, jobs shipped, breakage summary with root cause patterns, machine alerts, and recommendations for tomorrow's shift.", isReport:true},
-    {icon:"📈", label:"Backlog catch-up",     text:"Run a full backlog catch-up analysis. Call /api/lab/catchup for each department (surfacing, cutting, coating, assembly) and also lab-wide. For each, report: current backlog, daily incoming vs output, net gain/loss, days to clear, projected clear date, and weekly milestones. If any department is falling behind (output < incoming), flag it RED and calculate exactly what output rate is needed to catch up within 2 weeks. Format as a clear table.", isReport:true},
+    {icon:"📈", label:"Backlog catch-up",     text:"Run a full backlog catch-up analysis. Use get_backlog_catchup() for each department (surfacing, cutting, coating, assembly) and lab-wide. For each, report: current backlog, daily incoming vs output, net gain/loss, days to clear, projected clear date. Flag any department falling behind RED. Format as a table.", isReport:true},
   ];
 
   const buildAgingPrompt=()=>{
