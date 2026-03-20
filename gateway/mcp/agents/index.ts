@@ -171,6 +171,7 @@ export const COATING_AGENT: AgentConfig = {
     get_breakage_events,
     get_lens_catalog,
     get_maintenance_summary,
+    get_som_status,            // coater machine health
     get_time_at_lab_summary,
     get_time_at_lab_histogram,
     get_sla_at_risk,
@@ -284,10 +285,17 @@ export const QC_AGENT: AgentConfig = {
     get_wip_jobs,
     get_job_detail,
     get_aging_report,
+    get_throughput_trend,
+    get_remake_rate,
     get_breakage_summary,
     get_breakage_events,
+    get_breakage_by_position,
+    get_time_at_lab_summary,
+    get_sla_at_risk,
+    get_dvi_operator_data,
     get_lens_catalog,
     get_frame_catalog,
+    get_maintenance_summary,
     get_settings,
     think_aloud,
     search_knowledge,
@@ -309,11 +317,14 @@ export const DIRECTOR_AGENT: AgentConfig = {
   systemPrompt: DIRECTOR_AGENT_PROMPT,
   tools: [
     get_wip_snapshot,
+    get_wip_jobs,              // drill into specific jobs
+    get_job_detail,            // full job detail
     get_aging_report,
     get_throughput_trend,
     get_remake_rate,
     get_breakage_summary,
     get_coating_wait_summary,
+    get_coating_intelligence,  // coating pipeline visibility
     get_inventory_summary,
     get_maintenance_summary,
     get_time_at_lab_summary,
@@ -366,9 +377,12 @@ export const MAINTENANCE_AGENT: AgentConfig = {
   tools: [
     get_maintenance_summary,
     get_maintenance_tasks,
-    get_wip_snapshot,  // For production impact context
-    get_breakage_summary,  // Breakage often relates to equipment issues
+    get_som_status,          // CRITICAL: real-time Schneider machine health
+    get_wip_snapshot,
+    get_breakage_summary,
+    get_time_at_lab_summary, // downtime impact on throughput
     get_settings,
+    call_api,
     think_aloud,
     search_knowledge,
     get_knowledge_doc,
@@ -382,14 +396,20 @@ export const SHIFT_REPORT_AGENT: AgentConfig = {
   department: undefined,
   systemPrompt: SHIFT_REPORT_AGENT_PROMPT,
   tools: [
-    // Summary and report tools only - no raw data
     get_wip_snapshot,
     get_aging_report,
     get_throughput_trend,
+    get_remake_rate,
     get_breakage_summary,
     get_coating_wait_summary,
     get_inventory_summary,
     get_maintenance_summary,
+    get_time_at_lab_summary,
+    get_time_at_lab_histogram,
+    get_sla_at_risk,
+    get_som_status,
+    get_dvi_operator_data,
+    get_backlog_catchup,
     get_settings,
     think_aloud,
     search_knowledge,
@@ -406,9 +426,13 @@ export const PICKING_AGENT: AgentConfig = {
   systemPrompt: PICKING_AGENT_PROMPT,
   tools: [
     get_wip_snapshot,
+    get_wip_jobs,
+    get_job_detail,
     get_inventory_summary,
     get_inventory_detail,
     get_lens_catalog,
+    get_time_at_lab_summary,
+    get_backlog_catchup,
     get_settings,
     think_aloud,
     search_knowledge,
@@ -450,6 +474,11 @@ export const SHIPPING_AGENT: AgentConfig = {
     get_job_detail,
     get_aging_report,
     get_throughput_trend,
+    get_time_at_lab_summary,
+    get_sla_at_risk,
+    get_backlog_catchup,
+    get_dvi_operator_data,
+    get_breakage_summary,
     get_settings,
     call_api,
     think_aloud,
