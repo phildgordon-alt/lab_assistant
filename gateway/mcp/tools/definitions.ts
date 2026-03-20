@@ -926,7 +926,7 @@ export const get_operator_leaderboard = {
   name: 'get_operator_leaderboard',
   description: `USE THIS for "who are the top performers", "best assemblers", "operator rankings", or any operator comparison question.
 WHAT: Returns pre-aggregated operator leaderboard sorted BEST FIRST. Rank 1 = MOST jobs = TOP performer. Rank 2 = second best. The list is already sorted — show rank 1-5 for "top performers".
-FIELDS: rank (1=best), operator (initials), totalJobs, jobsPerDay, avgDwellMin.
+FIELDS: rank (1=best), name (full name), operator (initials), totalJobs, jobsPerDay, avgDwellMin. Always display the name field, not initials.
 HOW: Optional days (default 14) and stage filter (ASSEMBLY, SURFACING, COATING, CUTTING, QC).
 IMPORTANT: When asked for "top performers", show the FIRST entries (rank 1, 2, 3...). Do NOT reverse or show the bottom.`,
   input_schema: {

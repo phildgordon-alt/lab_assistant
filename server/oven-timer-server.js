@@ -3833,12 +3833,21 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     }));
   }
 
-  // GET /api/time-at-lab/operators — operator leaderboard
+  // GET /api/time-at-lab/operators — operator leaderboard with full names
   if (req.method==='GET' && url.pathname==='/api/time-at-lab/operators') {
-    return json(res, timeAtLab.getOperatorLeaderboard({
+    const result = timeAtLab.getOperatorLeaderboard({
       days: parseInt(url.searchParams.get('days') || '14'),
       stage: url.searchParams.get('stage') || null,
-    }));
+    });
+    // Enrich with full names from assembly config operator map
+    const nameMap = assemblyConfig.operatorMap || {};
+    if (result.operators) {
+      result.operators = result.operators.map(op => ({
+        ...op,
+        name: nameMap[op.operator] || op.operator,
+      }));
+    }
+    return json(res, result);
   }
 
   // GET /api/time-at-lab/ai-context — AI-ready summary
