@@ -224,6 +224,8 @@ const HIGH_BAD = new Set([
   'dvi_queue_depth_asse', 'dvi_queue_depth_qc',
   // Maintenance / oven
   'oven_overdue_racks', 'maintenance_open_work_orders',
+  // Vision
+  'vision_exception_count',
 ]);
 
 const LOW_BAD = new Set([
@@ -232,6 +234,8 @@ const LOW_BAD = new Set([
   'dvi_shipped_per_hour',
   // Network
   'network_wan_status',
+  // Vision
+  'vision_match_rate',
 ]);
 
 // ─── ALERT DETAIL TEMPLATES ──────────────────────────────────────────────
@@ -334,6 +338,11 @@ const RULES = [
 
   // Oven
   { metric: 'oven_overdue_racks',          op: '>=', threshold: 3,  tier: 'P1', message: 'CRITICAL: 3+ oven racks overdue — coating quality at risk, check temps' },
+
+  // Vision
+  { metric: 'vision_match_rate',           op: '<=', threshold: 80, tier: 'P2', message: 'WARNING: Vision scan accuracy below 80% — check lighting, camera, lens positioning' },
+  { metric: 'vision_match_rate',           op: '<=', threshold: 60, tier: 'P1', message: 'CRITICAL: Vision scan accuracy below 60% — scanner system needs immediate attention' },
+  { metric: 'vision_exception_count',      op: '>=', threshold: 20, tier: 'P2', message: 'WARNING: 20+ unresolved vision exceptions — operator review needed' },
 ];
 
 /**

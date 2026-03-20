@@ -57,6 +57,7 @@ const containers = require('./container-service');
 // ── Lab Configuration + EWS Settings ────────────────────────────
 const labConfig = require('./lab-config');
 const timeAtLab = require('./time-at-lab');
+const visionService = require('./vision-service');
 
 // ── Early Warning System ────────────────────────────────────────
 const ews = require('./ews-engine');
@@ -3518,10 +3519,33 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         j.job_id.includes(jobNumber)
       );
 
-      // Log the scan
+      // Persist scan to vision_reads (replaces in-memory buffer)
+      let readResult;
+      try {
+        readResult = visionService.recordRead({
+          capture_id: body.capture_id || null,
+          job_number: jobNumber,
+          eye_side: eye_side || null,
+          ocr_confidence: confidence || null,
+          raw_text: body.raw_text || null,
+          device: device || 'unknown',
+          station_id: body.station_id || null,
+          operator_id: body.operator_id || null,
+          tool_id: tool_id || null,
+          matched: !!match,
+          matched_job_id: match ? match.job_id : null,
+          matched_stage: match ? match.stage : null,
+          validation_reason: match ? 'confirmed' : 'job_not_found',
+          image_data: body.image_data || null,
+          model_version: body.model_version || null,
+          scanned_at: scannedAt || new Date().toISOString(),
+        });
+      } catch(e) { console.warn('[VISION] Record failed:', e.message); }
+
+      // Also keep in-memory for backward compatibility
       if (!global._visionScans) global._visionScans = [];
       const scan = {
-        id: Date.now(),
+        id: readResult?.readId || Date.now(),
         jobNumber,
         confidence: confidence || 0,
         scannedAt: scannedAt || new Date().toISOString(),
@@ -3568,7 +3592,12 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         stage: match ? match.stage : null,
         station: match ? match.station : null,
         operator: match ? match.operator : null,
-        container: containerResult
+        container: containerResult,
+        validated: !!match,
+        validation_reason: match ? 'confirmed' : 'job_not_found',
+        readId: readResult?.readId || null,
+        label: readResult?.label || null,
+        proceed: !!match && (confidence || 0) >= 0.5,
       });
     } catch(e) { return json(res,{success:false,message:e.message},400); }
   }
@@ -3590,6 +3619,55 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       matchRate: scans.length > 0 ? Math.round(scans.filter(s => s.matched).length / scans.length * 100) : 0,
       lastScan: lastScan ? { jobNumber: lastScan.jobNumber, matched: lastScan.matched, at: lastScan.scannedAt } : null
     });
+  }
+
+  // ── Vision Self-Training System ──────────────────────────────
+
+  // GET /api/vision/accuracy — accuracy metrics for dashboard
+  if (req.method==='GET' && url.pathname==='/api/vision/accuracy') {
+    const days = parseInt(url.searchParams.get('days') || '7');
+    return json(res, visionService.getAccuracy({ days }));
+  }
+
+  // GET /api/vision/exceptions — unresolved failed reads
+  if (req.method==='GET' && url.pathname==='/api/vision/exceptions') {
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+    return json(res, visionService.getExceptions(limit));
+  }
+
+  // POST /api/vision/exceptions/:id/resolve — operator corrects a read
+  if (req.method==='POST' && url.pathname.match(/^\/api\/vision\/exceptions\/\d+\/resolve$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    const body = await readBody(req);
+    return json(res, visionService.resolveException(id, body.correct_job, body.operator_id));
+  }
+
+  // GET /api/vision/training-data — export labeled images
+  if (req.method==='GET' && url.pathname==='/api/vision/training-data') {
+    const since = url.searchParams.get('since') || null;
+    return json(res, visionService.getTrainingData(since));
+  }
+
+  // GET /api/vision/model — get confidence model for iPad sync
+  if (req.method==='GET' && url.pathname==='/api/vision/model') {
+    return json(res, visionService.getModelSync());
+  }
+
+  // POST /api/vision/model — upload confidence model from iPad
+  if (req.method==='POST' && url.pathname==='/api/vision/model') {
+    const body = await readBody(req);
+    return json(res, visionService.setModelSync(body.threshold, body.samples));
+  }
+
+  // GET /api/vision/reads — persistent scan log (replaces in-memory)
+  if (req.method==='GET' && url.pathname==='/api/vision/reads') {
+    const limit = parseInt(url.searchParams.get('limit') || '50');
+    return json(res, visionService.getRecentReads(limit));
+  }
+
+  // GET /api/vision/ai-context — AI-ready vision summary
+  if (req.method==='GET' && url.pathname==='/api/vision/ai-context') {
+    return json(res, visionService.getAIContext());
   }
 
   // ── Containers (Coating Pipeline Inheritance) ──────────────

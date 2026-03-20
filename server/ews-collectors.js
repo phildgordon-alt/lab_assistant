@@ -620,6 +620,29 @@ function register(ews, adapters) {
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // 9. Vision — Scan accuracy and exception tracking
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  try {
+    const visionService = require('./vision-service');
+    ews.registerCollector('vision', async () => {
+      const readings = [];
+      try {
+        const acc = visionService.getAccuracy({ days: 1 });
+        if (acc.totalScans > 0) {
+          readings.push({ metric: 'vision_match_rate', system: 'Vision', value: acc.successRate, unit: '%' });
+          readings.push({ metric: 'vision_exception_count', system: 'Vision', value: acc.exceptionsPending, unit: 'reads' });
+          readings.push({ metric: 'vision_total_scans', system: 'Vision', value: acc.totalScans, unit: 'scans' });
+          readings.push({ metric: 'vision_avg_confidence', system: 'Vision', value: Math.round(acc.avgConfidence * 100), unit: '%' });
+        }
+      } catch (e) {
+        console.error('[EWS:Vision] Collection error:', e.message);
+      }
+      return readings;
+    });
+  } catch (e) { /* vision-service not available */ }
+
   console.log(`[EWS] All collectors registered`);
 }
 

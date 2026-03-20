@@ -353,6 +353,71 @@ for (const sql of containerMigrations) {
   try { db.exec(sql); } catch (e) { /* column already exists */ }
 }
 
+// Vision self-training system tables
+db.exec(`
+  -- Every scan attempt from LensScanner app (persistent)
+  CREATE TABLE IF NOT EXISTS vision_reads (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capture_id TEXT UNIQUE,
+    job_number TEXT,
+    eye_side TEXT,
+    ocr_confidence REAL,
+    raw_text TEXT,
+    device TEXT,
+    station_id TEXT,
+    operator_id TEXT,
+    tool_id TEXT,
+    matched INTEGER DEFAULT 0,
+    matched_job_id TEXT,
+    matched_stage TEXT,
+    validation_reason TEXT,
+    correct_job TEXT,
+    resolution_type TEXT,
+    image_path TEXT,
+    model_version TEXT,
+    scanned_at TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_vr_job ON vision_reads(job_number);
+  CREATE INDEX IF NOT EXISTS idx_vr_matched ON vision_reads(matched);
+  CREATE INDEX IF NOT EXISTS idx_vr_scanned ON vision_reads(scanned_at);
+  CREATE INDEX IF NOT EXISTS idx_vr_station ON vision_reads(station_id);
+
+  -- Labeled images for training pipeline
+  CREATE TABLE IF NOT EXISTS vision_labels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    capture_id TEXT NOT NULL,
+    label TEXT NOT NULL,
+    label_source TEXT NOT NULL,
+    image_path TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_vl_label ON vision_labels(label);
+
+  -- Model version tracking
+  CREATE TABLE IF NOT EXISTS vision_models (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version TEXT NOT NULL,
+    trained_at TEXT,
+    sample_count INTEGER,
+    precision_score REAL,
+    recall_score REAL,
+    f1_score REAL,
+    status TEXT DEFAULT 'candidate',
+    promoted_at TEXT,
+    notes TEXT
+  );
+
+  -- Confidence model sync (shared across iPads)
+  CREATE TABLE IF NOT EXISTS vision_confidence_sync (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    threshold REAL DEFAULT 0.5,
+    samples TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  INSERT OR IGNORE INTO vision_confidence_sync (id, threshold, samples) VALUES (1, 0.5, '[]');
+`);
+
 db.exec(`
 
   -- ═══════════════════════════════════════════════════════════════════════════
