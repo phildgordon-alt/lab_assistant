@@ -85,8 +85,6 @@ const stmts = {
       updated_at = excluded.updated_at
   `),
 
-  updateStageTimestamp: db.prepare(`UPDATE job_lifecycle SET ?? = ? WHERE job_id = ?`),
-
   setShipped: db.prepare(`
     UPDATE job_lifecycle SET shipped_at = ?, current_stage = 'SHIPPED',
       minutes_total = ROUND((? - entered_lab_at) / 60000.0, 1),
