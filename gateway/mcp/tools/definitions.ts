@@ -795,6 +795,138 @@ export const KNOWLEDGE_TOOLS = [
   generate_csv_report,
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TIME AT LAB TOOLS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const get_time_at_lab_summary = {
+  name: 'get_time_at_lab_summary',
+  description: `USE THIS for questions about how long jobs take, time-at-lab metrics, SLA compliance, or bottleneck identification.
+WHAT: Returns avg/min/max days in lab, SLA compliance %, stage dwell times, current WIP by stage, bottleneck stage, at-risk jobs.
+HOW: Optional period (24h, 7d, 30d). Returns shipped job stats + active WIP stats.
+NOT for individual job timelines — use get_time_at_lab_job() for that.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      period: {
+        type: 'string',
+        enum: ['24h', '7d', '30d'],
+        description: 'Time period. Default 7d.',
+        default: '7d',
+      },
+    },
+  },
+};
+
+export const get_time_at_lab_job = {
+  name: 'get_time_at_lab_job',
+  description: `USE THIS to see the full lifecycle timeline of a specific job — every stage it passed through with timestamps and dwell times.
+WHAT: Returns job attributes, per-stage enter/exit timestamps, stage durations, SLA status, transition log.
+HOW: Requires job_id (invoice number).
+NOT for aggregate stats — use get_time_at_lab_summary() for that.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      job_id: {
+        type: 'string',
+        description: 'Job/invoice number to look up (required)',
+      },
+    },
+    required: ['job_id'],
+  },
+};
+
+export const get_time_at_lab_histogram = {
+  name: 'get_time_at_lab_histogram',
+  description: `USE THIS for distribution analysis — how many jobs at each day-in-lab mark, filterable by lens type, coating, department.
+WHAT: Returns job counts bucketed by days in lab (0d, 1d, 2d, 3d...) with breakdowns by coating, lens type, and stage.
+HOW: Filter by lensType (P/S/B), coating, stage. Mode: active (current WIP) or shipped (historical).`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      mode: { type: 'string', enum: ['active', 'shipped'], description: 'active WIP or shipped jobs', default: 'active' },
+      lensType: { type: 'string', description: 'Filter: P=Progressive, S=Single Vision, B=Bifocal' },
+      coating: { type: 'string', description: 'Filter: AR, Blue Cut, Hard Coat, Transitions, Mirror, Polarized' },
+      stage: { type: 'string', description: 'Filter: SURFACING, COATING, CUTTING, ASSEMBLY, QC' },
+      period: { type: 'string', description: 'For shipped mode: 7d, 30d, 90d', default: '30d' },
+    },
+  },
+};
+
+export const get_sla_at_risk = {
+  name: 'get_sla_at_risk',
+  description: `USE THIS to find jobs that are approaching or have exceeded their SLA deadline.
+WHAT: Returns list of at-risk and breached jobs with job ID, stage, elapsed time, remaining time, SLA target.
+HOW: No parameters needed. Returns up to 50 most urgent jobs.`,
+  input_schema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+export const TIME_AT_LAB_TOOLS = [
+  get_time_at_lab_summary,
+  get_time_at_lab_job,
+  get_time_at_lab_histogram,
+  get_sla_at_risk,
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MACHINE & OPERATOR TOOLS
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const get_som_status = {
+  name: 'get_som_status',
+  description: `USE THIS for questions about machine health, conveyor status, OEE, or equipment errors.
+WHAT: Returns all SOM (Schneider) machine devices with status, error state, conveyor positions, and health info.
+HOW: No parameters needed. Returns devices + conveyors from both sites.
+For surfacing questions: machines include generators, polishers, blockers, deblocking units.`,
+  input_schema: {
+    type: 'object',
+    properties: {},
+  },
+};
+
+export const get_dvi_operator_data = {
+  name: 'get_dvi_operator_data',
+  description: `USE THIS for questions about operator performance, who is working on what, jobs per operator, or top performers.
+WHAT: Returns DVI job data enriched with operator assignments, station info, and stage timings.
+HOW: Optional department filter. Data includes operator field on each job for performance grouping.
+For "top assemblers" or "who is fastest": group returned jobs by operator, count per operator, calculate avg time per job.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      department: {
+        type: 'string',
+        description: 'Filter by department code: S=Surfacing, C=Coating, E=Edging, A=Assembly, Q=QC',
+      },
+    },
+  },
+};
+
+export const get_backlog_catchup = {
+  name: 'get_backlog_catchup',
+  description: `USE THIS for backlog analysis, catch-up projections, and recovery timeline questions.
+WHAT: Returns current backlog, net daily gain/loss, days to clear, projected clear date, weekly milestones.
+HOW: Optional department. Auto-fills from live DVI queue data if department specified.
+For "when will we catch up" or "how far behind are we" questions.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      department: {
+        type: 'string',
+        description: 'Department: surfacing, cutting, coating, assembly. Omit for lab-wide.',
+      },
+    },
+  },
+};
+
+export const OPERATIONS_TOOLS = [
+  get_som_status,
+  get_dvi_operator_data,
+  get_backlog_catchup,
+];
+
 // All tools (for backwards compatibility)
 export const ALL_TOOLS = [
   ...WIP_TOOLS,
@@ -807,5 +939,7 @@ export const ALL_TOOLS = [
   ...SETTINGS_TOOLS,
   ...GENERIC_TOOLS,
   ...KNOWLEDGE_TOOLS,
+  ...TIME_AT_LAB_TOOLS,
+  ...OPERATIONS_TOOLS,
 ];
 

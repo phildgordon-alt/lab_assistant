@@ -356,6 +356,43 @@ export async function handleToolCall(
     case 'query_database':
       return handleQueryDatabase(toolInput.query as string);
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // TIME AT LAB TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'get_time_at_lab_summary':
+      return handleCallApi('GET', `/api/time-at-lab/summary?period=${toolInput.period || '7d'}`);
+
+    case 'get_time_at_lab_job':
+      return handleCallApi('GET', `/api/time-at-lab/job/${encodeURIComponent(toolInput.job_id as string)}`);
+
+    case 'get_time_at_lab_histogram': {
+      const params = new URLSearchParams();
+      if (toolInput.mode) params.set('mode', toolInput.mode as string);
+      if (toolInput.lensType) params.set('lensType', toolInput.lensType as string);
+      if (toolInput.coating) params.set('coating', toolInput.coating as string);
+      if (toolInput.stage) params.set('stage', toolInput.stage as string);
+      if (toolInput.period) params.set('period', toolInput.period as string);
+      return handleCallApi('GET', `/api/time-at-lab/histogram?${params}`);
+    }
+
+    case 'get_sla_at_risk':
+      return handleCallApi('GET', '/api/time-at-lab/at-risk');
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // MACHINE & OPERATOR TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'get_som_status':
+      return handleCallApi('GET', '/api/som/devices');
+
+    case 'get_dvi_operator_data':
+      return handleCallApi('GET', `/api/dvi/data${toolInput.department ? '?department=' + toolInput.department : ''}`);
+
+    case 'get_backlog_catchup':
+      return handleCallApi('GET', `/api/lab/catchup${toolInput.department ? '?department=' + toolInput.department : ''}`);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // GENERIC TOOLS
+    // ─────────────────────────────────────────────────────────────────────────
     case 'call_api':
       return handleCallApi(
         toolInput.method as string,
