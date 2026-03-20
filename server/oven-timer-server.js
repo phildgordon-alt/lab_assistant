@@ -1917,6 +1917,66 @@ Respond with a structured batching plan in this format:
     });
   }
 
+  // GET /api/assembly/history — daily assembly totals from DVI trace
+  if (req.method==='GET' && url.pathname==='/api/assembly/history') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const sinceMs = Date.now() - (days * 86400000);
+
+    // Build daily totals from DVI trace events at ASSEMBLY stations
+    const allJobs = dviTrace.getJobs();
+    const byDay = {};
+
+    for (const job of allJobs) {
+      const history = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
+      if (!history || !history.events) continue;
+
+      for (const evt of history.events) {
+        if (!evt.timestamp || evt.timestamp < sinceMs) continue;
+        if (!/^ASSEMBLY #\d+/.test(evt.station)) continue;
+
+        const day = new Date(evt.timestamp).toISOString().slice(0, 10);
+        if (!byDay[day]) byDay[day] = { date: day, jobs: new Set(), events: 0, operators: new Set(), byOperator: {} };
+        byDay[day].jobs.add(job.job_id);
+        byDay[day].events++;
+        if (evt.operator) {
+          byDay[day].operators.add(evt.operator);
+          if (!byDay[day].byOperator[evt.operator]) byDay[day].byOperator[evt.operator] = new Set();
+          byDay[day].byOperator[evt.operator].add(job.job_id);
+        }
+      }
+    }
+
+    // Convert sets to counts and enrich names
+    const assignments = assemblyConfig.assignments || {};
+    const opMap = assemblyConfig.operatorMap || {};
+    // Build initials→name from assignments
+    const nameFromAssign = {};
+    const ASM_STN = [];
+    for (let i = 1; i <= 15; i++) ASM_STN.push({ id: `STN-${String(i).padStart(2,'0')}`, dvi: `ASSEMBLY #${i}` });
+    for (const [stnId, info] of Object.entries(assignments)) {
+      if (!info?.operatorName) continue;
+      const direct = info.operatorName.replace(/[^A-Z]/gi,'').slice(0,2).toUpperCase();
+      if (direct) nameFromAssign[direct] = info.operatorName;
+    }
+    const fullNameMap = { ...nameFromAssign, ...opMap };
+
+    const history = Object.values(byDay)
+      .map(d => ({
+        date: d.date,
+        jobs: d.jobs.size,
+        events: d.events,
+        operators: d.operators.size,
+        byOperator: Object.fromEntries(
+          Object.entries(d.byOperator)
+            .map(([init, jobSet]) => [fullNameMap[init] || init, jobSet.size])
+            .sort((a, b) => b[1] - a[1])
+        ),
+      }))
+      .sort((a, b) => b.date.localeCompare(a.date));
+
+    return json(res, { history, days });
+  }
+
   // ── Assembly config (operator assignments + name map) ──────────
   // Synced from standalone AssemblyDashboard.html so main app can read them
   // ── Shipped history — daily shipped counts from trace + shipped XML ─────
