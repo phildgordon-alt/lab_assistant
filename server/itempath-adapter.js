@@ -707,11 +707,16 @@ async function poll() {
     // Locations have: name (e.g. "CAR-6/Shelf 058/Pos 01"), materialName, currentQuantity
     // Build per-SKU warehouse stock from locations data
     // CAR-1..3 → WH1, CAR-4..6 → WH2, KITCHEN/IRV → WH3
+    if (pollCount <= 1 && locations.length > 0) {
+      const sample = locations[0];
+      console.log(`[ItemPath] Location fields: ${Object.keys(sample).join(', ')}`);
+      console.log(`[ItemPath] Location sample: name=${sample.name}, materialName=${sample.materialName}, material_name=${sample.material_name}, materialId=${sample.materialId}, currentQuantity=${sample.currentQuantity}`);
+    }
     const warehouseStock = { WH1: {}, WH2: {}, WH3: {} };
     for (const loc of locations) {
       const locName = loc.name || '';
       const qty = parseFloat(loc.currentQuantity) || 0;
-      const sku = loc.materialName || loc.material_name || null;
+      const sku = loc.materialName || loc.material_name || loc.materialId || null;
       if (!sku || qty <= 0) continue;
 
       const wh = deriveWarehouse(locName) || 'WH1';
