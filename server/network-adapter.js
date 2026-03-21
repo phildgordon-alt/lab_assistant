@@ -37,6 +37,16 @@ const UNIFI_SITE_2 = process.env.UNIFI_SITE_2 || '';
 const NETWORK_POLL_MS = parseInt(process.env.NETWORK_POLL_MS || '30000');
 const MOCK_MODE = !UNIFI_URL;
 
+// Map UniFi site IDs to frontend-friendly keys
+// Site Magic merges sites — we split by IP subnet (10.0.x = irvine1, 10.1.x = irvine2)
+const SITE_KEY_1 = 'irvine1';
+const SITE_KEY_2 = 'irvine2';
+
+function classifySite(ip) {
+  if (!ip) return SITE_KEY_1;
+  return ip.startsWith('10.1.') ? SITE_KEY_2 : SITE_KEY_1;
+}
+
 // Persistence file
 const DATA_FILE = path.join(__dirname, 'network-data.json');
 
@@ -329,11 +339,39 @@ async function poll() {
 
   try {
     // Poll site 1
-    siteData[UNIFI_SITE] = await pollSite(UNIFI_SITE);
+    const site1Raw = await pollSite(UNIFI_SITE);
 
-    // Poll site 2 if configured
-    if (UNIFI_SITE_2) {
-      siteData[UNIFI_SITE_2] = await pollSite(UNIFI_SITE_2);
+    // Poll site 2 if configured as separate site
+    let site2Raw = null;
+    if (UNIFI_SITE_2 && UNIFI_SITE_2 !== UNIFI_SITE) {
+      site2Raw = await pollSite(UNIFI_SITE_2);
+    }
+
+    if (site2Raw) {
+      // Two separate UniFi sites — map directly
+      siteData[SITE_KEY_1] = site1Raw;
+      siteData[SITE_KEY_2] = site2Raw;
+    } else {
+      // Single site (Site Magic) — split by IP subnet
+      const s1 = { devices: [], clients: [], health: site1Raw.health, alarms: [], events: [] };
+      const s2 = { devices: [], clients: [], health: [], alarms: [], events: [] };
+
+      for (const d of site1Raw.devices) {
+        (classifySite(d.ip) === SITE_KEY_2 ? s2 : s1).devices.push(d);
+      }
+      for (const c of site1Raw.clients) {
+        (classifySite(c.ip) === SITE_KEY_2 ? s2 : s1).clients.push(c);
+      }
+      for (const a of site1Raw.alarms) {
+        // Alarms don't always have IP, default to site 1
+        s1.alarms.push(a);
+      }
+      for (const e of site1Raw.events) {
+        s1.events.push(e);
+      }
+
+      siteData[SITE_KEY_1] = s1;
+      siteData[SITE_KEY_2] = s2;
     }
 
     // Run VLAN bleed detection across all clients
@@ -551,13 +589,8 @@ function generateMockData() {
     ],
   };
 
-  siteData[UNIFI_SITE] = mockSite1;
-  if (UNIFI_SITE_2) {
-    siteData[UNIFI_SITE_2] = mockSite2;
-  } else {
-    // In mock mode, always show both sites for demo purposes
-    siteData['site2'] = mockSite2;
-  }
+  siteData[SITE_KEY_1] = mockSite1;
+  siteData[SITE_KEY_2] = mockSite2;
 
   bleedViolations = [];
   teleportData = generateMockTeleport();
