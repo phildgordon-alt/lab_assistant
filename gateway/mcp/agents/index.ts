@@ -498,6 +498,32 @@ export const SHIPPING_AGENT: AgentConfig = {
 // Agent Registry
 // ─────────────────────────────────────────────────────────────────────────────
 
+export const INVENTORY_AGENT: AgentConfig = {
+  name: 'InventoryAgent',
+  description: 'Inventory & stocking: consumption analysis, reorder plans, SKU-level stock management',
+  department: undefined,
+  systemPrompt: '', // Loaded from InventoryAgent.md
+  tools: [
+    get_wip_snapshot,
+    get_wip_jobs,
+    get_job_detail,
+    get_inventory_summary,
+    get_inventory_detail,
+    get_lens_catalog,
+    get_time_at_lab_summary,
+    get_time_at_lab_histogram,
+    get_sla_at_risk,
+    get_backlog_catchup,
+    get_throughput_trend,
+    get_settings,
+    think_aloud,
+    search_knowledge,
+    get_knowledge_doc,
+    generate_csv_report,
+  ],
+  defaultFilters: {},
+};
+
 export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   // Department agents (production flow order)
   surface: SURFACE_AGENT,
@@ -513,6 +539,7 @@ export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   // Office/support agents
   office: OFFICE_AGENT,
   picking: PICKING_AGENT,
+  inventory: INVENTORY_AGENT,
   // Cross-department agents
   director: DIRECTOR_AGENT,
   lab: LAB_AGENT,

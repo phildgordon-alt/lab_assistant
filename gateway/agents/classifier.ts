@@ -92,7 +92,13 @@ const AGENT_KEYWORDS: Record<string, string[]> = {
   ],
   PickingAgent: [
     'pick', 'picking', 'kardex', 'put wall', 'putwall', 'tray', 'dispensing',
-    'dispense', 'carousel', 'storage', 'bin', 'lens blank', 'inventory',
+    'dispense', 'carousel', 'storage', 'bin', 'lens blank',
+  ],
+  InventoryAgent: [
+    'inventory', 'stock', 'stocking', 'restock', 'reorder', 'consumption',
+    'usage', 'sku', 'blank', 'blanks', 'supply', 'procurement', 'par level',
+    'safety stock', 'lead time', 'forecast', 'demand', 'stockout', 'low stock',
+    'order quantity', 'days of supply', 'stocking plan',
   ],
   MaintenanceAgent: [
     'maintenance', 'machine down', 'down', 'fault', 'repair', 'uptime',
@@ -127,6 +133,7 @@ const AGENT_CONFIG_MAP: Record<string, string> = {
   // Support agents
   OfficeAgent: 'office',
   PickingAgent: 'picking',
+  InventoryAgent: 'inventory',
   // Cross-department agents
   DirectorAgent: 'director',
   LabAgent: 'lab',
@@ -191,5 +198,5 @@ export function getAgents(): Array<{ name: string; keywords: string[] }> {
  * Check if an agent name is valid
  */
 export function isValidAgent(agentName: string): boolean {
-  return agentName in AGENT_KEYWORDS;
+  return agentName in AGENT_KEYWORDS || agentName in AGENT_CONFIG_MAP;
 }
