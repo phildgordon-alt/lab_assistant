@@ -235,29 +235,37 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     connections.som = { status: 'unconfigured', message: 'Lab server not running or SOM not configured' };
   }
 
-  // UniFi Network
+  // UniFi Network — check via lab server (credentials live in root .env)
   try {
-    const unifiUrl = process.env.UNIFI_URL;
-    const unifiKey = process.env.UNIFI_API_KEY;
-    if (!unifiUrl || !unifiKey) {
-      connections.network = { status: 'unconfigured', message: 'UNIFI_URL or UNIFI_API_KEY not set' };
-    } else {
-      const start = Date.now();
-      const resp = await fetch(`${labUrl}/api/network/status`, { signal: AbortSignal.timeout(5000) });
-      const latency = Date.now() - start;
-      if (resp.ok) {
-        const data = await resp.json() as any;
-        const deviceCount = data.devices?.length || data.device_count || 0;
-        connections.network = { status: 'connected', message: `UDM-Pro (${deviceCount} devices)`, latency };
+    const start = Date.now();
+    const resp = await fetch(`${labUrl}/api/config/env`, { signal: AbortSignal.timeout(5000) });
+    const latency = Date.now() - start;
+    if (resp.ok) {
+      const envVars = await resp.json() as any;
+      if (!envVars.UNIFI_URL && !envVars.UNIFI_API_KEY) {
+        connections.network = { status: 'unconfigured', message: 'UNIFI_URL / UNIFI_API_KEY not set in .env' };
+      } else if (!envVars.UNIFI_URL || !envVars.UNIFI_API_KEY) {
+        connections.network = { status: 'unconfigured', message: `Missing ${!envVars.UNIFI_URL ? 'UNIFI_URL' : 'UNIFI_API_KEY'}` };
       } else {
-        connections.network = { status: 'disconnected', message: `HTTP ${resp.status}` };
+        // Credentials exist — try the network status endpoint
+        try {
+          const nResp = await fetch(`${labUrl}/api/network/status`, { signal: AbortSignal.timeout(5000) });
+          if (nResp.ok) {
+            const data = await nResp.json() as any;
+            const deviceCount = data.devices?.length || data.device_count || 0;
+            connections.network = { status: 'connected', message: `UDM-Pro (${deviceCount} devices)`, latency };
+          } else {
+            connections.network = { status: 'disconnected', message: 'Credentials set but controller not reachable' };
+          }
+        } catch {
+          connections.network = { status: 'disconnected', message: 'Credentials set but controller not reachable' };
+        }
       }
+    } else {
+      connections.network = { status: 'unconfigured', message: 'Cannot read server config' };
     }
   } catch (e) {
-    const unifiUrl = process.env.UNIFI_URL;
-    connections.network = unifiUrl
-      ? { status: 'disconnected', message: 'UniFi controller not reachable' }
-      : { status: 'unconfigured', message: 'UNIFI_URL not set' };
+    connections.network = { status: 'unconfigured', message: 'Lab server not reachable' };
   }
 
   res.json({
