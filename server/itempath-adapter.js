@@ -267,14 +267,19 @@ async function getLocationsData() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Derive warehouse from location name:
-//   CAR-1 through CAR-6 → production carousels (WH1/WH2)
-//   KITCHEN* → Lens Kitchen (WH3 extended inventory)
-//   IRV02* → Irvine 2 inventory (WH3 extended inventory)
+//   CAR-1, CAR-2, CAR-3 → WH1
+//   CAR-4, CAR-5, CAR-6 → WH2
+//   KITCHEN* → WH3 (Lens Kitchen, extended inventory)
+//   IRV02* → WH3 (Irvine 2 inventory, extended inventory)
 function deriveWarehouse(location) {
   if (!location) return null;
-  if (/^CAR-/i.test(location)) return 'WH1';
+  const carMatch = location.match(/^CAR-(\d+)/i);
+  if (carMatch) {
+    const num = parseInt(carMatch[1]);
+    return num <= 3 ? 'WH1' : 'WH2';
+  }
   if (/^KITCHEN/i.test(location)) return 'WH3';
-  if (/^IRV02/i.test(location)) return 'WH3';
+  if (/^IRV/i.test(location)) return 'WH3';
   return null;
 }
 
@@ -700,26 +705,26 @@ async function poll() {
 
     // Build per-SKU warehouse stock from locations data
     // Locations have: name (e.g. "CAR-6/Shelf 058/Pos 01"), materialName, currentQuantity
-    const warehouseStock = { WH1: {}, WH3: {} };  // { WH1: { sku: qty }, WH3: { sku: qty } }
+    // Build per-SKU warehouse stock from locations data
+    // CAR-1..3 → WH1, CAR-4..6 → WH2, KITCHEN/IRV → WH3
+    const warehouseStock = { WH1: {}, WH2: {}, WH3: {} };
     for (const loc of locations) {
       const locName = loc.name || '';
       const qty = parseFloat(loc.currentQuantity) || 0;
       const sku = loc.materialName || loc.material_name || null;
       if (!sku || qty <= 0) continue;
 
-      const wh = (/^CAR-/i.test(locName)) ? 'WH1'
-               : (/^KITCHEN/i.test(locName) || /^IRV/i.test(locName)) ? 'WH3'
-               : 'WH1';
-
+      const wh = deriveWarehouse(locName) || 'WH1';
+      if (!warehouseStock[wh]) warehouseStock[wh] = {};
       if (!warehouseStock[wh][sku]) warehouseStock[wh][sku] = 0;
       warehouseStock[wh][sku] += qty;
     }
     if (pollCount <= 1) {
-      const wh1Skus = Object.keys(warehouseStock.WH1).length;
-      const wh3Skus = Object.keys(warehouseStock.WH3).length;
-      const wh1Total = Object.values(warehouseStock.WH1).reduce((s, q) => s + q, 0);
-      const wh3Total = Object.values(warehouseStock.WH3).reduce((s, q) => s + q, 0);
-      console.log(`[ItemPath] Warehouse stock from locations: WH1=${wh1Skus} SKUs (${wh1Total} units), WH3=${wh3Skus} SKUs (${wh3Total} units)`);
+      for (const wh of ['WH1', 'WH2', 'WH3']) {
+        const skus = Object.keys(warehouseStock[wh] || {}).length;
+        const total = Object.values(warehouseStock[wh] || {}).reduce((s, q) => s + q, 0);
+        console.log(`[ItemPath] ${wh}: ${skus} SKUs, ${total} units`);
+      }
     }
 
     cache = {
@@ -1022,16 +1027,20 @@ function getDailyPicks() {
   return { ...dailyPickTotals, hourlyPicks, hourlyPuts };
 }
 
-/** Per-SKU stock breakdown by warehouse (WH1=carousels, WH3=kitchen+IRV02) */
+/** Per-SKU stock breakdown by warehouse (WH1=CAR 1-3, WH2=CAR 4-6, WH3=kitchen+IRV) */
 function getWarehouseStock() {
-  const ws = cache.warehouseStock || { WH1: {}, WH3: {} };
+  const ws = cache.warehouseStock || { WH1: {}, WH2: {}, WH3: {} };
+  const stats = {};
+  for (const wh of ['WH1', 'WH2', 'WH3']) {
+    const data = ws[wh] || {};
+    stats[`${wh.toLowerCase()}_sku_count`] = Object.keys(data).length;
+    stats[`${wh.toLowerCase()}_total_units`] = Object.values(data).reduce((s, q) => s + q, 0);
+  }
   return {
     WH1: ws.WH1 || {},
+    WH2: ws.WH2 || {},
     WH3: ws.WH3 || {},
-    wh1_sku_count: Object.keys(ws.WH1 || {}).length,
-    wh3_sku_count: Object.keys(ws.WH3 || {}).length,
-    wh1_total_units: Object.values(ws.WH1 || {}).reduce((s, q) => s + q, 0),
-    wh3_total_units: Object.values(ws.WH3 || {}).reduce((s, q) => s + q, 0),
+    ...stats,
     lastSync: cache.lastSync,
   };
 }

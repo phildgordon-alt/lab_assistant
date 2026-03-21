@@ -1529,17 +1529,18 @@ Respond with a structured batching plan in this format:
     const ws = itempath.getWarehouseStock();
     for (const item of consumption.stocking_plan) {
       item.wh1_qty = ws.WH1[item.sku] || 0;
+      item.wh2_qty = ws.WH2[item.sku] || 0;
       item.wh3_qty = ws.WH3[item.sku] || 0;
+      item.production_qty = item.wh1_qty + item.wh2_qty;
       item.wh3_days_of_supply = item.avg_daily_usage > 0 ? Math.round(item.wh3_qty / item.avg_daily_usage * 10) / 10 : null;
       item.action = (item.days_of_supply !== null && item.days_of_supply <= 5)
         ? (item.wh3_qty > 0 ? 'TRANSFER_FROM_WH3' : 'REORDER')
         : 'ADEQUATE';
     }
     consumption.warehouse_totals = {
-      wh1_skus: ws.wh1_sku_count,
-      wh1_units: ws.wh1_total_units,
-      wh3_skus: ws.wh3_sku_count,
-      wh3_units: ws.wh3_total_units,
+      wh1_skus: ws.wh1_sku_count, wh1_units: ws.wh1_total_units,
+      wh2_skus: ws.wh2_sku_count, wh2_units: ws.wh2_total_units,
+      wh3_skus: ws.wh3_sku_count, wh3_units: ws.wh3_total_units,
     };
     return json(res, consumption);
   }
