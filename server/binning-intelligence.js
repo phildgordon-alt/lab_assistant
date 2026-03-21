@@ -142,6 +142,12 @@ function analyzeSwapThresholds(daysThreshold = 3) {
     const daysOfSupply = rate.daily_rate > 0 ? Math.round(bin.qty / rate.daily_rate * 10) / 10 : null;
     if (daysOfSupply === null) continue;
 
+    // Look up bin type from binTypeMap (keyed without depth)
+    const parsed = parseLocation(bin.location_name);
+    const binInfo = parsed.binKey ? _binTypeMap[parsed.binKey] : null;
+    const binSkuCount = binInfo ? binInfo.skus.size : 1;
+    const binType = binSkuCount === 1 ? 'full' : binSkuCount === 2 ? 'half' : binSkuCount <= 4 ? 'quarter' : 'mixed';
+
     const entry = {
       sku: bin.sku,
       location: bin.location_name,
@@ -152,6 +158,7 @@ function analyzeSwapThresholds(daysThreshold = 3) {
       daily_rate: rate.daily_rate,
       days_of_supply: daysOfSupply,
       sku_count: bin.sku_count,
+      bin_type: binType,
     };
 
     if (daysOfSupply <= daysThreshold) {
@@ -162,11 +169,14 @@ function analyzeSwapThresholds(daysThreshold = 3) {
   }
 
   // Pre-build recommendations for Kitchen
+  // Build type matches existing bin — you replace a full with a full, half with half, etc.
   const prebuildList = urgent.map(b => ({
     sku: b.sku,
     qty_needed: Math.ceil(b.daily_rate * 7), // 1 week supply
     current_qty: b.qty,
+    daily_rate: b.daily_rate,
     days_left: b.days_of_supply,
+    bin_type: b.bin_type,
     carousel: b.carousel,
   }));
 

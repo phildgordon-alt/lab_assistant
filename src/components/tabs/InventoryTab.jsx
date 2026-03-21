@@ -314,22 +314,28 @@ function BinningDetailView({ view, serverUrl }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: mono }}>
               <thead><tr style={{ background: T.bg }}>
                 <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU</th>
+                <th style={{ padding: "8px 12px", textAlign: "center", color: T.textDim, fontSize: 10 }}>BUILD TYPE</th>
                 <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>CURRENT</th>
                 <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>DAILY RATE</th>
                 <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>DAYS LEFT</th>
                 <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>QTY NEEDED</th>
                 <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>CAROUSEL</th>
               </tr></thead>
-              <tbody>{prebuild.map((b, i) => (
+              <tbody>{prebuild.map((b, i) => {
+                const typeColor = b.bin_type === 'full' ? T.green : b.bin_type === 'half' ? T.blue : b.bin_type === 'quarter' ? T.amber : T.textMuted;
+                const typeLabel = b.bin_type === 'full' ? 'FULL' : b.bin_type === 'half' ? 'HALF' : b.bin_type === 'quarter' ? 'QTR' : b.bin_type?.toUpperCase() || '—';
+                return (
                 <tr key={i} style={{ borderBottom: `1px solid ${T.border}22` }}>
                   <td style={{ padding: "8px 12px", color: T.text }}>{b.sku}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "center" }}><span style={{ padding: "3px 10px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: `${typeColor}20`, color: typeColor, fontFamily: mono }}>{typeLabel}</span></td>
                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.textMuted }}>{b.current_qty}</td>
                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue }}>{b.daily_rate || '—'}</td>
                   <td style={{ padding: "8px 12px", textAlign: "right", color: b.days_left <= 1 ? T.red : b.days_left <= 3 ? T.amber : T.textMuted, fontWeight: 700 }}>{b.days_left}</td>
                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.green, fontWeight: 700 }}>{b.qty_needed}</td>
                   <td style={{ padding: "8px 12px", color: T.textDim }}>{b.carousel}</td>
                 </tr>
-              ))}</tbody>
+                );
+              })}</tbody>
             </table>
           </Card>
         )}
