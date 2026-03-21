@@ -318,6 +318,20 @@ export async function handleToolCall(
     case 'get_consumption_history':
       return handleGetConsumptionHistory(toolInput);
 
+    case 'get_binning_swap':
+      return handleCallApi('GET', `/api/inventory/binning/swap${toolInput.carousel ? `?carousel=${toolInput.carousel}` : ''}`);
+
+    case 'get_binning_consolidation':
+      return handleCallApi('GET', `/api/inventory/binning/consolidate${toolInput.warehouse ? `?warehouse=${toolInput.warehouse}` : ''}`);
+
+    case 'get_binning_adjacency': {
+      const params = new URLSearchParams();
+      if (toolInput.days) params.set('days', String(toolInput.days));
+      if (toolInput.min_co_picks) params.set('min', String(toolInput.min_co_picks));
+      const qs = params.toString();
+      return handleCallApi('GET', `/api/inventory/binning/adjacency${qs ? `?${qs}` : ''}`);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // MAINTENANCE TOOLS
     // ─────────────────────────────────────────────────────────────────────────

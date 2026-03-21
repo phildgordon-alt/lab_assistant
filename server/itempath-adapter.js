@@ -739,6 +739,7 @@ async function poll() {
       warehouses,
       warehouseStats,
       warehouseStock,  // per-SKU stock by warehouse from locations
+      locationContents, // raw location_contents for binning intelligence
       hourlyStats,
       hourlyPutStats,
       vlmStats,
@@ -1049,4 +1050,8 @@ function getWarehouseStock() {
   };
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock };
+function getLocationContents() {
+  return cache.locationContents || [];
+}
+
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock, getLocationContents };

@@ -37,7 +37,9 @@ const knowledge = require('./knowledge-adapter');
 
 // ── ItemPath/Kardex inventory integration ─────────────────────
 const itempath = require('./itempath-adapter');
+const binning = require('./binning-intelligence');
 itempath.start();
+binning.start(itempath);
 
 // ── Limble CMMS maintenance integration ───────────────────────
 const limble = require('./limble-adapter');
@@ -1544,6 +1546,29 @@ Respond with a structured batching plan in this format:
     };
     return json(res, consumption);
   }
+  // ── Binning Intelligence ────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/inventory/binning/summary') {
+    return json(res, binning.getSummary());
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/binning/swap') {
+    return json(res, binning.getSwapAnalysis(url.searchParams.get('carousel')));
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/binning/consolidate') {
+    return json(res, binning.getConsolidation(url.searchParams.get('warehouse')));
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/binning/adjacency') {
+    const days = parseInt(url.searchParams.get('days') || '14');
+    const minCoPicks = parseInt(url.searchParams.get('min') || '5');
+    return json(res, binning.getAdjacency(days, minCoPicks));
+  }
+  if (req.method==='GET' && url.pathname==='/api/inventory/binning/recommendations') {
+    return json(res, binning.getRecommendations(url.searchParams.get('type')));
+  }
+  if (req.method==='POST' && url.pathname==='/api/inventory/binning/acknowledge') {
+    const body = await readBody(req);
+    return json(res, binning.acknowledgeRecommendation(body.id, body.status || 'accepted'));
+  }
+
   if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {
     return json(res, itempath.getAlerts());
   }

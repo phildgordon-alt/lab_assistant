@@ -122,6 +122,44 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_picks_hist_completed ON picks_history(completed_at);
   CREATE INDEX IF NOT EXISTS idx_picks_hist_recorded ON picks_history(recorded_at);
 
+  -- Binning Intelligence
+  CREATE TABLE IF NOT EXISTS bin_contents (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    location_name TEXT NOT NULL,
+    carousel TEXT,
+    shelf TEXT,
+    position TEXT,
+    warehouse TEXT,
+    material_id TEXT,
+    sku TEXT,
+    qty REAL DEFAULT 0,
+    last_sync TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_bin_sku ON bin_contents(sku);
+  CREATE INDEX IF NOT EXISTS idx_bin_carousel ON bin_contents(carousel);
+  CREATE INDEX IF NOT EXISTS idx_bin_wh ON bin_contents(warehouse);
+
+  CREATE TABLE IF NOT EXISTS pick_sequences (
+    sku_a TEXT NOT NULL,
+    sku_b TEXT NOT NULL,
+    co_pick_count INTEGER DEFAULT 1,
+    avg_gap_seconds REAL,
+    last_seen TEXT,
+    PRIMARY KEY(sku_a, sku_b)
+  );
+  CREATE INDEX IF NOT EXISTS idx_seq_count ON pick_sequences(co_pick_count DESC);
+
+  CREATE TABLE IF NOT EXISTS binning_recommendations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    priority TEXT DEFAULT 'recommended',
+    description TEXT,
+    details_json TEXT,
+    status TEXT DEFAULT 'pending',
+    created_at TEXT DEFAULT (datetime('now')),
+    resolved_at TEXT
+  );
+
   -- Maintenance assets (Limble)
   CREATE TABLE IF NOT EXISTS maintenance_assets (
     id TEXT PRIMARY KEY,

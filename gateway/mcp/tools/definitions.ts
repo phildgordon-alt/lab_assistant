@@ -699,10 +699,57 @@ export const COATING_TOOLS = [
   get_oven_rack_status,
 ];
 
+export const get_binning_swap = {
+  name: 'get_binning_swap',
+  description: `USE THIS for blue bin swap monitoring and pre-build recommendations.
+WHAT: Returns bins approaching swap threshold in the Kardex carousels (CAR-1 through CAR-6), with days-of-supply remaining and a pre-build list for the Kitchen.
+HOW: Optional carousel filter (e.g. "CAR-3"). Returns urgent (<=3 days), upcoming (<=6 days), and prebuild_list.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      carousel: { type: 'string', description: 'Optional filter: CAR-1, CAR-2, etc.' },
+    },
+  },
+};
+
+export const get_binning_consolidation = {
+  name: 'get_binning_consolidation',
+  description: `USE THIS to find same-SKU partial bins that can be merged to free shelf space.
+WHAT: Identifies SKUs that exist in multiple bins across carousels. Shows current bin count, target bins after merge, and shelves freed.
+HOW: Optional warehouse filter. Returns opportunities sorted by shelves freed.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      warehouse: { type: 'string', description: 'Optional: WH1 or WH2' },
+    },
+  },
+};
+
+export const get_binning_adjacency = {
+  name: 'get_binning_adjacency',
+  description: `USE THIS for pick sequence optimization — find frequently co-picked SKUs that should be stored on adjacent shelves.
+WHAT: Analyzes pick history to find SKU pairs frequently picked together. Checks if they're on the same carousel/shelf. Recommends moves for distant pairs.
+HOW: Optional days (default 14) and min_co_picks (default 5) params.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      days: { type: 'number', description: 'Days of pick history to analyze. Default 14.' },
+      min_co_picks: { type: 'number', description: 'Minimum co-pick count to include. Default 5.' },
+    },
+  },
+};
+
+export const BINNING_TOOLS = [
+  get_binning_swap,
+  get_binning_consolidation,
+  get_binning_adjacency,
+];
+
 export const INVENTORY_TOOLS = [
   get_inventory_summary,
   get_inventory_detail,
   get_consumption_history,
+  ...BINNING_TOOLS,
 ];
 
 export const MAINTENANCE_TOOLS = [

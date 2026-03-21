@@ -285,6 +285,137 @@ function ProductionStageTab({ domain, children, contextData, serverUrl, settings
   );
 }
 
+// ── Binning Detail View ─────────────────────────────────────────
+function BinningDetailView({ view, serverUrl }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!serverUrl) return;
+    setLoading(true);
+    const ep = view === 'swap' ? '/api/inventory/binning/swap'
+             : view === 'consolidate' ? '/api/inventory/binning/consolidate'
+             : '/api/inventory/binning/adjacency';
+    fetch(`${serverUrl}${ep}`).then(r => r.json()).then(d => { setData(d); setLoading(false); }).catch(() => setLoading(false));
+  }, [view, serverUrl]);
+
+  if (loading) return <Card style={{ padding: 32, textAlign: "center", color: T.textMuted }}>Loading...</Card>;
+  if (!data) return null;
+
+  if (view === 'swap') {
+    const urgent = data.urgent || [];
+    const upcoming = data.upcoming || [];
+    const prebuild = data.prebuild_list || [];
+    return (
+      <div>
+        {prebuild.length > 0 && (
+          <Card style={{ marginBottom: 20, borderLeft: `4px solid ${T.red}` }}>
+            <SectionHeader right={`${prebuild.length} SKUs`}>Pre-Build List (Kitchen)</SectionHeader>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: mono }}>
+              <thead><tr style={{ background: T.bg }}>
+                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>CURRENT</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>DAILY RATE</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>DAYS LEFT</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>QTY NEEDED</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>CAROUSEL</th>
+              </tr></thead>
+              <tbody>{prebuild.map((b, i) => (
+                <tr key={i} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                  <td style={{ padding: "8px 12px", color: T.text }}>{b.sku}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.textMuted }}>{b.current_qty}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue }}>{b.daily_rate || '—'}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: b.days_left <= 1 ? T.red : b.days_left <= 3 ? T.amber : T.textMuted, fontWeight: 700 }}>{b.days_left}</td>
+                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.green, fontWeight: 700 }}>{b.qty_needed}</td>
+                  <td style={{ padding: "8px 12px", color: T.textDim }}>{b.carousel}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </Card>
+        )}
+        {urgent.length === 0 && upcoming.length === 0 && (
+          <Card style={{ padding: 32, textAlign: "center", color: T.textMuted }}>No bins approaching swap threshold. All carousels healthy.</Card>
+        )}
+      </div>
+    );
+  }
+
+  if (view === 'consolidate') {
+    const ops = data.opportunities || [];
+    return (
+      <Card>
+        <SectionHeader right={`${data.summary?.total_shelves_freed || 0} shelves freed`}>Consolidation Opportunities</SectionHeader>
+        {ops.length > 0 ? (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: mono }}>
+            <thead><tr style={{ background: T.bg }}>
+              <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU</th>
+              <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>BINS</th>
+              <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>TARGET</th>
+              <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>FREED</th>
+              <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>TOTAL QTY</th>
+              <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>CAROUSELS</th>
+            </tr></thead>
+            <tbody>{ops.map((o, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                <td style={{ padding: "8px 12px", color: T.text }}>{o.sku}</td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: T.amber }}>{o.current_bins}</td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: T.green }}>{o.target_bins}</td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: T.green, fontWeight: 700 }}>{o.shelves_freed}</td>
+                <td style={{ padding: "8px 12px", textAlign: "right", color: T.textMuted }}>{o.total_qty}</td>
+                <td style={{ padding: "8px 12px", color: T.textDim }}>{o.carousels}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        ) : (
+          <div style={{ padding: 32, textAlign: "center", color: T.textMuted }}>No consolidation opportunities found.</div>
+        )}
+      </Card>
+    );
+  }
+
+  if (view === 'adjacency') {
+    const recs = data.move_recommendations || [];
+    const pairs = data.pairs || [];
+    return (
+      <div>
+        <Card style={{ marginBottom: 20 }}>
+          <SectionHeader right={`${data.summary?.days_analyzed || 14}d analyzed`}>Co-Pick Pairs</SectionHeader>
+          {pairs.length > 0 ? (
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: mono }}>
+              <thead><tr style={{ background: T.bg }}>
+                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU A</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU B</th>
+                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>CO-PICKS</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>LOC A</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>LOC B</th>
+                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>ACTION</th>
+              </tr></thead>
+              <tbody>{pairs.slice(0, 30).map((p, i) => {
+                const actionColor = p.action === 'optimal' ? T.green : p.action === 'move_adjacent_shelf' ? T.amber : T.red;
+                const actionLabel = p.action === 'optimal' ? 'Optimal' : p.action === 'move_adjacent_shelf' ? 'Move Shelf' : p.action === 'move_same_carousel' ? 'Move Carousel' : '—';
+                return (
+                  <tr key={i} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                    <td style={{ padding: "8px 12px", color: T.text }}>{p.sku_a}</td>
+                    <td style={{ padding: "8px 12px", color: T.text }}>{p.sku_b}</td>
+                    <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue, fontWeight: 700 }}>{p.co_picks}</td>
+                    <td style={{ padding: "8px 12px", color: T.textDim }}>{p.loc_a}</td>
+                    <td style={{ padding: "8px 12px", color: T.textDim }}>{p.loc_b}</td>
+                    <td style={{ padding: "8px 12px" }}><span style={{ padding: "3px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: `${actionColor}20`, color: actionColor }}>{actionLabel}</span></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          ) : (
+            <div style={{ padding: 32, textAlign: "center", color: T.textMuted }}>Not enough pick history for adjacency analysis.</div>
+          )}
+        </Card>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 // ══════════════════════════════════════════════════════════════
 // ── INVENTORY TAB ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
@@ -303,24 +434,28 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [whStock, setWhStock] = useState(null);
   const [whSearch, setWhSearch] = useState("");
   const [whFilter, setWhFilter] = useState("all"); // all, WH1, WH2, WH3
+  const [binningData, setBinningData] = useState(null);
+  const [binningView, setBinningView] = useState("swap"); // swap, consolidate, adjacency
 
   // Fetch all inventory data
   useEffect(() => {
     if (!ovenServerUrl) return;
     const go = async () => {
       try {
-        const [invResp, picksResp, alertsResp, vlmsResp, whResp] = await Promise.all([
+        const [invResp, picksResp, alertsResp, vlmsResp, whResp, binResp] = await Promise.all([
           fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/warehouse-stock`).then(r => r.json()).catch(() => null),
+          fetch(`${ovenServerUrl}/api/inventory/binning/summary`).then(r => r.json()).catch(() => null),
         ]);
         setInventory(invResp);
         setPicks(picksResp);
         setAlerts(alertsResp);
         setVlms(vlmsResp);
         if (whResp) setWhStock(whResp);
+        if (binResp) setBinningData(binResp);
         setLoading(false);
       } catch (e) {
         console.error('[Inventory] Fetch error:', e);
@@ -380,7 +515,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "binning", label: "Binning Intelligence" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -498,6 +633,59 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 </div>
               )}
             </Card>
+          </div>
+        )}
+
+        {sub === "binning" && (
+          <div>
+            {/* Sub-navigation */}
+            <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
+              {[{ id: "swap", label: "Blue Bin Swap" }, { id: "consolidate", label: "Consolidation" }, { id: "adjacency", label: "Adjacency" }].map(t => (
+                <button key={t.id} onClick={() => setBinningView(t.id)}
+                  style={{ background: binningView === t.id ? T.purple + '30' : "transparent", border: `1px solid ${binningView === t.id ? T.purple : T.border}`, borderRadius: 6, padding: "8px 16px", color: binningView === t.id ? T.purple : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono }}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Summary cards */}
+            {binningData && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 24 }}>
+                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BINS NEAR SWAP</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.red, fontFamily: mono }}>{binningData.swap?.bins_near_swap || 0}</div>
+                </Card>
+                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>CONSOLIDATION OPS</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{binningData.consolidation?.total_opportunities || 0}</div>
+                  <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono }}>{binningData.consolidation?.total_shelves_freed || 0} shelves freed</div>
+                </Card>
+                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.purple}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>MOVE RECOMMENDATIONS</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.purple, fontFamily: mono }}>{binningData.adjacency?.move_recommendations || 0}</div>
+                </Card>
+              </div>
+            )}
+
+            {/* Carousel utilization */}
+            {binningData?.utilization && (
+              <Card style={{ marginBottom: 20 }}>
+                <SectionHeader>Carousel Utilization</SectionHeader>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12 }}>
+                  {binningData.utilization.map((u, i) => (
+                    <div key={i} style={{ padding: 12, background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, textAlign: "center" }}>
+                      <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 700, color: T.text }}>{u.carousel}</div>
+                      <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{u.warehouse}</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: T.blue, fontFamily: mono, marginTop: 4 }}>{(u.total_units || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{u.unique_skus} SKUs · {u.total_bins} bins</div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            )}
+
+            {/* Detail view based on selected sub-view */}
+            <BinningDetailView view={binningView} serverUrl={ovenServerUrl} />
           </div>
         )}
 
