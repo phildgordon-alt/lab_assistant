@@ -1899,11 +1899,12 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                     itempath:"ItemPath/Kardex",
                     dvi:"DVI Lab System",
                     limble:"Limble CMMS",
-                    som:"SOM Control Center"
+                    som:"SOM Control Center",
+                    network:"UniFi Network"
                   };
                   const serviceIcons = {
                     gateway:"🌐",database:"🗄️",lab_backend:"🔧",slack:"💬",
-                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️",som:"⚙️"
+                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️",som:"⚙️",network:"🔀"
                   };
                   const startCommands = {
                     lab_backend: "npm run server",
@@ -1938,6 +1939,12 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                       {key:'somDatabase',label:'SOM_DATABASE',type:'text'},
                       {key:'somUser',label:'SOM_USER',type:'text'},
                       {key:'somPassword',label:'SOM_PASSWORD',type:'password'}
+                    ],
+                    network: [
+                      {key:'unifiUrl',label:'UNIFI_URL',type:'url'},
+                      {key:'unifiApiKey',label:'UNIFI_API_KEY',type:'password'},
+                      {key:'unifiSite',label:'UNIFI_SITE',type:'text'},
+                      {key:'unifiSite2',label:'UNIFI_SITE_2',type:'text'}
                     ]
                   };
                   const isExpanded = expandedService === key;
