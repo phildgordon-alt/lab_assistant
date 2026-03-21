@@ -1561,6 +1561,9 @@ Respond with a structured batching plan in this format:
     const minCoPicks = parseInt(url.searchParams.get('min') || '5');
     return json(res, binning.getAdjacency(days, minCoPicks));
   }
+  if (req.method==='GET' && url.pathname==='/api/inventory/binning/bin-types') {
+    return json(res, binning.getBinTypes(url.searchParams.get('carousel')));
+  }
   if (req.method==='GET' && url.pathname==='/api/inventory/binning/recommendations') {
     return json(res, binning.getRecommendations(url.searchParams.get('type')));
   }

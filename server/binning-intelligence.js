@@ -18,6 +18,7 @@ const { db } = require('./db');
 
 let lastAnalysis = null;
 let analysisInterval = null;
+let _binTypeMap = {}; // binKey → { skus: Set, totalQty, carousel, warehouse }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PARSE LOCATION NAMES
@@ -25,21 +26,22 @@ let analysisInterval = null;
 // "KITCHEN01-005/01-06/03" → { carousel: "KITCHEN01", shelf: "005", position: "01-06" }
 // ─────────────────────────────────────────────────────────────────────────────
 function parseLocation(locationName) {
-  if (!locationName) return { carousel: null, shelf: null, position: null };
+  if (!locationName) return { carousel: null, shelf: null, position: null, depth: null, binKey: null };
 
-  // CAR-N/ Shelf NNN/ Position NN
-  const carMatch = locationName.match(/^(CAR-\d+)\/?.*Shelf\s*(\d+)\/?.*Position\s*(\d+)/i);
+  // CAR-N/ Shelf NNN/ Position NN- Depth NN
+  const carMatch = locationName.match(/^(CAR-\d+)\/?.*Shelf\s*(\d+)\/?.*Position\s*(\d+)(?:.*Depth\s*(\d+))?/i);
   if (carMatch) {
-    return { carousel: carMatch[1], shelf: carMatch[2], position: carMatch[3] };
+    const binKey = `${carMatch[1]}/S${carMatch[2]}/P${carMatch[3]}`; // without depth
+    return { carousel: carMatch[1], shelf: carMatch[2], position: carMatch[3], depth: carMatch[4] || null, binKey };
   }
 
   // KITCHEN01-XXX/YY-ZZ/WW
   const kitMatch = locationName.match(/^(KITCHEN\d+|IRV\d+)/i);
   if (kitMatch) {
-    return { carousel: kitMatch[1], shelf: locationName, position: null };
+    return { carousel: kitMatch[1], shelf: locationName, position: null, depth: null, binKey: locationName };
   }
 
-  return { carousel: locationName.split('/')[0]?.trim(), shelf: null, position: null };
+  return { carousel: locationName.split('/')[0]?.trim(), shelf: null, position: null, depth: null, binKey: locationName };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,6 +80,23 @@ function rebuildBinContents(locationContents, matIdToSku) {
       );
     }
   });
+
+  // Also build bin_key → sku_count mapping for bin type classification
+  // bin_key = carousel/shelf/position (without depth)
+  const binSkuMap = {};
+  for (const lc of locationContents) {
+    const qty = parseFloat(lc.currentQuantity) || 0;
+    if (qty <= 0) continue;
+    const parsed = parseLocation(lc.locationName);
+    if (!parsed.binKey) continue;
+    const sku = matIdToSku[lc.materialId] || lc.materialId;
+    if (!binSkuMap[parsed.binKey]) binSkuMap[parsed.binKey] = { skus: new Set(), totalQty: 0, carousel: parsed.carousel, warehouse: lc.warehouseName || 'WH1' };
+    binSkuMap[parsed.binKey].skus.add(sku);
+    binSkuMap[parsed.binKey].totalQty += qty;
+  }
+
+  // Store bin type summary globally for queries
+  _binTypeMap = binSkuMap;
 
   insertMany(locationContents);
   console.log(`[Binning] Rebuilt bin_contents: ${locationContents.length} records`);
@@ -324,10 +343,14 @@ function getSummary() {
     ORDER BY carousel
   `).all();
 
+  const binTypes = getBinTypes();
+
   return {
     swap: swap.summary,
     consolidation: consolidation.summary,
     adjacency: adjacency.summary,
+    binTypes: binTypes.summary,
+    byCarousel: binTypes.byCarousel,
     utilization,
     lastAnalysis,
   };
@@ -353,6 +376,48 @@ function getConsolidation(warehouse) {
 
 function getAdjacency(days, minCoPicks) {
   return analyzePickAdjacency(days || 14, minCoPicks || 5);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BIN TYPE ANALYSIS
+// Classify each physical bin position as full/half/quarter
+// ─────────────────────────────────────────────────────────────────────────────
+function getBinTypes(carousel) {
+  const bins = [];
+  for (const [binKey, info] of Object.entries(_binTypeMap)) {
+    if (carousel && info.carousel !== carousel) continue;
+    const skuCount = info.skus.size;
+    const binType = skuCount === 1 ? 'full' : skuCount === 2 ? 'half' : skuCount <= 4 ? 'quarter' : 'mixed';
+    bins.push({
+      bin: binKey,
+      carousel: info.carousel,
+      warehouse: info.warehouse,
+      sku_count: skuCount,
+      bin_type: binType,
+      skus: [...info.skus],
+      total_qty: info.totalQty,
+    });
+  }
+
+  bins.sort((a, b) => b.sku_count - a.sku_count);
+
+  const summary = {
+    total_bins: bins.length,
+    full: bins.filter(b => b.bin_type === 'full').length,
+    half: bins.filter(b => b.bin_type === 'half').length,
+    quarter: bins.filter(b => b.bin_type === 'quarter').length,
+    mixed: bins.filter(b => b.bin_type === 'mixed').length,
+  };
+
+  // Group by carousel for overview
+  const byCarousel = {};
+  for (const b of bins) {
+    if (!byCarousel[b.carousel]) byCarousel[b.carousel] = { full: 0, half: 0, quarter: 0, mixed: 0, total: 0 };
+    byCarousel[b.carousel][b.bin_type]++;
+    byCarousel[b.carousel].total++;
+  }
+
+  return { bins: bins.slice(0, 100), summary, byCarousel };
 }
 
 function getRecommendations(type) {
@@ -412,6 +477,7 @@ module.exports = {
   getSwapAnalysis,
   getConsolidation,
   getAdjacency,
+  getBinTypes,
   getRecommendations,
   acknowledgeRecommendation,
 };

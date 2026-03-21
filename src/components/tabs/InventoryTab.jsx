@@ -667,6 +667,52 @@ function InventoryTab({ ovenServerUrl, settings }) {
               </div>
             )}
 
+            {/* Bin Type Summary */}
+            {binningData?.binTypes && (
+              <Card style={{ marginBottom: 20 }}>
+                <SectionHeader right={`${binningData.binTypes.total_bins} total bins`}>Bin Type Distribution</SectionHeader>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+                  {[
+                    { label: 'FULL', count: binningData.binTypes.full, color: T.green, desc: '1 SKU' },
+                    { label: 'HALF', count: binningData.binTypes.half, color: T.blue, desc: '2 SKUs' },
+                    { label: 'QUARTER', count: binningData.binTypes.quarter, color: T.amber, desc: '4 SKUs' },
+                    { label: 'MIXED', count: binningData.binTypes.mixed, color: T.red, desc: '5+ SKUs' },
+                  ].map(t => (
+                    <div key={t.label} style={{ padding: 12, background: T.bg, borderRadius: 8, border: `1px solid ${T.border}`, textAlign: "center" }}>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>{t.label}</div>
+                      <div style={{ fontSize: 28, fontWeight: 800, color: t.color, fontFamily: mono }}>{t.count}</div>
+                      <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{t.desc}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Per-carousel breakdown */}
+                {binningData.byCarousel && (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 12 }}>
+                    {Object.entries(binningData.byCarousel).map(([car, counts]) => (
+                      <div key={car} style={{ padding: 12, background: T.bg, borderRadius: 8, border: `1px solid ${T.border}` }}>
+                        <div style={{ fontFamily: mono, fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 8 }}>{car}</div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {counts.full > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.green }}>F:{counts.full}</span>}
+                          {counts.half > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.blue }}>H:{counts.half}</span>}
+                          {counts.quarter > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.amber }}>Q:{counts.quarter}</span>}
+                          {counts.mixed > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.red }}>M:{counts.mixed}</span>}
+                        </div>
+                        {/* Fill bar showing type proportions */}
+                        <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden", marginTop: 8 }}>
+                          {counts.full > 0 && <div style={{ flex: counts.full, background: T.green }} />}
+                          {counts.half > 0 && <div style={{ flex: counts.half, background: T.blue }} />}
+                          {counts.quarter > 0 && <div style={{ flex: counts.quarter, background: T.amber }} />}
+                          {counts.mixed > 0 && <div style={{ flex: counts.mixed, background: T.red }} />}
+                        </div>
+                        <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, marginTop: 4 }}>{counts.total} bins</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            )}
+
             {/* Carousel utilization */}
             {binningData?.utilization && (
               <Card style={{ marginBottom: 20 }}>
