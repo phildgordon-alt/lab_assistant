@@ -44,7 +44,8 @@ const SITE_KEY_2 = 'irvine2';
 
 function classifySite(ip) {
   if (!ip) return SITE_KEY_1;
-  return ip.startsWith('10.1.') ? SITE_KEY_2 : SITE_KEY_1;
+  if (ip.startsWith('10.1.') || ip.startsWith('192.168.11.')) return SITE_KEY_2;
+  return SITE_KEY_1;
 }
 
 // Persistence file
