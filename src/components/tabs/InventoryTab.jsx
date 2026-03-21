@@ -178,6 +178,8 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
 
   const handleAsk = async () => {
     if (!query.trim() || loading) return;
+    const q = query;
+    setQuery('');
     setLoading(true);
     setResponse('');
 
@@ -187,7 +189,7 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          question: query,
+          question: q,
           agent: domain === 'inventory' ? 'InventoryAgent' : domain,
           context: contextData
         })
