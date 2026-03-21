@@ -4119,6 +4119,67 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, labConfig.getBacklogTrend(dept, days));
   }
 
+  // ── Server Config (read/write .env) ─────────────────────────
+
+  // GET /api/config/env — read current env vars (masked)
+  if (req.method==='GET' && url.pathname==='/api/config/env') {
+    const envPath = path.join(__dirname, '..', '.env');
+    const vars = {};
+    try {
+      const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+        if (match) {
+          const key = match[1];
+          const val = match[2];
+          // Mask sensitive values
+          if (key.includes('KEY') || key.includes('TOKEN') || key.includes('PASSWORD') || key.includes('SECRET')) {
+            vars[key] = val ? val.slice(0, 4) + '***' + val.slice(-2) : '';
+          } else {
+            vars[key] = val;
+          }
+        }
+      }
+    } catch (e) { /* .env doesn't exist yet */ }
+    return json(res, vars);
+  }
+
+  // POST /api/config/env — update env vars and restart adapter
+  if (req.method==='POST' && url.pathname==='/api/config/env') {
+    const body = await readBody(req);
+    const envPath = path.join(__dirname, '..', '.env');
+
+    // Read existing .env
+    let existing = {};
+    try {
+      const lines = fs.readFileSync(envPath, 'utf8').split('\n');
+      for (const line of lines) {
+        const match = line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/);
+        if (match) existing[match[1]] = match[2];
+      }
+    } catch (e) { /* .env doesn't exist, start fresh */ }
+
+    // Merge new values (only update keys that are provided)
+    for (const [key, val] of Object.entries(body)) {
+      if (typeof val === 'string' && /^[A-Z_][A-Z0-9_]*$/.test(key)) {
+        if (val.includes('***')) continue; // skip masked values (not changed)
+        existing[key] = val;
+      }
+    }
+
+    // Write back
+    const envContent = Object.entries(existing).map(([k, v]) => `${k}=${v}`).join('\n') + '\n';
+    fs.writeFileSync(envPath, envContent);
+
+    // Update process.env so adapters can pick up changes
+    for (const [key, val] of Object.entries(existing)) {
+      process.env[key] = val;
+    }
+
+    console.log(`[CONFIG] .env updated with ${Object.keys(body).length} keys`);
+    return json(res, { ok: true, message: 'Environment updated. Restart server for full effect.' });
+  }
+
   // ── Static files: dist/ assets + standalone apps ────────────
   if (req.method==='GET') {
     const MIME_TYPES = {'.html':'text/html','.js':'application/javascript','.css':'text/css','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.svg':'image/svg+xml','.ico':'image/x-icon','.woff':'font/woff','.woff2':'font/woff2'};

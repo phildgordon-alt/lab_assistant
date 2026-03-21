@@ -1484,6 +1484,43 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   const [slackCleanResult,setSlackCleanResult]=useState(null);
   const [deleteAllSlackMsgs,setDeleteAllSlackMsgs]=useState(false);
 
+  // Server env save state
+  const [savingEnv,setSavingEnv]=useState(null); // null or service key being saved
+  const [envSaveResult,setEnvSaveResult]=useState({}); // { [serviceKey]: {ok,message} }
+
+  const saveServiceToServer = async (serviceKey, configs) => {
+    setSavingEnv(serviceKey);
+    setEnvSaveResult(prev=>({...prev,[serviceKey]:null}));
+    try {
+      const serverUrl = settings.serverUrl || `http://${window.location.hostname}:3002`;
+      // Map settings keys to env var names using the label field
+      const envVars = {};
+      for (const cfg of configs) {
+        const val = settings[cfg.key];
+        if (val) envVars[cfg.label] = val;
+      }
+      if (Object.keys(envVars).length === 0) {
+        setEnvSaveResult(prev=>({...prev,[serviceKey]:{ok:false,message:'No values to save'}}));
+        setSavingEnv(null);
+        return;
+      }
+      const resp = await fetch(`${serverUrl}/api/config/env`, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify(envVars)
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        setEnvSaveResult(prev=>({...prev,[serviceKey]:{ok:true,message:`Saved ${Object.keys(envVars).length} vars to .env`}}));
+      } else {
+        setEnvSaveResult(prev=>({...prev,[serviceKey]:{ok:false,message:data.message||'Save failed'}}));
+      }
+    } catch(e) {
+      setEnvSaveResult(prev=>({...prev,[serviceKey]:{ok:false,message:e.message}}));
+    }
+    setSavingEnv(null);
+  };
+
   // MCP Tools state
   const [mcpTools,setMcpTools]=useState([]);
   const [mcpAgents,setMcpAgents]=useState([]);
@@ -2006,8 +2043,19 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                                 </div>
                               </div>
                             ))}
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:8}}>
+                              <button onClick={()=>saveServiceToServer(key,configs)} disabled={savingEnv===key}
+                                style={{background:T.green,border:"none",borderRadius:6,padding:"8px 16px",color:"#fff",fontSize:11,fontWeight:700,cursor:"pointer",opacity:savingEnv===key?0.6:1}}>
+                                {savingEnv===key ? "Saving..." : "Save to Server .env"}
+                              </button>
+                              {envSaveResult[key] && (
+                                <span style={{fontSize:11,color:envSaveResult[key].ok?T.green:T.red,fontFamily:mono}}>
+                                  {envSaveResult[key].ok?"✓":"✗"} {envSaveResult[key].message}
+                                </span>
+                              )}
+                            </div>
                             <div style={{fontSize:10,color:T.textDim,marginTop:4}}>
-                              💡 Changes are saved automatically. Gateway uses env vars from <code style={{background:T.surface,padding:"2px 4px",borderRadius:3}}>gateway/.env</code> — update there for production.
+                              Writes to server <code style={{background:T.surface,padding:"2px 4px",borderRadius:3}}>.env</code> file. Gateway uses <code style={{background:T.surface,padding:"2px 4px",borderRadius:3}}>gateway/.env</code> separately.
                             </div>
                             {/* Slack-specific cleanup action */}
                             {key === 'slack' && conn.status === 'connected' && (
