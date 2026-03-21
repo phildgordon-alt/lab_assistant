@@ -283,6 +283,7 @@ function normalizeMaterial(m) {
     qty:          parseFloat(m.currentQuantity) || 0,  // ItemPath uses currentQuantity
     unit:         m.unitOfMeasure || 'EA',
     location:     m.location || m.bin || null,
+    warehouse:    m.warehouseName || m.warehouse || null,
     coatingType:  m.Info1 || null,  // e.g., "BLY SV"
     index:        m.Info3 || null,  // e.g., "HK 76"
     rxSphere:     m.Info4 || null,  // e.g., "-8.00"
@@ -529,7 +530,14 @@ async function poll() {
     const fetchMs = Date.now() - pollStart;
     console.log(`[ItemPath] All fetches completed in ${fetchMs}ms`);
 
-    const materials   = (materialsResp.materials || materialsResp.data || materialsResp || []).map(normalizeMaterial);
+    const rawMaterials = materialsResp.materials || materialsResp.data || materialsResp || [];
+    // Log sample material fields on first poll to identify warehouse field
+    if (pollCount <= 1 && rawMaterials.length > 0) {
+      const sample = rawMaterials[0];
+      console.log(`[ItemPath] Sample material fields: ${Object.keys(sample).join(', ')}`);
+      console.log(`[ItemPath] Sample material warehouse fields: warehouseName=${sample.warehouseName}, warehouse=${sample.warehouse}, warehouseId=${sample.warehouseId}`);
+    }
+    const materials   = rawMaterials.map(normalizeMaterial);
 
     // Filter orders by "In Process" status (active picks)
     const allOrders   = (ordersResp.orders || ordersResp.data || ordersResp || []);
