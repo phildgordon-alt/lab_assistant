@@ -1086,32 +1086,40 @@ function queryConsumption(days = 7) {
     ORDER BY total_consumed DESC
   `).all(days);
 
-  // Current stock levels for each SKU
+  // Current stock levels for each SKU across ALL warehouses
   const stockLevels = db.prepare(`
     SELECT sku, name, qty, coating_type, warehouse
     FROM inventory
-    WHERE qty > 0
   `).all();
 
-  // Build a lookup of current stock by SKU+warehouse
+  // Build lookups: by SKU+warehouse, and WH3 extended inventory by SKU
   const stockMap = {};
+  const wh3Stock = {};
   for (const s of stockLevels) {
-    const key = `${s.sku}|${s.warehouse || 'WH1'}`;
+    const wh = s.warehouse || 'WH1';
+    const key = `${s.sku}|${wh}`;
     stockMap[key] = s;
+    if (wh === 'WH3') {
+      wh3Stock[s.sku] = (wh3Stock[s.sku] || 0) + (s.qty || 0);
+    }
   }
 
-  // Combine consumption with current stock
+  // Combine consumption with current stock + WH3 availability
   const stockingPlan = skuConsumption.map(c => {
     const key = `${c.sku}|${c.warehouse || 'WH1'}`;
     const stock = stockMap[key];
     const currentQty = stock ? stock.qty : 0;
+    const wh3Qty = wh3Stock[c.sku] || 0;
     const daysOfSupply = c.avg_daily_usage > 0 ? Math.round(currentQty / c.avg_daily_usage * 10) / 10 : null;
+    const wh3DaysOfSupply = c.avg_daily_usage > 0 ? Math.round(wh3Qty / c.avg_daily_usage * 10) / 10 : null;
     return {
       sku: c.sku,
       name: c.name,
       warehouse: c.warehouse,
       coating: stock?.coating_type || null,
       current_qty: currentQty,
+      wh3_qty: wh3Qty,
+      wh3_days_of_supply: wh3DaysOfSupply,
       total_consumed: c.total_consumed,
       active_days: c.active_days,
       avg_daily_usage: c.avg_daily_usage,
@@ -1120,6 +1128,9 @@ function queryConsumption(days = 7) {
                 daysOfSupply <= 2 ? 'URGENT' :
                 daysOfSupply <= 5 ? 'ORDER_SOON' :
                 daysOfSupply <= 10 ? 'MONITOR' : 'ADEQUATE',
+      action: daysOfSupply !== null && daysOfSupply <= 5
+        ? (wh3Qty > 0 ? 'TRANSFER_FROM_WH3' : 'REORDER')
+        : 'ADEQUATE',
     };
   });
 
