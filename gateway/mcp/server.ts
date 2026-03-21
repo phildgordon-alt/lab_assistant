@@ -315,6 +315,9 @@ export async function handleToolCall(
     case 'get_inventory_detail':
       return handleGetInventoryDetail(toolInput);
 
+    case 'get_consumption_history':
+      return handleGetConsumptionHistory(toolInput);
+
     // ─────────────────────────────────────────────────────────────────────────
     // MAINTENANCE TOOLS
     // ─────────────────────────────────────────────────────────────────────────
@@ -1024,6 +1027,19 @@ function handleGetInventoryDetail(input: Record<string, unknown>): unknown {
     return { items, count: items.length, source: 'sqlite' };
   } catch (e: any) {
     return { error: e.message, source: 'sqlite' };
+  }
+}
+
+async function handleGetConsumptionHistory(input: Record<string, unknown>): Promise<unknown> {
+  try {
+    const days = Math.min(Math.max((input.days as number) || 7, 1), 90);
+    const labUrl = process.env.LAB_SERVER_URL || `http://localhost:3002`;
+    const resp = await fetch(`${labUrl}/api/inventory/consumption?days=${days}`);
+    if (!resp.ok) throw new Error(`Lab server returned ${resp.status}`);
+    const data = await resp.json();
+    return data;
+  } catch (e: any) {
+    return { error: e.message, source: 'lab-server' };
   }
 }
 

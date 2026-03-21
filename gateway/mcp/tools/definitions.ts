@@ -291,6 +291,25 @@ NOT for individual SKU lookup — use get_inventory_detail() for that.`,
   },
 };
 
+export const get_consumption_history = {
+  name: 'get_consumption_history',
+  description: `USE THIS for stocking plans and reorder recommendations.
+WHAT: Returns ALL SKU-level consumption data: daily usage rates, current stock, days-of-supply, and priority (URGENT/ORDER_SOON/MONITOR/ADEQUATE).
+HOW: Specify days parameter (7 for weekly, 30 for monthly). Returns every SKU that was consumed in the period — not just top items.
+INCLUDES: stocking_plan (per-SKU with avg_daily_usage, days_of_supply, priority), daily_totals (total picks per day), summary (urgent/order_soon counts).
+USE THIS when asked about: stocking plans, reorder, consumption, usage rates, days of supply, what to order.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      days: {
+        type: 'number',
+        description: 'Number of days of consumption history to analyze. Default 7 (week). Use 30 for monthly.',
+        default: 7,
+      },
+    },
+  },
+};
+
 export const get_inventory_detail = {
   name: 'get_inventory_detail',
   description: `USE THIS when you need details on a specific SKU or to search inventory.
@@ -683,6 +702,7 @@ export const COATING_TOOLS = [
 export const INVENTORY_TOOLS = [
   get_inventory_summary,
   get_inventory_detail,
+  get_consumption_history,
 ];
 
 export const MAINTENANCE_TOOLS = [

@@ -1066,6 +1066,85 @@ function queryCompletedPicks(days = 7) {
   return { daily, topSkus, days };
 }
 
+/**
+ * SKU-level consumption with daily averages and days-of-supply calculation
+ * Used by InventoryAgent for stocking plans
+ */
+function queryConsumption(days = 7) {
+  // Per-SKU consumption over the period
+  const skuConsumption = db.prepare(`
+    SELECT
+      ph.sku,
+      ph.name,
+      SUM(ph.qty) as total_consumed,
+      COUNT(DISTINCT date(ph.completed_at)) as active_days,
+      ROUND(CAST(SUM(ph.qty) AS REAL) / NULLIF(COUNT(DISTINCT date(ph.completed_at)), 0), 1) as avg_daily_usage,
+      ph.warehouse
+    FROM picks_history ph
+    WHERE ph.completed_at >= datetime('now', '-' || ? || ' days')
+    GROUP BY ph.sku, ph.warehouse
+    ORDER BY total_consumed DESC
+  `).all(days);
+
+  // Current stock levels for each SKU
+  const stockLevels = db.prepare(`
+    SELECT sku, name, qty, coating_type, warehouse
+    FROM inventory
+    WHERE qty > 0
+  `).all();
+
+  // Build a lookup of current stock by SKU+warehouse
+  const stockMap = {};
+  for (const s of stockLevels) {
+    const key = `${s.sku}|${s.warehouse || 'WH1'}`;
+    stockMap[key] = s;
+  }
+
+  // Combine consumption with current stock
+  const stockingPlan = skuConsumption.map(c => {
+    const key = `${c.sku}|${c.warehouse || 'WH1'}`;
+    const stock = stockMap[key];
+    const currentQty = stock ? stock.qty : 0;
+    const daysOfSupply = c.avg_daily_usage > 0 ? Math.round(currentQty / c.avg_daily_usage * 10) / 10 : null;
+    return {
+      sku: c.sku,
+      name: c.name,
+      warehouse: c.warehouse,
+      coating: stock?.coating_type || null,
+      current_qty: currentQty,
+      total_consumed: c.total_consumed,
+      active_days: c.active_days,
+      avg_daily_usage: c.avg_daily_usage,
+      days_of_supply: daysOfSupply,
+      priority: daysOfSupply === null ? 'UNKNOWN' :
+                daysOfSupply <= 2 ? 'URGENT' :
+                daysOfSupply <= 5 ? 'ORDER_SOON' :
+                daysOfSupply <= 10 ? 'MONITOR' : 'ADEQUATE',
+    };
+  });
+
+  // Daily totals for the period
+  const dailyTotals = db.prepare(`
+    SELECT date(completed_at) as pick_date, SUM(qty) as total_qty, COUNT(*) as pick_count
+    FROM picks_history
+    WHERE completed_at >= datetime('now', '-' || ? || ' days')
+    GROUP BY date(completed_at)
+    ORDER BY pick_date DESC
+  `).all(days);
+
+  return {
+    period_days: days,
+    stocking_plan: stockingPlan,
+    daily_totals: dailyTotals,
+    summary: {
+      total_skus: skuConsumption.length,
+      total_consumed: skuConsumption.reduce((s, c) => s + c.total_consumed, 0),
+      urgent_count: stockingPlan.filter(s => s.priority === 'URGENT').length,
+      order_soon_count: stockingPlan.filter(s => s.priority === 'ORDER_SOON').length,
+    }
+  };
+}
+
 function queryDailyStats(days = 30) {
   return db.prepare(`
     SELECT * FROM daily_stats
@@ -1513,6 +1592,7 @@ module.exports = {
   queryShippedJobs,
   queryShippedStats,
   queryCompletedPicks,
+  queryConsumption,
   queryDailyStats,
   queryInventoryTrend,
   // Snapshot functions

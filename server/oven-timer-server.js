@@ -1519,6 +1519,10 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/daily') {
     return json(res, itempath.getDailyPicks());
   }
+  if (req.method==='GET' && url.pathname==='/api/inventory/consumption') {
+    const days = parseInt(url.searchParams.get('days') || '7');
+    return json(res, labDb.queryConsumption(days));
+  }
   if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {
     return json(res, itempath.getAlerts());
   }
