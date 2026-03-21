@@ -235,6 +235,31 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     connections.som = { status: 'unconfigured', message: 'Lab server not running or SOM not configured' };
   }
 
+  // UniFi Network
+  try {
+    const unifiUrl = process.env.UNIFI_URL;
+    const unifiKey = process.env.UNIFI_API_KEY;
+    if (!unifiUrl || !unifiKey) {
+      connections.network = { status: 'unconfigured', message: 'UNIFI_URL or UNIFI_API_KEY not set' };
+    } else {
+      const start = Date.now();
+      const resp = await fetch(`${labUrl}/api/network/status`, { signal: AbortSignal.timeout(5000) });
+      const latency = Date.now() - start;
+      if (resp.ok) {
+        const data = await resp.json() as any;
+        const deviceCount = data.devices?.length || data.device_count || 0;
+        connections.network = { status: 'connected', message: `UDM-Pro (${deviceCount} devices)`, latency };
+      } else {
+        connections.network = { status: 'disconnected', message: `HTTP ${resp.status}` };
+      }
+    }
+  } catch (e) {
+    const unifiUrl = process.env.UNIFI_URL;
+    connections.network = unifiUrl
+      ? { status: 'disconnected', message: 'UniFi controller not reachable' }
+      : { status: 'unconfigured', message: 'UNIFI_URL not set' };
+  }
+
   res.json({
     timestamp: new Date().toISOString(),
     connections,
