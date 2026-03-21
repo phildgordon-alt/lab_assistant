@@ -544,16 +544,13 @@ async function poll() {
     const locationsData = await getLocationsData().catch(() => []);
     const locationsResp = { locations: locationsData };
 
+    // Location contents: material-to-location-to-warehouse mapping (per-SKU per-warehouse stock)
+    const locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 }).catch(() => ({ contents: [] }));
+
     const fetchMs = Date.now() - pollStart;
     console.log(`[ItemPath] All fetches completed in ${fetchMs}ms`);
 
     const rawMaterials = materialsResp.materials || materialsResp.data || materialsResp || [];
-    // Log sample material fields on first poll to identify warehouse field
-    if (pollCount <= 1 && rawMaterials.length > 0) {
-      const sample = rawMaterials[0];
-      console.log(`[ItemPath] Sample material fields: ${Object.keys(sample).join(', ')}`);
-      console.log(`[ItemPath] Sample material warehouse fields: warehouseName=${sample.warehouseName}, warehouse=${sample.warehouse}, warehouseId=${sample.warehouseId}`);
-    }
     const materials   = rawMaterials.map(normalizeMaterial);
 
     // Filter orders by "In Process" status (active picks)
@@ -705,31 +702,33 @@ async function poll() {
 
     // Build per-SKU warehouse stock from locations data
     // Locations have: name (e.g. "CAR-6/Shelf 058/Pos 01"), materialName, currentQuantity
-    // Build per-SKU warehouse stock from locations data
-    // CAR-1..3 → WH1, CAR-4..6 → WH2, KITCHEN/IRV → WH3
-    if (pollCount <= 1 && locations.length > 0) {
-      const sample = locations[0];
-      console.log(`[ItemPath] Location fields: ${Object.keys(sample).join(', ')}`);
-      console.log(`[ItemPath] Location sample: name=${sample.name}, materialName=${sample.materialName}, material_name=${sample.material_name}, materialId=${sample.materialId}, currentQuantity=${sample.currentQuantity}`);
-    }
+    // Build per-SKU warehouse stock from location_contents API
+    // This gives us materialId + warehouseName + currentQuantity per location
+    const locationContents = locationContentsResp.contents || [];
     const warehouseStock = { WH1: {}, WH2: {}, WH3: {} };
-    for (const loc of locations) {
-      const locName = loc.name || '';
-      const qty = parseFloat(loc.currentQuantity) || 0;
-      const sku = loc.materialName || loc.material_name || loc.materialId || null;
-      if (!sku || qty <= 0) continue;
 
-      const wh = deriveWarehouse(locName) || 'WH1';
+    // Build materialId → SKU name lookup from materials
+    const matIdToSku = {};
+    for (const m of rawMaterials) {
+      matIdToSku[m.id] = m.name; // m.name = OPC code (SKU)
+    }
+
+    for (const lc of locationContents) {
+      const qty = parseFloat(lc.currentQuantity) || 0;
+      const wh = lc.warehouseName || 'WH1';
+      const materialId = lc.materialId;
+      const sku = matIdToSku[materialId] || materialId;
+      if (qty <= 0) continue;
+
       if (!warehouseStock[wh]) warehouseStock[wh] = {};
       if (!warehouseStock[wh][sku]) warehouseStock[wh][sku] = 0;
       warehouseStock[wh][sku] += qty;
     }
-    if (pollCount <= 1) {
-      for (const wh of ['WH1', 'WH2', 'WH3']) {
-        const skus = Object.keys(warehouseStock[wh] || {}).length;
-        const total = Object.values(warehouseStock[wh] || {}).reduce((s, q) => s + q, 0);
-        console.log(`[ItemPath] ${wh}: ${skus} SKUs, ${total} units`);
-      }
+
+    for (const wh of ['WH1', 'WH2', 'WH3']) {
+      const skus = Object.keys(warehouseStock[wh] || {}).length;
+      const total = Object.values(warehouseStock[wh] || {}).reduce((s, q) => s + q, 0);
+      console.log(`[ItemPath] ${wh}: ${skus} SKUs, ${Math.round(total)} units`);
     }
 
     cache = {
