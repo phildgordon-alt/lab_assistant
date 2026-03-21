@@ -1519,9 +1519,29 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/daily') {
     return json(res, itempath.getDailyPicks());
   }
+  if (req.method==='GET' && url.pathname==='/api/inventory/warehouse-stock') {
+    return json(res, itempath.getWarehouseStock());
+  }
   if (req.method==='GET' && url.pathname==='/api/inventory/consumption') {
     const days = parseInt(url.searchParams.get('days') || '7');
-    return json(res, labDb.queryConsumption(days));
+    const consumption = labDb.queryConsumption(days);
+    // Enrich with live warehouse stock from ItemPath locations
+    const ws = itempath.getWarehouseStock();
+    for (const item of consumption.stocking_plan) {
+      item.wh1_qty = ws.WH1[item.sku] || 0;
+      item.wh3_qty = ws.WH3[item.sku] || 0;
+      item.wh3_days_of_supply = item.avg_daily_usage > 0 ? Math.round(item.wh3_qty / item.avg_daily_usage * 10) / 10 : null;
+      item.action = (item.days_of_supply !== null && item.days_of_supply <= 5)
+        ? (item.wh3_qty > 0 ? 'TRANSFER_FROM_WH3' : 'REORDER')
+        : 'ADEQUATE';
+    }
+    consumption.warehouse_totals = {
+      wh1_skus: ws.wh1_sku_count,
+      wh1_units: ws.wh1_total_units,
+      wh3_skus: ws.wh3_sku_count,
+      wh3_units: ws.wh3_total_units,
+    };
+    return json(res, consumption);
   }
   if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {
     return json(res, itempath.getAlerts());

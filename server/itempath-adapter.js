@@ -266,6 +266,18 @@ async function getLocationsData() {
 // NORMALIZE — map ItemPath API response shapes to Lab_Assistant internal format
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Derive warehouse from location name:
+//   CAR-1 through CAR-6 → production carousels (WH1/WH2)
+//   KITCHEN* → Lens Kitchen (WH3 extended inventory)
+//   IRV02* → Irvine 2 inventory (WH3 extended inventory)
+function deriveWarehouse(location) {
+  if (!location) return null;
+  if (/^CAR-/i.test(location)) return 'WH1';
+  if (/^KITCHEN/i.test(location)) return 'WH3';
+  if (/^IRV02/i.test(location)) return 'WH3';
+  return null;
+}
+
 function normalizeMaterial(m) {
   // ItemPath materials = lens blanks in Kardex
   // Actual ItemPath fields:
@@ -283,7 +295,7 @@ function normalizeMaterial(m) {
     qty:          parseFloat(m.currentQuantity) || 0,  // ItemPath uses currentQuantity
     unit:         m.unitOfMeasure || 'EA',
     location:     m.location || m.bin || null,
-    warehouse:    m.warehouseName || m.warehouse || null,
+    warehouse:    deriveWarehouse(m.location || m.bin || null),
     coatingType:  m.Info1 || null,  // e.g., "BLY SV"
     index:        m.Info3 || null,  // e.g., "HK 76"
     rxSphere:     m.Info4 || null,  // e.g., "-8.00"
@@ -686,6 +698,30 @@ async function poll() {
       });
     }
 
+    // Build per-SKU warehouse stock from locations data
+    // Locations have: name (e.g. "CAR-6/Shelf 058/Pos 01"), materialName, currentQuantity
+    const warehouseStock = { WH1: {}, WH3: {} };  // { WH1: { sku: qty }, WH3: { sku: qty } }
+    for (const loc of locations) {
+      const locName = loc.name || '';
+      const qty = parseFloat(loc.currentQuantity) || 0;
+      const sku = loc.materialName || loc.material_name || null;
+      if (!sku || qty <= 0) continue;
+
+      const wh = (/^CAR-/i.test(locName)) ? 'WH1'
+               : (/^KITCHEN/i.test(locName) || /^IRV/i.test(locName)) ? 'WH3'
+               : 'WH1';
+
+      if (!warehouseStock[wh][sku]) warehouseStock[wh][sku] = 0;
+      warehouseStock[wh][sku] += qty;
+    }
+    if (pollCount <= 1) {
+      const wh1Skus = Object.keys(warehouseStock.WH1).length;
+      const wh3Skus = Object.keys(warehouseStock.WH3).length;
+      const wh1Total = Object.values(warehouseStock.WH1).reduce((s, q) => s + q, 0);
+      const wh3Total = Object.values(warehouseStock.WH3).reduce((s, q) => s + q, 0);
+      console.log(`[ItemPath] Warehouse stock from locations: WH1=${wh1Skus} SKUs (${wh1Total} units), WH3=${wh3Skus} SKUs (${wh3Total} units)`);
+    }
+
     cache = {
       materials,
       activePicks,
@@ -693,6 +729,7 @@ async function poll() {
       alerts,
       warehouses,
       warehouseStats,
+      warehouseStock,  // per-SKU stock by warehouse from locations
       hourlyStats,
       hourlyPutStats,
       vlmStats,
@@ -985,4 +1022,18 @@ function getDailyPicks() {
   return { ...dailyPickTotals, hourlyPicks, hourlyPuts };
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks };
+/** Per-SKU stock breakdown by warehouse (WH1=carousels, WH3=kitchen+IRV02) */
+function getWarehouseStock() {
+  const ws = cache.warehouseStock || { WH1: {}, WH3: {} };
+  return {
+    WH1: ws.WH1 || {},
+    WH3: ws.WH3 || {},
+    wh1_sku_count: Object.keys(ws.WH1 || {}).length,
+    wh3_sku_count: Object.keys(ws.WH3 || {}).length,
+    wh1_total_units: Object.values(ws.WH1 || {}).reduce((s, q) => s + q, 0),
+    wh3_total_units: Object.values(ws.WH3 || {}).reduce((s, q) => s + q, 0),
+    lastSync: cache.lastSync,
+  };
+}
+
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock };
