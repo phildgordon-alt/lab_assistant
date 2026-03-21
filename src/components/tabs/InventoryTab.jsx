@@ -300,22 +300,27 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [sortCol, setSortCol] = useState("qty");
   const [sortDir, setSortDir] = useState("asc");
   const [selectedItem, setSelectedItem] = useState(null);
+  const [whStock, setWhStock] = useState(null);
+  const [whSearch, setWhSearch] = useState("");
+  const [whFilter, setWhFilter] = useState("all"); // all, WH1, WH2, WH3
 
   // Fetch all inventory data
   useEffect(() => {
     if (!ovenServerUrl) return;
     const go = async () => {
       try {
-        const [invResp, picksResp, alertsResp, vlmsResp] = await Promise.all([
+        const [invResp, picksResp, alertsResp, vlmsResp, whResp] = await Promise.all([
           fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r => r.json()),
+          fetch(`${ovenServerUrl}/api/inventory/warehouse-stock`).then(r => r.json()).catch(() => null),
         ]);
         setInventory(invResp);
         setPicks(picksResp);
         setAlerts(alertsResp);
         setVlms(vlmsResp);
+        if (whResp) setWhStock(whResp);
         setLoading(false);
       } catch (e) {
         console.error('[Inventory] Fetch error:', e);
@@ -375,7 +380,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouses", label: "Warehouses" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -401,7 +406,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
     warehouses: inventory.warehouses,
     warehouseStats: inventory.warehouseStats,
     vlmStats: vlms.vlmStats,
-    picksByWarehouse: picks.byWarehouse
+    picksByWarehouse: picks.byWarehouse,
+    warehouseStock: whStock ? { wh1_units: whStock.wh1_total_units, wh2_units: whStock.wh2_total_units, wh3_units: whStock.wh3_total_units } : null
   };
 
   if (loading) {
@@ -492,6 +498,126 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 </div>
               )}
             </Card>
+          </div>
+        )}
+
+        {sub === "warehouse-stock" && (
+          <div>
+            {/* Warehouse totals */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 24 }}>
+              {[
+                { id: 'WH1', label: 'Warehouse 1', sub: 'CAR 1-3', color: T.blue },
+                { id: 'WH2', label: 'Warehouse 2', sub: 'CAR 4-6', color: T.green },
+                { id: 'WH3', label: 'Warehouse 3', sub: 'Kitchen + IRV02', color: T.amber },
+              ].map(wh => {
+                const skus = whStock ? Object.keys(whStock[wh.id] || {}).length : 0;
+                const units = whStock ? Object.values(whStock[wh.id] || {}).reduce((s, q) => s + q, 0) : 0;
+                const isActive = whFilter === wh.id;
+                return (
+                  <Card key={wh.id} onClick={() => setWhFilter(whFilter === wh.id ? 'all' : wh.id)}
+                    style={{ padding: 20, cursor: 'pointer', borderLeft: `4px solid ${wh.color}`, background: isActive ? `${wh.color}15` : T.card, border: isActive ? `1px solid ${wh.color}` : `1px solid ${T.border}`, borderLeftWidth: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 800, color: T.text, fontFamily: mono }}>{wh.label}</div>
+                        <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{wh.sub}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: 28, fontWeight: 900, color: wh.color, fontFamily: mono }}>{units.toLocaleString()}</div>
+                        <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL UNITS</div>
+                      </div>
+                      <div>
+                        <div style={{ fontSize: 28, fontWeight: 900, color: T.text, fontFamily: mono }}>{skus.toLocaleString()}</div>
+                        <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>UNIQUE SKUS</div>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+
+            {/* Search */}
+            <div style={{ marginBottom: 16, display: "flex", gap: 12, alignItems: "center" }}>
+              <input
+                value={whSearch} onChange={e => setWhSearch(e.target.value)}
+                placeholder="Search by SKU..."
+                style={{ flex: 1, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }}
+              />
+              <div style={{ display: "flex", gap: 4 }}>
+                {['all', 'WH1', 'WH2', 'WH3'].map(f => (
+                  <button key={f} onClick={() => setWhFilter(f)} style={{
+                    padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                    background: whFilter === f ? (f === 'WH1' ? T.blue : f === 'WH2' ? T.green : f === 'WH3' ? T.amber : T.blueDark) : 'transparent',
+                    color: whFilter === f ? '#fff' : T.textMuted,
+                    border: `1px solid ${whFilter === f ? 'transparent' : T.border}`
+                  }}>{f === 'all' ? 'All' : f}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* SKU table */}
+            {whStock ? (() => {
+              // Build unified SKU list
+              const skuMap = {};
+              for (const wh of ['WH1', 'WH2', 'WH3']) {
+                for (const [sku, qty] of Object.entries(whStock[wh] || {})) {
+                  if (!skuMap[sku]) skuMap[sku] = { sku, WH1: 0, WH2: 0, WH3: 0, total: 0 };
+                  skuMap[sku][wh] = qty;
+                  skuMap[sku].total += qty;
+                }
+              }
+              let rows = Object.values(skuMap);
+              // Filter by warehouse
+              if (whFilter !== 'all') rows = rows.filter(r => r[whFilter] > 0);
+              // Filter by search
+              if (whSearch) {
+                const q = whSearch.toLowerCase();
+                rows = rows.filter(r => r.sku.toLowerCase().includes(q));
+              }
+              // Sort by total desc
+              rows.sort((a, b) => b.total - a.total);
+              const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+
+              return (
+                <Card style={{ padding: 0 }}>
+                  <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: mono }}>{rows.length} SKUs</span>
+                    <span style={{ fontSize: 12, fontFamily: mono, color: T.textDim }}>Total: <strong style={{ color: T.orange }}>{grandTotal.toLocaleString()}</strong> units</span>
+                  </div>
+                  <div style={{ maxHeight: 500, overflowY: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: mono }}>
+                      <thead>
+                        <tr style={{ background: T.bg, position: "sticky", top: 0, zIndex: 1 }}>
+                          <th style={{ padding: "10px 16px", textAlign: "left", color: T.textDim, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>SKU</th>
+                          <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>WH1</th>
+                          <th style={{ padding: "10px 12px", textAlign: "right", color: T.green, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>WH2</th>
+                          <th style={{ padding: "10px 12px", textAlign: "right", color: T.amber, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>WH3</th>
+                          <th style={{ padding: "10px 16px", textAlign: "right", color: T.text, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>TOTAL</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.slice(0, 200).map(r => (
+                          <tr key={r.sku} style={{ borderBottom: `1px solid ${T.border}22` }}
+                            onClick={() => { const m = (inventory.materials || []).find(x => x.sku === r.sku); if (m) setSelectedItem(m); }}>
+                            <td style={{ padding: "8px 16px", color: T.text, cursor: "pointer" }}>{r.sku}</td>
+                            <td style={{ padding: "8px 12px", textAlign: "right", color: r.WH1 > 0 ? T.blue : T.textDim }}>{r.WH1 || '—'}</td>
+                            <td style={{ padding: "8px 12px", textAlign: "right", color: r.WH2 > 0 ? T.green : T.textDim }}>{r.WH2 || '—'}</td>
+                            <td style={{ padding: "8px 12px", textAlign: "right", color: r.WH3 > 0 ? T.amber : T.textDim }}>{r.WH3 || '—'}</td>
+                            <td style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: T.text }}>{r.total.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {rows.length > 200 && <div style={{ padding: 12, textAlign: "center", color: T.textDim, fontSize: 11 }}>Showing first 200 of {rows.length} SKUs</div>}
+                  </div>
+                </Card>
+              );
+            })() : (
+              <Card style={{ padding: 40, textAlign: "center" }}>
+                <div style={{ color: T.textMuted }}>Loading warehouse stock data...</div>
+              </Card>
+            )}
           </div>
         )}
 
