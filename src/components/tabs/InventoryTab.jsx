@@ -187,8 +187,8 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: query,
-          domain,
+          question: query,
+          agent: domain === 'inventory' ? 'InventoryAgent' : domain,
           context: contextData
         })
       });
@@ -217,11 +217,15 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
             }
           }
         }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        setResponse(`Error: ${err.message || `HTTP ${res.status}`}`);
       }
     } catch (e) {
       setResponse('Error connecting to AI service.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   return (
