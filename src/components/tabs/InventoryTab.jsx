@@ -289,6 +289,9 @@ function ProductionStageTab({ domain, children, contextData, serverUrl, settings
 function BinningDetailView({ view, serverUrl }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [binTypeFilter, setBinTypeFilter] = useState("all"); // all, full, half, quarter
+  const [sortCol, setSortCol] = useState("days_left");
+  const [sortAsc, setSortAsc] = useState(true);
 
   useEffect(() => {
     if (!serverUrl) return;
@@ -303,25 +306,60 @@ function BinningDetailView({ view, serverUrl }) {
   if (!data) return null;
 
   if (view === 'swap') {
-    const urgent = data.urgent || [];
-    const upcoming = data.upcoming || [];
     const prebuild = data.prebuild_list || [];
+
+    // Filter by bin type
+    const filtered = binTypeFilter === 'all' ? prebuild : prebuild.filter(b => b.bin_type === binTypeFilter);
+
+    // Sort
+    const sorted = [...filtered].sort((a, b) => {
+      const av = a[sortCol] ?? 0, bv = b[sortCol] ?? 0;
+      if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+      return sortAsc ? av - bv : bv - av;
+    });
+
+    const toggleSort = (col) => { if (sortCol === col) setSortAsc(!sortAsc); else { setSortCol(col); setSortAsc(true); } };
+    const sortIcon = (col) => sortCol === col ? (sortAsc ? ' ▲' : ' ▼') : '';
+
+    // Count by type
+    const fullCount = prebuild.filter(b => b.bin_type === 'full').length;
+    const halfCount = prebuild.filter(b => b.bin_type === 'half').length;
+    const qtrCount = prebuild.filter(b => b.bin_type === 'quarter').length;
+
     return (
       <div>
-        {prebuild.length > 0 && (
+        {/* Bin type filter buttons */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          {[
+            { id: 'all', label: `All (${prebuild.length})`, color: T.text },
+            { id: 'full', label: `Full (${fullCount})`, color: T.green },
+            { id: 'half', label: `Half (${halfCount})`, color: T.blue },
+            { id: 'quarter', label: `Quarter (${qtrCount})`, color: T.amber },
+          ].map(f => (
+            <button key={f.id} onClick={() => setBinTypeFilter(f.id)} style={{
+              padding: "8px 16px", borderRadius: 6, fontSize: 12, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+              background: binTypeFilter === f.id ? `${f.color}25` : 'transparent',
+              color: binTypeFilter === f.id ? f.color : T.textMuted,
+              border: `1px solid ${binTypeFilter === f.id ? f.color : T.border}`
+            }}>{f.label}</button>
+          ))}
+        </div>
+
+        {sorted.length > 0 ? (
           <Card style={{ marginBottom: 20, borderLeft: `4px solid ${T.red}` }}>
-            <SectionHeader right={`${prebuild.length} SKUs`}>Pre-Build List (Kitchen)</SectionHeader>
+            <SectionHeader right={`${sorted.length} SKUs`}>Pre-Build List (Kitchen)</SectionHeader>
+            <div style={{ maxHeight: 600, overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: mono }}>
-              <thead><tr style={{ background: T.bg }}>
-                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU</th>
-                <th style={{ padding: "8px 12px", textAlign: "center", color: T.textDim, fontSize: 10 }}>BUILD TYPE</th>
-                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>CURRENT</th>
-                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>DAILY RATE</th>
-                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>DAYS LEFT</th>
-                <th style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>QTY NEEDED</th>
-                <th style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>CAROUSEL</th>
+              <thead><tr style={{ background: T.bg, position: "sticky", top: 0, zIndex: 1 }}>
+                <th onClick={() => toggleSort('sku')} style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10, cursor: "pointer" }}>SKU{sortIcon('sku')}</th>
+                <th onClick={() => toggleSort('bin_type')} style={{ padding: "8px 12px", textAlign: "center", color: T.textDim, fontSize: 10, cursor: "pointer" }}>BUILD TYPE{sortIcon('bin_type')}</th>
+                <th onClick={() => toggleSort('current_qty')} style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10, cursor: "pointer" }}>CURRENT{sortIcon('current_qty')}</th>
+                <th onClick={() => toggleSort('daily_rate')} style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10, cursor: "pointer" }}>DAILY RATE{sortIcon('daily_rate')}</th>
+                <th onClick={() => toggleSort('days_left')} style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10, cursor: "pointer" }}>DAYS LEFT{sortIcon('days_left')}</th>
+                <th onClick={() => toggleSort('qty_needed')} style={{ padding: "8px 12px", textAlign: "right", color: T.textDim, fontSize: 10, cursor: "pointer" }}>QTY NEEDED{sortIcon('qty_needed')}</th>
+                <th onClick={() => toggleSort('carousel')} style={{ padding: "8px 12px", textAlign: "left", color: T.textDim, fontSize: 10, cursor: "pointer" }}>CAROUSEL{sortIcon('carousel')}</th>
               </tr></thead>
-              <tbody>{prebuild.map((b, i) => {
+              <tbody>{sorted.map((b, i) => {
                 const typeColor = b.bin_type === 'full' ? T.green : b.bin_type === 'half' ? T.blue : b.bin_type === 'quarter' ? T.amber : T.textMuted;
                 const typeLabel = b.bin_type === 'full' ? 'FULL' : b.bin_type === 'half' ? 'HALF' : b.bin_type === 'quarter' ? 'QTR' : b.bin_type?.toUpperCase() || '—';
                 return (
@@ -337,10 +375,10 @@ function BinningDetailView({ view, serverUrl }) {
                 );
               })}</tbody>
             </table>
+            </div>
           </Card>
-        )}
-        {urgent.length === 0 && upcoming.length === 0 && (
-          <Card style={{ padding: 32, textAlign: "center", color: T.textMuted }}>No bins approaching swap threshold. All carousels healthy.</Card>
+        ) : (
+          <Card style={{ padding: 32, textAlign: "center", color: T.textMuted }}>No bins matching filter.</Card>
         )}
       </div>
     );
