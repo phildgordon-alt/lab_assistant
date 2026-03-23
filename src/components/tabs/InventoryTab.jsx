@@ -480,19 +480,24 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [whFilter, setWhFilter] = useState("all"); // all, WH1, WH2, WH3
   const [binningData, setBinningData] = useState(null);
   const [binningView, setBinningView] = useState("swap"); // swap, consolidate, adjacency
+  const [reconData, setReconData] = useState(null);
+  const [reconFilter, setReconFilter] = useState("all"); // all, discrepancies, matches, ns_only, ip_only
+  const [reconSearch, setReconSearch] = useState("");
+  const [reconRefreshing, setReconRefreshing] = useState(false);
 
   // Fetch all inventory data
   useEffect(() => {
     if (!ovenServerUrl) return;
     const go = async () => {
       try {
-        const [invResp, picksResp, alertsResp, vlmsResp, whResp, binResp] = await Promise.all([
+        const [invResp, picksResp, alertsResp, vlmsResp, whResp, binResp, reconResp] = await Promise.all([
           fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r => r.json()),
           fetch(`${ovenServerUrl}/api/inventory/warehouse-stock`).then(r => r.json()).catch(() => null),
           fetch(`${ovenServerUrl}/api/inventory/binning/summary`).then(r => r.json()).catch(() => null),
+          fetch(`${ovenServerUrl}/api/netsuite/reconcile`).then(r => r.json()).catch(() => null),
         ]);
         setInventory(invResp);
         setPicks(picksResp);
@@ -500,6 +505,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
         setVlms(vlmsResp);
         if (whResp) setWhStock(whResp);
         if (binResp) setBinningData(binResp);
+        if (reconResp) setReconData(reconResp);
         setLoading(false);
       } catch (e) {
         console.error('[Inventory] Fetch error:', e);
@@ -559,7 +565,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "binning", label: "Binning Intelligence" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -776,6 +782,148 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
             {/* Detail view based on selected sub-view */}
             <BinningDetailView view={binningView} serverUrl={ovenServerUrl} />
+          </div>
+        )}
+
+        {sub === "reconciliation" && (
+          <div>
+            {/* Summary KPIs */}
+            {reconData?.summary ? (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 24 }}>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>SKUS COMPARED</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{reconData.summary.totalSkus?.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>NS: {reconData.summary.netsuiteSkus} · IP: {reconData.summary.itempathSkus}</div>
+                  </Card>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>MATCHED</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{reconData.summary.matched?.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.green, fontFamily: mono }}>{reconData.summary.matchRate}% match rate</div>
+                  </Card>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DISCREPANCIES</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.discrepancies > 0 ? T.red : T.green, fontFamily: mono }}>{reconData.summary.discrepancies?.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>
+                      <span style={{ color: T.red }}>{reconData.summary.critical} critical</span> · <span style={{ color: T.amber }}>{reconData.summary.high} high</span> · {reconData.summary.low} low
+                    </div>
+                  </Card>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NET VARIANCE</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.totalDiff === 0 ? T.green : T.amber, fontFamily: mono }}>{reconData.summary.totalDiff > 0 ? '+' : ''}{reconData.summary.totalDiff?.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IP: {reconData.summary.totalItemPath?.toLocaleString()} · NS: {reconData.summary.totalNetSuite?.toLocaleString()}</div>
+                  </Card>
+                </div>
+
+                {/* Sync status + refresh */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono }}>
+                    Last sync: {reconData.lastSync ? new Date(reconData.lastSync).toLocaleString() : 'Never'}
+                  </div>
+                  <button onClick={async () => {
+                    setReconRefreshing(true);
+                    try {
+                      await fetch(`${ovenServerUrl}/api/netsuite/refresh`, { method: 'POST' });
+                      const resp = await fetch(`${ovenServerUrl}/api/netsuite/reconcile`);
+                      setReconData(await resp.json());
+                    } catch (e) { console.error(e); }
+                    setReconRefreshing(false);
+                  }} disabled={reconRefreshing}
+                    style={{ background: T.blue, border: "none", borderRadius: 8, padding: "8px 16px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: reconRefreshing ? 0.6 : 1, fontFamily: mono }}>
+                    {reconRefreshing ? "Syncing..." : "↻ Refresh NetSuite"}
+                  </button>
+                </div>
+
+                {/* Filters */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+                  <input value={reconSearch} onChange={e => setReconSearch(e.target.value)} placeholder="Search SKU..."
+                    style={{ flex: 1, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
+                  {[
+                    { id: 'all', label: 'All' },
+                    { id: 'discrepancies', label: 'Discrepancies', color: T.red },
+                    { id: 'matches', label: 'Matches', color: T.green },
+                    { id: 'ns_only', label: 'NS Only', color: T.purple },
+                    { id: 'ip_only', label: 'IP Only', color: T.blue },
+                  ].map(f => (
+                    <button key={f.id} onClick={() => setReconFilter(f.id)} style={{
+                      padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                      background: reconFilter === f.id ? `${f.color || T.text}25` : 'transparent',
+                      color: reconFilter === f.id ? (f.color || T.text) : T.textMuted,
+                      border: `1px solid ${reconFilter === f.id ? (f.color || T.text) : T.border}`
+                    }}>{f.label}</button>
+                  ))}
+                </div>
+
+                {/* Discrepancy table */}
+                {(() => {
+                  let rows = reconData.discrepancies || [];
+                  // Add matched items if showing all or matches
+                  if (reconFilter === 'all' || reconFilter === 'matches') {
+                    // Matches aren't in discrepancies array — they're the absence of discrepancies
+                  }
+                  if (reconFilter === 'matches') rows = []; // matches aren't in the discrepancies array
+                  if (reconFilter === 'ns_only') rows = rows.filter(d => d.netsuite > 0 && d.itempath === 0);
+                  if (reconFilter === 'ip_only') rows = rows.filter(d => d.itempath > 0 && d.netsuite === 0);
+                  if (reconSearch) {
+                    const q = reconSearch.toLowerCase();
+                    rows = rows.filter(d => d.sku?.toLowerCase().includes(q) || d.name?.toLowerCase().includes(q));
+                  }
+                  return (
+                    <Card style={{ padding: 0 }}>
+                      <div style={{ padding: "12px 16px", borderBottom: `1px solid ${T.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: mono }}>{rows.length} {reconFilter === 'all' ? 'discrepancies' : reconFilter}</span>
+                      </div>
+                      <div style={{ maxHeight: 500, overflowY: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: mono }}>
+                          <thead>
+                            <tr style={{ background: T.bg, position: "sticky", top: 0, zIndex: 1 }}>
+                              <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU</th>
+                              <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>NAME</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10 }}>ITEMPATH</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontSize: 10 }}>NETSUITE</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>VARIANCE</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>%</th>
+                              <th style={{ padding: "10px 12px", textAlign: "center", color: T.textDim, fontSize: 10 }}>STATUS</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rows.slice(0, 200).map((d, i) => {
+                              const statusColor = d.diff === 0 ? T.green : d.netsuite === 0 ? T.blue : d.itempath === 0 ? (T.purple || '#9b6ee0') : d.diff > 0 ? T.amber : T.red;
+                              const statusLabel = d.diff === 0 ? 'MATCH' : d.netsuite === 0 ? 'IP ONLY' : d.itempath === 0 ? 'NS ONLY' : d.diff > 0 ? 'OVER' : 'SHORT';
+                              const sevColor = d.severity === 'critical' ? T.red : d.severity === 'high' ? T.amber : T.textDim;
+                              return (
+                                <tr key={i} style={{ borderBottom: `1px solid ${T.border}22`, background: d.severity === 'critical' ? `${T.red}08` : 'transparent' }}>
+                                  <td style={{ padding: "8px 12px", color: T.text }}>{d.sku}</td>
+                                  <td style={{ padding: "8px 12px", color: T.textMuted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue }}>{d.itempath?.toLocaleString()}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.purple || '#9b6ee0' }}>{d.netsuite?.toLocaleString()}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: sevColor, fontWeight: 700 }}>{d.diff > 0 ? '+' : ''}{d.diff}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: sevColor }}>{d.pctDiff}%</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "center" }}>
+                                    <span style={{ padding: "3px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: `${statusColor}20`, color: statusColor }}>{statusLabel}</span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                        {rows.length === 0 && reconFilter === 'matches' && (
+                          <div style={{ padding: 32, textAlign: "center", color: T.green }}>All {reconData.summary.matched} SKUs match between ItemPath and NetSuite.</div>
+                        )}
+                        {rows.length === 0 && reconFilter !== 'matches' && (
+                          <div style={{ padding: 32, textAlign: "center", color: T.textMuted }}>No discrepancies found.</div>
+                        )}
+                      </div>
+                    </Card>
+                  );
+                })()}
+              </>
+            ) : (
+              <Card style={{ padding: 40, textAlign: "center" }}>
+                <div style={{ fontSize: 32, marginBottom: 10 }}>📊</div>
+                <div style={{ color: T.textMuted }}>NetSuite reconciliation loading... If this persists, check Settings → Connections for NetSuite status.</div>
+              </Card>
+            )}
           </div>
         )}
 
