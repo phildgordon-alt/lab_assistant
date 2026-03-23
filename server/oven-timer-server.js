@@ -1707,6 +1707,42 @@ Respond with a structured batching plan in this format:
   }
 
   // ── DVI Trace (live tray movement) endpoints ─────────────────
+  // Diagnostic: compare trace WIP vs shipped index
+  if (req.method==='GET' && url.pathname==='/api/dvi/wip-diagnostic') {
+    const traceJobs = dviTrace.getJobsForKPI();
+    const traceMap = new Map(traceJobs.map(j => [j.job_id, j]));
+
+    let inTraceAndShipped = 0;
+    let traceOnly = 0;
+    const ghostJobs = []; // in trace, also in shipped = should be removed
+
+    for (const j of traceJobs) {
+      if (shippedJobIndex.has(j.job_id)) {
+        inTraceAndShipped++;
+        ghostJobs.push({ job_id: j.job_id, stage: j.stage, status: j.status, lastSeen: j.lastSeen ? new Date(j.lastSeen).toISOString() : null });
+      } else {
+        traceOnly++;
+      }
+    }
+
+    // Queue jobs from XML index
+    let queueJobs = 0;
+    for (const [jobNum] of dviJobIndex) {
+      if (!traceMap.has(jobNum) && !shippedJobIndex.has(jobNum)) queueJobs++;
+    }
+
+    return json(res, {
+      traceWIP: traceJobs.length,
+      traceOnly: traceOnly,
+      inTraceAndShipped: inTraceAndShipped,
+      queueJobs: queueJobs,
+      totalWIP: traceOnly + queueJobs,
+      shippedIndexSize: shippedJobIndex.size,
+      dviJobIndexSize: dviJobIndex.size,
+      sampleGhosts: ghostJobs.slice(0, 10),
+    });
+  }
+
   if (req.method==='GET' && url.pathname==='/api/dvi/jobs') {
     // Primary job data endpoint — feeds KPIs and department views
     const jobs = dviTrace.getJobsForKPI();
