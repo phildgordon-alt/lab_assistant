@@ -116,13 +116,26 @@ function request(method, url, body = null) {
 // ─────────────────────────────────────────────────────────────────────────────
 // SUITEQL QUERY
 // ─────────────────────────────────────────────────────────────────────────────
-async function suiteql(query, limit = 1000) {
-  const url = `${BASE_URL}/services/rest/query/v1/suiteql?limit=${limit}`;
-  const resp = await request('POST', url, { q: query });
-  if (resp.status !== 200) {
-    throw new Error(`SuiteQL error ${resp.status}: ${JSON.stringify(resp.data).slice(0, 200)}`);
+async function suiteql(query) {
+  const limit = 1000;
+  let offset = 0;
+  let allItems = [];
+  let hasMore = true;
+
+  while (hasMore) {
+    const url = `${BASE_URL}/services/rest/query/v1/suiteql?limit=${limit}&offset=${offset}`;
+    const resp = await request('POST', url, { q: query });
+    if (resp.status !== 200) {
+      throw new Error(`SuiteQL error ${resp.status}: ${JSON.stringify(resp.data).slice(0, 200)}`);
+    }
+    const items = resp.data.items || [];
+    allItems = allItems.concat(items);
+    hasMore = resp.data.hasMore === true;
+    offset += limit;
+    if (items.length < limit) hasMore = false;
   }
-  return resp.data.items || [];
+
+  return allItems;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -147,7 +160,7 @@ async function poll() {
       WHERE invbal.location = ${LOCATION_ID}
         AND invbal.quantityOnHand > 0
       ORDER BY item.itemId
-    `, 1000);
+    `);
 
     // Build inventory map
     const newInventory = {};
