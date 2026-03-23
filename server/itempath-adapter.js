@@ -538,14 +538,22 @@ async function poll() {
 
     // Materials: ONLY on first poll. Saved to SQLite via db.upsertInventory().
     // Subsequent polls only fetch light data (orders, transactions).
-    if (pollCount === 1 && !cachedMaterialsResp) {
-      console.log(`[ItemPath] First poll — fetching materials catalog (one-time)...`);
+    if (pollCount <= 3 && !cachedMaterialsResp) {
+      console.log(`[ItemPath] Poll #${pollCount} — fetching materials catalog...`);
       try {
-        cachedMaterialsResp = await ipFetch('/api/materials', { limit: 10000 });
+        // Use longer timeout for initial heavy load
+        const matUrl = new URL(`${CONFIG.baseUrl}/api/materials`);
+        matUrl.searchParams.set('limit', '10000');
+        const matResp = await fetch(matUrl.toString(), {
+          headers: authHeaders(),
+          signal: AbortSignal.timeout(120000),  // 2 minutes for initial load
+        });
+        if (!matResp.ok) throw new Error(`HTTP ${matResp.status}`);
+        cachedMaterialsResp = await matResp.json();
         console.log(`[ItemPath] Materials loaded: ${(cachedMaterialsResp.materials || []).length} items`);
       } catch (e) {
-        console.error(`[ItemPath] Materials fetch failed: ${e.message} — will retry next restart`);
-        cachedMaterialsResp = { materials: [] };
+        console.error(`[ItemPath] Materials fetch failed: ${e.message} — will retry next poll`);
+        cachedMaterialsResp = null; // retry on next poll
       }
     }
     const materialsResp = cachedMaterialsResp || { materials: [] };
@@ -564,10 +572,17 @@ async function poll() {
 
     // Location contents: ONLY on first poll. Heavy call (20K records).
     let locationContentsResp = { contents: cache.locationContents || [] };
-    if (pollCount === 1) {
-      console.log(`[ItemPath] First poll — fetching location contents (one-time)...`);
+    if (pollCount <= 3 && !(cache.locationContents && cache.locationContents.length > 0)) {
+      console.log(`[ItemPath] Poll #${pollCount} — fetching location contents...`);
       try {
-        locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 });
+        const lcUrl = new URL(`${CONFIG.baseUrl}/api/location_contents`);
+        lcUrl.searchParams.set('limit', '20000');
+        const lcResp = await fetch(lcUrl.toString(), {
+          headers: authHeaders(),
+          signal: AbortSignal.timeout(120000),  // 2 minutes
+        });
+        if (!lcResp.ok) throw new Error(`HTTP ${lcResp.status}`);
+        locationContentsResp = await lcResp.json();
         console.log(`[ItemPath] Location contents loaded: ${(locationContentsResp.contents || []).length} records`);
       } catch (e) {
         console.error(`[ItemPath] Location contents fetch failed: ${e.message}`);
