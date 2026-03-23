@@ -1709,7 +1709,16 @@ Respond with a structured batching plan in this format:
   // ── DVI Trace (live tray movement) endpoints ─────────────────
   if (req.method==='GET' && url.pathname==='/api/dvi/jobs') {
     // Primary job data endpoint — feeds KPIs and department views
-    const jobs = dviTrace.getJobsForKPI();
+    const allTraceJobs = dviTrace.getJobsForKPI();
+
+    // Filter out trace jobs that are in the shipped index
+    let shippedFromTrace = 0;
+    const jobs = allTraceJobs.filter(j => {
+      if (shippedJobIndex.has(j.job_id)) { shippedFromTrace++; return false; }
+      return true;
+    });
+    if (shippedFromTrace > 0) console.log(`[DVI-Jobs] Removed ${shippedFromTrace} shipped jobs from trace WIP`);
+
     const traceJobIds = new Set(jobs.map(j => j.job_id));
 
     // Enrich trace jobs with DVI XML data (coating, lens, frame)
