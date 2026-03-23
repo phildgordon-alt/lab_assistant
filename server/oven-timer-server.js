@@ -261,8 +261,10 @@ function loadDviJobIndex() {
     try {
       const jobNum = path.basename(file, '.xml');
       if (dviJobIndex.has(jobNum)) continue;
-      const xml = fs.readFileSync(path.join(DVI_JOBS_DIR, file), 'utf8');
+      const filePath = path.join(DVI_JOBS_DIR, file);
+      const xml = fs.readFileSync(filePath, 'utf8');
       const parsed = parseDviXml(xml);
+      parsed.fileDate = fs.statSync(filePath).mtimeMs;
       dviJobIndex.set(jobNum, parsed);
       loaded++;
     } catch (e) { /* skip bad files */ }
@@ -1740,9 +1742,13 @@ Respond with a structured batching plan in this format:
     // to avoid counting completed jobs as WIP.
     let queueJobCount = 0;
     let skippedShipped = 0;
+    let skippedOld = 0;
+    const maxQueueAge = 7 * 86400000; // 7 days — jobs older than this are probably done
     for (const [jobNum, xml] of dviJobIndex) {
       if (traceJobIds.has(jobNum)) continue;      // already tracked by trace
       if (shippedJobIndex.has(jobNum)) { skippedShipped++; continue; } // already shipped
+      // Skip jobs from XML files older than 7 days
+      if (xml.fileDate && (Date.now() - xml.fileDate) > maxQueueAge) { skippedOld++; continue; }
       queueJobCount++;
       enriched.push({
         job_id: jobNum,
@@ -1764,7 +1770,7 @@ Respond with a structured batching plan in this format:
         source: 'dvi-xml'
       });
     }
-    if (queueJobCount > 0 || skippedShipped > 0) console.log(`[DVI-Jobs] Queue: ${queueJobCount} unreleased jobs added, ${skippedShipped} skipped (already shipped)`);
+    if (queueJobCount > 0 || skippedShipped > 0 || skippedOld > 0) console.log(`[DVI-Jobs] Queue: ${queueJobCount} unreleased, ${skippedShipped} shipped, ${skippedOld} old (>7d) skipped`);
 
     // Get shipped stats from BOTH trace (today's movements) AND shipped XML index (archived files)
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
