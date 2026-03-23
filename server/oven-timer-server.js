@@ -1740,9 +1740,28 @@ Respond with a structured batching plan in this format:
       shippedIndexSize: shippedJobIndex.size,
       dviJobIndexSize: dviJobIndex.size,
       sampleGhosts: ghostJobs.slice(0, 10),
-      // Debug: show actual key formats
-      sampleTraceIds: traceJobs.slice(0, 5).map(j => ({ raw: j.job_id, type: typeof j.job_id })),
-      sampleShippedKeys: [...shippedJobIndex.keys()].slice(0, 5).map(k => ({ raw: k, type: typeof k })),
+      // Check specific known shipped job
+      test415084inShipped: shippedJobIndex.has('415084'),
+      test415084inTrace: traceMap.has('415084'),
+      // Check if ANY trace job exists in shipped by brute force string comparison
+      bruteForceCheck: (() => {
+        const shippedKeys = new Set([...shippedJobIndex.keys()]);
+        let found = 0;
+        let samples = [];
+        for (const j of traceJobs) {
+          if (shippedKeys.has(j.job_id)) {
+            found++;
+            if (samples.length < 3) samples.push(j.job_id);
+          } else if (shippedKeys.has(String(j.job_id))) {
+            found++;
+            if (samples.length < 3) samples.push(j.job_id + ' (as string)');
+          }
+        }
+        return { found, samples, traceIdSample: traceJobs[0]?.job_id, shippedHasIt: shippedKeys.has(traceJobs[0]?.job_id) };
+      })(),
+      // Range check
+      traceIdRange: { min: traceJobs.map(j=>j.job_id).sort()[0], max: traceJobs.map(j=>j.job_id).sort().pop() },
+      shippedKeyRange: { min: [...shippedJobIndex.keys()].sort()[0], max: [...shippedJobIndex.keys()].sort().pop() },
     });
   }
 
