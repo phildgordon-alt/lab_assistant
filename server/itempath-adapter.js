@@ -518,11 +518,16 @@ function updatePreviousQty(materials) {
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN POLL — fetches all endpoints in parallel
 // ─────────────────────────────────────────────────────────────────────────────
+let pollCount = 0;
+let cachedMaterialsResp = null;
+
 async function poll() {
   if (CONFIG.mockMode) {
     loadMockData();
     return;
   }
+
+  pollCount++;
 
   try {
     const now = new Date();
@@ -531,15 +536,26 @@ async function poll() {
 
     const pollStart = Date.now();
 
-    // Parallel fetch — locations cached separately (60min TTL), transactions today only
+    // Materials: only fetch every 15th poll (~15 min) or first poll — heavy call (10K items, 5MB)
+    const fetchMaterials = (pollCount === 1 || pollCount % 15 === 0 || !cachedMaterialsResp);
+    const materialsPromise = fetchMaterials
+      ? ipFetch('/api/materials', { limit: 10000 })
+      : Promise.resolve(cachedMaterialsResp);
+
+    // Light calls every 60s: orders + transactions
     const [materialsResp, ordersResp, txResp, pickTxResp, putTxResp, warehousesResp] = await Promise.all([
-      ipFetch('/api/materials', { limit: 10000 }),                    // All materials — full catalog required
-      ipFetch('/api/orders',    { limit: 200, status: 'In Process' }),  // Only active orders (was 500 all statuses)
-      ipFetch('/api/transactions', { after: todayStart, limit: 200 }).catch(() => ({ transactions: [] })),  // Today's transactions only (was 2hr/500)
-      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),  // Pick lines today
-      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),  // Put lines today
+      materialsPromise,
+      ipFetch('/api/orders',    { limit: 200, status: 'In Process' }),
+      ipFetch('/api/transactions', { after: todayStart, limit: 200 }).catch(() => ({ transactions: [] })),
+      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),
+      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),
       ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
     ]);
+
+    if (fetchMaterials) {
+      cachedMaterialsResp = materialsResp;
+      console.log(`[ItemPath] Materials refreshed (poll #${pollCount})`);
+    }
     // Locations: cached for 60 min — reference data that rarely changes
     const locationsData = await getLocationsData().catch(() => []);
     const locationsResp = { locations: locationsData };
