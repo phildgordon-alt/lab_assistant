@@ -302,8 +302,16 @@ function loadShippedIndex() {
 // Load on startup and refresh every 60s
 loadDviJobIndex();
 loadShippedIndex();
+// Purge shipped jobs from trace after indices are loaded
+setTimeout(() => {
+  dviTrace.purgeShippedJobs(shippedJobIndex);
+}, 5000);
 setInterval(loadDviJobIndex, 60000);
 setInterval(loadShippedIndex, 60000);
+// Re-purge every 5 minutes as new shipped data comes in
+setInterval(() => {
+  dviTrace.purgeShippedJobs(shippedJobIndex);
+}, 300000);
 
 // Demo mode: seed DVI trace + coating runs when SMB is unreachable
 if (process.env.DEMO_MODE === 'true') {

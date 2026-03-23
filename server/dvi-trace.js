@@ -564,6 +564,21 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   /**
+   * Purge jobs that are in the shipped index — removes them from trace permanently
+   */
+  purgeShippedJobs(shippedIndex) {
+    let purged = 0;
+    for (const [jobId, job] of this.jobs) {
+      if (shippedIndex.has(jobId)) {
+        this.jobs.delete(jobId);
+        purged++;
+      }
+    }
+    if (purged > 0) console.log(`[DVI-Trace] Purged ${purged} shipped jobs from trace (${this.jobs.size} remaining)`);
+    return purged;
+  }
+
+  /**
    * Get status for monitoring
    */
   getStatus() {
