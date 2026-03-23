@@ -1740,6 +1740,9 @@ Respond with a structured batching plan in this format:
       shippedIndexSize: shippedJobIndex.size,
       dviJobIndexSize: dviJobIndex.size,
       sampleGhosts: ghostJobs.slice(0, 10),
+      // Debug: show actual key formats
+      sampleTraceIds: traceJobs.slice(0, 5).map(j => ({ raw: j.job_id, type: typeof j.job_id })),
+      sampleShippedKeys: [...shippedJobIndex.keys()].slice(0, 5).map(k => ({ raw: k, type: typeof k })),
     });
   }
 
