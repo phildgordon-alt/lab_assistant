@@ -536,37 +536,43 @@ async function poll() {
 
     const pollStart = Date.now();
 
-    // Materials: only fetch every 15th poll (~15 min) or first poll — heavy call (10K items, 5MB)
-    const fetchMaterials = (pollCount === 1 || pollCount % 15 === 0 || !cachedMaterialsResp);
-    const materialsPromise = fetchMaterials
-      ? ipFetch('/api/materials', { limit: 10000 })
-      : Promise.resolve(cachedMaterialsResp);
+    // Materials: ONLY on first poll. Saved to SQLite via db.upsertInventory().
+    // Subsequent polls only fetch light data (orders, transactions).
+    if (pollCount === 1 && !cachedMaterialsResp) {
+      console.log(`[ItemPath] First poll — fetching materials catalog (one-time)...`);
+      try {
+        cachedMaterialsResp = await ipFetch('/api/materials', { limit: 10000 });
+        console.log(`[ItemPath] Materials loaded: ${(cachedMaterialsResp.materials || []).length} items`);
+      } catch (e) {
+        console.error(`[ItemPath] Materials fetch failed: ${e.message} — will retry next restart`);
+        cachedMaterialsResp = { materials: [] };
+      }
+    }
+    const materialsResp = cachedMaterialsResp || { materials: [] };
 
-    // Light calls every 60s: orders + transactions
-    const [materialsResp, ordersResp, txResp, pickTxResp, putTxResp, warehousesResp] = await Promise.all([
-      materialsPromise,
+    // Light calls every 60s: orders + transactions only
+    const [ordersResp, txResp, pickTxResp, putTxResp, warehousesResp] = await Promise.all([
       ipFetch('/api/orders',    { limit: 200, status: 'In Process' }),
       ipFetch('/api/transactions', { after: todayStart, limit: 200 }).catch(() => ({ transactions: [] })),
       ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),
       ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),
       ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
     ]);
-
-    if (fetchMaterials) {
-      cachedMaterialsResp = materialsResp;
-      console.log(`[ItemPath] Materials refreshed (poll #${pollCount})`);
-    }
     // Locations: cached for 60 min — reference data that rarely changes
     const locationsData = await getLocationsData().catch(() => []);
     const locationsResp = { locations: locationsData };
 
-    // Location contents: material-to-location-to-warehouse mapping (per-SKU per-warehouse stock)
-    // Location contents: only fetch every 5th poll (every 5 minutes) to avoid overloading ItemPath
-    let locationContentsResp = { contents: [] };
-    if (pollCount % 5 === 1 || pollCount === 1) {
-      locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 }).catch(() => ({ contents: [] }));
-    } else {
-      locationContentsResp = { contents: cache.locationContents || [] };
+    // Location contents: ONLY on first poll. Heavy call (20K records).
+    let locationContentsResp = { contents: cache.locationContents || [] };
+    if (pollCount === 1) {
+      console.log(`[ItemPath] First poll — fetching location contents (one-time)...`);
+      try {
+        locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 });
+        console.log(`[ItemPath] Location contents loaded: ${(locationContentsResp.contents || []).length} records`);
+      } catch (e) {
+        console.error(`[ItemPath] Location contents fetch failed: ${e.message}`);
+        locationContentsResp = { contents: [] };
+      }
     }
 
     const fetchMs = Date.now() - pollStart;
