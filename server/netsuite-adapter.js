@@ -147,7 +147,7 @@ async function poll() {
       WHERE invbal.location = ${LOCATION_ID}
         AND invbal.quantityOnHand > 0
       ORDER BY item.itemId
-    `, 5000);
+    `, 1000);
 
     // Build inventory map
     const newInventory = {};
