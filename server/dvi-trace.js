@@ -519,7 +519,7 @@ class DviTraceWatcher extends EventEmitter {
    */
   getJobsForKPI() {
     return this.getJobs()
-      .filter(j => j.status !== 'SHIPPED' && j.stage !== 'SHIPPED')
+      .filter(j => j.status !== 'SHIPPED' && j.stage !== 'SHIPPED' && j.status !== 'CANCELED' && j.stage !== 'CANCELED' && j.status !== 'HOLD' && j.stage !== 'HOLD')
       .map(j => ({
         ...j,
         invoice: j.job_id,
