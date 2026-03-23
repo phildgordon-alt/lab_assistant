@@ -302,16 +302,8 @@ function loadShippedIndex() {
 // Load on startup and refresh every 60s
 loadDviJobIndex();
 loadShippedIndex();
-// Purge shipped jobs from trace after indices are loaded
-setTimeout(() => {
-  dviTrace.purgeShippedJobs(shippedJobIndex);
-}, 5000);
 setInterval(loadDviJobIndex, 60000);
 setInterval(loadShippedIndex, 60000);
-// Re-purge every 5 minutes as new shipped data comes in
-setInterval(() => {
-  dviTrace.purgeShippedJobs(shippedJobIndex);
-}, 300000);
 
 // Demo mode: seed DVI trace + coating runs when SMB is unreachable
 if (process.env.DEMO_MODE === 'true') {
@@ -1717,16 +1709,7 @@ Respond with a structured batching plan in this format:
   // ── DVI Trace (live tray movement) endpoints ─────────────────
   if (req.method==='GET' && url.pathname==='/api/dvi/jobs') {
     // Primary job data endpoint — feeds KPIs and department views
-    const allTraceJobs = dviTrace.getJobsForKPI();
-
-    // Filter out trace jobs that are in the shipped index
-    let shippedFromTrace = 0;
-    const jobs = allTraceJobs.filter(j => {
-      if (shippedJobIndex.has(j.job_id)) { shippedFromTrace++; return false; }
-      return true;
-    });
-    if (shippedFromTrace > 0) console.log(`[DVI-Jobs] Removed ${shippedFromTrace} shipped jobs from trace WIP`);
-
+    const jobs = dviTrace.getJobsForKPI();
     const traceJobIds = new Set(jobs.map(j => j.job_id));
 
     // Enrich trace jobs with DVI XML data (coating, lens, frame)
