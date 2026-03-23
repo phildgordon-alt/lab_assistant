@@ -482,6 +482,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [binningView, setBinningView] = useState("swap"); // swap, consolidate, adjacency
   const [reconData, setReconData] = useState(null);
   const [reconFilter, setReconFilter] = useState("all"); // all, discrepancies, matches, ns_only, ip_only
+  const [reconCategory, setReconCategory] = useState("all"); // all, Lenses, Tops, Frames, Other
   const [reconSearch, setReconSearch] = useState("");
   const [reconRefreshing, setReconRefreshing] = useState(false);
 
@@ -854,16 +855,26 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   ))}
                 </div>
 
+                {/* Category filter */}
+                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+                  <span style={{ fontSize: 11, color: T.textDim, fontFamily: mono, alignSelf: "center" }}>Category:</span>
+                  {['all', 'Lenses', 'Tops', 'Frames', 'Other'].map(c => (
+                    <button key={c} onClick={() => setReconCategory(c)} style={{
+                      padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                      background: reconCategory === c ? `${T.cyan}25` : 'transparent',
+                      color: reconCategory === c ? T.cyan : T.textMuted,
+                      border: `1px solid ${reconCategory === c ? T.cyan : T.border}`
+                    }}>{c === 'all' ? 'All' : c}</button>
+                  ))}
+                </div>
+
                 {/* Discrepancy table */}
                 {(() => {
                   let rows = reconData.discrepancies || [];
-                  // Add matched items if showing all or matches
-                  if (reconFilter === 'all' || reconFilter === 'matches') {
-                    // Matches aren't in discrepancies array — they're the absence of discrepancies
-                  }
-                  if (reconFilter === 'matches') rows = []; // matches aren't in the discrepancies array
+                  if (reconFilter === 'matches') rows = [];
                   if (reconFilter === 'ns_only') rows = rows.filter(d => d.netsuite > 0 && d.itempath === 0);
                   if (reconFilter === 'ip_only') rows = rows.filter(d => d.itempath > 0 && d.netsuite === 0);
+                  if (reconCategory !== 'all') rows = rows.filter(d => d.category === reconCategory);
                   if (reconSearch) {
                     const q = reconSearch.toLowerCase();
                     rows = rows.filter(d => d.sku?.toLowerCase().includes(q) || d.name?.toLowerCase().includes(q));
@@ -879,6 +890,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <tr style={{ background: T.bg, position: "sticky", top: 0, zIndex: 1 }}>
                               <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU</th>
                               <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>NAME</th>
+                              <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>CATEGORY</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10 }}>ITEMPATH</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontSize: 10 }}>NETSUITE</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>VARIANCE</th>
@@ -895,6 +907,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <tr key={i} style={{ borderBottom: `1px solid ${T.border}22`, background: d.severity === 'critical' ? `${T.red}08` : 'transparent' }}>
                                   <td style={{ padding: "8px 12px", color: T.text }}>{d.sku}</td>
                                   <td style={{ padding: "8px 12px", color: T.textMuted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</td>
+                                  <td style={{ padding: "8px 12px", color: T.cyan, fontSize: 10 }}>{d.category || '—'}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue }}>{d.itempath?.toLocaleString()}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.purple || '#9b6ee0' }}>{d.netsuite?.toLocaleString()}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: sevColor, fontWeight: 700 }}>{d.diff > 0 ? '+' : ''}{d.diff}</td>

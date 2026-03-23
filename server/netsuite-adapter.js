@@ -151,10 +151,11 @@ async function poll() {
   const start = Date.now();
 
   try {
-    // Query all inventory items at Irvine 2 location with qty > 0
+    // Query all inventory items at Irvine 2 location with qty > 0, include class
     const rows = await suiteql(`
       SELECT item.itemId AS sku, item.displayName AS name,
-             invbal.quantityOnHand AS qty, invbal.quantityAvailable AS available
+             invbal.quantityOnHand AS qty, invbal.quantityAvailable AS available,
+             item.class AS classId
       FROM inventoryBalance invbal
       JOIN item ON item.id = invbal.item
       WHERE invbal.location = ${LOCATION_ID}
@@ -162,14 +163,32 @@ async function poll() {
       ORDER BY item.itemId
     `);
 
+    // Class ID → category mapping
+    const CLASS_MAP = {
+      '1': 'Frames', '2': 'Frames',                    // Glasses, Base Frames
+      '3': 'Lenses',                                     // Lenses/Blanks
+      '4': 'Lenses',                                     // Lens Upgrades
+      '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops', // All top frame types
+      '8': 'Other', '10': 'Other', '11': 'Other', '12': 'Other', '13': 'Other',
+    };
+    const CLASS_NAMES = {
+      '1': 'Glasses', '2': 'Base Frames', '3': 'Lenses', '4': 'Lens Upgrades',
+      '5': 'Top Frames', '6': 'Printed Tops', '7': 'Blank Tops', '8': 'Ink',
+      '9': 'Stock Tops', '10': 'Accessories', '11': 'Packaging', '12': 'Warranties', '13': 'Other',
+    };
+
     // Build inventory map
     const newInventory = {};
     for (const row of rows) {
+      const classId = row.classid || row.classId || '';
       newInventory[row.sku] = {
         sku: row.sku,
         name: row.name,
         qty: parseFloat(row.qty) || 0,
         available: parseFloat(row.available) || 0,
+        category: CLASS_MAP[classId] || 'Other',
+        className: CLASS_NAMES[classId] || 'Unknown',
+        classId: classId,
       };
     }
 
@@ -219,6 +238,8 @@ function reconcile(itempath) {
       discrepancies.push({
         sku,
         name: inventory[sku]?.name || '',
+        category: inventory[sku]?.category || 'Unknown',
+        className: inventory[sku]?.className || '',
         netsuite: nsQty,
         itempath: ipQty,
         diff,
