@@ -268,6 +268,27 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     connections.network = { status: 'unconfigured', message: 'Lab server not reachable' };
   }
 
+  // NetSuite
+  try {
+    const start = Date.now();
+    const resp = await fetch(`${labUrl}/api/netsuite/health`, { signal: AbortSignal.timeout(5000) });
+    const latency = Date.now() - start;
+    if (resp.ok) {
+      const health = await resp.json() as any;
+      if (!health.configured) {
+        connections.netsuite = { status: 'unconfigured', message: 'NETSUITE credentials not set' };
+      } else if (health.connected) {
+        connections.netsuite = { status: 'connected', message: `${health.skuCount} SKUs synced`, latency };
+      } else {
+        connections.netsuite = { status: 'disconnected', message: health.syncError || 'Not synced yet' };
+      }
+    } else {
+      connections.netsuite = { status: 'disconnected', message: `Lab server returned ${resp.status}` };
+    }
+  } catch (e) {
+    connections.netsuite = { status: 'unconfigured', message: 'Lab server not reachable' };
+  }
+
   res.json({
     timestamp: new Date().toISOString(),
     connections,

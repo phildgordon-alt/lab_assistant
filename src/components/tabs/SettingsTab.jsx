@@ -1937,11 +1937,12 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                     dvi:"DVI Lab System",
                     limble:"Limble CMMS",
                     som:"SOM Control Center",
-                    network:"UniFi Network"
+                    network:"UniFi Network",
+                    netsuite:"NetSuite ERP"
                   };
                   const serviceIcons = {
                     gateway:"🌐",database:"🗄️",lab_backend:"🔧",slack:"💬",
-                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️",som:"⚙️",network:"🔀"
+                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️",som:"⚙️",network:"🔀",netsuite:"📊"
                   };
                   const startCommands = {
                     lab_backend: "npm run server",

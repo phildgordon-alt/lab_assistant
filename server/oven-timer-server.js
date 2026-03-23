@@ -38,8 +38,10 @@ const knowledge = require('./knowledge-adapter');
 // ── ItemPath/Kardex inventory integration ─────────────────────
 const itempath = require('./itempath-adapter');
 const binning = require('./binning-intelligence');
+const netsuite = require('./netsuite-adapter');
 itempath.start();
 binning.start(itempath);
+netsuite.start();
 
 // ── Limble CMMS maintenance integration ───────────────────────
 const limble = require('./limble-adapter');
@@ -1572,6 +1574,27 @@ Respond with a structured batching plan in this format:
   if (req.method==='POST' && url.pathname==='/api/inventory/binning/acknowledge') {
     const body = await readBody(req);
     return json(res, binning.acknowledgeRecommendation(body.id, body.status || 'accepted'));
+  }
+
+  // ── NetSuite Reconciliation ─────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/netsuite/inventory') {
+    return json(res, netsuite.getInventory());
+  }
+  if (req.method==='GET' && url.pathname==='/api/netsuite/reconcile') {
+    return json(res, netsuite.reconcile(itempath));
+  }
+  if (req.method==='GET' && url.pathname==='/api/netsuite/health') {
+    return json(res, netsuite.getHealth());
+  }
+  if (req.method==='GET' && url.pathname==='/api/netsuite/lookup') {
+    const sku = url.searchParams.get('sku');
+    if (!sku) return json(res, { error: 'sku parameter required' });
+    const nsData = netsuite.lookupSku(sku);
+    return json(res, { sku, netsuite: nsData });
+  }
+  if (req.method==='POST' && url.pathname==='/api/netsuite/refresh') {
+    await netsuite.poll();
+    return json(res, { ok: true, ...netsuite.getHealth() });
   }
 
   if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {
