@@ -545,7 +545,13 @@ async function poll() {
     const locationsResp = { locations: locationsData };
 
     // Location contents: material-to-location-to-warehouse mapping (per-SKU per-warehouse stock)
-    const locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 }).catch(() => ({ contents: [] }));
+    // Location contents: only fetch every 5th poll (every 5 minutes) to avoid overloading ItemPath
+    let locationContentsResp = { contents: [] };
+    if (pollCount % 5 === 1 || pollCount === 1) {
+      locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 }).catch(() => ({ contents: [] }));
+    } else {
+      locationContentsResp = { contents: cache.locationContents || [] };
+    }
 
     const fetchMs = Date.now() - pollStart;
     console.log(`[ItemPath] All fetches completed in ${fetchMs}ms`);

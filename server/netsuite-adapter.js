@@ -151,9 +151,11 @@ async function poll() {
   const start = Date.now();
 
   try {
-    // Query all inventory items at Irvine 2 location with qty > 0, include class
+    // Query all inventory items at Irvine 2 location with qty > 0
+    // Use upcCode as primary SKU match (same as ItemPath OPC code)
     const rows = await suiteql(`
-      SELECT item.itemId AS sku, item.displayName AS name,
+      SELECT item.itemId AS itemid, item.displayName AS name,
+             item.upcCode AS upc,
              invbal.quantityOnHand AS qty, invbal.quantityAvailable AS available,
              item.class AS classId
       FROM inventoryBalance invbal
@@ -177,12 +179,16 @@ async function poll() {
       '9': 'Stock Tops', '10': 'Accessories', '11': 'Packaging', '12': 'Warranties', '13': 'Other',
     };
 
-    // Build inventory map
+    // Build inventory map — use UPC (OPC) as the key to match ItemPath
     const newInventory = {};
     for (const row of rows) {
-      const classId = row.classid || row.classId || '';
-      newInventory[row.sku] = {
-        sku: row.sku,
+      const classId = row.classid || '';
+      // Use upcCode if available, otherwise itemId (both can be OPC codes)
+      const sku = row.upc || row.itemid || '';
+      if (!sku) continue;
+      newInventory[sku] = {
+        sku,
+        itemId: row.itemid,
         name: row.name,
         qty: parseFloat(row.qty) || 0,
         available: parseFloat(row.available) || 0,
