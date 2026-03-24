@@ -1660,8 +1660,13 @@ Respond with a structured batching plan in this format:
       GROUP BY sku
     `).all(from, to);
     const ipBySku = {};
+    let ipLenses = 0, ipFrames = 0;
+    const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
     for (const r of ipRows) {
-      ipBySku[r.sku] = { qty: r.total_qty, picks: r.pick_count, days: r.days };
+      const type = isLensSku(r.sku) ? 'lens' : 'frame';
+      ipBySku[r.sku] = { qty: r.total_qty, picks: r.pick_count, days: r.days, type };
+      if (type === 'lens') ipLenses += r.total_qty;
+      else ipFrames += r.total_qty;
     }
 
     // ItemPath date range
@@ -1682,7 +1687,7 @@ Respond with a structured batching plan in this format:
       const kardexTotal = (lk.lenses || 0) + (lk.frames || 0);
       return {
         sku,
-        type: lk.type || (lk.frames > 0 ? 'frame' : 'lens'),
+        type: lk.type || ip.type || (lk.frames > 0 ? 'frame' : (isLensSku(sku) ? 'lens' : 'frame')),
         kardex_total: kardexTotal,
         looker_lenses: lk.lenses || 0,
         looker_frames: lk.frames || 0,
@@ -1725,7 +1730,7 @@ Respond with a structured batching plan in this format:
       summary: {
         from, to,
         kardex: { total: lkTotal, lenses: lkLensTotal, frames: lkFrameTotal, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
-        itempath: { total: ipTotal, skus: Object.keys(ipBySku).length, days: ipDailyRows.length, range: ipRange },
+        itempath: { total: ipTotal, lenses: ipLenses, frames: ipFrames, skus: Object.keys(ipBySku).length, days: ipDailyRows.length, range: ipRange },
         variance: ipTotal - lkTotal,
       },
       skuCount: skus.length,

@@ -1517,7 +1517,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX (ITEMPATH)</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{(sm.itempath?.total || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.itempath?.skus || 0} SKUs · {sm.itempath?.days || 0} days</div>
-                  {sm.itempath?.range && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{sm.itempath.range.earliest || '—'} — {sm.itempath.range.latest || '—'}</div>}
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>
+                    Lenses: {(sm.itempath?.lenses || 0).toLocaleString()} · Frames: {(sm.itempath?.frames || 0).toLocaleString()}
+                  </div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE (LOOKER)</div>
