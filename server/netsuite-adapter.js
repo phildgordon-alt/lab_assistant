@@ -182,16 +182,23 @@ async function poll() {
       '9': 'Stock Tops', '10': 'Accessories', '11': 'Packaging', '12': 'Warranties', '13': 'Other',
     };
 
-    // Build inventory map — use UPC (OPC) as the key to match ItemPath
+    // Build inventory map
+    // Lenses (class 3,4): itemId IS the OPC code — matches ItemPath directly
+    // Frames/Tops (class 1,2,5,6,7,9): use upcCode for matching
     const newInventory = {};
     for (const row of rows) {
       const classId = row.classid || '';
-      // Use upcCode if available, otherwise itemId (both can be OPC codes)
-      const sku = row.upc || row.itemid || '';
+      const isLens = classId === '3' || classId === '4';
+
+      // For lenses: itemId is the OPC code (4800xxx, 06xxx, 001xxx)
+      // For frames/tops: upcCode is the matching key (12-digit UPC)
+      const sku = isLens ? (row.itemid || '') : (row.upc || row.itemid || '');
       if (!sku) continue;
+
       newInventory[sku] = {
         sku,
         itemId: row.itemid,
+        upc: row.upc || null,
         name: row.name,
         qty: parseFloat(row.qty) || 0,
         available: parseFloat(row.available) || 0,
@@ -200,6 +207,11 @@ async function poll() {
         classId: classId,
       };
     }
+
+    // Log matching key stats
+    const lensCount = Object.values(newInventory).filter(i => i.category === 'Lenses').length;
+    const frameTopCount = Object.values(newInventory).filter(i => i.category !== 'Lenses' && i.category !== 'Other').length;
+    console.log(`[NetSuite] Lenses: ${lensCount} (matched by OPC itemId), Frames/Tops: ${frameTopCount} (matched by UPC)`);
 
     inventory = newInventory;
     lastSync = new Date().toISOString();
