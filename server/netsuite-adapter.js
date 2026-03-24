@@ -467,8 +467,8 @@ function start() {
 
   // Initial poll after 10s (let other adapters start first)
   setTimeout(() => { poll(); fetchOpenPOs(); }, 10000);
-  // Consumption sync after 20s (heavy query, don't block startup)
-  setTimeout(() => syncConsumption(), 20000);
+  // Consumption sync after 60s (heavy query, let everything else start first)
+  setTimeout(() => syncConsumption(), 60000);
   // Inventory every 5 minutes, POs every 10 minutes, consumption every 30 minutes
   pollTimer = setInterval(() => poll(), POLL_INTERVAL);
   setInterval(() => fetchOpenPOs(), 600000);
@@ -491,51 +491,70 @@ async function syncConsumption() {
     // Find latest date we have in SQLite to only fetch new data
     const latest = db.db.prepare('SELECT MAX(tran_date) as latest FROM netsuite_consumption_daily').get();
     const year = new Date().getFullYear();
-    // If we have data, fetch from last date (re-fetch that day for completeness); otherwise YTD
-    const from = latest?.latest || `${year}-01-01`;
-    const to = new Date().toISOString().slice(0, 10);
+    const startDate = latest?.latest || `${year}-01-01`;
+    const endDate = new Date().toISOString().slice(0, 10);
 
-    console.log(`[NetSuite] Syncing consumption from ${from} to ${to}...`);
-    const allRows = await suiteql(`
-      SELECT t.trandate, i.itemId AS itemid, ABS(tl.quantity) AS qty, t.type
-      FROM transactionline tl
-      INNER JOIN transaction t ON t.id = tl.transaction
-      INNER JOIN item i ON i.id = tl.item
-      WHERE tl.location = ${LOCATION_ID}
-        AND t.trandate >= TO_DATE('${from}', 'YYYY-MM-DD')
-        AND t.trandate <= TO_DATE('${to}', 'YYYY-MM-DD')
-        AND tl.quantity < 0
-      ORDER BY t.trandate DESC
-    `);
-
-    console.log(`[NetSuite] Consumption: ${allRows.length} lines fetched from API`);
-
-    // Aggregate by date + sku
-    const agg = {};
-    for (const row of allRows) {
-      const sku = row.itemid || '';
-      const qty = parseInt(row.qty) || 0;
-      const date = row.trandate || '';
-      if (!sku || qty <= 0 || !date) continue;
-      const key = `${date}|${sku}`;
-      if (!agg[key]) agg[key] = { date, sku, qty: 0, lines: 0 };
-      agg[key].qty += qty;
-      agg[key].lines++;
+    // Break into monthly chunks to avoid loading 342K rows at once
+    const chunks = [];
+    let d = new Date(startDate + 'T00:00:00');
+    const end = new Date(endDate + 'T00:00:00');
+    while (d <= end) {
+      const from = d.toISOString().slice(0, 10);
+      // Move to end of month or endDate, whichever is sooner
+      const monthEnd = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+      const to = monthEnd > end ? endDate : monthEnd.toISOString().slice(0, 10);
+      chunks.push({ from, to });
+      d = new Date(d.getFullYear(), d.getMonth() + 1, 1);
     }
 
-    // Upsert into SQLite — delete days we're refreshing, then insert
-    const dates = new Set(Object.values(agg).map(a => a.date));
-    const deleteStmt = db.db.prepare('DELETE FROM netsuite_consumption_daily WHERE tran_date = ?');
+    console.log(`[NetSuite] Syncing consumption: ${chunks.length} month chunk(s) from ${startDate} to ${endDate}`);
+
+    const deleteStmt = db.db.prepare('DELETE FROM netsuite_consumption_daily WHERE tran_date >= ? AND tran_date <= ?');
     const insertStmt = db.db.prepare('INSERT INTO netsuite_consumption_daily (tran_date, sku, qty, lines) VALUES (?, ?, ?, ?)');
 
-    const upsert = db.db.transaction(() => {
-      for (const d of dates) deleteStmt.run(d);
-      for (const a of Object.values(agg)) insertStmt.run(a.date, a.sku, a.qty, a.lines);
-    });
-    upsert();
+    for (const chunk of chunks) {
+      try {
+        console.log(`[NetSuite] Fetching consumption ${chunk.from} to ${chunk.to}...`);
+        const rows = await suiteql(`
+          SELECT t.trandate, i.itemId AS itemid, ABS(tl.quantity) AS qty, t.type
+          FROM transactionline tl
+          INNER JOIN transaction t ON t.id = tl.transaction
+          INNER JOIN item i ON i.id = tl.item
+          WHERE tl.location = ${LOCATION_ID}
+            AND t.trandate >= TO_DATE('${chunk.from}', 'YYYY-MM-DD')
+            AND t.trandate <= TO_DATE('${chunk.to}', 'YYYY-MM-DD')
+            AND tl.quantity < 0
+          ORDER BY t.trandate DESC
+        `);
+
+        // Aggregate by date + sku
+        const agg = {};
+        for (const row of rows) {
+          const sku = row.itemid || '';
+          const qty = parseInt(row.qty) || 0;
+          const date = row.trandate || '';
+          if (!sku || qty <= 0 || !date) continue;
+          const key = `${date}|${sku}`;
+          if (!agg[key]) agg[key] = { date, sku, qty: 0, lines: 0 };
+          agg[key].qty += qty;
+          agg[key].lines++;
+        }
+
+        // Save to SQLite
+        const save = db.db.transaction(() => {
+          deleteStmt.run(chunk.from, chunk.to);
+          for (const a of Object.values(agg)) insertStmt.run(a.date, a.sku, a.qty, a.lines);
+        });
+        save();
+
+        console.log(`[NetSuite] Chunk ${chunk.from}–${chunk.to}: ${rows.length} lines → ${Object.keys(agg).length} aggregates saved`);
+      } catch (e) {
+        console.error(`[NetSuite] Chunk ${chunk.from}–${chunk.to} error:`, e.message);
+      }
+    }
 
     const totalRows = db.db.prepare('SELECT COUNT(*) as cnt FROM netsuite_consumption_daily').get();
-    console.log(`[NetSuite] Consumption saved: ${Object.keys(agg).length} new aggregates, ${totalRows.cnt} total in SQLite`);
+    console.log(`[NetSuite] Consumption sync complete: ${totalRows.cnt} total aggregates in SQLite`);
   } catch (e) {
     console.error('[NetSuite] Consumption sync error:', e.message);
   }
