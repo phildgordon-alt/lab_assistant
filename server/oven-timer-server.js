@@ -1754,12 +1754,13 @@ Respond with a structured batching plan in this format:
     try {
       const days = parseInt(url.searchParams.get('days') || '30');
 
-      // DVI: shipped jobs per day from dvi_jobs_history
-      const dviRows = labDb.db.prepare(`
-        SELECT date(shipped_at) as d, COUNT(*) as jobs
-        FROM dvi_jobs_history WHERE shipped_at IS NOT NULL
-        GROUP BY d ORDER BY d DESC
-      `).all();
+      // DVI: shipped jobs per day from shipped XML archive (source of truth)
+      const dviByDate = {};
+      for (const [jobNum, xml] of shippedJobIndex) {
+        if (!xml.shippedAt) continue;
+        const d = new Date(xml.shippedAt).toISOString().slice(0, 10);
+        dviByDate[d] = (dviByDate[d] || 0) + 1;
+      }
 
       // Looker: Look 495 frame jobs per day (= jobs reported to NetSuite)
       const frameData = looker.getFrameUsage();
@@ -1781,13 +1782,13 @@ Respond with a structured batching plan in this format:
 
       // Merge dates
       const allDates = new Set([
-        ...dviRows.map(r => r.d),
+        ...Object.keys(dviByDate),
         ...Object.keys(lkJobsByDate),
         ...Object.keys(breakageByDate),
       ]);
       const daily = [...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days).map(d => ({
         date: d,
-        dvi: dviRows.find(r => r.d === d)?.jobs || 0,
+        dvi: dviByDate[d] || 0,
         looker: lkJobsByDate[d] || 0,
         breakage: breakageByDate[d] || 0,
       }));
@@ -2587,24 +2588,13 @@ Respond with a structured batching plan in this format:
       const key = date.toISOString().slice(0, 10);
       byDay[key] = { date: key, shipped: 0, rush: 0 };
     }
-    // Source 1: Trace jobs
-    const traceJobs = dviTrace.getJobs();
-    const countedIds = new Set();
-    for (const j of traceJobs) {
-      if (j.status !== 'SHIPPED' || !j.lastSeen) continue;
-      const key = new Date(j.lastSeen).toISOString().slice(0, 10);
-      if (byDay[key]) {
-        byDay[key].shipped++;
-        if (j.rush === 'Y' || j.Rush === 'Y') byDay[key].rush++;
-        countedIds.add(j.job_id);
-      }
-    }
-    // Source 2: Shipped XML archive
+    // Primary source: Shipped XML archive (source of truth)
     for (const [jobNum, xml] of shippedJobIndex) {
-      if (countedIds.has(jobNum) || !xml.shippedAt) continue;
+      if (!xml.shippedAt) continue;
       const key = new Date(xml.shippedAt).toISOString().slice(0, 10);
       if (byDay[key]) {
         byDay[key].shipped++;
+        if (xml.rush === 'Y') byDay[key].rush++;
       }
     }
     const history = Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date));
