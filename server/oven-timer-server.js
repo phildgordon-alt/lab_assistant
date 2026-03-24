@@ -1624,156 +1624,127 @@ Respond with a structured batching plan in this format:
 
   // ── Consumption comparison — YTD by SKU across all sources ──
   if (req.method==='GET' && url.pathname==='/api/usage/consumption') {
-    const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
-    const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
+    try {
+      const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
+      const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
+      const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
 
-    // Looker lenses: YTD by OPC (already cached)
-    const lkData = looker.getUsage(9999); // all cached data
-    const lkBySku = {};
-    for (const day of (lkData.daily || [])) {
-      if (day.date < from || day.date > to) continue;
-      for (const [opc, v] of Object.entries(day.byOpc || {})) {
-        if (!lkBySku[opc]) lkBySku[opc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'lens' };
-        lkBySku[opc].lenses += v.lenses;
-        lkBySku[opc].breakages += v.breakages;
-        lkBySku[opc].days++;
-      }
+      // ── Looker (lenses + frames) ──
+      const lkBySku = {};
+      let totalFramesLooker = 0;
+      const dailyMap = {};
+      try {
+        const lkData = looker.getUsage(9999);
+        for (const day of (lkData.daily || [])) {
+          if (day.date < from || day.date > to) continue;
+          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
+          dailyMap[day.date].looker += day.lenses;
+          dailyMap[day.date].looker_break += day.breakages;
+          for (const [opc, v] of Object.entries(day.byOpc || {})) {
+            if (!lkBySku[opc]) lkBySku[opc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'lens' };
+            lkBySku[opc].lenses += v.lenses;
+            lkBySku[opc].breakages += v.breakages;
+            lkBySku[opc].days++;
+          }
+        }
+        const frameData = looker.getFrameUsage();
+        for (const day of (frameData.daily || [])) {
+          if (day.date < from || day.date > to) continue;
+          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
+          dailyMap[day.date].looker += day.frames;
+          for (const [upc, count] of Object.entries(day.byUpc || {})) {
+            if (!lkBySku[upc]) lkBySku[upc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'frame' };
+            lkBySku[upc].frames += count;
+            lkBySku[upc].days++;
+            totalFramesLooker += count;
+          }
+        }
+      } catch (e) { console.error('[Consumption] Looker error:', e.message); }
+
+      // ── ItemPath (picks_history from SQLite) ──
+      const ipBySku = {};
+      let ipLenses = 0, ipFrames = 0;
+      let ipRange = null;
+      try {
+        const ipRows = labDb.db.prepare(`
+          SELECT sku, SUM(qty) as total_qty, COUNT(*) as pick_count, COUNT(DISTINCT date(completed_at)) as days
+          FROM picks_history
+          WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
+          GROUP BY sku
+        `).all(from, to);
+        for (const r of ipRows) {
+          const type = isLensSku(r.sku) ? 'lens' : 'frame';
+          ipBySku[r.sku] = { qty: r.total_qty, picks: r.pick_count, days: r.days, type };
+          if (type === 'lens') ipLenses += r.total_qty; else ipFrames += r.total_qty;
+        }
+        ipRange = labDb.db.prepare('SELECT MIN(date(completed_at)) as earliest, MAX(date(completed_at)) as latest FROM picks_history WHERE completed_at IS NOT NULL').get();
+        const ipDailyRows = labDb.db.prepare('SELECT date(completed_at) as date, SUM(qty) as qty FROM picks_history WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at)').all(from, to);
+        for (const r of ipDailyRows) {
+          if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
+          dailyMap[r.date].itempath = r.qty;
+        }
+      } catch (e) { console.error('[Consumption] ItemPath error:', e.message); }
+
+      // ── NetSuite consumption (from SQLite cache) ──
+      let nsBySku = {};
+      let nsTotal = 0;
+      let nsDayCount = 0;
+      try {
+        const nsConsumption = netsuite.getConsumption(from, to);
+        nsBySku = nsConsumption.bySku || {};
+        nsTotal = nsConsumption.total || 0;
+        nsDayCount = nsConsumption.dayCount || 0;
+        for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
+          if (!dailyMap[date]) dailyMap[date] = { date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
+          dailyMap[date].netsuite = v.qty;
+        }
+      } catch (e) { console.error('[Consumption] NetSuite error:', e.message); }
+
+      // ── Merge ──
+      const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
+      const allSkus = new Set([...Object.keys(lkBySku), ...Object.keys(ipBySku), ...Object.keys(nsBySku)]);
+      const skusFull = [...allSkus].map(sku => {
+        const lk = lkBySku[sku] || {};
+        const ip = ipBySku[sku] || {};
+        const ns = nsBySku[sku] || {};
+        const kardexTotal = (lk.lenses || 0) + (lk.frames || 0);
+        return {
+          sku,
+          type: lk.type || ip.type || (lk.frames > 0 ? 'frame' : (isLensSku(sku) ? 'lens' : 'frame')),
+          kardex_total: kardexTotal,
+          looker_lenses: lk.lenses || 0,
+          looker_frames: lk.frames || 0,
+          looker_breakages: lk.breakages || 0,
+          itempath_qty: ip.qty || 0,
+          itempath_picks: ip.picks || 0,
+          netsuite_qty: ns.qty || 0,
+          variance_ip_ns: (ip.qty || 0) - (ns.qty || 0),
+        };
+      });
+
+      const lkLensTotal = skusFull.reduce((s, r) => s + r.looker_lenses, 0);
+      const lkTotal = lkLensTotal + totalFramesLooker;
+      const lkBreak = skusFull.reduce((s, r) => s + r.looker_breakages, 0);
+      const ipTotal = skusFull.reduce((s, r) => s + r.itempath_qty, 0);
+      const lkDays = Object.values(dailyMap).filter(d => d.looker > 0);
+      const lkRange = lkDays.length > 0 ? { earliest: lkDays[lkDays.length - 1]?.date, latest: lkDays[0]?.date } : null;
+
+      return json(res, {
+        skus: skusFull,
+        daily,
+        summary: {
+          from, to,
+          kardex: { total: lkTotal, lenses: lkLensTotal, frames: totalFramesLooker, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
+          itempath: { total: ipTotal, lenses: ipLenses, frames: ipFrames, skus: Object.keys(ipBySku).length, days: Object.values(dailyMap).filter(d => d.itempath > 0).length, range: ipRange },
+          netsuite: { total: nsTotal, skus: Object.keys(nsBySku).length, days: nsDayCount },
+          variance: ipTotal - nsTotal,
+        },
+        skuCount: skusFull.length,
+      });
+    } catch (e) {
+      console.error('[Consumption] Fatal error:', e.message);
+      return json(res, { error: e.message, skus: [], daily: [], summary: {}, skuCount: 0 }, 500);
     }
-
-    // Looker frames: YTD by UPC by day (from Look 495 pattern with daily date)
-    const frameData = looker.getFrameUsage();
-    let totalFramesLooker = 0;
-    for (const day of (frameData.daily || [])) {
-      if (day.date < from || day.date > to) continue;
-      for (const [upc, count] of Object.entries(day.byUpc || {})) {
-        if (!lkBySku[upc]) lkBySku[upc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'frame' };
-        lkBySku[upc].frames += count;
-        lkBySku[upc].days++;
-        totalFramesLooker += count;
-      }
-    }
-
-    // ItemPath: picks_history by SKU
-    const ipRows = labDb.db.prepare(`
-      SELECT sku, SUM(qty) as total_qty, COUNT(*) as pick_count, COUNT(DISTINCT date(completed_at)) as days
-      FROM picks_history
-      WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
-      GROUP BY sku
-    `).all(from, to);
-    const ipBySku = {};
-    let ipLenses = 0, ipFrames = 0;
-    const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
-    for (const r of ipRows) {
-      const type = isLensSku(r.sku) ? 'lens' : 'frame';
-      ipBySku[r.sku] = { qty: r.total_qty, picks: r.pick_count, days: r.days, type };
-      if (type === 'lens') ipLenses += r.total_qty;
-      else ipFrames += r.total_qty;
-    }
-
-    // ItemPath date range
-    const ipRange = labDb.db.prepare(`
-      SELECT MIN(date(completed_at)) as earliest, MAX(date(completed_at)) as latest
-      FROM picks_history WHERE completed_at IS NOT NULL
-    `).get();
-
-    // Looker date range in filter
-    const lkDays = (lkData.daily || []).filter(d => d.date >= from && d.date <= to);
-    const lkRange = lkDays.length > 0 ? { earliest: lkDays[lkDays.length - 1].date, latest: lkDays[0].date } : null;
-
-    // Merge all SKUs
-    const allSkus = new Set([...Object.keys(lkBySku), ...Object.keys(ipBySku)]);
-    const skus = [...allSkus].map(sku => {
-      const lk = lkBySku[sku] || {};
-      const ip = ipBySku[sku] || {};
-      const kardexTotal = (lk.lenses || 0) + (lk.frames || 0);
-      return {
-        sku,
-        type: lk.type || ip.type || (lk.frames > 0 ? 'frame' : (isLensSku(sku) ? 'lens' : 'frame')),
-        kardex_total: kardexTotal,
-        looker_lenses: lk.lenses || 0,
-        looker_frames: lk.frames || 0,
-        looker_breakages: lk.breakages || 0,
-        itempath_qty: ip.qty || 0,
-        itempath_picks: ip.picks || 0,
-        variance: (ip.qty || 0) - kardexTotal,
-      };
-    });
-
-    // Daily totals for the chart — lenses + frames
-    const dailyMap = {};
-    for (const day of (lkData.daily || [])) {
-      if (day.date < from || day.date > to) continue;
-      if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0 };
-      dailyMap[day.date].looker += day.lenses;
-      dailyMap[day.date].looker_break += day.breakages;
-    }
-    // Add frame counts to daily totals
-    for (const day of (frameData.daily || [])) {
-      if (day.date < from || day.date > to) continue;
-      if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0 };
-      dailyMap[day.date].looker += day.frames;
-    }
-    const ipDailyRows = labDb.db.prepare(`
-      SELECT date(completed_at) as date, SUM(qty) as qty
-      FROM picks_history
-      WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
-      GROUP BY date(completed_at)
-    `).all(from, to);
-    for (const r of ipDailyRows) {
-      if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
-      dailyMap[r.date].itempath = r.qty;
-    }
-
-    // NetSuite consumption (from SQLite cache)
-    const nsConsumption = netsuite.getConsumption(from, to);
-    const nsBySku = nsConsumption.bySku || {};
-    const nsTotal = nsConsumption.total || 0;
-    for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
-      if (!dailyMap[date]) dailyMap[date] = { date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
-      dailyMap[date].netsuite = v.qty;
-    }
-
-    const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
-
-    // Add NetSuite qty to each SKU row
-    const allSkusWithNs = new Set([...Object.keys(lkBySku), ...Object.keys(ipBySku), ...Object.keys(nsBySku)]);
-    const skusFull = [...allSkusWithNs].map(sku => {
-      const lk = lkBySku[sku] || {};
-      const ip = ipBySku[sku] || {};
-      const ns = nsBySku[sku] || {};
-      const kardexTotal = (lk.lenses || 0) + (lk.frames || 0);
-      return {
-        sku,
-        type: lk.type || ip.type || (lk.frames > 0 ? 'frame' : (isLensSku(sku) ? 'lens' : 'frame')),
-        kardex_total: kardexTotal,
-        looker_lenses: lk.lenses || 0,
-        looker_frames: lk.frames || 0,
-        looker_breakages: lk.breakages || 0,
-        itempath_qty: ip.qty || 0,
-        itempath_picks: ip.picks || 0,
-        netsuite_qty: ns.qty || 0,
-        variance_ip_ns: (ip.qty || 0) - (ns.qty || 0),
-      };
-    });
-
-    const lkLensTotal = skusFull.reduce((s, r) => s + r.looker_lenses, 0);
-    const lkFrameTotal = totalFramesLooker;
-    const lkTotal = lkLensTotal + lkFrameTotal;
-    const lkBreak = skusFull.reduce((s, r) => s + r.looker_breakages, 0);
-    const ipTotal = skusFull.reduce((s, r) => s + r.itempath_qty, 0);
-
-    return json(res, {
-      skus: skusFull,
-      daily,
-      summary: {
-        from, to,
-        kardex: { total: lkTotal, lenses: lkLensTotal, frames: lkFrameTotal, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
-        itempath: { total: ipTotal, lenses: ipLenses, frames: ipFrames, skus: Object.keys(ipBySku).length, days: ipDailyRows.length, range: ipRange },
-        netsuite: { total: nsTotal, skus: Object.keys(nsBySku).length, days: nsConsumption?.dayCount || 0 },
-        variance: ipTotal - nsTotal,
-      },
-      skuCount: skusFull.length,
-    });
   }
 
   // ── NetSuite consumption endpoints ─────────────────────────
