@@ -1752,6 +1752,66 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Pipeline comparison — shipped jobs per day: Kardex vs DVI vs Looker ──
+  if (req.method==='GET' && url.pathname==='/api/usage/pipeline') {
+    try {
+      const days = parseInt(url.searchParams.get('days') || '30');
+      const today = new Date().toISOString().slice(0, 10);
+
+      // DVI: shipped jobs per day from dvi_jobs_history
+      const dviRows = labDb.db.prepare(`
+        SELECT date(shipped_at) as d, COUNT(*) as jobs
+        FROM dvi_jobs_history WHERE shipped_at IS NOT NULL
+        GROUP BY d ORDER BY d DESC
+      `).all();
+
+      // Kardex (ItemPath): frame picks per day = jobs (1 frame = 1 job)
+      const skuCat = (sku) => netsuite.getSkuCategory(sku);
+      const ipRows = labDb.db.prepare(`
+        SELECT date(completed_at) as d, sku, SUM(qty) as qty
+        FROM picks_history WHERE completed_at IS NOT NULL
+        GROUP BY d, sku
+      `).all();
+      const ipJobsByDate = {};
+      for (const r of ipRows) {
+        const cat = skuCat(r.sku);
+        if (cat !== 'Frames') continue;
+        ipJobsByDate[r.d] = (ipJobsByDate[r.d] || 0) + r.qty;
+      }
+
+      // Looker: Look 495 frame jobs per day
+      const frameData = looker.getFrameUsage();
+      const lkJobsByDate = {};
+      for (const day of (frameData.daily || [])) {
+        lkJobsByDate[day.date] = day.frames;
+      }
+
+      // Merge all dates
+      const allDates = new Set([
+        ...dviRows.map(r => r.d),
+        ...Object.keys(ipJobsByDate),
+        ...Object.keys(lkJobsByDate),
+      ]);
+      const daily = [...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days).map(d => ({
+        date: d,
+        kardex: ipJobsByDate[d] || 0,
+        dvi: dviRows.find(r => r.d === d)?.jobs || 0,
+        looker: lkJobsByDate[d] || 0,
+      }));
+
+      const totals = {
+        kardex: daily.reduce((s, d) => s + d.kardex, 0),
+        dvi: daily.reduce((s, d) => s + d.dvi, 0),
+        looker: daily.reduce((s, d) => s + d.looker, 0),
+      };
+
+      return json(res, { daily, totals, days: daily.length });
+    } catch (e) {
+      console.error('[Pipeline] Error:', e.message);
+      return json(res, { error: e.message, daily: [], totals: {}, days: 0 }, 500);
+    }
+  }
+
   // ── NetSuite consumption endpoints ─────────────────────────
   if (req.method==='GET' && url.pathname==='/api/netsuite/consumption') {
     const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
