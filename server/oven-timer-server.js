@@ -1724,22 +1724,14 @@ Respond with a structured batching plan in this format:
       dailyMap[r.date].itempath = r.qty;
     }
 
-    // NetSuite consumption (real transaction data)
-    let nsConsumption = null;
-    let nsBySku = {};
-    let nsTotal = 0;
-    try {
-      nsConsumption = await netsuite.fetchConsumption(from, to);
-      if (nsConsumption) {
-        nsBySku = nsConsumption.bySku || {};
-        nsTotal = nsConsumption.total || 0;
-        // Add to daily chart
-        for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
-          if (!dailyMap[date]) dailyMap[date] = { date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
-          dailyMap[date].netsuite = v.qty;
-        }
-      }
-    } catch (e) { console.error('[Consumption] NetSuite fetch error:', e.message); }
+    // NetSuite consumption (from SQLite cache)
+    const nsConsumption = netsuite.getConsumption(from, to);
+    const nsBySku = nsConsumption.bySku || {};
+    const nsTotal = nsConsumption.total || 0;
+    for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
+      if (!dailyMap[date]) dailyMap[date] = { date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
+      dailyMap[date].netsuite = v.qty;
+    }
 
     const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
 
@@ -1788,8 +1780,11 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/netsuite/consumption') {
     const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
     const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
-    const data = await netsuite.fetchConsumption(from, to);
-    return json(res, data || { error: 'Not configured' });
+    return json(res, netsuite.getConsumption(from, to));
+  }
+  if (req.method==='POST' && url.pathname==='/api/netsuite/consumption/sync') {
+    await netsuite.syncConsumption();
+    return json(res, { ok: true, ...netsuite.getConsumption() });
   }
 
   // ── Looker lens usage endpoints ─────────────────────────────

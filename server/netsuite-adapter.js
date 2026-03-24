@@ -467,65 +467,109 @@ function start() {
 
   // Initial poll after 10s (let other adapters start first)
   setTimeout(() => { poll(); fetchOpenPOs(); }, 10000);
-  // Inventory every 5 minutes, POs every 10 minutes
+  // Consumption sync after 20s (heavy query, don't block startup)
+  setTimeout(() => syncConsumption(), 20000);
+  // Inventory every 5 minutes, POs every 10 minutes, consumption every 30 minutes
   pollTimer = setInterval(() => poll(), POLL_INTERVAL);
   setInterval(() => fetchOpenPOs(), 600000);
+  setInterval(() => syncConsumption(), 1800000);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONSUMPTION — YTD transaction lines (negative qty = consumed)
+// Fetched from NetSuite, saved to SQLite, served from SQLite
 // ─────────────────────────────────────────────────────────────────────────────
-let consumptionCache = { bySku: {}, byDate: {}, lastSync: null, total: 0 };
+let consumptionSyncing = false;
 
-async function fetchConsumption(fromDate, toDate) {
-  if (!CONSUMER_KEY || !TOKEN_ID) return null;
+async function syncConsumption() {
+  if (!CONSUMER_KEY || !TOKEN_ID || consumptionSyncing) return;
+  consumptionSyncing = true;
 
+  try {
+    const db = require('./db');
+
+    // Find latest date we have in SQLite to only fetch new data
+    const latest = db.db.prepare('SELECT MAX(tran_date) as latest FROM netsuite_consumption_daily').get();
+    const year = new Date().getFullYear();
+    // If we have data, fetch from last date (re-fetch that day for completeness); otherwise YTD
+    const from = latest?.latest || `${year}-01-01`;
+    const to = new Date().toISOString().slice(0, 10);
+
+    console.log(`[NetSuite] Syncing consumption from ${from} to ${to}...`);
+    const allRows = await suiteql(`
+      SELECT t.trandate, i.itemId AS itemid, ABS(tl.quantity) AS qty, t.type
+      FROM transactionline tl
+      INNER JOIN transaction t ON t.id = tl.transaction
+      INNER JOIN item i ON i.id = tl.item
+      WHERE tl.location = ${LOCATION_ID}
+        AND t.trandate >= TO_DATE('${from}', 'YYYY-MM-DD')
+        AND t.trandate <= TO_DATE('${to}', 'YYYY-MM-DD')
+        AND tl.quantity < 0
+      ORDER BY t.trandate DESC
+    `);
+
+    console.log(`[NetSuite] Consumption: ${allRows.length} lines fetched from API`);
+
+    // Aggregate by date + sku
+    const agg = {};
+    for (const row of allRows) {
+      const sku = row.itemid || '';
+      const qty = parseInt(row.qty) || 0;
+      const date = row.trandate || '';
+      if (!sku || qty <= 0 || !date) continue;
+      const key = `${date}|${sku}`;
+      if (!agg[key]) agg[key] = { date, sku, qty: 0, lines: 0 };
+      agg[key].qty += qty;
+      agg[key].lines++;
+    }
+
+    // Upsert into SQLite — delete days we're refreshing, then insert
+    const dates = new Set(Object.values(agg).map(a => a.date));
+    const deleteStmt = db.db.prepare('DELETE FROM netsuite_consumption_daily WHERE tran_date = ?');
+    const insertStmt = db.db.prepare('INSERT INTO netsuite_consumption_daily (tran_date, sku, qty, lines) VALUES (?, ?, ?, ?)');
+
+    const upsert = db.db.transaction(() => {
+      for (const d of dates) deleteStmt.run(d);
+      for (const a of Object.values(agg)) insertStmt.run(a.date, a.sku, a.qty, a.lines);
+    });
+    upsert();
+
+    const totalRows = db.db.prepare('SELECT COUNT(*) as cnt FROM netsuite_consumption_daily').get();
+    console.log(`[NetSuite] Consumption saved: ${Object.keys(agg).length} new aggregates, ${totalRows.cnt} total in SQLite`);
+  } catch (e) {
+    console.error('[NetSuite] Consumption sync error:', e.message);
+  }
+  consumptionSyncing = false;
+}
+
+function getConsumption(fromDate, toDate) {
+  const db = require('./db');
   const from = fromDate || `${new Date().getFullYear()}-01-01`;
   const to = toDate || new Date().toISOString().slice(0, 10);
 
-  console.log(`[NetSuite] Fetching consumption ${from} to ${to}...`);
-  const allRows = await suiteql(`
-    SELECT t.trandate, i.itemId AS itemid, ABS(tl.quantity) AS qty, t.type
-    FROM transactionline tl
-    INNER JOIN transaction t ON t.id = tl.transaction
-    INNER JOIN item i ON i.id = tl.item
-    WHERE tl.location = ${LOCATION_ID}
-      AND t.trandate >= TO_DATE('${from}', 'YYYY-MM-DD')
-      AND t.trandate <= TO_DATE('${to}', 'YYYY-MM-DD')
-      AND tl.quantity < 0
-    ORDER BY t.trandate DESC
-  `);
-
-  console.log(`[NetSuite] Consumption: ${allRows.length} lines fetched`);
-
+  // Read from SQLite
   const bySku = {};
   const byDate = {};
   let total = 0;
 
-  for (const row of allRows) {
-    const sku = row.itemid || '';
-    const qty = parseInt(row.qty) || 0;
-    const date = row.trandate || '';
-    if (!sku || qty <= 0) continue;
+  const rows = db.db.prepare(`
+    SELECT tran_date, sku, qty, lines FROM netsuite_consumption_daily
+    WHERE tran_date >= ? AND tran_date <= ?
+  `).all(from, to);
 
-    total += qty;
-
-    if (!bySku[sku]) bySku[sku] = { qty: 0, lines: 0 };
-    bySku[sku].qty += qty;
-    bySku[sku].lines++;
-
-    if (!byDate[date]) byDate[date] = { qty: 0, lines: 0 };
-    byDate[date].qty += qty;
-    byDate[date].lines++;
+  for (const r of rows) {
+    total += r.qty;
+    if (!bySku[r.sku]) bySku[r.sku] = { qty: 0, lines: 0 };
+    bySku[r.sku].qty += r.qty;
+    bySku[r.sku].lines += r.lines;
+    if (!byDate[r.tran_date]) byDate[r.tran_date] = { qty: 0, lines: 0 };
+    byDate[r.tran_date].qty += r.qty;
+    byDate[r.tran_date].lines += r.lines;
   }
 
-  consumptionCache = { bySku, byDate, lastSync: new Date().toISOString(), total, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length };
-  console.log(`[NetSuite] Consumption cached: ${total} units, ${Object.keys(bySku).length} SKUs, ${Object.keys(byDate).length} days`);
-  return consumptionCache;
-}
+  const lastSync = db.db.prepare('SELECT MAX(synced_at) as latest FROM netsuite_consumption_daily').get();
 
-function getConsumption() {
-  return consumptionCache;
+  return { bySku, byDate, total, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length, lastSync: lastSync?.latest };
 }
 
 module.exports = {
@@ -536,7 +580,7 @@ module.exports = {
   lookupSku,
   getOpenPOs,
   fetchOpenPOs,
-  fetchConsumption,
+  syncConsumption,
   getConsumption,
   poll,
 };

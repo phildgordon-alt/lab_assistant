@@ -263,6 +263,29 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(stat_date);
 
+  -- NetSuite consumption (transaction lines, negative qty = consumed)
+  CREATE TABLE IF NOT EXISTS netsuite_consumption (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sku TEXT NOT NULL,
+    qty INTEGER NOT NULL,
+    tran_date TEXT NOT NULL,
+    tran_type TEXT,
+    synced_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_ns_consume_sku ON netsuite_consumption(sku);
+  CREATE INDEX IF NOT EXISTS idx_ns_consume_date ON netsuite_consumption(tran_date);
+
+  -- NetSuite consumption daily aggregates (faster queries)
+  CREATE TABLE IF NOT EXISTS netsuite_consumption_daily (
+    tran_date TEXT NOT NULL,
+    sku TEXT NOT NULL,
+    qty INTEGER NOT NULL,
+    lines INTEGER NOT NULL,
+    PRIMARY KEY(tran_date, sku)
+  );
+  CREATE INDEX IF NOT EXISTS idx_ns_cd_date ON netsuite_consumption_daily(tran_date);
+  CREATE INDEX IF NOT EXISTS idx_ns_cd_sku ON netsuite_consumption_daily(sku);
+
   -- TOPS manual count uploads (CSV upload from inventory tab)
   CREATE TABLE IF NOT EXISTS tops_inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
