@@ -1640,6 +1640,7 @@ Respond with a structured batching plan in this format:
         const ipRows = labDb.db.prepare(`
           SELECT sku, SUM(qty) as total_qty FROM picks_history
           WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
+            AND qty <= 10
           GROUP BY sku
         `).all(from, to);
         for (const r of ipRows) {
@@ -1649,7 +1650,7 @@ Respond with a structured batching plan in this format:
           if (type === 'lens') kardexLenses += r.total_qty; else kardexFrames += r.total_qty;
         }
         // Daily totals
-        const ipDailyAll = labDb.db.prepare('SELECT date(completed_at) as date, sku, SUM(qty) as qty FROM picks_history WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at), sku').all(from, to);
+        const ipDailyAll = labDb.db.prepare('SELECT date(completed_at) as date, sku, SUM(qty) as qty FROM picks_history WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? AND qty <= 10 GROUP BY date(completed_at), sku').all(from, to);
         for (const r of ipDailyAll) {
           if (!isLensOrFrame(r.sku)) continue;
           if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, kardex: 0, netsuite: 0, breakages: 0 };
@@ -1852,11 +1853,12 @@ Respond with a structured batching plan in this format:
       return cat === 'Lenses' || cat === 'Frames';
     };
 
-    // ItemPath: individual transactions (qty) per day, filtered by date + lens/frame
+    // ItemPath: picks only (qty <= 10 per line = pick, qty > 10 = likely a put/receiving)
     const ipDailyRows = labDb.db.prepare(`
       SELECT date(completed_at) as date, sku, SUM(qty) as qty
       FROM picks_history
       WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
+        AND qty <= 10
       GROUP BY date(completed_at), sku
     `).all(fromDate, today);
 
