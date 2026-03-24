@@ -1593,7 +1593,17 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/netsuite/reconcile') {
     const category = url.searchParams.get('category') || null;
     const topsRows = labDb.db.prepare('SELECT sku, qty FROM tops_inventory').all();
-    return json(res, netsuite.reconcile(itempath, category, topsRows));
+    // Build Looker usage by OPC (aggregated across all cached days)
+    const lkData = looker.getUsage(60);
+    const lookerByOpc = {};
+    for (const day of (lkData.daily || [])) {
+      for (const [opc, v] of Object.entries(day.byOpc || {})) {
+        if (!lookerByOpc[opc]) lookerByOpc[opc] = { lenses: 0, breakages: 0 };
+        lookerByOpc[opc].lenses += v.lenses;
+        lookerByOpc[opc].breakages += v.breakages;
+      }
+    }
+    return json(res, netsuite.reconcile(itempath, category, topsRows, lookerByOpc));
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/pos') {
     const category = url.searchParams.get('category') || null;

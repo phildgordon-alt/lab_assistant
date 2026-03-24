@@ -289,6 +289,27 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     connections.netsuite = { status: 'unconfigured', message: 'Lab server not reachable' };
   }
 
+  // Looker
+  try {
+    const start = Date.now();
+    const resp = await fetch(`${labUrl}/api/looker/health`, { signal: AbortSignal.timeout(5000) });
+    const latency = Date.now() - start;
+    if (resp.ok) {
+      const health = await resp.json() as any;
+      if (health.connected) {
+        connections.looker = { status: 'connected', message: `${health.daysCached} days cached`, latency };
+      } else if (health.error) {
+        connections.looker = { status: 'disconnected', message: health.error };
+      } else {
+        connections.looker = { status: 'unconfigured', message: 'LOOKER credentials not set' };
+      }
+    } else {
+      connections.looker = { status: 'disconnected', message: `Lab server returned ${resp.status}` };
+    }
+  } catch (e) {
+    connections.looker = { status: 'unconfigured', message: 'Lab server not reachable' };
+  }
+
   res.json({
     timestamp: new Date().toISOString(),
     connections,

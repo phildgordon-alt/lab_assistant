@@ -805,28 +805,33 @@ function InventoryTab({ ovenServerUrl, settings }) {
             {/* Summary KPIs */}
             {reconData?.summary ? (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 24 }}>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12, marginBottom: 24 }}>
+                  <Card style={{ padding: 14, textAlign: "center" }}>
                     <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>SKUS COMPARED</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{reconData.summary.totalSkus?.toLocaleString()}</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.text, fontFamily: mono }}>{reconData.summary.totalSkus?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>NS: {reconData.summary.netsuiteSkus} · IP: {reconData.summary.itempathSkus}</div>
                   </Card>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
+                  <Card style={{ padding: 14, textAlign: "center" }}>
                     <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>MATCHED</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{reconData.summary.matched?.toLocaleString()}</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{reconData.summary.matched?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.green, fontFamily: mono }}>{reconData.summary.matchRate}% match rate</div>
                   </Card>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
+                  <Card style={{ padding: 14, textAlign: "center" }}>
                     <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DISCREPANCIES</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.discrepancies > 0 ? T.red : T.green, fontFamily: mono }}>{reconData.summary.discrepancies?.toLocaleString()}</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: reconData.summary.discrepancies > 0 ? T.red : T.green, fontFamily: mono }}>{reconData.summary.discrepancies?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>
-                      <span style={{ color: T.red }}>{reconData.summary.critical} critical</span> · <span style={{ color: T.amber }}>{reconData.summary.high} high</span> · {reconData.summary.low} low
+                      <span style={{ color: T.red }}>{reconData.summary.critical} crit</span> · <span style={{ color: T.amber }}>{reconData.summary.high} high</span> · {reconData.summary.low} low
                     </div>
                   </Card>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NET VARIANCE</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.totalDiff === 0 ? T.green : T.amber, fontFamily: mono }}>{reconData.summary.totalDiff > 0 ? '+' : ''}{reconData.summary.totalDiff?.toLocaleString()}</div>
+                  <Card style={{ padding: 14, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>IP vs NS VARIANCE</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: reconData.summary.totalDiff === 0 ? T.green : T.amber, fontFamily: mono }}>{reconData.summary.totalDiff > 0 ? '+' : ''}{reconData.summary.totalDiff?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IP: {reconData.summary.totalItemPath?.toLocaleString()} · NS: {reconData.summary.totalNetSuite?.toLocaleString()}</div>
+                  </Card>
+                  <Card style={{ padding: 14, textAlign: "center", borderLeft: `3px solid ${T.cyan}` }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER CONSUMED</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.cyan, fontFamily: mono }}>{(reconData.summary.totalLooker || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{reconData.summary.lookerSkus || 0} OPCs · 60 days</div>
                   </Card>
                 </div>
 
@@ -918,6 +923,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10 }}>IP TOTAL</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontSize: 10 }}>NETSUITE</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>VARIANCE</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.cyan, fontSize: 10 }}>LOOKER USED</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.red, fontSize: 10 }}>BREAKAGE</th>
                               <th style={{ padding: "10px 12px", textAlign: "center", color: T.textDim, fontSize: 10 }}>STATUS</th>
                             </tr>
                           </thead>
@@ -937,6 +944,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue, fontWeight: 600 }}>{d.itempath?.toLocaleString()}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{d.netsuite?.toLocaleString()}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: sevColor, fontWeight: 700 }}>{d.diff > 0 ? '+' : ''}{d.diff}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: d.looker_used > 0 ? T.cyan : T.textDim }}>{d.looker_used > 0 ? d.looker_used.toLocaleString() : '—'}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: d.looker_breakages > 0 ? T.red : T.textDim }}>{d.looker_breakages > 0 ? d.looker_breakages.toLocaleString() : '—'}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "center" }}>
                                     <span style={{ padding: "3px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: `${statusColor}20`, color: statusColor }}>{statusLabel}</span>
                                   </td>
