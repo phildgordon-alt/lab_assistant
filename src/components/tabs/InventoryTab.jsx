@@ -541,14 +541,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
         }
         if (tab === 'inventory') {
           if (!fetchedRef.current.inventory) {
-            const [invResp, vlmsResp, alertsResp] = await Promise.all([
+            const [invResp, vlmsResp, alertsResp, topsResp, catResp] = await Promise.all([
               fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
+              fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json()).catch(() => null),
+              fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()).catch(() => ({})),
             ]);
             setInventory(invResp);
             setVlms(vlmsResp);
             setAlerts(alertsResp);
+            if (topsResp) setTopsData(topsResp);
+            setSkuCategories(catResp);
             fetchedRef.current.inventory = true;
           }
         }
@@ -589,19 +593,38 @@ function InventoryTab({ ovenServerUrl, settings }) {
   }, [ovenServerUrl, sub]);
 
   // Filter and sort materials
+  const [filterCategory, setFilterCategory] = useState("All");
+
+  // Merge ItemPath materials + TOPS into one list
+  const allInventory = useMemo(() => {
+    const items = (inventory.materials || []).map(m => ({ ...m, category: skuCategories[m.sku] || 'Other' }));
+    // Add TOPS items (not already in ItemPath)
+    const ipSkus = new Set(items.map(m => m.sku));
+    for (const t of (topsData?.items || [])) {
+      if (!ipSkus.has(t.upc || t.sku)) {
+        items.push({ sku: t.upc || t.sku, name: t.model_name ? `${t.model_name} ${t.top_code || ''}`.trim() : t.sku, qty: t.qty, category: 'Tops', coatingType: null, location: t.location || 'TOPS' });
+      }
+    }
+    return items;
+  }, [inventory.materials, topsData, skuCategories]);
+
   const filteredMaterials = useMemo(() => {
-    let items = [...(inventory.materials || [])];
+    let items = [...allInventory];
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       items = items.filter(m =>
         m.sku?.toLowerCase().includes(q) ||
         m.name?.toLowerCase().includes(q) ||
         m.coatingType?.toLowerCase().includes(q) ||
+        m.category?.toLowerCase().includes(q) ||
         m.location?.toLowerCase().includes(q)
       );
     }
     if (filterCoating !== "All") {
       items = items.filter(m => m.coatingType === filterCoating);
+    }
+    if (filterCategory !== "All") {
+      items = items.filter(m => m.category === filterCategory);
     }
     items.sort((a, b) => {
       const av = a[sortCol], bv = b[sortCol];
@@ -609,7 +632,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
       return sortDir === "asc" ? String(av || "").localeCompare(String(bv || "")) : String(bv || "").localeCompare(String(av || ""));
     });
     return items;
-  }, [inventory.materials, searchQuery, filterCoating, sortCol, sortDir]);
+  }, [allInventory, searchQuery, filterCoating, filterCategory, sortCol, sortDir]);
 
   // Get unique coating types for filter
   const coatingTypes = useMemo(() => {
@@ -618,9 +641,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
   }, [inventory.materials]);
 
   // Stats
-  const totalSKUs = (inventory.materials || []).length;
-  const totalQty = (inventory.materials || []).reduce((s, m) => s + (m.qty || 0), 0);
-  const outOfStock = (inventory.materials || []).filter(m => m.qty === 0).length;
+  const totalSKUs = allInventory.length;
+  const totalQty = allInventory.reduce((s, m) => s + (m.qty || 0), 0);
+  const outOfStock = allInventory.filter(m => m.qty === 0).length;
   const lowStock = alerts.critical + alerts.high;
 
   const toggleSort = col => { if (sortCol === col) setSortDir(d => d === "asc" ? "desc" : "asc"); else { setSortCol(col); setSortDir("asc"); } };
@@ -698,11 +721,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
             </div>
 
             {/* Filters */}
-            <div style={{ display: "flex", gap: 12, marginBottom: 16, alignItems: "center" }}>
-              <input type="text" placeholder="Search SKU, name, location..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+              <input type="text" placeholder="Search SKU, name, category..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
                 style={{ flex: 1, maxWidth: 300, padding: "8px 12px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
+              {['All', 'Lenses', 'Frames', 'Tops', 'Other'].map(c => (
+                <button key={c} onClick={() => setFilterCategory(c)} style={{
+                  padding: "7px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                  background: filterCategory === c ? T.blue : 'transparent', color: filterCategory === c ? '#fff' : T.textMuted,
+                  border: `1px solid ${filterCategory === c ? T.blue : T.border}`
+                }}>{c}</button>
+              ))}
               <select value={filterCoating} onChange={e => setFilterCoating(e.target.value)}
-                style={{ padding: "8px 12px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }}>
+                style={{ padding: "7px 12px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 11, fontFamily: mono }}>
                 {coatingTypes.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono }}>
@@ -716,8 +746,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <thead>
                   <tr style={{ background: T.bg }}>
                     <SHdr col="sku">SKU</SHdr>
+                    <SHdr col="category">Category</SHdr>
                     <SHdr col="name">Description</SHdr>
-                    <SHdr col="coatingType">Type</SHdr>
+                    <SHdr col="coatingType">Coating</SHdr>
                     <SHdr col="qty" align="right">Qty</SHdr>
                     <SHdr col="location">Location</SHdr>
                     <SHdr col="index">Index</SHdr>
@@ -731,6 +762,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     return (
                       <tr key={m.id || m.sku} onClick={() => setSelectedItem(m)} style={{ borderBottom: `1px solid ${T.border}`, background: isSelected ? `${T.blue}15` : isOut ? `${T.red}08` : isLow ? `${T.amber}08` : "transparent", cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = `${T.blue}10`} onMouseLeave={e => e.currentTarget.style.background = isSelected ? `${T.blue}15` : isOut ? `${T.red}08` : isLow ? `${T.amber}08` : 'transparent'}>
                         <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.text, fontWeight: 600 }}>{m.sku}</td>
+                        <td style={{ padding: "10px 12px" }}>
+                          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, fontFamily: mono,
+                            background: m.category === 'Lenses' ? `${T.cyan}20` : m.category === 'Frames' ? `${T.purple || '#9b6ee0'}20` : m.category === 'Tops' ? `${T.amber}20` : `${T.textDim}20`,
+                            color: m.category === 'Lenses' ? T.cyan : m.category === 'Frames' ? (T.purple || '#9b6ee0') : m.category === 'Tops' ? T.amber : T.textDim
+                          }}>{m.category || 'Other'}</span>
+                        </td>
                         <td style={{ padding: "10px 12px", fontSize: 12, color: T.textMuted, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</td>
                         <td style={{ padding: "10px 12px" }}>
                           {m.coatingType && <Pill color={T.blue} bg={`${T.blue}15`}>{m.coatingType}</Pill>}
