@@ -515,15 +515,16 @@ async function syncConsumption() {
 
     console.log(`[NetSuite] Syncing consumption: ${chunks.length} month chunk(s) from ${startDate} to ${endDate}`);
 
+    const CLASS_TO_CAT = { '1': 'Frames', '2': 'Frames', '3': 'Lenses', '4': 'Lenses', '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops' };
     const deleteStmt = db.db.prepare('DELETE FROM netsuite_consumption_daily WHERE tran_date >= ? AND tran_date <= ?');
-    const insertStmt = db.db.prepare('INSERT INTO netsuite_consumption_daily (tran_date, sku, qty, lines) VALUES (?, ?, ?, ?)');
+    const insertStmt = db.db.prepare('INSERT INTO netsuite_consumption_daily (tran_date, sku, qty, lines, category) VALUES (?, ?, ?, ?, ?)');
 
     for (const chunk of chunks) {
       try {
         console.log(`[NetSuite] Fetching consumption ${chunk.from} to ${chunk.to}...`);
-        // Aggregate on NetSuite's side — much fewer rows to paginate
+        // Aggregate on NetSuite's side — includes class for category filtering
         const rows = await suiteql(`
-          SELECT t.trandate, i.itemId AS itemid, SUM(ABS(tl.quantity)) AS qty, COUNT(*) AS lines
+          SELECT t.trandate, i.itemId AS itemid, i.class AS classid, SUM(ABS(tl.quantity)) AS qty, COUNT(*) AS lines
           FROM transactionline tl
           INNER JOIN transaction t ON t.id = tl.transaction
           INNER JOIN item i ON i.id = tl.item
@@ -531,7 +532,7 @@ async function syncConsumption() {
             AND t.trandate >= TO_DATE('${chunk.from}', 'YYYY-MM-DD')
             AND t.trandate <= TO_DATE('${chunk.to}', 'YYYY-MM-DD')
             AND tl.quantity < 0
-          GROUP BY t.trandate, i.itemId
+          GROUP BY t.trandate, i.itemId, i.class
           ORDER BY t.trandate DESC
         `);
 
@@ -550,7 +551,8 @@ async function syncConsumption() {
             const qty = parseInt(row.qty) || 0;
             const lines = parseInt(row.lines) || 0;
             const date = toISO(row.trandate || '');
-            if (sku && qty > 0 && date) insertStmt.run(date, sku, qty, lines);
+            const cat = CLASS_TO_CAT[row.classid] || 'Other';
+            if (sku && qty > 0 && date) insertStmt.run(date, sku, qty, lines, cat);
           }
         });
         save();
@@ -580,18 +582,17 @@ function getConsumption(fromDate, toDate) {
   let total = 0;
 
   const rows = db.db.prepare(`
-    SELECT tran_date, sku, qty, lines FROM netsuite_consumption_daily
+    SELECT tran_date, sku, qty, lines, category FROM netsuite_consumption_daily
     WHERE tran_date >= ? AND tran_date <= ?
+      AND category IN ('Lenses', 'Frames')
   `).all(from, to);
 
   let lenses = 0, frames = 0;
 
   for (const r of rows) {
-    const cat = getSkuCategory(r.sku);
-    if (cat !== 'Lenses' && cat !== 'Frames') continue; // only lenses and frames
     total += r.qty;
-    if (cat === 'Lenses') lenses += r.qty; else frames += r.qty;
-    if (!bySku[r.sku]) bySku[r.sku] = { qty: 0, lines: 0, category: cat };
+    if (r.category === 'Lenses') lenses += r.qty; else frames += r.qty;
+    if (!bySku[r.sku]) bySku[r.sku] = { qty: 0, lines: 0, category: r.category };
     bySku[r.sku].qty += r.qty;
     bySku[r.sku].lines += r.lines;
     if (!byDate[r.tran_date]) byDate[r.tran_date] = { qty: 0, lines: 0 };

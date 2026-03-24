@@ -25,6 +25,11 @@ const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SCHEMA MIGRATIONS — safe ALTER TABLE for existing databases
+// ─────────────────────────────────────────────────────────────────────────────
+try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SCHEMA
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -281,6 +286,7 @@ db.exec(`
     sku TEXT NOT NULL,
     qty INTEGER NOT NULL,
     lines INTEGER NOT NULL,
+    category TEXT,
     PRIMARY KEY(tran_date, sku)
   );
   CREATE INDEX IF NOT EXISTS idx_ns_cd_date ON netsuite_consumption_daily(tran_date);
