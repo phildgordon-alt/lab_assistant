@@ -28,6 +28,40 @@ db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 // SCHEMA MIGRATIONS — safe ALTER TABLE for existing databases
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
+
+// PO tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS purchase_orders (
+    id TEXT PRIMARY KEY,
+    po_number TEXT,
+    date TEXT,
+    status TEXT,
+    status_code TEXT,
+    vendor TEXT,
+    memo TEXT,
+    line_count INTEGER,
+    total_qty INTEGER,
+    total_received INTEGER,
+    total_remaining INTEGER,
+    total_amount REAL,
+    lines_json TEXT,
+    last_sync TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status_code);
+  CREATE INDEX IF NOT EXISTS idx_po_date ON purchase_orders(date);
+
+  CREATE TABLE IF NOT EXISTS purchase_orders_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    po_id TEXT,
+    po_number TEXT,
+    status TEXT,
+    total_qty INTEGER,
+    total_received INTEGER,
+    vendor TEXT,
+    recorded_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_po_hist_number ON purchase_orders_history(po_number);
+`);
 try { db.exec('ALTER TABLE tops_inventory ADD COLUMN upc TEXT'); } catch {}
 try { db.exec('ALTER TABLE tops_inventory ADD COLUMN model_name TEXT'); } catch {}
 try { db.exec('ALTER TABLE tops_inventory ADD COLUMN top_code TEXT'); } catch {}

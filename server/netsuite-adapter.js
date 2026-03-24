@@ -414,6 +414,20 @@ async function fetchOpenPOs() {
 
     poCache = { orders, lastSync: new Date().toISOString() };
     console.log(`[NetSuite] POs: ${orders.length} open, ${lines.length} line items`);
+
+    // Save to SQLite
+    try {
+      const db = require('./db');
+      const upsert = db.db.prepare(`INSERT OR REPLACE INTO purchase_orders (id, po_number, date, status, status_code, vendor, memo, line_count, total_qty, total_received, total_remaining, total_amount, lines_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const hist = db.db.prepare(`INSERT INTO purchase_orders_history (po_id, po_number, status, total_qty, total_received, vendor) VALUES (?, ?, ?, ?, ?, ?)`);
+      const save = db.db.transaction(() => {
+        for (const o of orders) {
+          upsert.run(o.id, o.poNumber, o.date, o.status, o.statusCode, o.vendor, o.memo, o.lineCount, o.totalQty, o.totalReceived, o.totalRemaining, o.totalAmount, JSON.stringify(o.lines));
+          hist.run(o.id, o.poNumber, o.status, o.totalQty, o.totalReceived, o.vendor);
+        }
+      });
+      save();
+    } catch (e) { console.error('[NetSuite] PO save error:', e.message); }
   } catch (err) {
     console.error(`[NetSuite] PO fetch error: ${err.message}`);
   }

@@ -503,6 +503,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [consumeSearch, setConsumeSearch] = useState("");
   const [consumeSort, setConsumeSort] = useState("looker"); // looker, itempath, variance
   const [consumeLoading, setConsumeLoading] = useState(false);
+  const [poData, setPoData] = useState(null);
+  const [poFilter, setPoFilter] = useState("all");
+  const [poSearch, setPoSearch] = useState("");
+  const [poExpanded, setPoExpanded] = useState(null);
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
 
@@ -589,7 +593,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -1899,6 +1903,126 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </div>
                 </Card>
               )}
+            </div>
+          );
+        })()}
+
+        {sub === "pos" && (() => {
+          if (!poData) {
+            fetch(`${ovenServerUrl}/api/netsuite/pos`).then(r => r.json()).then(setPoData).catch(() => {});
+          }
+          const orders = poData?.orders || [];
+          let filtered = orders;
+          if (poFilter !== 'all') filtered = filtered.filter(o => o.status === poFilter);
+          if (poSearch) {
+            const q = poSearch.toLowerCase();
+            filtered = filtered.filter(o => o.poNumber?.toLowerCase().includes(q) || o.vendor?.toLowerCase().includes(q) || o.lines?.some(l => l.sku?.toLowerCase().includes(q)));
+          }
+
+          const statuses = {};
+          for (const o of orders) statuses[o.status] = (statuses[o.status] || 0) + 1;
+          const totalQty = filtered.reduce((s, o) => s + o.totalQty, 0);
+          const totalRemaining = filtered.reduce((s, o) => s + o.totalRemaining, 0);
+          const totalAmount = filtered.reduce((s, o) => s + o.totalAmount, 0);
+
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Purchase Orders</h3>
+                <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono }}>Last sync: {poData?.lastSync ? new Date(poData.lastSync).toLocaleString() : '—'}</div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>OPEN POs</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{filtered.length}</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL ORDERED</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{totalQty.toLocaleString()}</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>REMAINING</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{totalRemaining.toLocaleString()}</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.textDim}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL AMOUNT</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.text, fontFamily: mono }}>${Math.round(totalAmount).toLocaleString()}</div>
+                </Card>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+                <input type="text" placeholder="Search PO#, vendor, SKU..." value={poSearch} onChange={e => setPoSearch(e.target.value)}
+                  style={{ flex: 1, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
+                {['all', ...Object.keys(statuses)].map(s => (
+                  <button key={s} onClick={() => setPoFilter(s)} style={{
+                    padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                    background: poFilter === s ? T.blue : 'transparent', color: poFilter === s ? '#fff' : T.textMuted,
+                    border: `1px solid ${poFilter === s ? T.blue : T.border}`
+                  }}>{s === 'all' ? `All (${orders.length})` : `${s} (${statuses[s]})`}</button>
+                ))}
+              </div>
+
+              <Card>
+                <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                  {filtered.map(o => (
+                    <div key={o.id} style={{ borderBottom: `1px solid ${T.border}` }}>
+                      <div onClick={() => setPoExpanded(poExpanded === o.id ? null : o.id)} style={{
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', cursor: 'pointer',
+                        background: poExpanded === o.id ? `${T.blue}08` : 'transparent'
+                      }}>
+                        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                          <div style={{ fontFamily: mono, fontSize: 13, fontWeight: 700, color: T.text }}>{o.poNumber}</div>
+                          <div style={{ fontSize: 11, color: T.textMuted }}>{o.vendor}</div>
+                          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontFamily: mono,
+                            background: o.statusCode === 'B' ? `${T.amber}20` : o.statusCode === 'C' ? `${T.green}20` : `${T.blue}20`,
+                            color: o.statusCode === 'B' ? T.amber : o.statusCode === 'C' ? T.green : T.blue
+                          }}>{o.status}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontFamily: mono, fontSize: 11 }}>
+                          <span style={{ color: T.textMuted }}>{o.date}</span>
+                          <span style={{ color: T.text }}>{o.lineCount} items</span>
+                          <span style={{ color: T.amber }}>Ord: {o.totalQty}</span>
+                          <span style={{ color: T.green }}>Rem: {o.totalRemaining}</span>
+                          <span style={{ color: T.textDim }}>${Math.round(o.totalAmount).toLocaleString()}</span>
+                          <span style={{ fontSize: 12, color: T.textDim }}>{poExpanded === o.id ? '▲' : '▼'}</span>
+                        </div>
+                      </div>
+                      {poExpanded === o.id && o.lines?.length > 0 && (
+                        <div style={{ padding: '0 16px 12px 32px', background: `${T.blue}05` }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                            <thead>
+                              <tr>
+                                <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>SKU</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>NAME</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>CAT</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>ORDERED</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>RECEIVED</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>REMAINING</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>AMOUNT</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {o.lines.map((l, i) => (
+                                <tr key={i} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                                  <td style={{ padding: '5px 8px', color: T.text, fontWeight: 600 }}>{l.sku}</td>
+                                  <td style={{ padding: '5px 8px', color: T.textMuted, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.name}</td>
+                                  <td style={{ padding: '5px 8px', color: T.cyan, fontSize: 9 }}>{l.category}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: T.amber }}>{l.qty}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: T.green }}>{l.received}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: l.remaining > 0 ? T.text : T.textDim, fontWeight: l.remaining > 0 ? 700 : 400 }}>{l.remaining}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textDim }}>${Math.round(l.amount).toLocaleString()}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {filtered.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No purchase orders found</div>}
+                </div>
+              </Card>
             </div>
           );
         })()}
