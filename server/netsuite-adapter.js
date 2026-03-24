@@ -529,14 +529,21 @@ async function syncConsumption() {
           ORDER BY t.trandate DESC
         `);
 
-        // Save to SQLite
+        // Save to SQLite — convert NetSuite date format (M/D/YYYY) to ISO (YYYY-MM-DD)
+        const toISO = (d) => {
+          if (!d) return '';
+          if (d.includes('-') && d.startsWith('20')) return d; // already ISO
+          const parts = d.split('/');
+          if (parts.length === 3) return `${parts[2]}-${parts[0].padStart(2,'0')}-${parts[1].padStart(2,'0')}`;
+          return d;
+        };
         const save = db.db.transaction(() => {
           deleteStmt.run(chunk.from, chunk.to);
           for (const row of rows) {
             const sku = row.itemid || '';
             const qty = parseInt(row.qty) || 0;
             const lines = parseInt(row.lines) || 0;
-            const date = row.trandate || '';
+            const date = toISO(row.trandate || '');
             if (sku && qty > 0 && date) insertStmt.run(date, sku, qty, lines);
           }
         });
