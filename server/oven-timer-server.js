@@ -1628,6 +1628,8 @@ Respond with a structured batching plan in this format:
       const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
       const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
       const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
+      const isFrameSku = (sku) => /^(196016|8[0-9]{11}|850)/.test(sku);
+      const isLensOrFrame = (sku) => isLensSku(sku) || isFrameSku(sku);
 
       // ── KARDEX: Merge ItemPath picks + Looker (lenses+frames) ──
       // ItemPath has actual picks (Mar 6+), Looker has YTD history
@@ -1665,24 +1667,27 @@ Respond with a structured batching plan in this format:
 
       // 2. Override with ItemPath picks where available (more accurate for recent days)
       try {
-        const ipRows = labDb.db.prepare(`
+        const ipRowsAll = labDb.db.prepare(`
           SELECT sku, SUM(qty) as total_qty FROM picks_history
           WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
           GROUP BY sku
         `).all(from, to);
-        // ItemPath daily totals
-        const ipDailyRows = labDb.db.prepare('SELECT date(completed_at) as date, SUM(qty) as qty FROM picks_history WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at)').all(from, to);
-        if (ipDailyRows.length > 0) {
-          // For days where we have ItemPath data, use it instead of Looker
-          for (const r of ipDailyRows) {
-            if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, kardex: 0, netsuite: 0, breakages: 0 };
-            dailyMap[r.date].kardex = r.qty; // override Looker for this day
+        const ipRows = ipRowsAll.filter(r => isLensOrFrame(r.sku));
+        // ItemPath daily totals (lens + frame only)
+        const ipDailyAll = labDb.db.prepare('SELECT date(completed_at) as date, sku, SUM(qty) as qty FROM picks_history WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at), sku').all(from, to);
+        const ipDailyMap = {};
+        for (const r of ipDailyAll) {
+          if (!isLensOrFrame(r.sku)) continue;
+          ipDailyMap[r.date] = (ipDailyMap[r.date] || 0) + r.qty;
+        }
+        if (Object.keys(ipDailyMap).length > 0) {
+          for (const [date, qty] of Object.entries(ipDailyMap)) {
+            if (!dailyMap[date]) dailyMap[date] = { date, kardex: 0, netsuite: 0, breakages: 0 };
+            dailyMap[date].kardex = qty; // override Looker for this day
           }
-          // For SKU totals, merge: ItemPath overrides for SKUs it has
           for (const r of ipRows) {
             const type = isLensSku(r.sku) ? 'lens' : 'frame';
             if (!kardexBySku[r.sku]) kardexBySku[r.sku] = { qty: 0, breakages: 0, type };
-            // Don't override — add ItemPath to Looker for now (they cover different date ranges)
           }
         }
       } catch (e) { console.error('[Consumption] ItemPath error:', e.message); }
@@ -1711,7 +1716,7 @@ Respond with a structured batching plan in this format:
 
       // ── Merge into SKU table ──
       const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
-      const allSkus = new Set([...Object.keys(kardexBySku), ...Object.keys(nsBySku)]);
+      const allSkus = new Set([...Object.keys(kardexBySku), ...Object.keys(nsBySku)].filter(isLensOrFrame));
       const skus = [...allSkus].map(sku => {
         const k = kardexBySku[sku] || {};
         const ns = nsBySku[sku] || {};
