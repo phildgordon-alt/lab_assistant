@@ -287,10 +287,10 @@ function loadShippedIndex() {
       const xml = fs.readFileSync(path.join(DVI_SHIPPED_DIR, file), 'utf8');
       const parsed = parseDviXml(xml);
       // Parse ship date into timestamp
-      // Primary: CycleDate from MegaTransfer root (always present on shipped files)
-      // Fallback: ShipDate from OrderData
+      // Primary: ShipDate from OrderData (actual ship date)
+      // Fallback: CycleDate from MegaTransfer root (file generation date)
       const cycleDate = xml.match(/CycleDate="([^"]*)"/)?.[1];
-      const shipDateStr = cycleDate || parsed.shipDate;
+      const shipDateStr = parsed.shipDate || cycleDate;
       if (shipDateStr) {
         const [mm, dd, yy] = shipDateStr.split('/');
         const [hh, min] = (parsed.shipTime || '12:00').split(':');
