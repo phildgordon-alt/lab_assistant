@@ -711,13 +711,16 @@ function upsertPicks(picks) {
       if (!currentIds.has(existing.id)) {
         // This pick is no longer active - archive it and record history
         archiveStmt.run(existing.id);
+        // Sanity check: qty should be reasonable (< 10,000 per pick)
+        const qty = typeof existing.qty === 'number' && existing.qty < 10000 ? existing.qty : 0;
+        const picked = typeof existing.picked === 'number' && existing.picked < 10000 ? existing.picked : 0;
         historyStmt.run(
           existing.id,
           existing.order_id,
           existing.sku,
           existing.name,
-          existing.qty,
-          existing.picked,
+          qty,
+          picked,
           existing.warehouse
         );
       }
