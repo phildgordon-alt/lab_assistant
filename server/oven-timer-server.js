@@ -1666,25 +1666,38 @@ Respond with a structured batching plan in this format:
         const lkData = looker.getUsage(9999);
         for (const day of (lkData.daily || [])) {
           if (day.date < from || day.date > to) continue;
-          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
-          dailyMap[day.date].netsuite += day.lenses;
+          let dayLenses = 0;
           for (const [opc, v] of Object.entries(day.byOpc || {})) {
+            const cat = netsuite.getSkuCategory(opc);
+            if (cat && cat !== 'Lenses') continue; // skip if known non-lens
             if (!nsBySku[opc]) nsBySku[opc] = { qty: 0, breakages: 0, category: 'Lenses' };
             nsBySku[opc].qty += v.lenses;
             nsBySku[opc].breakages += v.breakages;
             nsLenses += v.lenses;
+            dayLenses += v.lenses;
+          }
+          if (dayLenses > 0) {
+            if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
+            dailyMap[day.date].netsuite += dayLenses;
+            dailyMap[day.date].breakages += day.breakages;
           }
         }
         // Frames from Looker Look 495
         const frameData = looker.getFrameUsage();
         for (const day of (frameData.daily || [])) {
           if (day.date < from || day.date > to) continue;
-          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
-          dailyMap[day.date].netsuite += day.frames;
+          let dayFrames = 0;
           for (const [upc, count] of Object.entries(day.byUpc || {})) {
-            if (!nsBySku[upc]) nsBySku[upc] = { qty: 0, category: 'Frames' };
+            const cat = netsuite.getSkuCategory(upc);
+            if (cat && cat !== 'Frames') continue; // skip if known non-frame
+            if (!nsBySku[upc]) nsBySku[upc] = { qty: 0, breakages: 0, category: 'Frames' };
             nsBySku[upc].qty += count;
             nsFrames += count;
+            dayFrames += count;
+          }
+          if (dayFrames > 0) {
+            if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
+            dailyMap[day.date].netsuite += dayFrames;
           }
         }
         nsDayCount = Object.values(dailyMap).filter(d => d.netsuite > 0).length;
