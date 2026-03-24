@@ -1763,7 +1763,7 @@ Respond with a structured batching plan in this format:
     const days = parseInt(url.searchParams.get('days') || '30');
     const lookerData = looker.getUsage(days);
 
-    // ItemPath daily picks by SKU from picks_history
+    // ItemPath daily picks by SKU from picks_history (lenses + frames only)
     const ipDailyRows = labDb.db.prepare(`
       SELECT date(completed_at) as date, sku, SUM(qty) as qty, COUNT(*) as picks
       FROM picks_history
@@ -1772,10 +1772,16 @@ Respond with a structured batching plan in this format:
       ORDER BY date DESC
     `).all();
 
-    // ItemPath daily totals
+    const isLensOrFrameIP = (sku) => {
+      const cat = netsuite.getSkuCategory(sku);
+      return cat === 'Lenses' || cat === 'Frames';
+    };
+
+    // ItemPath daily totals (filtered to lenses + frames)
     const ipByDate = {};
     const ipBySku = {};
     for (const r of ipDailyRows) {
+      if (!isLensOrFrameIP(r.sku)) continue;
       if (!ipByDate[r.date]) ipByDate[r.date] = { picks: 0, qty: 0 };
       ipByDate[r.date].picks += r.picks;
       ipByDate[r.date].qty += r.qty;
