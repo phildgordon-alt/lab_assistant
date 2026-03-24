@@ -578,8 +578,12 @@ function getConsumption(fromDate, toDate) {
     WHERE tran_date >= ? AND tran_date <= ?
   `).all(from, to);
 
+  const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
+  let lenses = 0, frames = 0;
+
   for (const r of rows) {
     total += r.qty;
+    if (isLensSku(r.sku)) lenses += r.qty; else frames += r.qty;
     if (!bySku[r.sku]) bySku[r.sku] = { qty: 0, lines: 0 };
     bySku[r.sku].qty += r.qty;
     bySku[r.sku].lines += r.lines;
@@ -588,7 +592,7 @@ function getConsumption(fromDate, toDate) {
     byDate[r.tran_date].lines += r.lines;
   }
 
-  return { bySku, byDate, total, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length };
+  return { bySku, byDate, total, lenses, frames, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length };
 }
 
 module.exports = {

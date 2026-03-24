@@ -1525,6 +1525,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(sm.netsuite?.total || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.netsuite?.skus || 0} SKUs · {sm.netsuite?.days || 0} days</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>
+                    Lenses: {(sm.netsuite?.lenses || 0).toLocaleString()} · Frames: {(sm.netsuite?.frames || 0).toLocaleString()}
+                  </div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES</div>

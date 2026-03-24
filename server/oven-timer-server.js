@@ -1695,11 +1695,13 @@ Respond with a structured batching plan in this format:
 
       // ── NETSUITE: Transaction lines from SQLite ──
       let nsBySku = {};
-      let nsTotal = 0, nsDayCount = 0;
+      let nsTotal = 0, nsLenses = 0, nsFrames = 0, nsDayCount = 0;
       try {
         const nsConsumption = netsuite.getConsumption(from, to);
         nsBySku = nsConsumption.bySku || {};
         nsTotal = nsConsumption.total || 0;
+        nsLenses = nsConsumption.lenses || 0;
+        nsFrames = nsConsumption.frames || 0;
         nsDayCount = nsConsumption.dayCount || 0;
         for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
           if (!dailyMap[date]) dailyMap[date] = { date, kardex: 0, netsuite: 0, breakages: 0 };
@@ -1732,7 +1734,7 @@ Respond with a structured batching plan in this format:
         summary: {
           from, to,
           kardex: { total: kardexTotal, lenses: kardexLenses, frames: kardexFrames, breakages: kardexBreakages, skus: Object.keys(kardexBySku).length, days: kardexDays.length },
-          netsuite: { total: nsTotal, skus: Object.keys(nsBySku).length, days: nsDayCount },
+          netsuite: { total: nsTotal, lenses: nsLenses, frames: nsFrames, skus: Object.keys(nsBySku).length, days: nsDayCount },
           variance: kardexTotal - nsTotal,
         },
         skuCount: skus.length,
