@@ -1760,10 +1760,12 @@ Respond with a structured batching plan in this format:
       const days = parseInt(url.searchParams.get('days') || '30');
 
       // DVI: shipped jobs per day from shipped XML archive (source of truth)
+      // Use shipDate string directly (MM/DD/YY → YYYY-MM-DD) to avoid UTC timezone shift
       const dviByDate = {};
       for (const [jobNum, xml] of shippedJobIndex) {
-        if (!xml.shippedAt) continue;
-        const d = new Date(xml.shippedAt).toISOString().slice(0, 10);
+        if (!xml.shipDate) continue;
+        const [mm, dd, yy] = xml.shipDate.split('/');
+        const d = `20${yy}-${mm}-${dd}`;
         dviByDate[d] = (dviByDate[d] || 0) + 1;
       }
 
@@ -2594,9 +2596,11 @@ Respond with a structured batching plan in this format:
       byDay[key] = { date: key, shipped: 0, rush: 0 };
     }
     // Primary source: Shipped XML archive (source of truth)
+    // Use shipDate string directly to avoid UTC timezone shift
     for (const [jobNum, xml] of shippedJobIndex) {
-      if (!xml.shippedAt) continue;
-      const key = new Date(xml.shippedAt).toISOString().slice(0, 10);
+      if (!xml.shipDate) continue;
+      const [mm, dd, yy] = xml.shipDate.split('/');
+      const key = `20${yy}-${mm}-${dd}`;
       if (byDay[key]) {
         byDay[key].shipped++;
         if (xml.rush === 'Y') byDay[key].rush++;
