@@ -126,19 +126,19 @@ async function fetchUsage() {
 async function fetchFrameUsage() {
   const year = new Date().getFullYear();
   const rows = await runQuery(
-    ['poms_jobs.sent_from_lab_week', 'dvi_jobs.frame_upc', 'poms_jobs.count_jobs'],
+    ['dvi_jobs.sent_from_lab_week', 'dvi_jobs.frame_upc', 'poms_jobs.count_jobs'],
     {
       'dvi_jobs.dvi_destination': 'PAIR',
-      'poms_jobs.sent_from_lab_week': `${year}-01-01 to today`,
+      'dvi_jobs.sent_from_lab_week': `${year}-01-01 to today`,
     },
-    ['poms_jobs.sent_from_lab_week desc', 'poms_jobs.count_jobs desc'],
+    ['dvi_jobs.sent_from_lab_week desc', 'poms_jobs.count_jobs desc'],
     50000
   );
 
   // Group by week and UPC
   const byWeek = {};
   for (const r of rows) {
-    const week = r['poms_jobs.sent_from_lab_week'];
+    const week = r['dvi_jobs.sent_from_lab_week'];
     const upc = r['dvi_jobs.frame_upc'] || '';
     const jobs = r['poms_jobs.count_jobs'] || 0;
     if (!week || !upc) continue;
