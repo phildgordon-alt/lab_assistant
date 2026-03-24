@@ -85,15 +85,17 @@ async function runQuery(fields, filters, sorts, limit = 5000) {
 // ─────────────────────────────────────────────────────────────────────────────
 // FETCH LENS USAGE
 // ─────────────────────────────────────────────────────────────────────────────
-async function fetchUsage(daysBack = 30) {
+async function fetchUsage() {
+  // YTD — from Jan 1 of current year to today
+  const year = new Date().getFullYear();
   const rows = await runQuery(
     ['dvi_jobs.sent_from_lab_date', 'dvi_job_lenses.opc', 'dvi_job_lenses.count_lenses', 'item_breakages.count_breakages'],
     {
       'dvi_jobs.dvi_destination': 'PAIR',
-      'dvi_jobs.sent_from_lab_date': `last ${daysBack} days`,
+      'dvi_jobs.sent_from_lab_date': `${year}-01-01 to today`,
     },
     ['dvi_jobs.sent_from_lab_date desc', 'dvi_job_lenses.count_lenses desc'],
-    5000
+    50000  // YTD could be large
   );
 
   // Group by date
@@ -122,7 +124,7 @@ async function fetchUsage(daysBack = 30) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function poll() {
   try {
-    cache.daily = await fetchUsage(60);
+    cache.daily = await fetchUsage();
     cache.lastSync = new Date().toISOString();
     cache.error = null;
     console.log(`[Looker] Synced ${cache.daily.length} days of usage data`);
