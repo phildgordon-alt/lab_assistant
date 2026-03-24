@@ -1041,9 +1041,11 @@ function getAIContext() {
 function start() {
   console.log(`[ItemPath] Starting — ${CONFIG.mockMode ? 'MOCK MODE' : CONFIG.baseUrl} — poll every ${CONFIG.pollInterval/1000}s`);
 
-  // Load from SQLite FIRST — instant data on restart, no API call needed
+  // Load ALL data from SQLite FIRST — instant startup, no API wait
   try {
     const db = require('./db');
+
+    // Materials / Inventory
     const existing = db.db.prepare('SELECT * FROM inventory').all();
     if (existing.length > 0) {
       cache.materials = existing.map(row => ({
@@ -1056,7 +1058,6 @@ function start() {
       cache.lastSync = existing[0]?.last_sync || new Date().toISOString();
       cache.syncStatus = 'ok';
 
-      // Also populate the cached materials response so poll doesn't re-fetch
       cachedMaterialsResp = { materials: existing.map(row => ({
         id: row.id, name: row.sku, currentQuantity: row.qty,
         unitOfMeasure: row.unit, location: row.location,
@@ -1064,10 +1065,45 @@ function start() {
         reOrderPoint: 10,
       }))};
 
-      console.log(`[ItemPath] Loaded ${existing.length} items from SQLite — instant startup`);
+      console.log(`[ItemPath] Loaded ${existing.length} materials from SQLite`);
+    }
+
+    // Location contents → warehouse stock (from bin_contents table)
+    const binRows = db.db.prepare('SELECT * FROM bin_contents WHERE qty > 0').all();
+    if (binRows.length > 0) {
+      // Rebuild warehouse stock from bin_contents
+      const warehouseStock = { WH1: {}, WH2: {}, WH3: {} };
+      const matIdToSku = {};
+      for (const m of cache.materials) { matIdToSku[m.id] = m.sku; }
+
+      for (const row of binRows) {
+        const wh = row.warehouse || 'WH1';
+        const sku = row.sku || matIdToSku[row.material_id] || row.material_id;
+        if (!warehouseStock[wh]) warehouseStock[wh] = {};
+        if (!warehouseStock[wh][sku]) warehouseStock[wh][sku] = 0;
+        warehouseStock[wh][sku] += row.qty;
+      }
+
+      cache.warehouseStock = warehouseStock;
+      cache.locationContents = binRows.map(r => ({
+        materialId: r.material_id,
+        currentQuantity: r.qty,
+        warehouseName: r.warehouse,
+        locationName: r.location_name,
+      }));
+
+      for (const wh of ['WH1', 'WH2', 'WH3']) {
+        const skus = Object.keys(warehouseStock[wh] || {}).length;
+        const total = Object.values(warehouseStock[wh] || {}).reduce((s, q) => s + q, 0);
+        console.log(`[ItemPath] SQLite ${wh}: ${skus} SKUs, ${Math.round(total)} units`);
+      }
+    }
+
+    if (existing.length > 0 || binRows.length > 0) {
+      console.log(`[ItemPath] Instant startup from SQLite — ready`);
     }
   } catch (e) {
-    console.log(`[ItemPath] No SQLite data yet — will fetch from API`);
+    console.log(`[ItemPath] No SQLite data yet — will fetch from API: ${e.message}`);
   }
 
   poll();
