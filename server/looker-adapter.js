@@ -28,6 +28,7 @@ let accessToken = null;
 let tokenExpiry = 0;
 let cache = {
   daily: [],       // [{ date, lenses, breakages, byOpc: { opc: { lenses, breakages } } }]
+  frames: [],      // [{ week, frames, byUpc: { upc: count } }]
   lastSync: null,
   error: null,
 };
@@ -120,18 +121,58 @@ async function fetchUsage() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// FETCH FRAME USAGE (Look 495 — Base Frame Usage by week)
+// ─────────────────────────────────────────────────────────────────────────────
+async function fetchFrameUsage() {
+  const year = new Date().getFullYear();
+  const rows = await runQuery(
+    ['poms_jobs.sent_from_lab_week', 'dvi_jobs.frame_upc', 'poms_jobs.count_jobs'],
+    {
+      'dvi_jobs.dvi_destination': 'PAIR',
+      'poms_jobs.sent_from_lab_week': `${year}-01-01 to today`,
+    },
+    ['poms_jobs.sent_from_lab_week desc', 'poms_jobs.count_jobs desc'],
+    50000
+  );
+
+  // Group by week and UPC
+  const byWeek = {};
+  for (const r of rows) {
+    const week = r['poms_jobs.sent_from_lab_week'];
+    const upc = r['dvi_jobs.frame_upc'] || '';
+    const jobs = r['poms_jobs.count_jobs'] || 0;
+    if (!week || !upc) continue;
+
+    if (!byWeek[week]) byWeek[week] = { week, frames: 0, byUpc: {} };
+    byWeek[week].frames += jobs;
+    if (!byWeek[week].byUpc[upc]) byWeek[week].byUpc[upc] = 0;
+    byWeek[week].byUpc[upc] += jobs;
+  }
+
+  return Object.values(byWeek).sort((a, b) => b.week.localeCompare(a.week));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POLL
 // ─────────────────────────────────────────────────────────────────────────────
 async function poll() {
   try {
     cache.daily = await fetchUsage();
-    cache.lastSync = new Date().toISOString();
-    cache.error = null;
-    console.log(`[Looker] Synced ${cache.daily.length} days of usage data`);
+    console.log(`[Looker] Synced ${cache.daily.length} days of lens usage`);
   } catch (e) {
     cache.error = e.message;
-    console.error('[Looker] Poll error:', e.message);
+    console.error('[Looker] Lens usage poll error:', e.message);
   }
+
+  try {
+    cache.frames = await fetchFrameUsage();
+    console.log(`[Looker] Synced ${cache.frames.length} weeks of frame usage`);
+  } catch (e) {
+    console.error('[Looker] Frame usage poll error:', e.message);
+  }
+
+  cache.lastSync = new Date().toISOString();
+  if (cache.daily?.length > 0) cache.error = null;
 }
 
 function start() {
@@ -186,13 +227,39 @@ function getTopOPCs(days = 30, limit = 20) {
     .map(o => ({ ...o, breakageRate: o.lenses > 0 ? Math.round((o.breakages / o.lenses) * 1000) / 10 : 0 }));
 }
 
+function getFrameUsage() {
+  const weekly = cache.frames || [];
+  const totalFrames = weekly.reduce((s, w) => s + w.frames, 0);
+
+  // Aggregate by UPC
+  const upcTotals = {};
+  for (const w of weekly) {
+    for (const [upc, count] of Object.entries(w.byUpc || {})) {
+      upcTotals[upc] = (upcTotals[upc] || 0) + count;
+    }
+  }
+
+  return {
+    weekly,
+    totalFrames,
+    weekCount: weekly.length,
+    upcCount: Object.keys(upcTotals).length,
+    topUPCs: Object.entries(upcTotals)
+      .map(([upc, count]) => ({ upc, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 50),
+    lastSync: cache.lastSync,
+  };
+}
+
 function getHealth() {
   return {
     connected: !!cache.lastSync && !cache.error,
     lastSync: cache.lastSync,
     error: cache.error,
     daysCached: cache.daily.length,
+    weeksCachedFrames: (cache.frames || []).length,
   };
 }
 
-module.exports = { start, stop, poll, getUsage, getTopOPCs, getHealth };
+module.exports = { start, stop, poll, getUsage, getTopOPCs, getFrameUsage, getHealth };

@@ -1627,16 +1627,28 @@ Respond with a structured batching plan in this format:
     const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
     const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
 
-    // Looker: YTD by OPC (already cached)
+    // Looker lenses: YTD by OPC (already cached)
     const lkData = looker.getUsage(9999); // all cached data
     const lkBySku = {};
     for (const day of (lkData.daily || [])) {
       if (day.date < from || day.date > to) continue;
       for (const [opc, v] of Object.entries(day.byOpc || {})) {
-        if (!lkBySku[opc]) lkBySku[opc] = { lenses: 0, breakages: 0, days: 0 };
+        if (!lkBySku[opc]) lkBySku[opc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'lens' };
         lkBySku[opc].lenses += v.lenses;
         lkBySku[opc].breakages += v.breakages;
         lkBySku[opc].days++;
+      }
+    }
+
+    // Looker frames: YTD by UPC (weekly data from Look 495)
+    const frameData = looker.getFrameUsage();
+    let totalFramesLooker = 0;
+    for (const week of (frameData.weekly || [])) {
+      if (week.week < from || week.week > to) continue;
+      for (const [upc, count] of Object.entries(week.byUpc || {})) {
+        if (!lkBySku[upc]) lkBySku[upc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'frame' };
+        lkBySku[upc].frames += count;
+        totalFramesLooker += count;
       }
     }
 
@@ -1667,15 +1679,17 @@ Respond with a structured batching plan in this format:
     const skus = [...allSkus].map(sku => {
       const lk = lkBySku[sku] || {};
       const ip = ipBySku[sku] || {};
+      const kardexTotal = (lk.lenses || 0) + (lk.frames || 0);
       return {
         sku,
+        type: lk.type || (lk.frames > 0 ? 'frame' : 'lens'),
+        kardex_total: kardexTotal,
         looker_lenses: lk.lenses || 0,
+        looker_frames: lk.frames || 0,
         looker_breakages: lk.breakages || 0,
-        looker_days: lk.days || 0,
         itempath_qty: ip.qty || 0,
         itempath_picks: ip.picks || 0,
-        itempath_days: ip.days || 0,
-        variance: (ip.qty || 0) - (lk.lenses || 0),
+        variance: (ip.qty || 0) - kardexTotal,
       };
     });
 
@@ -1699,7 +1713,9 @@ Respond with a structured batching plan in this format:
     }
     const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
 
-    const lkTotal = skus.reduce((s, r) => s + r.looker_lenses, 0);
+    const lkLensTotal = skus.reduce((s, r) => s + r.looker_lenses, 0);
+    const lkFrameTotal = totalFramesLooker;
+    const lkTotal = lkLensTotal + lkFrameTotal;
     const lkBreak = skus.reduce((s, r) => s + r.looker_breakages, 0);
     const ipTotal = skus.reduce((s, r) => s + r.itempath_qty, 0);
 
@@ -1708,7 +1724,7 @@ Respond with a structured batching plan in this format:
       daily,
       summary: {
         from, to,
-        looker: { total: lkTotal, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
+        kardex: { total: lkTotal, lenses: lkLensTotal, frames: lkFrameTotal, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
         itempath: { total: ipTotal, skus: Object.keys(ipBySku).length, days: ipDailyRows.length, range: ipRange },
         variance: ipTotal - lkTotal,
       },
@@ -1720,6 +1736,9 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/looker/usage') {
     const days = parseInt(url.searchParams.get('days') || '30');
     return json(res, looker.getUsage(days));
+  }
+  if (req.method==='GET' && url.pathname==='/api/looker/frames') {
+    return json(res, looker.getFrameUsage());
   }
   if (req.method==='GET' && url.pathname==='/api/looker/top-opcs') {
     const days = parseInt(url.searchParams.get('days') || '30');
