@@ -515,8 +515,9 @@ async function syncConsumption() {
     for (const chunk of chunks) {
       try {
         console.log(`[NetSuite] Fetching consumption ${chunk.from} to ${chunk.to}...`);
+        // Aggregate on NetSuite's side — much fewer rows to paginate
         const rows = await suiteql(`
-          SELECT t.trandate, i.itemId AS itemid, ABS(tl.quantity) AS qty, t.type
+          SELECT t.trandate, i.itemId AS itemid, SUM(ABS(tl.quantity)) AS qty, COUNT(*) AS lines
           FROM transactionline tl
           INNER JOIN transaction t ON t.id = tl.transaction
           INNER JOIN item i ON i.id = tl.item
@@ -524,30 +525,24 @@ async function syncConsumption() {
             AND t.trandate >= TO_DATE('${chunk.from}', 'YYYY-MM-DD')
             AND t.trandate <= TO_DATE('${chunk.to}', 'YYYY-MM-DD')
             AND tl.quantity < 0
+          GROUP BY t.trandate, i.itemId
           ORDER BY t.trandate DESC
         `);
-
-        // Aggregate by date + sku
-        const agg = {};
-        for (const row of rows) {
-          const sku = row.itemid || '';
-          const qty = parseInt(row.qty) || 0;
-          const date = row.trandate || '';
-          if (!sku || qty <= 0 || !date) continue;
-          const key = `${date}|${sku}`;
-          if (!agg[key]) agg[key] = { date, sku, qty: 0, lines: 0 };
-          agg[key].qty += qty;
-          agg[key].lines++;
-        }
 
         // Save to SQLite
         const save = db.db.transaction(() => {
           deleteStmt.run(chunk.from, chunk.to);
-          for (const a of Object.values(agg)) insertStmt.run(a.date, a.sku, a.qty, a.lines);
+          for (const row of rows) {
+            const sku = row.itemid || '';
+            const qty = parseInt(row.qty) || 0;
+            const lines = parseInt(row.lines) || 0;
+            const date = row.trandate || '';
+            if (sku && qty > 0 && date) insertStmt.run(date, sku, qty, lines);
+          }
         });
         save();
 
-        console.log(`[NetSuite] Chunk ${chunk.from}–${chunk.to}: ${rows.length} lines → ${Object.keys(agg).length} aggregates saved`);
+        console.log(`[NetSuite] Chunk ${chunk.from}–${chunk.to}: ${rows.length} aggregated rows saved`);
       } catch (e) {
         console.error(`[NetSuite] Chunk ${chunk.from}–${chunk.to} error:`, e.message);
       }
@@ -586,9 +581,7 @@ function getConsumption(fromDate, toDate) {
     byDate[r.tran_date].lines += r.lines;
   }
 
-  const lastSync = db.db.prepare('SELECT MAX(synced_at) as latest FROM netsuite_consumption_daily').get();
-
-  return { bySku, byDate, total, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length, lastSync: lastSync?.latest };
+  return { bySku, byDate, total, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length };
 }
 
 module.exports = {
