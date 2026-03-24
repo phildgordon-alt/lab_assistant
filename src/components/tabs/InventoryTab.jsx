@@ -589,7 +589,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Pipeline" }, { id: "lens-usage", label: "Daily Usage" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Pipeline" }, { id: "lens-usage", label: "Daily Usage" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -1683,12 +1683,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
           }
           const daily = pipelineData?.daily || [];
           const totals = pipelineData?.totals || {};
-          const maxJobs = Math.max(1, ...daily.map(d => Math.max(d.kardex, d.dvi, d.looker)));
+          const maxJobs = Math.max(1, ...daily.map(d => Math.max(d.dvi, d.looker)));
 
           return (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Pipeline — Shipped Jobs per Day</h3>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Pipeline — DVI Shipped vs Looker → NetSuite</h3>
                 <div style={{ display: "flex", gap: 4 }}>
                   {[14, 30, 60].map(d => (
                     <button key={d} onClick={() => { setPipelineData(null); setPipelineDays(d); }} style={{
@@ -1701,12 +1701,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               </div>
 
               {/* KPI cards */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 12 }}>
-                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX / ITEMPATH</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{(totals.kardex || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>frame picks = jobs</div>
-                </Card>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DVI (SHIPPED)</div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(totals.dvi || 0).toLocaleString()}</div>
@@ -1717,62 +1712,53 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(totals.looker || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>jobs reported to NetSuite</div>
                 </Card>
-              </div>
-
-              {/* Variance row */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
-                <Card style={{ padding: 10, textAlign: "center" }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>KARDEX → DVI</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: Math.abs((totals.kardex || 0) - (totals.dvi || 0)) < 50 ? T.green : T.amber, fontFamily: mono }}>
-                    {((totals.kardex || 0) - (totals.dvi || 0)) > 0 ? '+' : ''}{((totals.kardex || 0) - (totals.dvi || 0)).toLocaleString()}
-                  </div>
-                </Card>
-                <Card style={{ padding: 10, textAlign: "center" }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>DVI → LOOKER</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: Math.abs((totals.dvi || 0) - (totals.looker || 0)) < 50 ? T.green : T.amber, fontFamily: mono }}>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${Math.abs((totals.dvi || 0) - (totals.looker || 0)) < 50 ? T.green : T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE (DVI — LOOKER)</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: Math.abs((totals.dvi || 0) - (totals.looker || 0)) < 50 ? T.green : T.red, fontFamily: mono }}>
                     {((totals.dvi || 0) - (totals.looker || 0)) > 0 ? '+' : ''}{((totals.dvi || 0) - (totals.looker || 0)).toLocaleString()}
                   </div>
-                </Card>
-                <Card style={{ padding: 10, textAlign: "center" }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>KARDEX → LOOKER (END TO END)</div>
-                  <div style={{ fontSize: 18, fontWeight: 800, color: Math.abs((totals.kardex || 0) - (totals.looker || 0)) < 50 ? T.green : T.amber, fontFamily: mono }}>
-                    {((totals.kardex || 0) - (totals.looker || 0)) > 0 ? '+' : ''}{((totals.kardex || 0) - (totals.looker || 0)).toLocaleString()}
-                  </div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>mega file ingestion gap</div>
                 </Card>
               </div>
 
               {/* Daily table */}
               <Card>
-                <SectionHeader right={`${daily.length} days`}>Daily Job Count</SectionHeader>
+                <SectionHeader right={`${daily.length} days`}>Daily Shipped Jobs</SectionHeader>
                 <div style={{ maxHeight: 600, overflowY: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
                     <thead>
                       <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DATE</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>KARDEX</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>K→D</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>D→L</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI SHIPPED</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER → NS</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>BAR</th>
                       </tr>
                     </thead>
                     <tbody>
                       {daily.map(d => {
                         const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-                        const kd = d.kardex - d.dvi;
-                        const dl = d.dvi - d.looker;
+                        const variance = d.dvi - d.looker;
                         const isToday = d.date === new Date().toISOString().slice(0, 10);
+                        const dviPct = Math.round((d.dvi / maxJobs) * 100);
+                        const lkPct = Math.round((d.looker / maxJobs) * 100);
                         return (
                           <tr key={d.date} style={{ borderBottom: `1px solid ${T.border}22`, background: isToday ? `${T.blue}10` : 'transparent' }}>
                             <td style={{ padding: '6px 12px', color: isToday ? T.blue : T.textMuted, fontWeight: isToday ? 700 : 400 }}>{isToday ? 'TODAY' : dayName}</td>
-                            <td style={{ padding: '6px 12px', textAlign: 'right', color: d.kardex > 0 ? T.green : T.textDim }}>{d.kardex > 0 ? d.kardex.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.dvi > 0 ? T.amber : T.textDim }}>{d.dvi > 0 ? d.dvi.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.looker > 0 ? T.blue : T.textDim }}>{d.looker > 0 ? d.looker.toLocaleString() : '—'}</td>
-                            <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, color: kd === 0 ? T.textDim : Math.abs(kd) > 20 ? T.red : T.amber }}>
-                              {d.kardex > 0 && d.dvi > 0 ? (kd > 0 ? '+' : '') + kd : '—'}
+                            <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, color: variance === 0 ? T.textDim : Math.abs(variance) > 20 ? T.red : T.amber }}>
+                              {d.dvi > 0 || d.looker > 0 ? (variance > 0 ? '+' : '') + variance : '—'}
                             </td>
-                            <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, color: dl === 0 ? T.textDim : Math.abs(dl) > 20 ? T.red : T.amber }}>
-                              {d.dvi > 0 && d.looker > 0 ? (dl > 0 ? '+' : '') + dl : '—'}
+                            <td style={{ padding: '6px 12px', width: '25%' }}>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                                  <div style={{ width: `${dviPct}%`, height: '100%', background: T.amber, borderRadius: 2, opacity: 0.7 }} />
+                                </div>
+                                <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                                  <div style={{ width: `${lkPct}%`, height: '100%', background: T.blue, borderRadius: 2, opacity: 0.7 }} />
+                                </div>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -1781,11 +1767,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </table>
                 </div>
                 <div style={{ display: "flex", gap: 16, padding: "8px 12px", borderTop: `1px solid ${T.border}`, fontSize: 10, fontFamily: mono, color: T.textDim }}>
-                  <span><span style={{ color: T.green }}>Kardex</span> = frame picks from ItemPath</span>
-                  <span><span style={{ color: T.amber }}>DVI</span> = shipped jobs from DVI trace</span>
-                  <span><span style={{ color: T.blue }}>Looker</span> = jobs reported to NetSuite</span>
-                  <span>K→D = Kardex minus DVI</span>
-                  <span>D→L = DVI minus Looker</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.amber, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />DVI shipped jobs</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker → NetSuite</span>
+                  <span>Variance = DVI minus Looker (positive = DVI shipped more than reported)</span>
                 </div>
               </Card>
             </div>
