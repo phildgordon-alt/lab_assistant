@@ -900,11 +900,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <tr style={{ background: T.bg, position: "sticky", top: 0, zIndex: 1 }}>
                               <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>SKU</th>
                               <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>NAME</th>
-                              <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>CATEGORY</th>
-                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10 }}>ITEMPATH</th>
+                              <th style={{ padding: "10px 12px", textAlign: "left", color: T.textDim, fontSize: 10 }}>CAT</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10 }}>WH1</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.green, fontSize: 10 }}>WH2</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.amber, fontSize: 10 }}>WH3</th>
+                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10 }}>IP TOTAL</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontSize: 10 }}>NETSUITE</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>VARIANCE</th>
-                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>%</th>
                               <th style={{ padding: "10px 12px", textAlign: "center", color: T.textDim, fontSize: 10 }}>STATUS</th>
                             </tr>
                           </thead>
@@ -916,12 +918,14 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               return (
                                 <tr key={i} style={{ borderBottom: `1px solid ${T.border}22`, background: d.severity === 'critical' ? `${T.red}08` : 'transparent' }}>
                                   <td style={{ padding: "8px 12px", color: T.text }}>{d.sku}</td>
-                                  <td style={{ padding: "8px 12px", color: T.textMuted, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</td>
+                                  <td style={{ padding: "8px 12px", color: T.textMuted, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.name}</td>
                                   <td style={{ padding: "8px 12px", color: T.cyan, fontSize: 10 }}>{d.category || '—'}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue }}>{d.itempath?.toLocaleString()}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.purple || '#9b6ee0' }}>{d.netsuite?.toLocaleString()}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: d.wh1 > 0 ? T.blue : T.textDim }}>{d.wh1 || '—'}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: d.wh2 > 0 ? T.green : T.textDim }}>{d.wh2 || '—'}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: d.wh3 > 0 ? T.amber : T.textDim }}>{d.wh3 || '—'}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue, fontWeight: 600 }}>{d.itempath?.toLocaleString()}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{d.netsuite?.toLocaleString()}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: sevColor, fontWeight: 700 }}>{d.diff > 0 ? '+' : ''}{d.diff}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right", color: sevColor }}>{d.pctDiff}%</td>
                                   <td style={{ padding: "8px 12px", textAlign: "center" }}>
                                     <span style={{ padding: "3px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: `${statusColor}20`, color: statusColor }}>{statusLabel}</span>
                                   </td>

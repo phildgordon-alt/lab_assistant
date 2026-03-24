@@ -246,16 +246,22 @@ function reconcile(itempath, category = null) {
   for (const sku of allSkus) {
     const nsQty = inventory[sku]?.qty || 0;
     const ipQty = ipTotal[sku] || 0;
+    const wh1Qty = ipWarehouseStock.WH1?.[sku] || 0;
+    const wh2Qty = ipWarehouseStock.WH2?.[sku] || 0;
+    const wh3Qty = ipWarehouseStock.WH3?.[sku] || 0;
     totalNetSuite += nsQty;
     totalItemPath += ipQty;
     const diff = ipQty - nsQty;
 
-    if (Math.abs(diff) > 0.5) { // Allow rounding tolerance
+    if (Math.abs(diff) > 0.5) {
       discrepancies.push({
         sku,
         name: inventory[sku]?.name || '',
         category: inventory[sku]?.category || 'Unknown',
         className: inventory[sku]?.className || '',
+        wh1: wh1Qty,
+        wh2: wh2Qty,
+        wh3: wh3Qty,
         netsuite: nsQty,
         itempath: ipQty,
         diff,
