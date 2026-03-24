@@ -589,7 +589,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Pipeline" }, { id: "lens-usage", label: "Daily Usage" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -1688,7 +1688,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
           return (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Pipeline — DVI Shipped vs Looker → NetSuite</h3>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Jobs Pipeline — DVI Shipped vs Looker → NetSuite</h3>
                 <div style={{ display: "flex", gap: 4 }}>
                   {[7, 14, 30, 60].map(d => (
                     <button key={d} onClick={() => { setPipelineData(null); setPipelineDays(d); }} style={{
@@ -1784,23 +1784,22 @@ function InventoryTab({ ovenServerUrl, settings }) {
         })()}
 
         {sub === "lens-usage" && (() => {
-          // Fetch on mount / days change
           if (!usageData || usageData._days !== usageDays) {
             fetch(`${ovenServerUrl}/api/usage/daily?days=${usageDays}`).then(r => r.json()).then(d => { d._days = usageDays; setUsageData(d); }).catch(() => {});
           }
           const daily = usageData?.dailyTotals || [];
           const skus = usageData?.skuComparison || [];
-          const lk = usageData?.summary?.looker || {};
-          const ip = usageData?.summary?.itempath || {};
-          const maxDay = Math.max(1, ...daily.map(d => Math.max(d.looker_lenses, d.itempath_qty)));
+          const sm = usageData?.summary || {};
+          const lk = sm.looker || {};
+          const ip = sm.itempath || {};
+          const maxDay = Math.max(1, ...daily.map(d => Math.max(d.looker_qty || 0, d.itempath_qty || 0)));
 
           return (
             <div>
-              {/* Header + period selector */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Daily Usage — Looker vs ItemPath</h3>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Daily Transactions — Looker vs ItemPath</h3>
                 <div style={{ display: "flex", gap: 4 }}>
-                  {[14, 30, 60].map(d => (
+                  {[7, 14, 30, 60].map(d => (
                     <button key={d} onClick={() => { setUsageData(null); setUsageDays(d); }} style={{
                       padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
                       background: usageDays === d ? T.blue : 'transparent', color: usageDays === d ? '#fff' : T.textMuted,
@@ -1810,90 +1809,84 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 </div>
               </div>
 
-              {/* KPIs */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER — SENT FROM LAB</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(lk.totalLenses || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lk.avgDaily || 0}/day · {lk.days || 0} days · {lk.skus || 0} OPCs</div>
-                </Card>
-                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES (LOOKER)</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: T.red, fontFamily: mono }}>{(lk.totalBreakages || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lk.breakageRate || 0}% rate</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER TRANSACTIONS</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(lk.total || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lk.skus || 0} SKUs · {lk.days || 0} days</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH — PICKED</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: T.green, fontFamily: mono }}>{(ip.totalQty || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{ip.totalPicks || 0} picks · {ip.days || 0} days · {ip.skus || 0} SKUs</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH TRANSACTIONS</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.green, fontFamily: mono }}>{(ip.total || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{ip.skus || 0} SKUs · {ip.days || 0} days</div>
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.red, fontFamily: mono }}>{(lk.breakages || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lk.total > 0 ? ((lk.breakages || 0) / lk.total * 100).toFixed(1) : 0}% rate</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE</div>
-                  <div style={{ fontSize: 26, fontWeight: 800, color: Math.abs((ip.totalQty || 0) - (lk.totalLenses || 0)) < 100 ? T.green : T.amber, fontFamily: mono }}>
-                    {((ip.totalQty || 0) - (lk.totalLenses || 0)) > 0 ? '+' : ''}{((ip.totalQty || 0) - (lk.totalLenses || 0)).toLocaleString()}
+                  <div style={{ fontSize: 26, fontWeight: 800, color: Math.abs(sm.variance || 0) < 100 ? T.green : T.amber, fontFamily: mono }}>
+                    {(sm.variance || 0) > 0 ? '+' : ''}{(sm.variance || 0).toLocaleString()}
                   </div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>IP picked - Looker sent</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>ItemPath — Looker</div>
                 </Card>
               </div>
 
-              {/* Daily chart — side by side bars */}
               <Card style={{ marginBottom: 20 }}>
-                <SectionHeader right={`${daily.length} days`}>Daily Consumption</SectionHeader>
+                <SectionHeader right={`${daily.length} days`}>Daily Transactions</SectionHeader>
                 <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                   {daily.map(d => {
                     const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-                    const lkPct = Math.round((d.looker_lenses / maxDay) * 100);
-                    const ipPct = Math.round((d.itempath_qty / maxDay) * 100);
+                    const lkPct = Math.round(((d.looker_qty || 0) / maxDay) * 100);
+                    const ipPct = Math.round(((d.itempath_qty || 0) / maxDay) * 100);
                     const isToday = d.date === new Date().toISOString().slice(0, 10);
-                    const isWeekend = [0, 6].includes(new Date(d.date + 'T12:00:00').getDay());
                     return (
                       <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: isToday ? `${T.blue}12` : T.bg, borderRadius: 5, border: `1px solid ${isToday ? T.blue : T.border}` }}>
-                        <div style={{ width: 100, fontSize: 11, fontWeight: isToday ? 700 : 500, color: isToday ? T.blue : isWeekend ? T.textDim : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
+                        <div style={{ width: 100, fontSize: 11, fontWeight: isToday ? 700 : 500, color: isToday ? T.blue : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
                         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                          <div style={{ height: 5, background: T.surface, borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
+                          <div style={{ height: 5, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
                             <div style={{ width: `${lkPct}%`, height: '100%', background: T.blue, borderRadius: 3, opacity: 0.7 }} />
-                            {d.looker_breakages > 0 && <div style={{ position: 'absolute', right: 0, top: 0, width: `${Math.max(2, Math.round((d.looker_breakages / maxDay) * 100))}%`, height: '100%', background: T.red, borderRadius: 3, opacity: 0.9 }} />}
                           </div>
                           <div style={{ height: 5, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
                             <div style={{ width: `${ipPct}%`, height: '100%', background: T.green, borderRadius: 3, opacity: 0.7 }} />
                           </div>
                         </div>
-                        <div style={{ minWidth: 55, textAlign: 'right', fontSize: 12, fontWeight: 700, color: T.blue, fontFamily: mono }}>{d.looker_lenses.toLocaleString()}</div>
-                        <div style={{ minWidth: 40, textAlign: 'right', fontSize: 10, color: d.looker_breakages > 0 ? T.red : T.textDim, fontFamily: mono }}>{d.looker_breakages > 0 ? `-${d.looker_breakages}` : ''}</div>
+                        <div style={{ minWidth: 55, textAlign: 'right', fontSize: 12, fontWeight: 700, color: T.blue, fontFamily: mono }}>{(d.looker_qty || 0).toLocaleString()}</div>
+                        <div style={{ minWidth: 40, textAlign: 'right', fontSize: 10, color: (d.looker_breakages || 0) > 0 ? T.red : T.textDim, fontFamily: mono }}>{(d.looker_breakages || 0) > 0 ? `-${d.looker_breakages}` : ''}</div>
                         <div style={{ width: 1, height: 14, background: T.border }} />
-                        <div style={{ minWidth: 55, textAlign: 'right', fontSize: 12, fontWeight: 700, color: T.green, fontFamily: mono }}>{d.itempath_qty > 0 ? d.itempath_qty.toLocaleString() : '—'}</div>
+                        <div style={{ minWidth: 55, textAlign: 'right', fontSize: 12, fontWeight: 700, color: T.green, fontFamily: mono }}>{(d.itempath_qty || 0) > 0 ? d.itempath_qty.toLocaleString() : '—'}</div>
                       </div>
                     );
                   })}
                 </div>
-                {daily.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>Loading usage data...</div>}
+                {daily.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>Loading...</div>}
                 <div style={{ display: "flex", gap: 16, padding: "8px 12px", borderTop: `1px solid ${T.border}`, marginTop: 6, fontSize: 10, fontFamily: mono, color: T.textDim }}>
-                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker (sent from lab)</span>
-                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />ItemPath (picked)</span>
-                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.red, borderRadius: 2, marginRight: 4, opacity: 0.9 }} />Breakages</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker (lenses + frames)</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />ItemPath (picks)</span>
                 </div>
               </Card>
 
-              {/* SKU comparison table */}
               {skus.length > 0 && (
                 <Card>
-                  <SectionHeader right={`${skus.length} SKUs`}>Usage by SKU — Looker vs ItemPath</SectionHeader>
+                  <SectionHeader right={`${skus.length} SKUs`}>Transactions by SKU</SectionHeader>
                   <div style={{ maxHeight: 500, overflowY: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
                       <thead>
                         <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
-                          <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU / OPC</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER SENT</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER</th>
                           <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGE</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>IP PICKED</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>ITEMPATH</th>
                           <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {skus.slice(0, 100).map((s, i) => (
+                        {skus.slice(0, 100).map(s => (
                           <tr key={s.sku} style={{ borderBottom: `1px solid ${T.border}22` }}>
                             <td style={{ padding: '7px 12px', fontWeight: 600, color: T.text }}>{s.sku}</td>
-                            <td style={{ padding: '7px 12px', textAlign: 'right', color: s.looker_lenses > 0 ? T.blue : T.textDim }}>{s.looker_lenses > 0 ? s.looker_lenses.toLocaleString() : '—'}</td>
+                            <td style={{ padding: '7px 12px', textAlign: 'right', color: s.looker_qty > 0 ? T.blue : T.textDim }}>{s.looker_qty > 0 ? s.looker_qty.toLocaleString() : '—'}</td>
                             <td style={{ padding: '7px 12px', textAlign: 'right', color: s.looker_breakages > 0 ? T.red : T.textDim }}>{s.looker_breakages > 0 ? s.looker_breakages.toLocaleString() : '—'}</td>
                             <td style={{ padding: '7px 12px', textAlign: 'right', color: s.itempath_qty > 0 ? T.green : T.textDim }}>{s.itempath_qty > 0 ? s.itempath_qty.toLocaleString() : '—'}</td>
                             <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 700, color: s.variance === 0 ? T.textDim : Math.abs(s.variance) > 50 ? T.red : T.amber }}>
