@@ -1539,7 +1539,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 24, fontWeight: 800, color: Math.abs(sm.variance || 0) < 500 ? T.green : T.amber, fontFamily: mono }}>
                     {(sm.variance || 0) > 0 ? '+' : ''}{(sm.variance || 0).toLocaleString()}
                   </div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Kardex — DVI</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Kardex — NetSuite</div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.textDim}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>PERIOD</div>
