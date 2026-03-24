@@ -1731,16 +1731,12 @@ Respond with a structured batching plan in this format:
           kardex: {
             total: kardexTotal, lenses: kardexLenses, frames: kardexFrames,
             jobs: kardexFrames, // 1 frame = 1 job
-            expectedLenses: kardexFrames * 2,
-            breakage: kardexLenses - (kardexFrames * 2), // overage = extra lens picks
-            lensesPerJob: kardexFrames > 0 ? Math.round((kardexLenses / kardexFrames) * 100) / 100 : 0,
             skus: Object.keys(kardexBySku).length, days: kardexDays.length,
           },
           netsuite: {
             total: nsLenses + nsFrames, lenses: nsLenses, frames: nsFrames,
             jobs: nsFrames, // Look 495 count_jobs = 1 per job
             breakages: Object.values(nsBySku).reduce((s, v) => s + (v.breakages || 0), 0),
-            lensesPerJob: nsFrames > 0 ? Math.round((nsLenses / nsFrames) * 100) / 100 : 0,
             skus: Object.keys(nsBySku).length, days: nsDayCount,
           },
           variance: kardexTotal - (nsLenses + nsFrames),

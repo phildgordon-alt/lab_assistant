@@ -1521,7 +1521,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 10 }}>
                 <Card style={{ padding: 14, borderLeft: `4px solid ${T.green}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1, marginBottom: 6 }}>KARDEX / ITEMPATH</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 8 }}>
                     <div style={{ textAlign: "center" }}>
                       <div style={{ fontSize: 22, fontWeight: 800, color: T.green, fontFamily: mono }}>{(sm.kardex?.jobs || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>JOBS</div>
@@ -1530,15 +1530,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <div style={{ fontSize: 22, fontWeight: 800, color: T.green, fontFamily: mono }}>{(sm.kardex?.total || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>TOTAL UNITS</div>
                     </div>
-                    <div style={{ textAlign: "center" }}>
-                      <div style={{ fontSize: 22, fontWeight: 800, color: (sm.kardex?.breakage || 0) > 0 ? T.red : T.green, fontFamily: mono }}>{(sm.kardex?.breakage || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>BREAKAGE (OVERAGE)</div>
-                    </div>
                   </div>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginTop: 6, display: "flex", gap: 12 }}>
                     <span>Lenses: {(sm.kardex?.lenses || 0).toLocaleString()}</span>
                     <span>Frames: {(sm.kardex?.frames || 0).toLocaleString()}</span>
-                    <span>Lenses/Job: {sm.kardex?.lensesPerJob || '—'}</span>
                     <span>{sm.kardex?.skus || 0} SKUs · {sm.kardex?.days || 0} days</span>
                   </div>
                 </Card>
@@ -1561,7 +1556,6 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginTop: 6, display: "flex", gap: 12 }}>
                     <span>Lenses: {(sm.netsuite?.lenses || 0).toLocaleString()}</span>
                     <span>Frames: {(sm.netsuite?.frames || 0).toLocaleString()}</span>
-                    <span>Lenses/Job: {sm.netsuite?.lensesPerJob || '—'}</span>
                     <span>{sm.netsuite?.skus || 0} SKUs · {sm.netsuite?.days || 0} days</span>
                   </div>
                 </Card>
