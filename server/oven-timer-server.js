@@ -1581,7 +1581,8 @@ Respond with a structured batching plan in this format:
     return json(res, netsuite.getInventory());
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/reconcile') {
-    return json(res, netsuite.reconcile(itempath));
+    const category = url.searchParams.get('category') || null;
+    return json(res, netsuite.reconcile(itempath, category));
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/health') {
     return json(res, netsuite.getHealth());

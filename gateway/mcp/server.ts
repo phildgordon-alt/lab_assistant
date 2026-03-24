@@ -332,6 +332,19 @@ export async function handleToolCall(
       return handleCallApi('GET', `/api/inventory/binning/adjacency${qs ? `?${qs}` : ''}`);
     }
 
+    case 'get_reconciliation_summary': {
+      const cat = toolInput.category ? `?category=${toolInput.category}` : '';
+      return handleCallApi('GET', `/api/netsuite/reconcile${cat}`);
+    }
+
+    case 'get_reconciliation_detail': {
+      const params = new URLSearchParams();
+      if (toolInput.category) params.set('category', String(toolInput.category));
+      if (toolInput.severity) params.set('severity', String(toolInput.severity));
+      const qs = params.toString();
+      return handleCallApi('GET', `/api/netsuite/reconcile${qs ? `?${qs}` : ''}`);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // MAINTENANCE TOOLS
     // ─────────────────────────────────────────────────────────────────────────

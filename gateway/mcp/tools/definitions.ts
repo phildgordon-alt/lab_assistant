@@ -739,6 +739,39 @@ HOW: Optional days (default 14) and min_co_picks (default 5) params.`,
   },
 };
 
+export const get_reconciliation_summary = {
+  name: 'get_reconciliation_summary',
+  description: `USE THIS for questions about inventory discrepancies between ItemPath and NetSuite.
+WHAT: Returns summary stats (total SKUs compared, matched, discrepancies, match rate, net variance) plus top discrepancies by severity.
+HOW: No parameters needed. Optional category filter (Lenses, Tops, Frames, Other).
+NOT for individual SKU lookup — use get_reconciliation_detail for that.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      category: { type: 'string', description: 'Filter by category: Lenses, Tops, Frames, Other. Omit for all.' },
+    },
+  },
+};
+
+export const get_reconciliation_detail = {
+  name: 'get_reconciliation_detail',
+  description: `USE THIS to drill into specific inventory discrepancies between ItemPath and NetSuite.
+WHAT: Returns per-SKU comparison: ItemPath qty, NetSuite qty, variance, percentage, severity, status (OVER/SHORT/MATCH/NS_ONLY/IP_ONLY).
+HOW: Filter by category and/or severity. Always provide at least one filter to avoid huge results.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      category: { type: 'string', description: 'Lenses, Tops, Frames, or Other' },
+      severity: { type: 'string', description: 'critical, high, or low' },
+    },
+  },
+};
+
+export const RECONCILIATION_TOOLS = [
+  get_reconciliation_summary,
+  get_reconciliation_detail,
+];
+
 export const BINNING_TOOLS = [
   get_binning_swap,
   get_binning_consolidation,
@@ -750,6 +783,7 @@ export const INVENTORY_TOOLS = [
   get_inventory_detail,
   get_consumption_history,
   ...BINNING_TOOLS,
+  ...RECONCILIATION_TOOLS,
 ];
 
 export const MAINTENANCE_TOOLS = [

@@ -215,7 +215,7 @@ async function poll() {
 // ─────────────────────────────────────────────────────────────────────────────
 // RECONCILE — Compare NetSuite vs ItemPath
 // ─────────────────────────────────────────────────────────────────────────────
-function reconcile(itempath) {
+function reconcile(itempath, category = null) {
   const ipWarehouseStock = itempath.getWarehouseStock();
 
   // Build ItemPath total by SKU (WH1 + WH2 + WH3)
@@ -227,7 +227,15 @@ function reconcile(itempath) {
   }
 
   // Compare
-  const allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal)]);
+  let allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal)]);
+
+  // Filter by category if specified
+  if (category) {
+    allSkus = new Set([...allSkus].filter(sku => {
+      const nsItem = inventory[sku];
+      return nsItem && nsItem.category === category;
+    }));
+  }
   const discrepancies = [];
   let matchCount = 0;
   let totalNetSuite = 0;

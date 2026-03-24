@@ -855,11 +855,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   ))}
                 </div>
 
-                {/* Category filter */}
+                {/* Category filter — re-fetches from server so KPIs recalculate */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                   <span style={{ fontSize: 11, color: T.textDim, fontFamily: mono, alignSelf: "center" }}>Category:</span>
                   {['all', 'Lenses', 'Tops', 'Frames', 'Other'].map(c => (
-                    <button key={c} onClick={() => setReconCategory(c)} style={{
+                    <button key={c} onClick={async () => {
+                      setReconCategory(c);
+                      try {
+                        const catParam = c === 'all' ? '' : `?category=${c}`;
+                        const resp = await fetch(`${ovenServerUrl}/api/netsuite/reconcile${catParam}`);
+                        setReconData(await resp.json());
+                      } catch (e) { console.error(e); }
+                    }} style={{
                       padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
                       background: reconCategory === c ? `${T.cyan}25` : 'transparent',
                       color: reconCategory === c ? T.cyan : T.textMuted,
