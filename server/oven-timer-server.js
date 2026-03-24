@@ -1640,14 +1640,15 @@ Respond with a structured batching plan in this format:
       }
     }
 
-    // Looker frames: YTD by UPC (weekly data from Look 495)
+    // Looker frames: YTD by UPC by day (from Look 495 pattern with daily date)
     const frameData = looker.getFrameUsage();
     let totalFramesLooker = 0;
-    for (const week of (frameData.weekly || [])) {
-      if (week.week < from || week.week > to) continue;
-      for (const [upc, count] of Object.entries(week.byUpc || {})) {
+    for (const day of (frameData.daily || [])) {
+      if (day.date < from || day.date > to) continue;
+      for (const [upc, count] of Object.entries(day.byUpc || {})) {
         if (!lkBySku[upc]) lkBySku[upc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'frame' };
         lkBySku[upc].frames += count;
+        lkBySku[upc].days++;
         totalFramesLooker += count;
       }
     }
@@ -1698,13 +1699,19 @@ Respond with a structured batching plan in this format:
       };
     });
 
-    // Daily totals for the chart
+    // Daily totals for the chart — lenses + frames
     const dailyMap = {};
     for (const day of (lkData.daily || [])) {
       if (day.date < from || day.date > to) continue;
       if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0 };
-      dailyMap[day.date].looker = day.lenses;
-      dailyMap[day.date].looker_break = day.breakages;
+      dailyMap[day.date].looker += day.lenses;
+      dailyMap[day.date].looker_break += day.breakages;
+    }
+    // Add frame counts to daily totals
+    for (const day of (frameData.daily || [])) {
+      if (day.date < from || day.date > to) continue;
+      if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0 };
+      dailyMap[day.date].looker += day.frames;
     }
     const ipDailyRows = labDb.db.prepare(`
       SELECT date(completed_at) as date, SUM(qty) as qty

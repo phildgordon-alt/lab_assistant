@@ -126,30 +126,30 @@ async function fetchUsage() {
 async function fetchFrameUsage() {
   const year = new Date().getFullYear();
   const rows = await runQuery(
-    ['dvi_jobs.sent_from_lab_week', 'dvi_jobs.frame_upc', 'poms_jobs.count_jobs'],
+    ['dvi_jobs.sent_from_lab_date', 'dvi_jobs.frame_upc', 'poms_jobs.count_jobs'],
     {
       'dvi_jobs.dvi_destination': 'PAIR',
-      'dvi_jobs.sent_from_lab_week': `${year}-01-01 to today`,
+      'dvi_jobs.sent_from_lab_date': `${year}-01-01 to today`,
     },
-    ['dvi_jobs.sent_from_lab_week desc', 'poms_jobs.count_jobs desc'],
+    ['dvi_jobs.sent_from_lab_date desc', 'poms_jobs.count_jobs desc'],
     50000
   );
 
-  // Group by week and UPC
-  const byWeek = {};
+  // Group by date and UPC
+  const byDate = {};
   for (const r of rows) {
-    const week = r['dvi_jobs.sent_from_lab_week'];
+    const date = r['dvi_jobs.sent_from_lab_date'];
     const upc = r['dvi_jobs.frame_upc'] || '';
     const jobs = r['poms_jobs.count_jobs'] || 0;
-    if (!week || !upc) continue;
+    if (!date || !upc) continue;
 
-    if (!byWeek[week]) byWeek[week] = { week, frames: 0, byUpc: {} };
-    byWeek[week].frames += jobs;
-    if (!byWeek[week].byUpc[upc]) byWeek[week].byUpc[upc] = 0;
-    byWeek[week].byUpc[upc] += jobs;
+    if (!byDate[date]) byDate[date] = { date, frames: 0, byUpc: {} };
+    byDate[date].frames += jobs;
+    if (!byDate[date].byUpc[upc]) byDate[date].byUpc[upc] = 0;
+    byDate[date].byUpc[upc] += jobs;
   }
 
-  return Object.values(byWeek).sort((a, b) => b.week.localeCompare(a.week));
+  return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -228,21 +228,21 @@ function getTopOPCs(days = 30, limit = 20) {
 }
 
 function getFrameUsage() {
-  const weekly = cache.frames || [];
-  const totalFrames = weekly.reduce((s, w) => s + w.frames, 0);
+  const daily = cache.frames || [];
+  const totalFrames = daily.reduce((s, d) => s + d.frames, 0);
 
   // Aggregate by UPC
   const upcTotals = {};
-  for (const w of weekly) {
-    for (const [upc, count] of Object.entries(w.byUpc || {})) {
+  for (const d of daily) {
+    for (const [upc, count] of Object.entries(d.byUpc || {})) {
       upcTotals[upc] = (upcTotals[upc] || 0) + count;
     }
   }
 
   return {
-    weekly,
+    daily,
     totalFrames,
-    weekCount: weekly.length,
+    dayCount: daily.length,
     upcCount: Object.keys(upcTotals).length,
     topUPCs: Object.entries(upcTotals)
       .map(([upc, count]) => ({ upc, count }))
