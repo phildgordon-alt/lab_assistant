@@ -1040,7 +1040,37 @@ function getAIContext() {
 // ─────────────────────────────────────────────────────────────────────────────
 function start() {
   console.log(`[ItemPath] Starting — ${CONFIG.mockMode ? 'MOCK MODE' : CONFIG.baseUrl} — poll every ${CONFIG.pollInterval/1000}s`);
-  poll();  // immediate first fetch
+
+  // Load from SQLite FIRST — instant data on restart, no API call needed
+  try {
+    const db = require('./db');
+    const existing = db.db.prepare('SELECT * FROM inventory').all();
+    if (existing.length > 0) {
+      cache.materials = existing.map(row => ({
+        id: row.id, sku: row.sku, name: row.name, qty: row.qty || 0,
+        qtyAvailable: row.qty_available || 0, unit: row.unit || 'EA',
+        location: row.location, warehouse: row.warehouse,
+        coatingType: row.coating_type, index: row.material_index,
+        reorderPoint: 10, lastUpdated: row.last_sync,
+      }));
+      cache.lastSync = existing[0]?.last_sync || new Date().toISOString();
+      cache.syncStatus = 'ok';
+
+      // Also populate the cached materials response so poll doesn't re-fetch
+      cachedMaterialsResp = { materials: existing.map(row => ({
+        id: row.id, name: row.sku, currentQuantity: row.qty,
+        unitOfMeasure: row.unit, location: row.location,
+        Info1: row.coating_type, Info3: row.material_index,
+        reOrderPoint: 10,
+      }))};
+
+      console.log(`[ItemPath] Loaded ${existing.length} items from SQLite — instant startup`);
+    }
+  } catch (e) {
+    console.log(`[ItemPath] No SQLite data yet — will fetch from API`);
+  }
+
+  poll();
   setInterval(poll, CONFIG.pollInterval);
 }
 
