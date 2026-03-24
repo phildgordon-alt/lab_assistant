@@ -1526,7 +1526,15 @@ Respond with a structured batching plan in this format:
     return json(res, itempath.getDailyPicks());
   }
   if (req.method==='GET' && url.pathname==='/api/inventory/warehouse-stock') {
-    return json(res, itempath.getWarehouseStock());
+    const ws = itempath.getWarehouseStock();
+    // Include TOPS manual count as a separate "warehouse"
+    const topsRows = labDb.db.prepare('SELECT sku, qty FROM tops_inventory').all();
+    const topsMap = {};
+    for (const r of topsRows) topsMap[r.sku] = (topsMap[r.sku] || 0) + r.qty;
+    ws.TOPS = topsMap;
+    ws.tops_sku_count = Object.keys(topsMap).length;
+    ws.tops_total_units = Object.values(topsMap).reduce((s, q) => s + q, 0);
+    return json(res, ws);
   }
   if (req.method==='GET' && url.pathname==='/api/inventory/consumption') {
     const days = parseInt(url.searchParams.get('days') || '7');
@@ -1582,7 +1590,12 @@ Respond with a structured batching plan in this format:
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/reconcile') {
     const category = url.searchParams.get('category') || null;
-    return json(res, netsuite.reconcile(itempath, category));
+    const topsRows = labDb.db.prepare('SELECT sku, qty FROM tops_inventory').all();
+    return json(res, netsuite.reconcile(itempath, category, topsRows));
+  }
+  if (req.method==='GET' && url.pathname==='/api/netsuite/pos') {
+    const category = url.searchParams.get('category') || null;
+    return json(res, netsuite.getOpenPOs(category));
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/health') {
     return json(res, netsuite.getHealth());
@@ -1621,6 +1634,69 @@ Respond with a structured batching plan in this format:
   }
   if (req.method==='GET' && url.pathname==='/api/inventory/ai-context') {
     return json(res, itempath.getAIContext());
+  }
+
+  // ── TOPS manual count upload ──────────────────────────────────
+  if (req.method==='POST' && url.pathname==='/api/inventory/tops/upload') {
+    return new Promise((resolve) => {
+      let body = '';
+      req.on('data', c => body += c);
+      req.on('end', () => {
+        try {
+          const filename = req.headers['x-filename'] || 'tops-upload.csv';
+          const lines = body.split(/\r?\n/).filter(l => l.trim());
+          if (lines.length < 2) return resolve(json(res, { error: 'CSV must have header + at least 1 row' }, 400));
+
+          const header = lines[0].toLowerCase();
+          if (!header.includes('sku') || !header.includes('qty')) {
+            return resolve(json(res, { error: 'CSV must have SKU and QTY columns' }, 400));
+          }
+
+          const cols = lines[0].split(',').map(c => c.trim().toLowerCase());
+          const skuIdx = cols.indexOf('sku');
+          const qtyIdx = cols.indexOf('qty');
+
+          const uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+          const rows = [];
+          for (let i = 1; i < lines.length; i++) {
+            const parts = lines[i].split(',').map(c => c.trim());
+            const sku = parts[skuIdx];
+            const qty = parseInt(parts[qtyIdx], 10);
+            if (sku && !isNaN(qty)) rows.push({ sku, qty });
+          }
+
+          if (rows.length === 0) return resolve(json(res, { error: 'No valid rows found' }, 400));
+
+          // Clear previous tops data and insert new
+          labDb.db.prepare('DELETE FROM tops_inventory').run();
+          const ins = labDb.db.prepare('INSERT INTO tops_inventory (sku, qty, upload_id) VALUES (?, ?, ?)');
+          const totalQty = rows.reduce((s, r) => s + r.qty, 0);
+
+          const insertAll = labDb.db.transaction(() => {
+            for (const r of rows) ins.run(r.sku, r.qty, uploadId);
+            labDb.db.prepare('INSERT INTO tops_uploads (id, filename, row_count, total_qty) VALUES (?, ?, ?, ?)').run(uploadId, filename, rows.length, totalQty);
+          });
+          insertAll();
+
+          console.log(`[TOPS] Uploaded ${rows.length} SKUs, ${totalQty} total qty from ${filename}`);
+          resolve(json(res, { ok: true, uploadId, filename, rowCount: rows.length, totalQty, uploadedAt: new Date().toISOString() }));
+        } catch (e) {
+          console.error('[TOPS] Upload error:', e);
+          resolve(json(res, { error: e.message }, 500));
+        }
+      });
+    });
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/inventory/tops') {
+    const rows = labDb.db.prepare('SELECT sku, qty, uploaded_at FROM tops_inventory ORDER BY qty DESC').all();
+    const lastUpload = labDb.db.prepare('SELECT * FROM tops_uploads ORDER BY uploaded_at DESC LIMIT 1').get();
+    return json(res, { items: rows, count: rows.length, totalQty: rows.reduce((s, r) => s + r.qty, 0), lastUpload: lastUpload || null });
+  }
+
+  if (req.method==='GET' && url.pathname==='/api/inventory/tops/history') {
+    const uploads = labDb.db.prepare('SELECT * FROM tops_uploads ORDER BY uploaded_at DESC LIMIT 20').all();
+    return json(res, { uploads });
   }
 
   // ── Limble CMMS maintenance endpoints ──────────────────────────

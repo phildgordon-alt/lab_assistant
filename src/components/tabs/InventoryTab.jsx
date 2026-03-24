@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { T, mono } from '../../constants';
 import { Card, SectionHeader } from '../shared';
 
@@ -486,6 +486,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [reconCategory, setReconCategory] = useState("all"); // all, Lenses, Tops, Frames, Other
   const [reconSearch, setReconSearch] = useState("");
   const [reconRefreshing, setReconRefreshing] = useState(false);
+  const [topsData, setTopsData] = useState(null);
+  const [topsUploading, setTopsUploading] = useState(false);
+  const [topsResult, setTopsResult] = useState(null);
+  const [topsError, setTopsError] = useState(null);
+  const [topsDragOver, setTopsDragOver] = useState(false);
+  const [topsSearch, setTopsSearch] = useState("");
+  const topsFileRef = useRef(null);
 
   // Fetch all inventory data
   useEffect(() => {
@@ -508,6 +515,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
         if (whResp) setWhStock(whResp);
         if (binResp) setBinningData(binResp);
         if (reconResp) setReconData(reconResp);
+        fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json()).then(setTopsData).catch(() => {});
         // Fetch NetSuite category mapping for warehouse stock breakdown
         try { const catResp = await fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()); setSkuCategories(catResp); } catch {}
         setLoading(false);
@@ -569,7 +577,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -957,11 +965,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
         {sub === "warehouse-stock" && (
           <div>
             {/* Warehouse totals */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, marginBottom: 24 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 24 }}>
               {[
                 { id: 'WH1', label: 'Warehouse 1', sub: 'CAR 1-3', color: T.blue },
                 { id: 'WH2', label: 'Warehouse 2', sub: 'CAR 4-6', color: T.green },
                 { id: 'WH3', label: 'Warehouse 3', sub: 'Kitchen + IRV02', color: T.amber },
+                { id: 'TOPS', label: 'TOPS', sub: 'Manual Count', color: T.purple },
               ].map(wh => {
                 const whData = whStock ? (whStock[wh.id] || {}) : {};
                 const skus = Object.keys(whData).length;
@@ -1014,10 +1023,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 style={{ flex: 1, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }}
               />
               <div style={{ display: "flex", gap: 4 }}>
-                {['all', 'WH1', 'WH2', 'WH3'].map(f => (
+                {['all', 'WH1', 'WH2', 'WH3', 'TOPS'].map(f => (
                   <button key={f} onClick={() => setWhFilter(f)} style={{
                     padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
-                    background: whFilter === f ? (f === 'WH1' ? T.blue : f === 'WH2' ? T.green : f === 'WH3' ? T.amber : T.blueDark) : 'transparent',
+                    background: whFilter === f ? (f === 'WH1' ? T.blue : f === 'WH2' ? T.green : f === 'WH3' ? T.amber : f === 'TOPS' ? T.purple : T.blueDark) : 'transparent',
                     color: whFilter === f ? '#fff' : T.textMuted,
                     border: `1px solid ${whFilter === f ? 'transparent' : T.border}`
                   }}>{f === 'all' ? 'All' : f}</button>
@@ -1029,9 +1038,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
             {whStock ? (() => {
               // Build unified SKU list
               const skuMap = {};
-              for (const wh of ['WH1', 'WH2', 'WH3']) {
+              for (const wh of ['WH1', 'WH2', 'WH3', 'TOPS']) {
                 for (const [sku, qty] of Object.entries(whStock[wh] || {})) {
-                  if (!skuMap[sku]) skuMap[sku] = { sku, WH1: 0, WH2: 0, WH3: 0, total: 0 };
+                  if (!skuMap[sku]) skuMap[sku] = { sku, WH1: 0, WH2: 0, WH3: 0, TOPS: 0, total: 0 };
                   skuMap[sku][wh] = qty;
                   skuMap[sku].total += qty;
                 }
@@ -1062,6 +1071,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>WH1</th>
                           <th style={{ padding: "10px 12px", textAlign: "right", color: T.green, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>WH2</th>
                           <th style={{ padding: "10px 12px", textAlign: "right", color: T.amber, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>WH3</th>
+                          <th style={{ padding: "10px 12px", textAlign: "right", color: T.purple, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>TOPS</th>
                           <th style={{ padding: "10px 16px", textAlign: "right", color: T.text, fontSize: 10, letterSpacing: 1, borderBottom: `1px solid ${T.border}` }}>TOTAL</th>
                         </tr>
                       </thead>
@@ -1073,6 +1083,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <td style={{ padding: "8px 12px", textAlign: "right", color: r.WH1 > 0 ? T.blue : T.textDim }}>{r.WH1 || '—'}</td>
                             <td style={{ padding: "8px 12px", textAlign: "right", color: r.WH2 > 0 ? T.green : T.textDim }}>{r.WH2 || '—'}</td>
                             <td style={{ padding: "8px 12px", textAlign: "right", color: r.WH3 > 0 ? T.amber : T.textDim }}>{r.WH3 || '—'}</td>
+                            <td style={{ padding: "8px 12px", textAlign: "right", color: r.TOPS > 0 ? T.purple : T.textDim }}>{r.TOPS || '—'}</td>
                             <td style={{ padding: "8px 16px", textAlign: "right", fontWeight: 700, color: T.text }}>{r.total.toLocaleString()}</td>
                           </tr>
                         ))}
@@ -1419,6 +1430,128 @@ function InventoryTab({ ovenServerUrl, settings }) {
             </Card>
           </div>
         )}
+
+        {sub === "tops" && (() => {
+          const uploadTopsFile = async (file) => {
+            setTopsUploading(true);
+            setTopsError(null);
+            setTopsResult(null);
+            try {
+              const content = await file.text();
+              const resp = await fetch(`${ovenServerUrl}/api/inventory/tops/upload`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/csv', 'X-Filename': file.name },
+                body: content
+              });
+              const data = await resp.json();
+              if (resp.ok) {
+                setTopsResult(data);
+                const updated = await fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json());
+                setTopsData(updated);
+              } else {
+                setTopsError(data.error || 'Upload failed');
+              }
+            } catch (e) { setTopsError(e.message); }
+            setTopsUploading(false);
+          };
+          const handleTopsDrop = (e) => { e.preventDefault(); setTopsDragOver(false); const f = e.dataTransfer?.files?.[0]; if (f) uploadTopsFile(f); };
+          const handleTopsSelect = (e) => { const f = e.target.files?.[0]; if (f) uploadTopsFile(f); };
+          const items = topsData?.items || [];
+          const filtered = topsSearch ? items.filter(i => i.sku.toLowerCase().includes(topsSearch.toLowerCase())) : items;
+
+          return (
+            <div>
+              {/* Upload Area */}
+              <Card
+                onDragOver={e => { e.preventDefault(); setTopsDragOver(true); }}
+                onDragLeave={() => setTopsDragOver(false)}
+                onDrop={handleTopsDrop}
+                onClick={() => topsFileRef.current?.click()}
+                style={{ padding: 32, textAlign: 'center', cursor: 'pointer', border: `2px dashed ${topsDragOver ? T.blue : T.border}`, background: topsDragOver ? `${T.blue}10` : T.card, transition: 'all 0.2s', marginBottom: 16 }}
+              >
+                <input ref={topsFileRef} type="file" accept=".csv" onChange={handleTopsSelect} style={{ display: 'none' }} />
+                {topsUploading ? (
+                  <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Uploading...</div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 28, marginBottom: 8 }}>+</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Drop TOPS CSV here</div>
+                    <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>or click to browse — CSV with SKU and QTY columns</div>
+                  </>
+                )}
+              </Card>
+
+              {topsError && (
+                <Card style={{ background: `${T.red}10`, border: `1px solid ${T.red}40`, marginBottom: 16, padding: 16 }}>
+                  <span style={{ color: T.red, fontSize: 13, fontWeight: 600 }}>{topsError}</span>
+                </Card>
+              )}
+
+              {topsResult && (
+                <Card style={{ background: `${T.green}10`, border: `1px solid ${T.green}40`, marginBottom: 16, padding: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ fontSize: 18, color: T.green }}>OK</span>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: T.green }}>{topsResult.rowCount} SKUs uploaded — {topsResult.totalQty?.toLocaleString()} total units</div>
+                      <div style={{ fontSize: 11, color: T.textMuted }}>{topsResult.filename}</div>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {/* KPI Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+                <Card style={{ padding: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: T.text, fontFamily: mono }}>{topsData?.count || 0}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginTop: 4 }}>UNIQUE SKUS</div>
+                </Card>
+                <Card style={{ padding: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: 28, fontWeight: 700, color: T.blue, fontFamily: mono }}>{(topsData?.totalQty || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginTop: 4 }}>TOTAL UNITS</div>
+                </Card>
+                <Card style={{ padding: 16, textAlign: 'center' }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{topsData?.lastUpload ? new Date(topsData.lastUpload.uploaded_at).toLocaleString() : 'Never'}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginTop: 4 }}>LAST UPLOAD</div>
+                </Card>
+              </div>
+
+              {/* Data Table */}
+              {items.length > 0 && (
+                <Card>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <SectionHeader style={{ margin: 0 }}>TOPS Inventory</SectionHeader>
+                    <input
+                      type="text" placeholder="Search SKU..."
+                      value={topsSearch} onChange={e => setTopsSearch(e.target.value)}
+                      style={{ padding: '6px 12px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono, width: 200 }}
+                    />
+                  </div>
+                  <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'left', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>SKU</th>
+                          <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'right', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>QTY</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.map((item, i) => (
+                          <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
+                            <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 12, color: T.text }}>{item.sku}</td>
+                            <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 12, color: T.text, textAlign: 'right' }}>{item.qty.toLocaleString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div style={{ padding: '8px 12px', fontSize: 10, color: T.textDim, borderTop: `1px solid ${T.border}` }}>
+                    Showing {filtered.length} of {items.length} SKUs
+                  </div>
+                </Card>
+              )}
+            </div>
+          );
+        })()}
 
         {sub === "search" && (
           <Card>

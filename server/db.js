@@ -262,6 +262,25 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(stat_date);
+
+  -- TOPS manual count uploads (CSV upload from inventory tab)
+  CREATE TABLE IF NOT EXISTS tops_inventory (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sku TEXT NOT NULL,
+    qty INTEGER NOT NULL,
+    upload_id TEXT NOT NULL,
+    uploaded_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_tops_sku ON tops_inventory(sku);
+  CREATE INDEX IF NOT EXISTS idx_tops_upload ON tops_inventory(upload_id);
+
+  CREATE TABLE IF NOT EXISTS tops_uploads (
+    id TEXT PRIMARY KEY,
+    filename TEXT,
+    row_count INTEGER,
+    total_qty INTEGER,
+    uploaded_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // ─────────────────────────────────────────────────────────────────────────────

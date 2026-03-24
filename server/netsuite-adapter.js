@@ -230,13 +230,19 @@ async function poll() {
 // ─────────────────────────────────────────────────────────────────────────────
 // RECONCILE — Compare NetSuite vs ItemPath
 // ─────────────────────────────────────────────────────────────────────────────
-function reconcile(itempath, category = null) {
+function reconcile(itempath, category = null, topsData = null) {
   const ipWarehouseStock = itempath.getWarehouseStock();
 
-  // Build ItemPath total by SKU (WH1 + WH2 + WH3)
+  // Build ItemPath total by SKU (WH1 + WH2 + WH3 + TOPS manual count)
   const ipTotal = {};
   for (const wh of ['WH1', 'WH2', 'WH3']) {
     for (const [sku, qty] of Object.entries(ipWarehouseStock[wh] || {})) {
+      ipTotal[sku] = (ipTotal[sku] || 0) + qty;
+    }
+  }
+  // Add TOPS manual count
+  if (topsData) {
+    for (const { sku, qty } of topsData) {
       ipTotal[sku] = (ipTotal[sku] || 0) + qty;
     }
   }
@@ -332,6 +338,110 @@ function getInventory() {
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PURCHASE ORDERS — Open POs from NetSuite
+// ─────────────────────────────────────────────────────────────────────────────
+let poCache = { orders: [], lastSync: null };
+
+async function fetchOpenPOs() {
+  if (!CONSUMER_KEY || !TOKEN_ID) return;
+
+  try {
+    // Get open PO headers
+    const headers = await suiteql(`
+      SELECT t.id, t.tranId AS poNumber, t.tranDate AS date, t.status,
+             t.memo, e.entityId AS vendorId, e.companyName AS vendor
+      FROM transaction t
+      LEFT JOIN entity e ON e.id = t.entity
+      WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D')
+      ORDER BY t.tranDate DESC
+    `);
+
+    // Get line items for open POs
+    const lines = await suiteql(`
+      SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
+             item.class AS classId, tl.quantity, tl.quantityReceived AS received,
+             tl.rate, tl.amount
+      FROM transactionLine tl
+      JOIN transaction t ON t.id = tl.transaction
+      JOIN item ON item.id = tl.item
+      WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D')
+        AND tl.quantity > 0 AND tl.itemType = 'InvtPart'
+      ORDER BY t.tranDate DESC
+    `);
+
+    const CLASS_MAP = { '1': 'Frames', '2': 'Frames', '3': 'Lenses', '4': 'Lenses', '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops' };
+    const STATUS_MAP = { 'A': 'Pending Approval', 'B': 'Pending Receipt', 'C': 'Partially Received', 'D': 'Pending Bill' };
+
+    // Group lines by PO
+    const linesByPO = {};
+    for (const line of lines) {
+      const poId = line.poid;
+      if (!linesByPO[poId]) linesByPO[poId] = [];
+      linesByPO[poId].push({
+        sku: line.sku,
+        name: line.name,
+        category: CLASS_MAP[line.classid] || 'Other',
+        qty: parseFloat(line.quantity) || 0,
+        received: parseFloat(line.received) || 0,
+        remaining: (parseFloat(line.quantity) || 0) - (parseFloat(line.received) || 0),
+        rate: parseFloat(line.rate) || 0,
+        amount: parseFloat(line.amount) || 0,
+      });
+    }
+
+    const orders = headers.map(h => ({
+      id: h.id,
+      poNumber: h.ponumber,
+      date: h.date,
+      status: STATUS_MAP[h.status] || h.status,
+      statusCode: h.status,
+      vendor: h.vendor || h.vendorid || '',
+      memo: h.memo || '',
+      lines: linesByPO[h.id] || [],
+      lineCount: (linesByPO[h.id] || []).length,
+      totalQty: (linesByPO[h.id] || []).reduce((s, l) => s + l.qty, 0),
+      totalReceived: (linesByPO[h.id] || []).reduce((s, l) => s + l.received, 0),
+      totalRemaining: (linesByPO[h.id] || []).reduce((s, l) => s + l.remaining, 0),
+      totalAmount: (linesByPO[h.id] || []).reduce((s, l) => s + l.amount, 0),
+    }));
+
+    poCache = { orders, lastSync: new Date().toISOString() };
+    console.log(`[NetSuite] POs: ${orders.length} open, ${lines.length} line items`);
+  } catch (err) {
+    console.error(`[NetSuite] PO fetch error: ${err.message}`);
+  }
+}
+
+function getOpenPOs(category = null) {
+  let orders = poCache.orders;
+  if (category) {
+    orders = orders.map(o => ({
+      ...o,
+      lines: o.lines.filter(l => l.category === category),
+    })).filter(o => o.lines.length > 0);
+  }
+
+  const summary = {
+    totalPOs: orders.length,
+    totalLines: orders.reduce((s, o) => s + o.lines.length, 0),
+    totalQty: orders.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + l.qty, 0), 0),
+    totalRemaining: orders.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + l.remaining, 0), 0),
+    totalAmount: orders.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + l.amount, 0), 0),
+    byStatus: {},
+    byCategory: {},
+  };
+
+  for (const o of orders) {
+    summary.byStatus[o.status] = (summary.byStatus[o.status] || 0) + 1;
+    for (const l of o.lines) {
+      summary.byCategory[l.category] = (summary.byCategory[l.category] || 0) + l.remaining;
+    }
+  }
+
+  return { orders, summary, lastSync: poCache.lastSync };
+}
+
 function getHealth() {
   return {
     configured: !!(CONSUMER_KEY && TOKEN_ID),
@@ -356,9 +466,10 @@ function start() {
   console.log(`[NetSuite] Poll interval: ${POLL_INTERVAL}ms`);
 
   // Initial poll after 10s (let other adapters start first)
-  setTimeout(() => poll(), 10000);
-  // Then every 5 minutes
+  setTimeout(() => { poll(); fetchOpenPOs(); }, 10000);
+  // Inventory every 5 minutes, POs every 10 minutes
   pollTimer = setInterval(() => poll(), POLL_INTERVAL);
+  setInterval(() => fetchOpenPOs(), 600000);
 }
 
 module.exports = {
@@ -367,5 +478,7 @@ module.exports = {
   getHealth,
   reconcile,
   lookupSku,
+  getOpenPOs,
+  fetchOpenPOs,
   poll,
 };
