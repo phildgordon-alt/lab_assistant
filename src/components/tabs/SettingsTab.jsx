@@ -1938,11 +1938,12 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                     limble:"Limble CMMS",
                     som:"SOM Control Center",
                     network:"UniFi Network",
-                    netsuite:"NetSuite ERP"
+                    netsuite:"NetSuite ERP",
+                    looker:"Looker Analytics"
                   };
                   const serviceIcons = {
                     gateway:"🌐",database:"🗄️",lab_backend:"🔧",slack:"💬",
-                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️",som:"⚙️",network:"🔀",netsuite:"📊"
+                    anthropic:"🤖",itempath:"📦",dvi:"🔬",limble:"🛠️",som:"⚙️",network:"🔀",netsuite:"📊",looker:"📈"
                   };
                   const startCommands = {
                     lab_backend: "npm run server",
@@ -1983,6 +1984,11 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                       {key:'unifiApiKey',label:'UNIFI_API_KEY',type:'password'},
                       {key:'unifiSite',label:'UNIFI_SITE',type:'text'},
                       {key:'unifiSite2',label:'UNIFI_SITE_2',type:'text'}
+                    ],
+                    looker: [
+                      {key:'lookerUrl',label:'LOOKER_URL',type:'url'},
+                      {key:'lookerClientId',label:'LOOKER_CLIENT_ID',type:'text'},
+                      {key:'lookerClientSecret',label:'LOOKER_CLIENT_SECRET',type:'password'}
                     ]
                   };
                   const isExpanded = expandedService === key;

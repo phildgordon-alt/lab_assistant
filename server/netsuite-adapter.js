@@ -230,7 +230,7 @@ async function poll() {
 // ─────────────────────────────────────────────────────────────────────────────
 // RECONCILE — Compare NetSuite vs ItemPath
 // ─────────────────────────────────────────────────────────────────────────────
-function reconcile(itempath, category = null, topsData = null, lookerByOpc = null) {
+function reconcile(itempath, category = null, topsData = null) {
   const ipWarehouseStock = itempath.getWarehouseStock();
 
   // Build ItemPath total by SKU (WH1 + WH2 + WH3 + TOPS manual count)
@@ -247,11 +247,8 @@ function reconcile(itempath, category = null, topsData = null, lookerByOpc = nul
     }
   }
 
-  // Build Looker consumption by OPC (daily avg)
-  const lkUsage = lookerByOpc || {};
-
   // Compare
-  let allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal), ...Object.keys(lkUsage)]);
+  let allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal)]);
 
   // Filter by category if specified — only include SKUs where NetSuite knows the category
   if (category) {
@@ -267,22 +264,17 @@ function reconcile(itempath, category = null, topsData = null, lookerByOpc = nul
   let totalNetSuite = 0;
   let totalItemPath = 0;
 
-  let totalLooker = 0;
   for (const sku of allSkus) {
     const nsQty = inventory[sku]?.qty || 0;
     const ipQty = ipTotal[sku] || 0;
     const wh1Qty = ipWarehouseStock.WH1?.[sku] || 0;
     const wh2Qty = ipWarehouseStock.WH2?.[sku] || 0;
     const wh3Qty = ipWarehouseStock.WH3?.[sku] || 0;
-    const lk = lkUsage[sku] || null;
-    const lkLenses = lk?.lenses || 0;
-    const lkBreakages = lk?.breakages || 0;
     totalNetSuite += nsQty;
     totalItemPath += ipQty;
-    totalLooker += lkLenses;
     const diff = ipQty - nsQty;
 
-    if (Math.abs(diff) > 0.5 || lkLenses > 0) {
+    if (Math.abs(diff) > 0.5) {
       discrepancies.push({
         sku,
         name: inventory[sku]?.name || '',
@@ -294,8 +286,6 @@ function reconcile(itempath, category = null, topsData = null, lookerByOpc = nul
         netsuite: nsQty,
         itempath: ipQty,
         diff,
-        looker_used: lkLenses,
-        looker_breakages: lkBreakages,
         pctDiff: nsQty > 0 ? Math.round((diff / nsQty) * 100) : (ipQty > 0 ? 100 : 0),
         severity: Math.abs(diff) > 50 ? 'critical' : Math.abs(diff) > 10 ? 'high' : 'low',
       });
@@ -316,8 +306,6 @@ function reconcile(itempath, category = null, topsData = null, lookerByOpc = nul
       totalNetSuite: Math.round(totalNetSuite),
       totalItemPath: Math.round(totalItemPath),
       totalDiff: Math.round(totalItemPath - totalNetSuite),
-      totalLooker: Math.round(totalLooker),
-      lookerSkus: Object.keys(lkUsage).length,
       netsuiteSkus: Object.keys(inventory).length,
       itempathSkus: Object.keys(ipTotal).length,
       critical: discrepancies.filter(d => d.severity === 'critical').length,

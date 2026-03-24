@@ -805,33 +805,28 @@ function InventoryTab({ ovenServerUrl, settings }) {
             {/* Summary KPIs */}
             {reconData?.summary ? (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 12, marginBottom: 24 }}>
-                  <Card style={{ padding: 14, textAlign: "center" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 24 }}>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
                     <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>SKUS COMPARED</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: T.text, fontFamily: mono }}>{reconData.summary.totalSkus?.toLocaleString()}</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{reconData.summary.totalSkus?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>NS: {reconData.summary.netsuiteSkus} · IP: {reconData.summary.itempathSkus}</div>
                   </Card>
-                  <Card style={{ padding: 14, textAlign: "center" }}>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
                     <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>MATCHED</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{reconData.summary.matched?.toLocaleString()}</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{reconData.summary.matched?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.green, fontFamily: mono }}>{reconData.summary.matchRate}% match rate</div>
                   </Card>
-                  <Card style={{ padding: 14, textAlign: "center" }}>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
                     <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DISCREPANCIES</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: reconData.summary.discrepancies > 0 ? T.red : T.green, fontFamily: mono }}>{reconData.summary.discrepancies?.toLocaleString()}</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.discrepancies > 0 ? T.red : T.green, fontFamily: mono }}>{reconData.summary.discrepancies?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>
-                      <span style={{ color: T.red }}>{reconData.summary.critical} crit</span> · <span style={{ color: T.amber }}>{reconData.summary.high} high</span> · {reconData.summary.low} low
+                      <span style={{ color: T.red }}>{reconData.summary.critical} critical</span> · <span style={{ color: T.amber }}>{reconData.summary.high} high</span> · {reconData.summary.low} low
                     </div>
                   </Card>
-                  <Card style={{ padding: 14, textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>IP vs NS VARIANCE</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: reconData.summary.totalDiff === 0 ? T.green : T.amber, fontFamily: mono }}>{reconData.summary.totalDiff > 0 ? '+' : ''}{reconData.summary.totalDiff?.toLocaleString()}</div>
+                  <Card style={{ padding: 16, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NET VARIANCE</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.totalDiff === 0 ? T.green : T.amber, fontFamily: mono }}>{reconData.summary.totalDiff > 0 ? '+' : ''}{reconData.summary.totalDiff?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IP: {reconData.summary.totalItemPath?.toLocaleString()} · NS: {reconData.summary.totalNetSuite?.toLocaleString()}</div>
-                  </Card>
-                  <Card style={{ padding: 14, textAlign: "center", borderLeft: `3px solid ${T.cyan}` }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER CONSUMED</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: T.cyan, fontFamily: mono }}>{(reconData.summary.totalLooker || 0).toLocaleString()}</div>
-                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{reconData.summary.lookerSkus || 0} OPCs · 60 days</div>
                   </Card>
                 </div>
 
@@ -923,8 +918,6 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.blue, fontSize: 10 }}>IP TOTAL</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontSize: 10 }}>NETSUITE</th>
                               <th style={{ padding: "10px 12px", textAlign: "right", color: T.textDim, fontSize: 10 }}>VARIANCE</th>
-                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.cyan, fontSize: 10 }}>LOOKER USED</th>
-                              <th style={{ padding: "10px 12px", textAlign: "right", color: T.red, fontSize: 10 }}>BREAKAGE</th>
                               <th style={{ padding: "10px 12px", textAlign: "center", color: T.textDim, fontSize: 10 }}>STATUS</th>
                             </tr>
                           </thead>
@@ -944,8 +937,6 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.blue, fontWeight: 600 }}>{d.itempath?.toLocaleString()}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{d.netsuite?.toLocaleString()}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "right", color: sevColor, fontWeight: 700 }}>{d.diff > 0 ? '+' : ''}{d.diff}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right", color: d.looker_used > 0 ? T.cyan : T.textDim }}>{d.looker_used > 0 ? d.looker_used.toLocaleString() : '—'}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right", color: d.looker_breakages > 0 ? T.red : T.textDim }}>{d.looker_breakages > 0 ? d.looker_breakages.toLocaleString() : '—'}</td>
                                   <td style={{ padding: "8px 12px", textAlign: "center" }}>
                                     <span style={{ padding: "3px 8px", borderRadius: 4, fontSize: 10, fontWeight: 700, background: `${statusColor}20`, color: statusColor }}>{statusLabel}</span>
                                   </td>
@@ -1446,21 +1437,19 @@ function InventoryTab({ ovenServerUrl, settings }) {
         {sub === "lens-usage" && (() => {
           // Fetch on mount / days change
           if (!usageData || usageData._days !== usageDays) {
-            fetch(`${ovenServerUrl}/api/usage/comparison?days=${usageDays}`).then(r => r.json()).then(d => { d._days = usageDays; setUsageData(d); }).catch(() => {});
-            fetch(`${ovenServerUrl}/api/looker/top-opcs?days=${usageDays}&limit=25`).then(r => r.json()).then(setUsageTopOPCs).catch(() => {});
+            fetch(`${ovenServerUrl}/api/usage/daily?days=${usageDays}`).then(r => r.json()).then(d => { d._days = usageDays; setUsageData(d); }).catch(() => {});
           }
-          const comp = usageData?.comparison || [];
-          const lkSummary = usageData?.lookerSummary || {};
-          const ipSummary = usageData?.itempathSummary || {};
-          const nsSummary = usageData?.netsuiteSummary || {};
-          const maxLenses = Math.max(1, ...comp.map(d => d.looker_lenses));
-          const topOPCs = Array.isArray(usageTopOPCs) ? usageTopOPCs : [];
+          const daily = usageData?.dailyTotals || [];
+          const skus = usageData?.skuComparison || [];
+          const lk = usageData?.summary?.looker || {};
+          const ip = usageData?.summary?.itempath || {};
+          const maxDay = Math.max(1, ...daily.map(d => Math.max(d.looker_lenses, d.itempath_qty)));
 
           return (
             <div>
-              {/* Period selector */}
+              {/* Header + period selector */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Lens Usage — Looker vs ItemPath</h3>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Daily Usage — Looker vs ItemPath</h3>
                 <div style={{ display: "flex", gap: 4 }}>
                   {[14, 30, 60].map(d => (
                     <button key={d} onClick={() => { setUsageData(null); setUsageDays(d); }} style={{
@@ -1472,95 +1461,97 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 </div>
               </div>
 
-              {/* Summary KPIs */}
+              {/* KPIs */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
-                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER — LENSES SENT</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(lkSummary.totalLenses || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lkSummary.avgDaily || 0}/day avg</div>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER — SENT FROM LAB</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(lk.totalLenses || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lk.avgDaily || 0}/day · {lk.days || 0} days · {lk.skus || 0} OPCs</div>
                 </Card>
-                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.red, fontFamily: mono }}>{(lkSummary.totalBreakages || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lkSummary.breakageRate || 0}% rate</div>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES (LOOKER)</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.red, fontFamily: mono }}>{(lk.totalBreakages || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lk.breakageRate || 0}% rate</div>
                 </Card>
-                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH — PICKS</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{(ipSummary.totalPicks || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{(ipSummary.totalQty || 0).toLocaleString()} qty</div>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH — PICKED</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.green, fontFamily: mono }}>{(ip.totalQty || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{ip.totalPicks || 0} picks · {ip.days || 0} days · {ip.skus || 0} SKUs</div>
                 </Card>
-                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE — ON HAND</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(nsSummary.totalQty || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{(nsSummary.totalSkus || 0).toLocaleString()} SKUs</div>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: Math.abs((ip.totalQty || 0) - (lk.totalLenses || 0)) < 100 ? T.green : T.amber, fontFamily: mono }}>
+                    {((ip.totalQty || 0) - (lk.totalLenses || 0)) > 0 ? '+' : ''}{((ip.totalQty || 0) - (lk.totalLenses || 0)).toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>IP picked - Looker sent</div>
                 </Card>
               </div>
 
-              {/* Daily comparison chart */}
+              {/* Daily chart — side by side bars */}
               <Card style={{ marginBottom: 20 }}>
-                <SectionHeader right={`${comp.length} days`}>Daily Lens Usage (Looker) vs Picks (ItemPath)</SectionHeader>
-                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                  {comp.map(d => {
+                <SectionHeader right={`${daily.length} days`}>Daily Consumption</SectionHeader>
+                <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                  {daily.map(d => {
                     const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-                    const barPct = Math.round((d.looker_lenses / maxLenses) * 100);
+                    const lkPct = Math.round((d.looker_lenses / maxDay) * 100);
+                    const ipPct = Math.round((d.itempath_qty / maxDay) * 100);
                     const isToday = d.date === new Date().toISOString().slice(0, 10);
                     const isWeekend = [0, 6].includes(new Date(d.date + 'T12:00:00').getDay());
                     return (
-                      <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', background: isToday ? `${T.blue}15` : T.bg, borderRadius: 6, border: `1px solid ${isToday ? T.blue : T.border}` }}>
-                        <div style={{ width: 110, fontSize: 11, fontWeight: isToday ? 700 : 600, color: isToday ? T.blue : isWeekend ? T.textDim : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
-                        <div style={{ flex: 1, height: 8, background: T.surface, borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
-                          <div style={{ width: `${barPct}%`, height: '100%', background: T.blue, borderRadius: 4, opacity: 0.7 }} />
-                          {d.looker_breakages > 0 && <div style={{ position: 'absolute', top: 0, left: 0, width: `${Math.round((d.looker_breakages / maxLenses) * 100)}%`, height: '100%', background: T.red, borderRadius: 4, opacity: 0.8 }} />}
+                      <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 12px', background: isToday ? `${T.blue}12` : T.bg, borderRadius: 5, border: `1px solid ${isToday ? T.blue : T.border}` }}>
+                        <div style={{ width: 100, fontSize: 11, fontWeight: isToday ? 700 : 500, color: isToday ? T.blue : isWeekend ? T.textDim : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
+                        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          <div style={{ height: 5, background: T.surface, borderRadius: 3, overflow: 'hidden', position: 'relative' }}>
+                            <div style={{ width: `${lkPct}%`, height: '100%', background: T.blue, borderRadius: 3, opacity: 0.7 }} />
+                            {d.looker_breakages > 0 && <div style={{ position: 'absolute', right: 0, top: 0, width: `${Math.max(2, Math.round((d.looker_breakages / maxDay) * 100))}%`, height: '100%', background: T.red, borderRadius: 3, opacity: 0.9 }} />}
+                          </div>
+                          <div style={{ height: 5, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
+                            <div style={{ width: `${ipPct}%`, height: '100%', background: T.green, borderRadius: 3, opacity: 0.7 }} />
+                          </div>
                         </div>
-                        <div style={{ minWidth: 60, textAlign: 'right', fontSize: 13, fontWeight: 700, color: T.blue, fontFamily: mono }}>{d.looker_lenses.toLocaleString()}</div>
-                        <div style={{ minWidth: 45, textAlign: 'right', fontSize: 11, color: d.looker_breakages > 0 ? T.red : T.textDim, fontFamily: mono }}>{d.looker_breakages > 0 ? `-${d.looker_breakages}` : '—'}</div>
-                        <div style={{ minWidth: 40, textAlign: 'right', fontSize: 11, color: d.looker_breakage_rate >= 3 ? T.red : d.looker_breakage_rate >= 2 ? T.amber : T.textDim, fontFamily: mono }}>{d.looker_breakage_rate > 0 ? `${d.looker_breakage_rate}%` : ''}</div>
-                        <div style={{ width: 1, height: 16, background: T.border, margin: '0 4px' }} />
-                        <div style={{ minWidth: 50, textAlign: 'right', fontSize: 11, color: d.itempath_picks > 0 ? T.green : T.textDim, fontFamily: mono }}>{d.itempath_picks > 0 ? `${d.itempath_picks} pk` : '—'}</div>
+                        <div style={{ minWidth: 55, textAlign: 'right', fontSize: 12, fontWeight: 700, color: T.blue, fontFamily: mono }}>{d.looker_lenses.toLocaleString()}</div>
+                        <div style={{ minWidth: 40, textAlign: 'right', fontSize: 10, color: d.looker_breakages > 0 ? T.red : T.textDim, fontFamily: mono }}>{d.looker_breakages > 0 ? `-${d.looker_breakages}` : ''}</div>
+                        <div style={{ width: 1, height: 14, background: T.border }} />
+                        <div style={{ minWidth: 55, textAlign: 'right', fontSize: 12, fontWeight: 700, color: T.green, fontFamily: mono }}>{d.itempath_qty > 0 ? d.itempath_qty.toLocaleString() : '—'}</div>
                       </div>
                     );
                   })}
                 </div>
-                {comp.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>Loading Looker data...</div>}
-                <div style={{ display: "flex", gap: 16, padding: "10px 12px", borderTop: `1px solid ${T.border}`, marginTop: 8, fontSize: 10, fontFamily: mono, color: T.textDim }}>
-                  <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Lenses (Looker)</span>
-                  <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.red, borderRadius: 2, marginRight: 4, opacity: 0.8 }} />Breakages</span>
-                  <span><span style={{ color: T.green }}>pk</span> = ItemPath picks</span>
+                {daily.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>Loading usage data...</div>}
+                <div style={{ display: "flex", gap: 16, padding: "8px 12px", borderTop: `1px solid ${T.border}`, marginTop: 6, fontSize: 10, fontFamily: mono, color: T.textDim }}>
+                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker (sent from lab)</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />ItemPath (picked)</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 5, background: T.red, borderRadius: 2, marginRight: 4, opacity: 0.9 }} />Breakages</span>
                 </div>
               </Card>
 
-              {/* Top OPCs */}
-              {topOPCs.length > 0 && (
+              {/* SKU comparison table */}
+              {skus.length > 0 && (
                 <Card>
-                  <SectionHeader right={`${topOPCs.length} OPCs`}>Top Lens OPCs by Volume</SectionHeader>
+                  <SectionHeader right={`${skus.length} SKUs`}>Usage by SKU — Looker vs ItemPath</SectionHeader>
                   <div style={{ maxHeight: 500, overflowY: 'auto' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
                       <thead>
-                        <tr style={{ background: T.bg, position: 'sticky', top: 0 }}>
-                          <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>OPC</th>
-                          <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LENSES</th>
-                          <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGES</th>
-                          <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>BREAK %</th>
-                          <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>BAR</th>
+                        <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
+                          <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU / OPC</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER SENT</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGE</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>IP PICKED</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {topOPCs.map((o, i) => {
-                          const maxOpc = topOPCs[0]?.lenses || 1;
-                          return (
-                            <tr key={o.opc} style={{ borderBottom: `1px solid ${T.border}22` }}>
-                              <td style={{ padding: '8px 12px', fontWeight: 700, color: T.text }}>{o.opc}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', color: T.blue }}>{o.lenses.toLocaleString()}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', color: o.breakages > 0 ? T.red : T.textDim }}>{o.breakages || '—'}</td>
-                              <td style={{ padding: '8px 12px', textAlign: 'right', color: o.breakageRate >= 5 ? T.red : o.breakageRate >= 3 ? T.amber : T.textDim }}>{o.breakageRate > 0 ? `${o.breakageRate}%` : '—'}</td>
-                              <td style={{ padding: '8px 12px', width: '30%' }}>
-                                <div style={{ height: 6, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
-                                  <div style={{ width: `${Math.round((o.lenses / maxOpc) * 100)}%`, height: '100%', background: T.blue, borderRadius: 3, opacity: 0.6 }} />
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        })}
+                        {skus.slice(0, 100).map((s, i) => (
+                          <tr key={s.sku} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                            <td style={{ padding: '7px 12px', fontWeight: 600, color: T.text }}>{s.sku}</td>
+                            <td style={{ padding: '7px 12px', textAlign: 'right', color: s.looker_lenses > 0 ? T.blue : T.textDim }}>{s.looker_lenses > 0 ? s.looker_lenses.toLocaleString() : '—'}</td>
+                            <td style={{ padding: '7px 12px', textAlign: 'right', color: s.looker_breakages > 0 ? T.red : T.textDim }}>{s.looker_breakages > 0 ? s.looker_breakages.toLocaleString() : '—'}</td>
+                            <td style={{ padding: '7px 12px', textAlign: 'right', color: s.itempath_qty > 0 ? T.green : T.textDim }}>{s.itempath_qty > 0 ? s.itempath_qty.toLocaleString() : '—'}</td>
+                            <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 700, color: s.variance === 0 ? T.textDim : Math.abs(s.variance) > 50 ? T.red : T.amber }}>
+                              {s.variance !== 0 ? (s.variance > 0 ? '+' : '') + s.variance.toLocaleString() : '—'}
+                            </td>
+                          </tr>
+                        ))}
                       </tbody>
                     </table>
                   </div>

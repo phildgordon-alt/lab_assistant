@@ -1593,17 +1593,7 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/netsuite/reconcile') {
     const category = url.searchParams.get('category') || null;
     const topsRows = labDb.db.prepare('SELECT sku, qty FROM tops_inventory').all();
-    // Build Looker usage by OPC (aggregated across all cached days)
-    const lkData = looker.getUsage(60);
-    const lookerByOpc = {};
-    for (const day of (lkData.daily || [])) {
-      for (const [opc, v] of Object.entries(day.byOpc || {})) {
-        if (!lookerByOpc[opc]) lookerByOpc[opc] = { lenses: 0, breakages: 0 };
-        lookerByOpc[opc].lenses += v.lenses;
-        lookerByOpc[opc].breakages += v.breakages;
-      }
-    }
-    return json(res, netsuite.reconcile(itempath, category, topsRows, lookerByOpc));
+    return json(res, netsuite.reconcile(itempath, category, topsRows));
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/pos') {
     const category = url.searchParams.get('category') || null;
@@ -1650,51 +1640,86 @@ Respond with a structured batching plan in this format:
     return json(res, { ok: true, ...looker.getHealth() });
   }
 
-  // ── Lens Usage Comparison — Looker vs ItemPath vs NetSuite ──
-  if (req.method==='GET' && url.pathname==='/api/usage/comparison') {
+  // ── Usage Comparison — daily consumption: Looker vs ItemPath ──
+  if (req.method==='GET' && url.pathname==='/api/usage/daily') {
     const days = parseInt(url.searchParams.get('days') || '30');
     const lookerData = looker.getUsage(days);
-    const ipPicks = itempath.getPicks();
-    const nsInventory = netsuite.getInventory();
 
-    // Build ItemPath daily picks from picks_history
-    const ipDaily = {};
-    const picksRows = labDb.db.prepare(`
-      SELECT date(completed_at) as date, SUM(qty) as total_qty, COUNT(*) as pick_count
+    // ItemPath daily picks by SKU from picks_history
+    const ipDailyRows = labDb.db.prepare(`
+      SELECT date(completed_at) as date, sku, SUM(qty) as qty, COUNT(*) as picks
       FROM picks_history
       WHERE completed_at IS NOT NULL
-      GROUP BY date(completed_at)
+      GROUP BY date(completed_at), sku
       ORDER BY date DESC
-      LIMIT ?
-    `).all(days);
-    for (const r of picksRows) {
-      ipDaily[r.date] = { picks: r.pick_count, qty: r.total_qty };
+    `).all();
+
+    // ItemPath daily totals
+    const ipByDate = {};
+    const ipBySku = {};
+    for (const r of ipDailyRows) {
+      if (!ipByDate[r.date]) ipByDate[r.date] = { picks: 0, qty: 0 };
+      ipByDate[r.date].picks += r.picks;
+      ipByDate[r.date].qty += r.qty;
+      if (!ipBySku[r.sku]) ipBySku[r.sku] = { sku: r.sku, totalQty: 0, totalPicks: 0, days: {} };
+      ipBySku[r.sku].totalQty += r.qty;
+      ipBySku[r.sku].totalPicks += r.picks;
+      ipBySku[r.sku].days[r.date] = r.qty;
     }
 
-    // Merge into comparison rows
+    // Looker by SKU (OPC)
+    const lkBySku = {};
+    for (const day of (lookerData.daily || [])) {
+      for (const [opc, v] of Object.entries(day.byOpc || {})) {
+        if (!lkBySku[opc]) lkBySku[opc] = { sku: opc, totalLenses: 0, totalBreakages: 0, days: {} };
+        lkBySku[opc].totalLenses += v.lenses;
+        lkBySku[opc].totalBreakages += v.breakages;
+        lkBySku[opc].days[day.date] = v.lenses;
+      }
+    }
+
+    // Daily totals merged
     const allDates = new Set([
       ...lookerData.daily.map(d => d.date),
-      ...Object.keys(ipDaily),
+      ...Object.keys(ipByDate),
     ]);
-    const comparison = [...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days).map(date => {
+    const dailyTotals = [...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days).map(date => {
       const lk = lookerData.daily.find(d => d.date === date);
-      const ip = ipDaily[date];
+      const ip = ipByDate[date];
       return {
         date,
         looker_lenses: lk?.lenses || 0,
         looker_breakages: lk?.breakages || 0,
-        looker_breakage_rate: lk && lk.lenses > 0 ? Math.round((lk.breakages / lk.lenses) * 1000) / 10 : 0,
         itempath_picks: ip?.picks || 0,
         itempath_qty: ip?.qty || 0,
       };
     });
 
+    // Top SKUs — merge Looker + ItemPath usage
+    const allSkus = new Set([...Object.keys(lkBySku), ...Object.keys(ipBySku)]);
+    const skuComparison = [...allSkus].map(sku => ({
+      sku,
+      looker_lenses: lkBySku[sku]?.totalLenses || 0,
+      looker_breakages: lkBySku[sku]?.totalBreakages || 0,
+      itempath_qty: ipBySku[sku]?.totalQty || 0,
+      itempath_picks: ipBySku[sku]?.totalPicks || 0,
+      variance: (ipBySku[sku]?.totalQty || 0) - (lkBySku[sku]?.totalLenses || 0),
+    })).filter(s => s.looker_lenses > 0 || s.itempath_qty > 0)
+      .sort((a, b) => (b.looker_lenses + b.itempath_qty) - (a.looker_lenses + a.itempath_qty));
+
+    const lkTotal = lookerData.totalLenses || 0;
+    const lkBreakTotal = lookerData.totalBreakages || 0;
+    const ipTotal = Object.values(ipByDate).reduce((s, d) => s + d.qty, 0);
+    const ipPicks = Object.values(ipByDate).reduce((s, d) => s + d.picks, 0);
+
     return json(res, {
-      comparison,
-      lookerSummary: { totalLenses: lookerData.totalLenses, totalBreakages: lookerData.totalBreakages, avgDaily: lookerData.avgDaily, breakageRate: lookerData.breakageRate },
-      itempathSummary: { totalPicks: picksRows.reduce((s, r) => s + r.pick_count, 0), totalQty: picksRows.reduce((s, r) => s + r.total_qty, 0) },
-      netsuiteSummary: { totalSkus: nsInventory.count, totalQty: nsInventory.totalQty },
-      dayCount: comparison.length,
+      dailyTotals,
+      skuComparison: skuComparison.slice(0, 200),
+      summary: {
+        looker: { totalLenses: lkTotal, totalBreakages: lkBreakTotal, avgDaily: lookerData.avgDaily, breakageRate: lookerData.breakageRate, days: lookerData.dayCount, skus: Object.keys(lkBySku).length },
+        itempath: { totalQty: ipTotal, totalPicks: ipPicks, days: Object.keys(ipByDate).length, skus: Object.keys(ipBySku).length },
+      },
+      dayCount: dailyTotals.length,
     });
   }
 
