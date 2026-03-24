@@ -2588,11 +2588,11 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/shipping/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
     const byDay = {};
-    const now = Date.now();
-    // Initialize days
+    // Initialize days using local time (not UTC)
     for (let d = 0; d < days; d++) {
-      const date = new Date(now - d * 86400000);
-      const key = date.toISOString().slice(0, 10);
+      const date = new Date();
+      date.setDate(date.getDate() - d);
+      const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       byDay[key] = { date: key, shipped: 0, rush: 0 };
     }
     // Primary source: Shipped XML archive (source of truth)
