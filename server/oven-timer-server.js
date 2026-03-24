@@ -39,9 +39,11 @@ const knowledge = require('./knowledge-adapter');
 const itempath = require('./itempath-adapter');
 const binning = require('./binning-intelligence');
 const netsuite = require('./netsuite-adapter');
+const looker = require('./looker-adapter');
 itempath.start();
 binning.start(itempath);
 netsuite.start();
+looker.start();
 
 // ── Limble CMMS maintenance integration ───────────────────────
 const limble = require('./limble-adapter');
@@ -1618,6 +1620,72 @@ Respond with a structured batching plan in this format:
   if (req.method==='POST' && url.pathname==='/api/netsuite/refresh') {
     await netsuite.poll();
     return json(res, { ok: true, ...netsuite.getHealth() });
+  }
+
+  // ── Looker lens usage endpoints ─────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/looker/usage') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    return json(res, looker.getUsage(days));
+  }
+  if (req.method==='GET' && url.pathname==='/api/looker/top-opcs') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const limit = parseInt(url.searchParams.get('limit') || '20');
+    return json(res, looker.getTopOPCs(days, limit));
+  }
+  if (req.method==='GET' && url.pathname==='/api/looker/health') {
+    return json(res, looker.getHealth());
+  }
+  if (req.method==='POST' && url.pathname==='/api/looker/refresh') {
+    await looker.poll();
+    return json(res, { ok: true, ...looker.getHealth() });
+  }
+
+  // ── Lens Usage Comparison — Looker vs ItemPath vs NetSuite ──
+  if (req.method==='GET' && url.pathname==='/api/usage/comparison') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const lookerData = looker.getUsage(days);
+    const ipPicks = itempath.getPicks();
+    const nsInventory = netsuite.getInventory();
+
+    // Build ItemPath daily picks from picks_history
+    const ipDaily = {};
+    const picksRows = labDb.db.prepare(`
+      SELECT date(completed_at) as date, SUM(qty) as total_qty, COUNT(*) as pick_count
+      FROM picks_history
+      WHERE completed_at IS NOT NULL
+      GROUP BY date(completed_at)
+      ORDER BY date DESC
+      LIMIT ?
+    `).all(days);
+    for (const r of picksRows) {
+      ipDaily[r.date] = { picks: r.pick_count, qty: r.total_qty };
+    }
+
+    // Merge into comparison rows
+    const allDates = new Set([
+      ...lookerData.daily.map(d => d.date),
+      ...Object.keys(ipDaily),
+    ]);
+    const comparison = [...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days).map(date => {
+      const lk = lookerData.daily.find(d => d.date === date);
+      const ip = ipDaily[date];
+      return {
+        date,
+        looker_lenses: lk?.lenses || 0,
+        looker_breakages: lk?.breakages || 0,
+        looker_breakage_rate: lk && lk.lenses > 0 ? Math.round((lk.breakages / lk.lenses) * 1000) / 10 : 0,
+        itempath_picks: ip?.picks || 0,
+        itempath_qty: ip?.qty || 0,
+      };
+    });
+
+    return json(res, {
+      comparison,
+      lookerSummary: { totalLenses: lookerData.totalLenses, totalBreakages: lookerData.totalBreakages, avgDaily: lookerData.avgDaily, breakageRate: lookerData.breakageRate },
+      itempathSummary: { totalPicks: picksRows.reduce((s, r) => s + r.pick_count, 0), totalQty: picksRows.reduce((s, r) => s + r.total_qty, 0) },
+      netsuiteSummary: { totalSkus: nsInventory.count, totalQty: nsInventory.totalQty },
+      dayCount: comparison.length,
+    });
   }
 
   if (req.method==='GET' && url.pathname==='/api/inventory/alerts') {

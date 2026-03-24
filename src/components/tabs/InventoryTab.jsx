@@ -493,6 +493,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [topsDragOver, setTopsDragOver] = useState(false);
   const [topsSearch, setTopsSearch] = useState("");
   const topsFileRef = useRef(null);
+  const [usageData, setUsageData] = useState(null);
+  const [usageDays, setUsageDays] = useState(30);
+  const [usageTopOPCs, setUsageTopOPCs] = useState([]);
 
   // Fetch all inventory data
   useEffect(() => {
@@ -577,7 +580,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "lens-usage", label: "Lens Usage" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -1430,6 +1433,133 @@ function InventoryTab({ ovenServerUrl, settings }) {
             </Card>
           </div>
         )}
+
+        {sub === "lens-usage" && (() => {
+          // Fetch on mount / days change
+          if (!usageData || usageData._days !== usageDays) {
+            fetch(`${ovenServerUrl}/api/usage/comparison?days=${usageDays}`).then(r => r.json()).then(d => { d._days = usageDays; setUsageData(d); }).catch(() => {});
+            fetch(`${ovenServerUrl}/api/looker/top-opcs?days=${usageDays}&limit=25`).then(r => r.json()).then(setUsageTopOPCs).catch(() => {});
+          }
+          const comp = usageData?.comparison || [];
+          const lkSummary = usageData?.lookerSummary || {};
+          const ipSummary = usageData?.itempathSummary || {};
+          const nsSummary = usageData?.netsuiteSummary || {};
+          const maxLenses = Math.max(1, ...comp.map(d => d.looker_lenses));
+          const topOPCs = Array.isArray(usageTopOPCs) ? usageTopOPCs : [];
+
+          return (
+            <div>
+              {/* Period selector */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Lens Usage — Looker vs ItemPath</h3>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[14, 30, 60].map(d => (
+                    <button key={d} onClick={() => { setUsageData(null); setUsageDays(d); }} style={{
+                      padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                      background: usageDays === d ? T.blue : 'transparent', color: usageDays === d ? '#fff' : T.textMuted,
+                      border: `1px solid ${usageDays === d ? T.blue : T.border}`
+                    }}>{d}d</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Summary KPIs */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER — LENSES SENT</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(lkSummary.totalLenses || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lkSummary.avgDaily || 0}/day avg</div>
+                </Card>
+                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.red, fontFamily: mono }}>{(lkSummary.totalBreakages || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lkSummary.breakageRate || 0}% rate</div>
+                </Card>
+                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH — PICKS</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{(ipSummary.totalPicks || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{(ipSummary.totalQty || 0).toLocaleString()} qty</div>
+                </Card>
+                <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE — ON HAND</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(nsSummary.totalQty || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{(nsSummary.totalSkus || 0).toLocaleString()} SKUs</div>
+                </Card>
+              </div>
+
+              {/* Daily comparison chart */}
+              <Card style={{ marginBottom: 20 }}>
+                <SectionHeader right={`${comp.length} days`}>Daily Lens Usage (Looker) vs Picks (ItemPath)</SectionHeader>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  {comp.map(d => {
+                    const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+                    const barPct = Math.round((d.looker_lenses / maxLenses) * 100);
+                    const isToday = d.date === new Date().toISOString().slice(0, 10);
+                    const isWeekend = [0, 6].includes(new Date(d.date + 'T12:00:00').getDay());
+                    return (
+                      <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 12px', background: isToday ? `${T.blue}15` : T.bg, borderRadius: 6, border: `1px solid ${isToday ? T.blue : T.border}` }}>
+                        <div style={{ width: 110, fontSize: 11, fontWeight: isToday ? 700 : 600, color: isToday ? T.blue : isWeekend ? T.textDim : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
+                        <div style={{ flex: 1, height: 8, background: T.surface, borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+                          <div style={{ width: `${barPct}%`, height: '100%', background: T.blue, borderRadius: 4, opacity: 0.7 }} />
+                          {d.looker_breakages > 0 && <div style={{ position: 'absolute', top: 0, left: 0, width: `${Math.round((d.looker_breakages / maxLenses) * 100)}%`, height: '100%', background: T.red, borderRadius: 4, opacity: 0.8 }} />}
+                        </div>
+                        <div style={{ minWidth: 60, textAlign: 'right', fontSize: 13, fontWeight: 700, color: T.blue, fontFamily: mono }}>{d.looker_lenses.toLocaleString()}</div>
+                        <div style={{ minWidth: 45, textAlign: 'right', fontSize: 11, color: d.looker_breakages > 0 ? T.red : T.textDim, fontFamily: mono }}>{d.looker_breakages > 0 ? `-${d.looker_breakages}` : '—'}</div>
+                        <div style={{ minWidth: 40, textAlign: 'right', fontSize: 11, color: d.looker_breakage_rate >= 3 ? T.red : d.looker_breakage_rate >= 2 ? T.amber : T.textDim, fontFamily: mono }}>{d.looker_breakage_rate > 0 ? `${d.looker_breakage_rate}%` : ''}</div>
+                        <div style={{ width: 1, height: 16, background: T.border, margin: '0 4px' }} />
+                        <div style={{ minWidth: 50, textAlign: 'right', fontSize: 11, color: d.itempath_picks > 0 ? T.green : T.textDim, fontFamily: mono }}>{d.itempath_picks > 0 ? `${d.itempath_picks} pk` : '—'}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {comp.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>Loading Looker data...</div>}
+                <div style={{ display: "flex", gap: 16, padding: "10px 12px", borderTop: `1px solid ${T.border}`, marginTop: 8, fontSize: 10, fontFamily: mono, color: T.textDim }}>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Lenses (Looker)</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 10, background: T.red, borderRadius: 2, marginRight: 4, opacity: 0.8 }} />Breakages</span>
+                  <span><span style={{ color: T.green }}>pk</span> = ItemPath picks</span>
+                </div>
+              </Card>
+
+              {/* Top OPCs */}
+              {topOPCs.length > 0 && (
+                <Card>
+                  <SectionHeader right={`${topOPCs.length} OPCs`}>Top Lens OPCs by Volume</SectionHeader>
+                  <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
+                      <thead>
+                        <tr style={{ background: T.bg, position: 'sticky', top: 0 }}>
+                          <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>OPC</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LENSES</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGES</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>BREAK %</th>
+                          <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>BAR</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {topOPCs.map((o, i) => {
+                          const maxOpc = topOPCs[0]?.lenses || 1;
+                          return (
+                            <tr key={o.opc} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                              <td style={{ padding: '8px 12px', fontWeight: 700, color: T.text }}>{o.opc}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', color: T.blue }}>{o.lenses.toLocaleString()}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', color: o.breakages > 0 ? T.red : T.textDim }}>{o.breakages || '—'}</td>
+                              <td style={{ padding: '8px 12px', textAlign: 'right', color: o.breakageRate >= 5 ? T.red : o.breakageRate >= 3 ? T.amber : T.textDim }}>{o.breakageRate > 0 ? `${o.breakageRate}%` : '—'}</td>
+                              <td style={{ padding: '8px 12px', width: '30%' }}>
+                                <div style={{ height: 6, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
+                                  <div style={{ width: `${Math.round((o.lenses / maxOpc) * 100)}%`, height: '100%', background: T.blue, borderRadius: 3, opacity: 0.6 }} />
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+            </div>
+          );
+        })()}
 
         {sub === "tops" && (() => {
           const uploadTopsFile = async (file) => {
