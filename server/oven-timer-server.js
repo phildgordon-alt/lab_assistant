@@ -1720,28 +1720,76 @@ Respond with a structured batching plan in this format:
       GROUP BY date(completed_at)
     `).all(from, to);
     for (const r of ipDailyRows) {
-      if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, looker: 0, looker_break: 0, itempath: 0 };
+      if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
       dailyMap[r.date].itempath = r.qty;
     }
+
+    // NetSuite consumption (real transaction data)
+    let nsConsumption = null;
+    let nsBySku = {};
+    let nsTotal = 0;
+    try {
+      nsConsumption = await netsuite.fetchConsumption(from, to);
+      if (nsConsumption) {
+        nsBySku = nsConsumption.bySku || {};
+        nsTotal = nsConsumption.total || 0;
+        // Add to daily chart
+        for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
+          if (!dailyMap[date]) dailyMap[date] = { date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
+          dailyMap[date].netsuite = v.qty;
+        }
+      }
+    } catch (e) { console.error('[Consumption] NetSuite fetch error:', e.message); }
+
     const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
 
-    const lkLensTotal = skus.reduce((s, r) => s + r.looker_lenses, 0);
+    // Add NetSuite qty to each SKU row
+    const allSkusWithNs = new Set([...Object.keys(lkBySku), ...Object.keys(ipBySku), ...Object.keys(nsBySku)]);
+    const skusFull = [...allSkusWithNs].map(sku => {
+      const lk = lkBySku[sku] || {};
+      const ip = ipBySku[sku] || {};
+      const ns = nsBySku[sku] || {};
+      const kardexTotal = (lk.lenses || 0) + (lk.frames || 0);
+      return {
+        sku,
+        type: lk.type || ip.type || (lk.frames > 0 ? 'frame' : (isLensSku(sku) ? 'lens' : 'frame')),
+        kardex_total: kardexTotal,
+        looker_lenses: lk.lenses || 0,
+        looker_frames: lk.frames || 0,
+        looker_breakages: lk.breakages || 0,
+        itempath_qty: ip.qty || 0,
+        itempath_picks: ip.picks || 0,
+        netsuite_qty: ns.qty || 0,
+        variance_ip_ns: (ip.qty || 0) - (ns.qty || 0),
+      };
+    });
+
+    const lkLensTotal = skusFull.reduce((s, r) => s + r.looker_lenses, 0);
     const lkFrameTotal = totalFramesLooker;
     const lkTotal = lkLensTotal + lkFrameTotal;
-    const lkBreak = skus.reduce((s, r) => s + r.looker_breakages, 0);
-    const ipTotal = skus.reduce((s, r) => s + r.itempath_qty, 0);
+    const lkBreak = skusFull.reduce((s, r) => s + r.looker_breakages, 0);
+    const ipTotal = skusFull.reduce((s, r) => s + r.itempath_qty, 0);
 
     return json(res, {
-      skus,
+      skus: skusFull,
       daily,
       summary: {
         from, to,
         kardex: { total: lkTotal, lenses: lkLensTotal, frames: lkFrameTotal, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
         itempath: { total: ipTotal, lenses: ipLenses, frames: ipFrames, skus: Object.keys(ipBySku).length, days: ipDailyRows.length, range: ipRange },
-        variance: ipTotal - lkTotal,
+        netsuite: { total: nsTotal, skus: Object.keys(nsBySku).length, days: nsConsumption?.dayCount || 0 },
+        variance: ipTotal - nsTotal,
       },
-      skuCount: skus.length,
+      skuCount: skusFull.length,
     });
+  }
+
+  // ── NetSuite consumption endpoints ─────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/netsuite/consumption') {
+    const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
+    const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
+    const data = await netsuite.fetchConsumption(from, to);
+    return json(res, data || { error: 'Not configured' });
   }
 
   // ── Looker lens usage endpoints ─────────────────────────────

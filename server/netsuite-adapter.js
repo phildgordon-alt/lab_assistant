@@ -472,6 +472,62 @@ function start() {
   setInterval(() => fetchOpenPOs(), 600000);
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CONSUMPTION — YTD transaction lines (negative qty = consumed)
+// ─────────────────────────────────────────────────────────────────────────────
+let consumptionCache = { bySku: {}, byDate: {}, lastSync: null, total: 0 };
+
+async function fetchConsumption(fromDate, toDate) {
+  if (!CONSUMER_KEY || !TOKEN_ID) return null;
+
+  const from = fromDate || `${new Date().getFullYear()}-01-01`;
+  const to = toDate || new Date().toISOString().slice(0, 10);
+
+  console.log(`[NetSuite] Fetching consumption ${from} to ${to}...`);
+  const allRows = await suiteql(`
+    SELECT t.trandate, i.itemId AS itemid, ABS(tl.quantity) AS qty, t.type
+    FROM transactionline tl
+    INNER JOIN transaction t ON t.id = tl.transaction
+    INNER JOIN item i ON i.id = tl.item
+    WHERE tl.location = ${LOCATION_ID}
+      AND t.trandate >= TO_DATE('${from}', 'YYYY-MM-DD')
+      AND t.trandate <= TO_DATE('${to}', 'YYYY-MM-DD')
+      AND tl.quantity < 0
+    ORDER BY t.trandate DESC
+  `);
+
+  console.log(`[NetSuite] Consumption: ${allRows.length} lines fetched`);
+
+  const bySku = {};
+  const byDate = {};
+  let total = 0;
+
+  for (const row of allRows) {
+    const sku = row.itemid || '';
+    const qty = parseInt(row.qty) || 0;
+    const date = row.trandate || '';
+    if (!sku || qty <= 0) continue;
+
+    total += qty;
+
+    if (!bySku[sku]) bySku[sku] = { qty: 0, lines: 0 };
+    bySku[sku].qty += qty;
+    bySku[sku].lines++;
+
+    if (!byDate[date]) byDate[date] = { qty: 0, lines: 0 };
+    byDate[date].qty += qty;
+    byDate[date].lines++;
+  }
+
+  consumptionCache = { bySku, byDate, lastSync: new Date().toISOString(), total, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length };
+  console.log(`[NetSuite] Consumption cached: ${total} units, ${Object.keys(bySku).length} SKUs, ${Object.keys(byDate).length} days`);
+  return consumptionCache;
+}
+
+function getConsumption() {
+  return consumptionCache;
+}
+
 module.exports = {
   start,
   getInventory,
@@ -480,5 +536,7 @@ module.exports = {
   lookupSku,
   getOpenPOs,
   fetchOpenPOs,
+  fetchConsumption,
+  getConsumption,
   poll,
 };

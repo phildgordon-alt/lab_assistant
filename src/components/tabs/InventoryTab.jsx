@@ -1454,7 +1454,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
           const skus = consumeData?.skus || [];
           const daily = consumeData?.daily || [];
           const sm = consumeData?.summary || {};
-          const maxDaily = Math.max(1, ...daily.map(d => Math.max(d.looker, d.itempath)));
+          const maxDaily = Math.max(1, ...daily.map(d => Math.max(d.looker, d.itempath, d.netsuite || 0)));
 
           // Filter + sort
           let filtered = skus;
@@ -1484,7 +1484,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
             <div>
               {/* Header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Consumption — Kardex vs NetSuite</h3>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Consumption — Kardex vs NetSuite vs Looker</h3>
                 <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                   {[{id:'ytd',label:'YTD'},{id:'month',label:'This Month'},{id:'30',label:'30d'},{id:'7',label:'7d'},{id:'custom',label:'Custom'}].map(p => (
                     <button key={p.id} onClick={() => p.id !== 'custom' ? applyFilter(p.id) : setConsumeFilter('custom')} style={{
@@ -1512,7 +1512,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               )}
 
               {/* KPIs */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 20 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 12 }}>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX (ITEMPATH)</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{(sm.itempath?.total || 0).toLocaleString()}</div>
@@ -1521,21 +1521,28 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     Lenses: {(sm.itempath?.lenses || 0).toLocaleString()} · Frames: {(sm.itempath?.frames || 0).toLocaleString()}
                   </div>
                 </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.purple || '#9b6ee0'}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE (TRANSACTIONS)</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.purple || '#9b6ee0', fontFamily: mono }}>{(sm.netsuite?.total || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.netsuite?.skus || 0} SKUs · {sm.netsuite?.days || 0} days</div>
+                </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE (LOOKER)</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER (SENT FROM LAB)</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(sm.kardex?.total || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.kardex?.skus || 0} SKUs · {sm.kardex?.days || 0} days</div>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>
                     Lenses: {(sm.kardex?.lenses || 0).toLocaleString()} · Frames: {(sm.kardex?.frames || 0).toLocaleString()}
                   </div>
                 </Card>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES (LOOKER)</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.red, fontFamily: mono }}>{(sm.kardex?.breakages || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.kardex?.total > 0 ? (sm.kardex.breakages / sm.kardex.total * 100).toFixed(1) : 0}% rate</div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE (IP — NS)</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: Math.abs(sm.variance || 0) < 500 ? T.green : T.amber, fontFamily: mono }}>
                     {(sm.variance || 0) > 0 ? '+' : ''}{(sm.variance || 0).toLocaleString()}
                   </div>
@@ -1562,22 +1569,27 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 12px', background: isToday ? `${T.blue}12` : T.bg, borderRadius: 4, border: `1px solid ${isToday ? T.blue : T.border}` }}>
                           <div style={{ width: 95, fontSize: 10, fontWeight: isToday ? 700 : 500, color: isToday ? T.blue : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
                           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                            <div style={{ height: 3, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
                               <div style={{ width: `${ipPct}%`, height: '100%', background: T.green, borderRadius: 2, opacity: 0.7 }} />
                             </div>
-                            <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                            <div style={{ height: 3, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                              <div style={{ width: `${Math.round(((d.netsuite || 0) / maxDaily) * 100)}%`, height: '100%', background: T.purple || '#9b6ee0', borderRadius: 2, opacity: 0.7 }} />
+                            </div>
+                            <div style={{ height: 3, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
                               <div style={{ width: `${lkPct}%`, height: '100%', background: T.blue, borderRadius: 2, opacity: 0.7 }} />
                             </div>
                           </div>
-                          <div style={{ minWidth: 50, textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.green, fontFamily: mono }}>{d.itempath > 0 ? d.itempath.toLocaleString() : '—'}</div>
-                          <div style={{ minWidth: 50, textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.blue, fontFamily: mono }}>{d.looker.toLocaleString()}</div>
+                          <div style={{ minWidth: 45, textAlign: 'right', fontSize: 10, fontWeight: 600, color: T.green, fontFamily: mono }}>{d.itempath > 0 ? d.itempath.toLocaleString() : '—'}</div>
+                          <div style={{ minWidth: 45, textAlign: 'right', fontSize: 10, fontWeight: 600, color: T.purple || '#9b6ee0', fontFamily: mono }}>{(d.netsuite || 0) > 0 ? d.netsuite.toLocaleString() : '—'}</div>
+                          <div style={{ minWidth: 45, textAlign: 'right', fontSize: 10, fontWeight: 600, color: T.blue, fontFamily: mono }}>{d.looker.toLocaleString()}</div>
                         </div>
                       );
                     })}
                   </div>
                   <div style={{ display: "flex", gap: 16, padding: "6px 12px", borderTop: `1px solid ${T.border}`, marginTop: 4, fontSize: 10, fontFamily: mono, color: T.textDim }}>
-                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Kardex (ItemPath picks)</span>
-                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />NetSuite (Looker — sent from lab)</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 3, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Kardex (ItemPath)</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 3, background: T.purple || '#9b6ee0', borderRadius: 2, marginRight: 4, opacity: 0.7 }} />NetSuite (transactions)</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 3, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker (sent from lab)</span>
                   </div>
                 </Card>
               )}
@@ -1607,7 +1619,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU</th>
                         <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>TYPE</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>KARDEX (IP)</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>NETSUITE (LK)</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.purple || '#9b6ee0', borderBottom: `1px solid ${T.border}` }}>NETSUITE</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGE</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
                       </tr>
@@ -1623,10 +1636,11 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             }}>{s.type === 'frame' ? 'FRAME' : 'LENS'}</span>
                           </td>
                           <td style={{ padding: '6px 12px', textAlign: 'right', color: s.itempath_qty > 0 ? T.green : T.textDim }}>{s.itempath_qty > 0 ? s.itempath_qty.toLocaleString() : '—'}</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', color: s.netsuite_qty > 0 ? (T.purple || '#9b6ee0') : T.textDim }}>{s.netsuite_qty > 0 ? s.netsuite_qty.toLocaleString() : '—'}</td>
                           <td style={{ padding: '6px 12px', textAlign: 'right', color: s.kardex_total > 0 ? T.blue : T.textDim }}>{s.kardex_total > 0 ? s.kardex_total.toLocaleString() : '—'}</td>
                           <td style={{ padding: '6px 12px', textAlign: 'right', color: s.looker_breakages > 0 ? T.red : T.textDim }}>{s.looker_breakages > 0 ? s.looker_breakages.toLocaleString() : '—'}</td>
-                          <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 700, color: s.variance === 0 ? T.textDim : Math.abs(s.variance) > 100 ? T.red : T.amber }}>
-                            {s.variance !== 0 ? (s.variance > 0 ? '+' : '') + s.variance.toLocaleString() : '—'}
+                          <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 700, color: s.variance_ip_ns === 0 ? T.textDim : Math.abs(s.variance_ip_ns) > 100 ? T.red : T.amber }}>
+                            {s.variance_ip_ns !== 0 ? (s.variance_ip_ns > 0 ? '+' : '') + s.variance_ip_ns.toLocaleString() : '—'}
                           </td>
                         </tr>
                       ))}
