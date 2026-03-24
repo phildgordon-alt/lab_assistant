@@ -1698,21 +1698,37 @@ Respond with a structured batching plan in this format:
         kardexBreakages += v.breakages;
       }
 
-      // ── NETSUITE: Transaction lines from SQLite ──
+      // ── DVI/NETSUITE: Looker Look 1118 (lenses) + SuiteQL transactions (frames) ──
       let nsBySku = {};
-      let nsTotal = 0, nsLenses = 0, nsFrames = 0, nsDayCount = 0;
+      let nsLenses = 0, nsFrames = 0, nsDayCount = 0;
+
+      // Lenses from Looker Look 1118 (this is what gets uploaded to NetSuite daily)
       try {
-        const nsConsumption = netsuite.getConsumption(from, to);
-        nsBySku = nsConsumption.bySku || {};
-        nsTotal = nsConsumption.total || 0;
-        nsLenses = nsConsumption.lenses || 0;
-        nsFrames = nsConsumption.frames || 0;
-        nsDayCount = nsConsumption.dayCount || 0;
-        for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
-          if (!dailyMap[date]) dailyMap[date] = { date, kardex: 0, netsuite: 0, breakages: 0 };
-          dailyMap[date].netsuite = v.qty;
+        const lkData = looker.getUsage(9999);
+        for (const day of (lkData.daily || [])) {
+          if (day.date < from || day.date > to) continue;
+          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
+          dailyMap[day.date].netsuite += day.lenses;
+          for (const [opc, v] of Object.entries(day.byOpc || {})) {
+            if (!nsBySku[opc]) nsBySku[opc] = { qty: 0, category: 'Lenses' };
+            nsBySku[opc].qty += v.lenses;
+            nsLenses += v.lenses;
+          }
         }
-      } catch (e) { console.error('[Consumption] NetSuite error:', e.message); }
+        // Frames from Looker Look 495
+        const frameData = looker.getFrameUsage();
+        for (const day of (frameData.daily || [])) {
+          if (day.date < from || day.date > to) continue;
+          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
+          dailyMap[day.date].netsuite += day.frames;
+          for (const [upc, count] of Object.entries(day.byUpc || {})) {
+            if (!nsBySku[upc]) nsBySku[upc] = { qty: 0, category: 'Frames' };
+            nsBySku[upc].qty += count;
+            nsFrames += count;
+          }
+        }
+        nsDayCount = Object.values(dailyMap).filter(d => d.netsuite > 0).length;
+      } catch (e) { console.error('[Consumption] DVI/NetSuite error:', e.message); }
 
       // ── Merge into SKU table ──
       const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
@@ -1739,8 +1755,8 @@ Respond with a structured batching plan in this format:
         summary: {
           from, to,
           kardex: { total: kardexTotal, lenses: kardexLenses, frames: kardexFrames, breakages: kardexBreakages, skus: Object.keys(kardexBySku).length, days: kardexDays.length },
-          netsuite: { total: nsTotal, lenses: nsLenses, frames: nsFrames, skus: Object.keys(nsBySku).length, days: nsDayCount },
-          variance: kardexTotal - nsTotal,
+          netsuite: { total: nsLenses + nsFrames, lenses: nsLenses, frames: nsFrames, skus: Object.keys(nsBySku).length, days: nsDayCount },
+          variance: kardexTotal - (nsLenses + nsFrames),
         },
         skuCount: skus.length,
       });
