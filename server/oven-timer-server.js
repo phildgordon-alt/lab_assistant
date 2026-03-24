@@ -2345,6 +2345,33 @@ Respond with a structured batching plan in this format:
     return json(res, { status: overall, systems, timestamp: new Date().toISOString() });
   }
 
+  if (req.method==='GET' && url.pathname==='/api/dvi/incoming') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    // Combine active + shipped jobs, group by entry_date
+    const active = labDb.db.prepare(`
+      SELECT entry_date, COUNT(*) as count FROM dvi_jobs
+      WHERE entry_date IS NOT NULL AND archived = 0
+      GROUP BY entry_date
+    `).all();
+    const shipped = labDb.db.prepare(`
+      SELECT entry_date, COUNT(*) as count FROM dvi_jobs_history
+      WHERE entry_date IS NOT NULL
+      GROUP BY entry_date
+    `).all();
+    // Merge into a single map
+    const byDate = {};
+    for (const r of active) { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + r.count; }
+    for (const r of shipped) { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + r.count; }
+    // Sort descending, limit to N days
+    const sorted = Object.entries(byDate)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, days);
+    const total = sorted.reduce((s, r) => s + r.count, 0);
+    const avg = sorted.length > 0 ? Math.round(total / sorted.length) : 0;
+    return json(res, { days: sorted, total, avg, dayCount: sorted.length });
+  }
+
   if (req.method==='GET' && url.pathname==='/api/dvi/trace/status') {
     const status = dviTrace.getStatus();
     // Add queue job count from XML index (jobs not in trace)

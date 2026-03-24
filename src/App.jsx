@@ -5402,6 +5402,93 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ── Incoming Tab ─────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function IncomingTab({ ovenServerUrl, settings }) {
+  const mono = "'JetBrains Mono',monospace";
+  const [data, setData] = useState(null);
+  const [days, setDays] = useState(30);
+
+  useEffect(() => {
+    if (!ovenServerUrl) return;
+    const go = async () => {
+      try {
+        const resp = await fetch(`${ovenServerUrl}/api/dvi/incoming?days=${days}`);
+        if (resp.ok) setData(await resp.json());
+      } catch {}
+    };
+    go();
+    const iv = setInterval(go, 60000);
+    return () => clearInterval(iv);
+  }, [ovenServerUrl, days]);
+
+  const daysList = data?.days || [];
+  const maxCount = Math.max(1, ...daysList.map(d => d.count));
+  const today = new Date().toISOString().slice(0, 10);
+  const todayCount = daysList.find(d => d.date === today)?.count || 0;
+
+  return (
+    <ProductionStageTab domain="incoming" contextData={{ incomingToday: todayCount, avg: data?.avg || 0 }} serverUrl={ovenServerUrl} settings={settings}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>Incoming Work</h2>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Daily incoming job count from DVI</p>
+        </div>
+        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TODAY</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{todayCount}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>DAILY AVG</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{data?.avg || 0}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TOTAL ({data?.dayCount || 0}d)</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: T.textMuted, fontFamily: mono }}>{(data?.total || 0).toLocaleString()}</div>
+          </div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {[14, 30, 60, 90].map(d => (
+              <button key={d} onClick={() => setDays(d)} style={{
+                padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                background: days === d ? T.blue : 'transparent',
+                color: days === d ? '#fff' : T.textMuted,
+                border: `1px solid ${days === d ? T.blue : T.border}`
+              }}>{d}d</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Bar Chart */}
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader right={`${daysList.length} days`}>Incoming Jobs by Day</SectionHeader>
+        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+          {daysList.map(d => {
+            const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+            const barPct = Math.round((d.count / maxCount) * 100);
+            const isToday = d.date === today;
+            const isWeekend = [0, 6].includes(new Date(d.date + 'T12:00:00').getDay());
+            return (
+              <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 12px', background: isToday ? `${T.blue}15` : T.bg, borderRadius: 6, border: `1px solid ${isToday ? T.blue : T.border}` }}>
+                <div style={{ width: 120, fontSize: 11, fontWeight: isToday ? 700 : 600, color: isToday ? T.blue : isWeekend ? T.textDim : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
+                <div style={{ flex: 1, height: 8, background: T.surface, borderRadius: 4, overflow: 'hidden' }}>
+                  <div style={{ width: `${barPct}%`, height: '100%', background: isToday ? T.blue : d.count >= (data?.avg || 0) ? T.green : T.amber, borderRadius: 4, transition: 'width 0.5s' }} />
+                </div>
+                <div style={{ minWidth: 50, textAlign: 'right', fontSize: 16, fontWeight: 800, color: isToday ? T.blue : d.count > 0 ? T.text : T.textDim, fontFamily: mono }}>{d.count}</div>
+              </div>
+            );
+          })}
+        </div>
+        {daysList.length === 0 && (
+          <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No incoming data available</div>
+        )}
+      </Card>
+    </ProductionStageTab>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // ── Shipping Tab ──────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settings }) {
@@ -10017,6 +10104,7 @@ function LabAssistantV2(){
   const navMenus=[
     {id:"overview",label:"Overview",icon:"◉",type:"button"},
     {id:"production",label:"Production",icon:"🏭",type:"dropdown",items:[
+      {id:"incoming",label:"Incoming",icon:"📥"},
       {id:"surfacing",label:"Surfacing",icon:"🌀"},
       {id:"cutting",label:"Cutting",icon:"✂️"},
       {id:"coating",label:"Coating",icon:"🌡"},
@@ -10133,6 +10221,7 @@ function LabAssistantV2(){
         {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="cutting"&&<CuttingTab trays={trays} dviJobs={mergedJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="assembly"&&<AssemblyTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="incoming"&&<IncomingTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="shipping"&&<ShippingTab trays={trays} dviJobs={dviJobs} shippedStats={shippedStats} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="inventory"&&<InventoryTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
