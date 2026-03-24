@@ -510,40 +510,83 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
 
-  // Fetch all inventory data
+  // Lazy-load: only fetch data needed for the active sub-tab
+  const fetchedRef = useRef({});
   useEffect(() => {
     if (!ovenServerUrl) return;
-    const go = async () => {
+    const fetchFor = async (tab) => {
       try {
-        const [invResp, picksResp, alertsResp, vlmsResp, whResp, binResp, reconResp] = await Promise.all([
-          fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()),
-          fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
-          fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
-          fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r => r.json()),
-          fetch(`${ovenServerUrl}/api/inventory/warehouse-stock`).then(r => r.json()).catch(() => null),
-          fetch(`${ovenServerUrl}/api/inventory/binning/summary`).then(r => r.json()).catch(() => null),
-          fetch(`${ovenServerUrl}/api/netsuite/reconcile`).then(r => r.json()).catch(() => null),
-        ]);
-        setInventory(invResp);
-        setPicks(picksResp);
-        setAlerts(alertsResp);
-        setVlms(vlmsResp);
-        if (whResp) setWhStock(whResp);
-        if (binResp) setBinningData(binResp);
-        if (reconResp) setReconData(reconResp);
-        fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json()).then(setTopsData).catch(() => {});
-        // Fetch NetSuite category mapping for warehouse stock breakdown
-        try { const catResp = await fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()); setSkuCategories(catResp); } catch {}
+        if (tab === 'warehouses' || tab === 'picks') {
+          // Activity + Picks: need picks data
+          if (!fetchedRef.current.picks) {
+            const [picksResp, alertsResp] = await Promise.all([
+              fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
+              fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
+            ]);
+            setPicks(picksResp);
+            setAlerts(alertsResp);
+            fetchedRef.current.picks = true;
+          }
+        }
+        if (tab === 'warehouse-stock') {
+          if (!fetchedRef.current.whStock) {
+            const [whResp, catResp] = await Promise.all([
+              fetch(`${ovenServerUrl}/api/inventory/warehouse-stock`).then(r => r.json()).catch(() => null),
+              fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()).catch(() => ({})),
+            ]);
+            if (whResp) setWhStock(whResp);
+            setSkuCategories(catResp);
+            fetchedRef.current.whStock = true;
+          }
+        }
+        if (tab === 'inventory') {
+          if (!fetchedRef.current.inventory) {
+            const [invResp, vlmsResp, alertsResp] = await Promise.all([
+              fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()),
+              fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r => r.json()),
+              fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
+            ]);
+            setInventory(invResp);
+            setVlms(vlmsResp);
+            setAlerts(alertsResp);
+            fetchedRef.current.inventory = true;
+          }
+        }
+        if (tab === 'reconciliation') {
+          if (!fetchedRef.current.recon) {
+            const reconResp = await fetch(`${ovenServerUrl}/api/netsuite/reconcile`).then(r => r.json()).catch(() => null);
+            if (reconResp) setReconData(reconResp);
+            fetchedRef.current.recon = true;
+          }
+        }
+        if (tab === 'binning') {
+          if (!fetchedRef.current.binning) {
+            const binResp = await fetch(`${ovenServerUrl}/api/inventory/binning/summary`).then(r => r.json()).catch(() => null);
+            if (binResp) setBinningData(binResp);
+            fetchedRef.current.binning = true;
+          }
+        }
+        if (tab === 'tops') {
+          if (!fetchedRef.current.tops) {
+            fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json()).then(setTopsData).catch(() => {});
+            fetchedRef.current.tops = true;
+          }
+        }
+        if (tab === 'alerts') {
+          if (!fetchedRef.current.alerts) {
+            const alertsResp = await fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json());
+            setAlerts(alertsResp);
+            fetchedRef.current.alerts = true;
+          }
+        }
         setLoading(false);
       } catch (e) {
         console.error('[Inventory] Fetch error:', e);
         setLoading(false);
       }
     };
-    go();
-    const iv = setInterval(go, 30000);
-    return () => clearInterval(iv);
-  }, [ovenServerUrl]);
+    fetchFor(sub);
+  }, [ovenServerUrl, sub]);
 
   // Filter and sort materials
   const filteredMaterials = useMemo(() => {
