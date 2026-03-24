@@ -1622,6 +1622,100 @@ Respond with a structured batching plan in this format:
     return json(res, { ok: true, ...netsuite.getHealth() });
   }
 
+  // ── Consumption comparison — YTD by SKU across all sources ──
+  if (req.method==='GET' && url.pathname==='/api/usage/consumption') {
+    const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
+    const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
+
+    // Looker: YTD by OPC (already cached)
+    const lkData = looker.getUsage(9999); // all cached data
+    const lkBySku = {};
+    for (const day of (lkData.daily || [])) {
+      if (day.date < from || day.date > to) continue;
+      for (const [opc, v] of Object.entries(day.byOpc || {})) {
+        if (!lkBySku[opc]) lkBySku[opc] = { lenses: 0, breakages: 0, days: 0 };
+        lkBySku[opc].lenses += v.lenses;
+        lkBySku[opc].breakages += v.breakages;
+        lkBySku[opc].days++;
+      }
+    }
+
+    // ItemPath: picks_history by SKU
+    const ipRows = labDb.db.prepare(`
+      SELECT sku, SUM(qty) as total_qty, COUNT(*) as pick_count, COUNT(DISTINCT date(completed_at)) as days
+      FROM picks_history
+      WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
+      GROUP BY sku
+    `).all(from, to);
+    const ipBySku = {};
+    for (const r of ipRows) {
+      ipBySku[r.sku] = { qty: r.total_qty, picks: r.pick_count, days: r.days };
+    }
+
+    // ItemPath date range
+    const ipRange = labDb.db.prepare(`
+      SELECT MIN(date(completed_at)) as earliest, MAX(date(completed_at)) as latest
+      FROM picks_history WHERE completed_at IS NOT NULL
+    `).get();
+
+    // Looker date range in filter
+    const lkDays = (lkData.daily || []).filter(d => d.date >= from && d.date <= to);
+    const lkRange = lkDays.length > 0 ? { earliest: lkDays[lkDays.length - 1].date, latest: lkDays[0].date } : null;
+
+    // Merge all SKUs
+    const allSkus = new Set([...Object.keys(lkBySku), ...Object.keys(ipBySku)]);
+    const skus = [...allSkus].map(sku => {
+      const lk = lkBySku[sku] || {};
+      const ip = ipBySku[sku] || {};
+      return {
+        sku,
+        looker_lenses: lk.lenses || 0,
+        looker_breakages: lk.breakages || 0,
+        looker_days: lk.days || 0,
+        itempath_qty: ip.qty || 0,
+        itempath_picks: ip.picks || 0,
+        itempath_days: ip.days || 0,
+        variance: (ip.qty || 0) - (lk.lenses || 0),
+      };
+    });
+
+    // Daily totals for the chart
+    const dailyMap = {};
+    for (const day of (lkData.daily || [])) {
+      if (day.date < from || day.date > to) continue;
+      if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0 };
+      dailyMap[day.date].looker = day.lenses;
+      dailyMap[day.date].looker_break = day.breakages;
+    }
+    const ipDailyRows = labDb.db.prepare(`
+      SELECT date(completed_at) as date, SUM(qty) as qty
+      FROM picks_history
+      WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
+      GROUP BY date(completed_at)
+    `).all(from, to);
+    for (const r of ipDailyRows) {
+      if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, looker: 0, looker_break: 0, itempath: 0 };
+      dailyMap[r.date].itempath = r.qty;
+    }
+    const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
+
+    const lkTotal = skus.reduce((s, r) => s + r.looker_lenses, 0);
+    const lkBreak = skus.reduce((s, r) => s + r.looker_breakages, 0);
+    const ipTotal = skus.reduce((s, r) => s + r.itempath_qty, 0);
+
+    return json(res, {
+      skus,
+      daily,
+      summary: {
+        from, to,
+        looker: { total: lkTotal, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
+        itempath: { total: ipTotal, skus: Object.keys(ipBySku).length, days: ipDailyRows.length, range: ipRange },
+        variance: ipTotal - lkTotal,
+      },
+      skuCount: skus.length,
+    });
+  }
+
   // ── Looker lens usage endpoints ─────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/looker/usage') {
     const days = parseInt(url.searchParams.get('days') || '30');

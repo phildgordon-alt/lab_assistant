@@ -496,6 +496,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [usageData, setUsageData] = useState(null);
   const [usageDays, setUsageDays] = useState(30);
   const [usageTopOPCs, setUsageTopOPCs] = useState([]);
+  const [consumeData, setConsumeData] = useState(null);
+  const [consumeFilter, setConsumeFilter] = useState("ytd"); // ytd, 30, 7, custom
+  const [consumeFrom, setConsumeFrom] = useState("");
+  const [consumeTo, setConsumeTo] = useState("");
+  const [consumeSearch, setConsumeSearch] = useState("");
+  const [consumeSort, setConsumeSort] = useState("looker"); // looker, itempath, variance
+  const [consumeLoading, setConsumeLoading] = useState(false);
 
   // Fetch all inventory data
   useEffect(() => {
@@ -580,7 +587,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "lens-usage", label: "Lens Usage" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "inventory", label: "Inventory" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "consumption", label: "Consumption" }, { id: "lens-usage", label: "Daily Usage" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "reconciliation", label: "Reconciliation" }, { id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -1433,6 +1440,190 @@ function InventoryTab({ ovenServerUrl, settings }) {
             </Card>
           </div>
         )}
+
+        {sub === "consumption" && (() => {
+          const fetchConsumption = (f, t) => {
+            setConsumeLoading(true);
+            const params = new URLSearchParams();
+            if (f) params.set('from', f);
+            if (t) params.set('to', t);
+            fetch(`${ovenServerUrl}/api/usage/consumption?${params}`).then(r => r.json()).then(d => { setConsumeData(d); setConsumeLoading(false); }).catch(() => setConsumeLoading(false));
+          };
+          if (!consumeData && !consumeLoading) fetchConsumption();
+
+          const skus = consumeData?.skus || [];
+          const daily = consumeData?.daily || [];
+          const sm = consumeData?.summary || {};
+          const maxDaily = Math.max(1, ...daily.map(d => Math.max(d.looker, d.itempath)));
+
+          // Filter + sort
+          let filtered = skus;
+          if (consumeSearch) {
+            const q = consumeSearch.toLowerCase();
+            filtered = filtered.filter(s => s.sku.toLowerCase().includes(q));
+          }
+          filtered = [...filtered].sort((a, b) => {
+            if (consumeSort === 'looker') return b.looker_lenses - a.looker_lenses;
+            if (consumeSort === 'itempath') return b.itempath_qty - a.itempath_qty;
+            if (consumeSort === 'variance') return Math.abs(b.variance) - Math.abs(a.variance);
+            return 0;
+          });
+
+          const applyFilter = (preset) => {
+            setConsumeFilter(preset);
+            setConsumeData(null);
+            const today = new Date().toISOString().slice(0, 10);
+            const year = new Date().getFullYear();
+            if (preset === 'ytd') fetchConsumption(`${year}-01-01`, today);
+            else if (preset === '30') { const d = new Date(); d.setDate(d.getDate() - 30); fetchConsumption(d.toISOString().slice(0, 10), today); }
+            else if (preset === '7') { const d = new Date(); d.setDate(d.getDate() - 7); fetchConsumption(d.toISOString().slice(0, 10), today); }
+            else if (preset === 'month') { const d = new Date(); fetchConsumption(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-01`, today); }
+          };
+
+          return (
+            <div>
+              {/* Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>YTD Consumption — Looker vs ItemPath</h3>
+                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  {[{id:'ytd',label:'YTD'},{id:'month',label:'This Month'},{id:'30',label:'30d'},{id:'7',label:'7d'},{id:'custom',label:'Custom'}].map(p => (
+                    <button key={p.id} onClick={() => p.id !== 'custom' ? applyFilter(p.id) : setConsumeFilter('custom')} style={{
+                      padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                      background: consumeFilter === p.id ? T.blue : 'transparent', color: consumeFilter === p.id ? '#fff' : T.textMuted,
+                      border: `1px solid ${consumeFilter === p.id ? T.blue : T.border}`
+                    }}>{p.label}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Custom date range */}
+              {consumeFilter === 'custom' && (
+                <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+                  <input type="date" value={consumeFrom} onChange={e => setConsumeFrom(e.target.value)}
+                    style={{ padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
+                  <span style={{ color: T.textDim }}>to</span>
+                  <input type="date" value={consumeTo} onChange={e => setConsumeTo(e.target.value)}
+                    style={{ padding: "8px 10px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
+                  <button onClick={() => { setConsumeData(null); fetchConsumption(consumeFrom, consumeTo); }}
+                    style={{ background: T.blue, border: "none", borderRadius: 6, padding: "8px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                    Apply
+                  </button>
+                </div>
+              )}
+
+              {/* KPIs */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 20 }}>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER — SENT FROM LAB</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(sm.looker?.total || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.looker?.skus || 0} OPCs · {sm.looker?.days || 0} days</div>
+                  {sm.looker?.range && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{sm.looker.range.earliest} — {sm.looker.range.latest}</div>}
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES (LOOKER)</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.red, fontFamily: mono }}>{(sm.looker?.breakages || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.looker?.total > 0 ? (sm.looker.breakages / sm.looker.total * 100).toFixed(1) : 0}% rate</div>
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH — PICKED</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: T.green, fontFamily: mono }}>{(sm.itempath?.total || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.itempath?.skus || 0} SKUs · {sm.itempath?.days || 0} days</div>
+                  {sm.itempath?.range && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{sm.itempath.range.earliest || '—'} — {sm.itempath.range.latest || '—'}</div>}
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE (IP - LOOKER)</div>
+                  <div style={{ fontSize: 26, fontWeight: 800, color: Math.abs(sm.variance || 0) < 500 ? T.green : T.amber, fontFamily: mono }}>
+                    {(sm.variance || 0) > 0 ? '+' : ''}{(sm.variance || 0).toLocaleString()}
+                  </div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.from} — {sm.to}</div>
+                </Card>
+              </div>
+
+              {/* Daily chart */}
+              {daily.length > 0 && (
+                <Card style={{ marginBottom: 20 }}>
+                  <SectionHeader right={`${daily.length} days`}>Daily Consumption</SectionHeader>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 400, overflowY: "auto" }}>
+                    {daily.map(d => {
+                      const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+                      const lkPct = Math.round((d.looker / maxDaily) * 100);
+                      const ipPct = Math.round((d.itempath / maxDaily) * 100);
+                      const isToday = d.date === new Date().toISOString().slice(0, 10);
+                      return (
+                        <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 12px', background: isToday ? `${T.blue}12` : T.bg, borderRadius: 4, border: `1px solid ${isToday ? T.blue : T.border}` }}>
+                          <div style={{ width: 95, fontSize: 10, fontWeight: isToday ? 700 : 500, color: isToday ? T.blue : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
+                          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                              <div style={{ width: `${lkPct}%`, height: '100%', background: T.blue, borderRadius: 2, opacity: 0.7 }} />
+                            </div>
+                            <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                              <div style={{ width: `${ipPct}%`, height: '100%', background: T.green, borderRadius: 2, opacity: 0.7 }} />
+                            </div>
+                          </div>
+                          <div style={{ minWidth: 50, textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.blue, fontFamily: mono }}>{d.looker.toLocaleString()}</div>
+                          <div style={{ minWidth: 50, textAlign: 'right', fontSize: 11, fontWeight: 600, color: T.green, fontFamily: mono }}>{d.itempath > 0 ? d.itempath.toLocaleString() : '—'}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", gap: 16, padding: "6px 12px", borderTop: `1px solid ${T.border}`, marginTop: 4, fontSize: 10, fontFamily: mono, color: T.textDim }}>
+                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker (sent)</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />ItemPath (picked)</span>
+                  </div>
+                </Card>
+              )}
+
+              {/* SKU comparison table */}
+              <Card>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: `1px solid ${T.border}` }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: mono }}>{filtered.length} SKUs</span>
+                    <input type="text" placeholder="Search SKU..." value={consumeSearch} onChange={e => setConsumeSearch(e.target.value)}
+                      style={{ padding: "6px 10px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 11, fontFamily: mono, width: 180 }} />
+                  </div>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    {[{id:'looker',label:'By Looker'},{id:'itempath',label:'By ItemPath'},{id:'variance',label:'By Variance'}].map(s => (
+                      <button key={s.id} onClick={() => setConsumeSort(s.id)} style={{
+                        padding: "5px 10px", borderRadius: 5, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                        background: consumeSort === s.id ? T.blue : 'transparent', color: consumeSort === s.id ? '#fff' : T.textMuted,
+                        border: `1px solid ${consumeSort === s.id ? T.blue : T.border}`
+                      }}>{s.label}</button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
+                    <thead>
+                      <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
+                        <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU / OPC</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER SENT</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGE</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>IP PICKED</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.slice(0, 200).map(s => (
+                        <tr key={s.sku} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                          <td style={{ padding: '6px 12px', fontWeight: 600, color: T.text }}>{s.sku}</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', color: s.looker_lenses > 0 ? T.blue : T.textDim }}>{s.looker_lenses > 0 ? s.looker_lenses.toLocaleString() : '—'}</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', color: s.looker_breakages > 0 ? T.red : T.textDim }}>{s.looker_breakages > 0 ? s.looker_breakages.toLocaleString() : '—'}</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', color: s.itempath_qty > 0 ? T.green : T.textDim }}>{s.itempath_qty > 0 ? s.itempath_qty.toLocaleString() : '—'}</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 700, color: s.variance === 0 ? T.textDim : Math.abs(s.variance) > 100 ? T.red : T.amber }}>
+                            {s.variance !== 0 ? (s.variance > 0 ? '+' : '') + s.variance.toLocaleString() : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {filtered.length === 0 && !consumeLoading && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No consumption data for this period</div>}
+                  {consumeLoading && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>Loading...</div>}
+                </div>
+                {filtered.length > 200 && <div style={{ padding: 8, textAlign: "center", fontSize: 10, color: T.textDim }}>Showing 200 of {filtered.length}</div>}
+              </Card>
+            </div>
+          );
+        })()}
 
         {sub === "lens-usage" && (() => {
           // Fetch on mount / days change
