@@ -1484,7 +1484,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
             <div>
               {/* Header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Consumption — Kardex vs NetSuite</h3>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Consumption — Kardex / ItemPath vs DVI / NetSuite</h3>
                 <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
                   {[{id:'ytd',label:'YTD'},{id:'month',label:'This Month'},{id:'30',label:'30d'},{id:'7',label:'7d'},{id:'custom',label:'Custom'}].map(p => (
                     <button key={p.id} onClick={() => p.id !== 'custom' ? applyFilter(p.id) : setConsumeFilter('custom')} style={{
@@ -1514,7 +1514,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               {/* KPIs */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 20 }}>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX / ITEMPATH</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{(sm.kardex?.total || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.kardex?.skus || 0} SKUs · {sm.kardex?.days || 0} days</div>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>
@@ -1522,7 +1522,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DVI / NETSUITE</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(sm.netsuite?.total || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.netsuite?.skus || 0} SKUs · {sm.netsuite?.days || 0} days</div>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>
@@ -1539,7 +1539,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 24, fontWeight: 800, color: Math.abs(sm.variance || 0) < 500 ? T.green : T.amber, fontFamily: mono }}>
                     {(sm.variance || 0) > 0 ? '+' : ''}{(sm.variance || 0).toLocaleString()}
                   </div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Kardex — NetSuite</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Kardex — DVI</div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.textDim}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>PERIOD</div>
@@ -1576,8 +1576,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     })}
                   </div>
                   <div style={{ display: "flex", gap: 16, padding: "6px 12px", borderTop: `1px solid ${T.border}`, marginTop: 4, fontSize: 10, fontFamily: mono, color: T.textDim }}>
-                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Kardex (Looker + ItemPath)</span>
-                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />NetSuite (transactions)</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Kardex / ItemPath</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />DVI / NetSuite</span>
                   </div>
                 </Card>
               )}
@@ -1606,8 +1606,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU</th>
                         <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>TYPE</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>KARDEX</th>
-                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>NETSUITE</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>KARDEX / IP</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>DVI / NS</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGE</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
                       </tr>
