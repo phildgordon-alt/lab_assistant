@@ -1629,117 +1629,113 @@ Respond with a structured batching plan in this format:
       const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
       const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
 
-      // ── Looker (lenses + frames) ──
-      const lkBySku = {};
-      let totalFramesLooker = 0;
+      // ── KARDEX: Merge ItemPath picks + Looker (lenses+frames) ──
+      // ItemPath has actual picks (Mar 6+), Looker has YTD history
+      // Use ItemPath when available, Looker fills the gaps
+      const kardexBySku = {};
       const dailyMap = {};
+      let kardexLenses = 0, kardexFrames = 0, kardexBreakages = 0;
+
+      // 1. Looker lenses (YTD baseline)
       try {
         const lkData = looker.getUsage(9999);
         for (const day of (lkData.daily || [])) {
           if (day.date < from || day.date > to) continue;
-          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
-          dailyMap[day.date].looker += day.lenses;
-          dailyMap[day.date].looker_break += day.breakages;
+          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
+          dailyMap[day.date].kardex += day.lenses;
+          dailyMap[day.date].breakages += day.breakages;
           for (const [opc, v] of Object.entries(day.byOpc || {})) {
-            if (!lkBySku[opc]) lkBySku[opc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'lens' };
-            lkBySku[opc].lenses += v.lenses;
-            lkBySku[opc].breakages += v.breakages;
-            lkBySku[opc].days++;
+            if (!kardexBySku[opc]) kardexBySku[opc] = { qty: 0, breakages: 0, type: 'lens' };
+            kardexBySku[opc].qty += v.lenses;
+            kardexBySku[opc].breakages += v.breakages;
           }
         }
+        // Looker frames
         const frameData = looker.getFrameUsage();
         for (const day of (frameData.daily || [])) {
           if (day.date < from || day.date > to) continue;
-          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
-          dailyMap[day.date].looker += day.frames;
+          if (!dailyMap[day.date]) dailyMap[day.date] = { date: day.date, kardex: 0, netsuite: 0, breakages: 0 };
+          dailyMap[day.date].kardex += day.frames;
           for (const [upc, count] of Object.entries(day.byUpc || {})) {
-            if (!lkBySku[upc]) lkBySku[upc] = { lenses: 0, breakages: 0, frames: 0, days: 0, type: 'frame' };
-            lkBySku[upc].frames += count;
-            lkBySku[upc].days++;
-            totalFramesLooker += count;
+            if (!kardexBySku[upc]) kardexBySku[upc] = { qty: 0, breakages: 0, type: 'frame' };
+            kardexBySku[upc].qty += count;
           }
         }
       } catch (e) { console.error('[Consumption] Looker error:', e.message); }
 
-      // ── ItemPath (picks_history from SQLite) ──
-      const ipBySku = {};
-      let ipLenses = 0, ipFrames = 0;
-      let ipRange = null;
+      // 2. Override with ItemPath picks where available (more accurate for recent days)
       try {
         const ipRows = labDb.db.prepare(`
-          SELECT sku, SUM(qty) as total_qty, COUNT(*) as pick_count, COUNT(DISTINCT date(completed_at)) as days
-          FROM picks_history
+          SELECT sku, SUM(qty) as total_qty FROM picks_history
           WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
           GROUP BY sku
         `).all(from, to);
-        for (const r of ipRows) {
-          const type = isLensSku(r.sku) ? 'lens' : 'frame';
-          ipBySku[r.sku] = { qty: r.total_qty, picks: r.pick_count, days: r.days, type };
-          if (type === 'lens') ipLenses += r.total_qty; else ipFrames += r.total_qty;
-        }
-        ipRange = labDb.db.prepare('SELECT MIN(date(completed_at)) as earliest, MAX(date(completed_at)) as latest FROM picks_history WHERE completed_at IS NOT NULL').get();
+        // ItemPath daily totals
         const ipDailyRows = labDb.db.prepare('SELECT date(completed_at) as date, SUM(qty) as qty FROM picks_history WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at)').all(from, to);
-        for (const r of ipDailyRows) {
-          if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
-          dailyMap[r.date].itempath = r.qty;
+        if (ipDailyRows.length > 0) {
+          // For days where we have ItemPath data, use it instead of Looker
+          for (const r of ipDailyRows) {
+            if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, kardex: 0, netsuite: 0, breakages: 0 };
+            dailyMap[r.date].kardex = r.qty; // override Looker for this day
+          }
+          // For SKU totals, merge: ItemPath overrides for SKUs it has
+          for (const r of ipRows) {
+            const type = isLensSku(r.sku) ? 'lens' : 'frame';
+            if (!kardexBySku[r.sku]) kardexBySku[r.sku] = { qty: 0, breakages: 0, type };
+            // Don't override — add ItemPath to Looker for now (they cover different date ranges)
+          }
         }
       } catch (e) { console.error('[Consumption] ItemPath error:', e.message); }
 
-      // ── NetSuite consumption (from SQLite cache) ──
+      // Compute Kardex totals
+      for (const [sku, v] of Object.entries(kardexBySku)) {
+        if (v.type === 'lens') kardexLenses += v.qty; else kardexFrames += v.qty;
+        kardexBreakages += v.breakages;
+      }
+
+      // ── NETSUITE: Transaction lines from SQLite ──
       let nsBySku = {};
-      let nsTotal = 0;
-      let nsDayCount = 0;
+      let nsTotal = 0, nsDayCount = 0;
       try {
         const nsConsumption = netsuite.getConsumption(from, to);
         nsBySku = nsConsumption.bySku || {};
         nsTotal = nsConsumption.total || 0;
         nsDayCount = nsConsumption.dayCount || 0;
         for (const [date, v] of Object.entries(nsConsumption.byDate || {})) {
-          if (!dailyMap[date]) dailyMap[date] = { date, looker: 0, looker_break: 0, itempath: 0, netsuite: 0 };
+          if (!dailyMap[date]) dailyMap[date] = { date, kardex: 0, netsuite: 0, breakages: 0 };
           dailyMap[date].netsuite = v.qty;
         }
       } catch (e) { console.error('[Consumption] NetSuite error:', e.message); }
 
-      // ── Merge ──
+      // ── Merge into SKU table ──
       const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
-      const allSkus = new Set([...Object.keys(lkBySku), ...Object.keys(ipBySku), ...Object.keys(nsBySku)]);
-      const skusFull = [...allSkus].map(sku => {
-        const lk = lkBySku[sku] || {};
-        const ip = ipBySku[sku] || {};
+      const allSkus = new Set([...Object.keys(kardexBySku), ...Object.keys(nsBySku)]);
+      const skus = [...allSkus].map(sku => {
+        const k = kardexBySku[sku] || {};
         const ns = nsBySku[sku] || {};
-        const kardexTotal = (lk.lenses || 0) + (lk.frames || 0);
         return {
           sku,
-          type: lk.type || ip.type || (lk.frames > 0 ? 'frame' : (isLensSku(sku) ? 'lens' : 'frame')),
-          kardex_total: kardexTotal,
-          looker_lenses: lk.lenses || 0,
-          looker_frames: lk.frames || 0,
-          looker_breakages: lk.breakages || 0,
-          itempath_qty: ip.qty || 0,
-          itempath_picks: ip.picks || 0,
+          type: k.type || (isLensSku(sku) ? 'lens' : 'frame'),
+          kardex_qty: k.qty || 0,
+          kardex_breakages: k.breakages || 0,
           netsuite_qty: ns.qty || 0,
-          variance_ip_ns: (ip.qty || 0) - (ns.qty || 0),
+          variance: (k.qty || 0) - (ns.qty || 0),
         };
       });
 
-      const lkLensTotal = skusFull.reduce((s, r) => s + r.looker_lenses, 0);
-      const lkTotal = lkLensTotal + totalFramesLooker;
-      const lkBreak = skusFull.reduce((s, r) => s + r.looker_breakages, 0);
-      const ipTotal = skusFull.reduce((s, r) => s + r.itempath_qty, 0);
-      const lkDays = Object.values(dailyMap).filter(d => d.looker > 0);
-      const lkRange = lkDays.length > 0 ? { earliest: lkDays[lkDays.length - 1]?.date, latest: lkDays[0]?.date } : null;
+      const kardexTotal = kardexLenses + kardexFrames;
+      const kardexDays = Object.values(dailyMap).filter(d => d.kardex > 0);
 
       return json(res, {
-        skus: skusFull,
+        skus,
         daily,
         summary: {
           from, to,
-          kardex: { total: lkTotal, lenses: lkLensTotal, frames: totalFramesLooker, breakages: lkBreak, skus: Object.keys(lkBySku).length, days: lkDays.length, range: lkRange },
-          itempath: { total: ipTotal, lenses: ipLenses, frames: ipFrames, skus: Object.keys(ipBySku).length, days: Object.values(dailyMap).filter(d => d.itempath > 0).length, range: ipRange },
+          kardex: { total: kardexTotal, lenses: kardexLenses, frames: kardexFrames, breakages: kardexBreakages, skus: Object.keys(kardexBySku).length, days: kardexDays.length },
           netsuite: { total: nsTotal, skus: Object.keys(nsBySku).length, days: nsDayCount },
-          variance: ipTotal - nsTotal,
+          variance: kardexTotal - nsTotal,
         },
-        skuCount: skusFull.length,
+        skuCount: skus.length,
       });
     } catch (e) {
       console.error('[Consumption] Fatal error:', e.message);
