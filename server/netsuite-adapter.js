@@ -229,13 +229,15 @@ function reconcile(itempath, category = null) {
   // Compare
   let allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal)]);
 
-  // Filter by category if specified
+  // Filter by category if specified — only include SKUs where NetSuite knows the category
   if (category) {
     allSkus = new Set([...allSkus].filter(sku => {
       const nsItem = inventory[sku];
-      return nsItem && nsItem.category === category;
+      if (nsItem) return nsItem.category === category;
+      return false; // ItemPath-only items don't have categories — exclude from filtered view
     }));
   }
+  console.log(`[NetSuite] Reconcile: ${allSkus.size} SKUs${category ? ` (category: ${category})` : ''}`);
   const discrepancies = [];
   let matchCount = 0;
   let totalNetSuite = 0;

@@ -1587,6 +1587,15 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/netsuite/health') {
     return json(res, netsuite.getHealth());
   }
+  if (req.method==='GET' && url.pathname==='/api/netsuite/categories') {
+    // Return SKU → category mapping for all NetSuite items
+    const nsInv = netsuite.getInventory();
+    const cats = {};
+    for (const item of nsInv.items || []) {
+      cats[item.sku] = item.category;
+    }
+    return json(res, cats);
+  }
   if (req.method==='GET' && url.pathname==='/api/netsuite/lookup') {
     const sku = url.searchParams.get('sku');
     if (!sku) return json(res, { error: 'sku parameter required' });

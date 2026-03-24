@@ -479,6 +479,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [whSearch, setWhSearch] = useState("");
   const [whFilter, setWhFilter] = useState("all"); // all, WH1, WH2, WH3
   const [binningData, setBinningData] = useState(null);
+  const [skuCategories, setSkuCategories] = useState({});
   const [binningView, setBinningView] = useState("swap"); // swap, consolidate, adjacency
   const [reconData, setReconData] = useState(null);
   const [reconFilter, setReconFilter] = useState("all"); // all, discrepancies, matches, ns_only, ip_only
@@ -507,6 +508,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
         if (whResp) setWhStock(whResp);
         if (binResp) setBinningData(binResp);
         if (reconResp) setReconData(reconResp);
+        // Fetch NetSuite category mapping for warehouse stock breakdown
+        try { const catResp = await fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()); setSkuCategories(catResp); } catch {}
         setLoading(false);
       } catch (e) {
         console.error('[Inventory] Fetch error:', e);
@@ -956,9 +959,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 { id: 'WH2', label: 'Warehouse 2', sub: 'CAR 4-6', color: T.green },
                 { id: 'WH3', label: 'Warehouse 3', sub: 'Kitchen + IRV02', color: T.amber },
               ].map(wh => {
-                const skus = whStock ? Object.keys(whStock[wh.id] || {}).length : 0;
-                const units = whStock ? Object.values(whStock[wh.id] || {}).reduce((s, q) => s + q, 0) : 0;
+                const whData = whStock ? (whStock[wh.id] || {}) : {};
+                const skus = Object.keys(whData).length;
+                const units = Object.values(whData).reduce((s, q) => s + q, 0);
                 const isActive = whFilter === wh.id;
+
+                // Category breakdown using NetSuite category mapping
+                const catCounts = { Lenses: 0, Frames: 0, Tops: 0, Other: 0 };
+                for (const [sku, qty] of Object.entries(whData)) {
+                  const cat = skuCategories[sku] || 'Other';
+                  catCounts[cat] = (catCounts[cat] || 0) + qty;
+                }
+
                 return (
                   <Card key={wh.id} onClick={() => setWhFilter(whFilter === wh.id ? 'all' : wh.id)}
                     style={{ padding: 20, cursor: 'pointer', borderLeft: `4px solid ${wh.color}`, background: isActive ? `${wh.color}15` : T.card, border: isActive ? `1px solid ${wh.color}` : `1px solid ${T.border}`, borderLeftWidth: 4 }}>
@@ -968,7 +980,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{wh.sub}</div>
                       </div>
                     </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
                       <div>
                         <div style={{ fontSize: 28, fontWeight: 900, color: wh.color, fontFamily: mono }}>{units.toLocaleString()}</div>
                         <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL UNITS</div>
@@ -977,6 +989,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <div style={{ fontSize: 28, fontWeight: 900, color: T.text, fontFamily: mono }}>{skus.toLocaleString()}</div>
                         <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>UNIQUE SKUS</div>
                       </div>
+                    </div>
+                    {/* Category breakdown */}
+                    <div style={{ borderTop: `1px solid ${T.border}`, paddingTop: 8, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      {catCounts.Lenses > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.cyan }}>Lenses: {catCounts.Lenses.toLocaleString()}</span>}
+                      {catCounts.Frames > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.green }}>Frames: {catCounts.Frames.toLocaleString()}</span>}
+                      {catCounts.Tops > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.amber }}>Tops: {catCounts.Tops.toLocaleString()}</span>}
+                      {catCounts.Other > 0 && <span style={{ fontSize: 10, fontFamily: mono, color: T.textDim }}>Other: {catCounts.Other.toLocaleString()}</span>}
                     </div>
                   </Card>
                 );
