@@ -1909,11 +1909,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
             setTopsError(null);
             setTopsResult(null);
             try {
-              const content = await file.text();
+              const body = file.name.endsWith('.xlsx') ? await file.arrayBuffer() : await file.text();
+              const contentType = file.name.endsWith('.xlsx') ? 'application/octet-stream' : 'text/csv';
               const resp = await fetch(`${ovenServerUrl}/api/inventory/tops/upload`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'text/csv', 'X-Filename': file.name },
-                body: content
+                headers: { 'Content-Type': contentType, 'X-Filename': file.name },
+                body
               });
               const data = await resp.json();
               if (resp.ok) {
@@ -1941,14 +1942,14 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 onClick={() => topsFileRef.current?.click()}
                 style={{ padding: 32, textAlign: 'center', cursor: 'pointer', border: `2px dashed ${topsDragOver ? T.blue : T.border}`, background: topsDragOver ? `${T.blue}10` : T.card, transition: 'all 0.2s', marginBottom: 16 }}
               >
-                <input ref={topsFileRef} type="file" accept=".csv" onChange={handleTopsSelect} style={{ display: 'none' }} />
+                <input ref={topsFileRef} type="file" accept=".csv,.xlsx" onChange={handleTopsSelect} style={{ display: 'none' }} />
                 {topsUploading ? (
                   <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Uploading...</div>
                 ) : (
                   <>
                     <div style={{ fontSize: 28, marginBottom: 8 }}>+</div>
-                    <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Drop TOPS CSV here</div>
-                    <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>or click to browse — CSV with SKU and QTY columns</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>Drop TOPS file here</div>
+                    <div style={{ fontSize: 12, color: T.textMuted, marginTop: 4 }}>or click to browse — XLSX (Tops Inventory) or CSV (SKU + QTY)</div>
                   </>
                 )}
               </Card>

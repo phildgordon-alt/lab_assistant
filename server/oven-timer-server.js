@@ -1934,35 +1934,49 @@ Respond with a structured batching plan in this format:
   // ── TOPS manual count upload ──────────────────────────────────
   if (req.method==='POST' && url.pathname==='/api/inventory/tops/upload') {
     return new Promise((resolve) => {
-      let body = '';
-      req.on('data', c => body += c);
+      const chunks = [];
+      req.on('data', c => chunks.push(c));
       req.on('end', () => {
         try {
-          const filename = req.headers['x-filename'] || 'tops-upload.csv';
-          const lines = body.split(/\r?\n/).filter(l => l.trim());
-          if (lines.length < 2) return resolve(json(res, { error: 'CSV must have header + at least 1 row' }, 400));
+          const filename = req.headers['x-filename'] || 'tops-upload';
+          const buf = Buffer.concat(chunks);
+          const isXlsx = filename.endsWith('.xlsx') || buf[0] === 0x50; // PK zip header
+          let rows = [];
 
-          const header = lines[0].toLowerCase();
-          if (!header.includes('sku') || !header.includes('qty')) {
-            return resolve(json(res, { error: 'CSV must have SKU and QTY columns' }, 400));
-          }
-
-          const cols = lines[0].split(',').map(c => c.trim().toLowerCase());
-          const skuIdx = cols.indexOf('sku');
-          const qtyIdx = cols.indexOf('qty');
-
-          const uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-          const rows = [];
-          for (let i = 1; i < lines.length; i++) {
-            const parts = lines[i].split(',').map(c => c.trim());
-            const sku = parts[skuIdx];
-            const qty = parseInt(parts[qtyIdx], 10);
-            if (sku && !isNaN(qty)) rows.push({ sku, qty });
+          if (isXlsx) {
+            // Parse XLSX — use most recent sheet, columns: UPC (C), Quantity (D)
+            const XLSX = require('xlsx');
+            const wb = XLSX.read(buf, { type: 'buffer' });
+            // Use first sheet (most recent count date)
+            const sheetName = wb.SheetNames[0];
+            const ws = wb.Sheets[sheetName];
+            const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
+            console.log(`[TOPS] Parsing XLSX sheet "${sheetName}" — ${data.length} rows`);
+            for (const row of data) {
+              const upc = String(row['UPC'] || row['upc'] || '').replace(/\.0$/, '').trim();
+              const qty = parseInt(row['Quantity - UNITS'] || row['Quantity'] || row['qty'] || row['QTY'] || 0);
+              if (upc && qty > 0) rows.push({ sku: upc, qty });
+            }
+          } else {
+            // Parse CSV — columns: SKU, QTY
+            const body = buf.toString('utf-8');
+            const lines = body.split(/\r?\n/).filter(l => l.trim());
+            if (lines.length < 2) return resolve(json(res, { error: 'CSV must have header + at least 1 row' }, 400));
+            const cols = lines[0].split(',').map(c => c.trim().toLowerCase());
+            const skuIdx = cols.indexOf('sku');
+            const qtyIdx = cols.indexOf('qty');
+            if (skuIdx < 0 || qtyIdx < 0) return resolve(json(res, { error: 'CSV must have SKU and QTY columns' }, 400));
+            for (let i = 1; i < lines.length; i++) {
+              const parts = lines[i].split(',').map(c => c.trim());
+              const sku = parts[skuIdx];
+              const qty = parseInt(parts[qtyIdx], 10);
+              if (sku && !isNaN(qty) && qty > 0) rows.push({ sku, qty });
+            }
           }
 
           if (rows.length === 0) return resolve(json(res, { error: 'No valid rows found' }, 400));
 
-          // Clear previous tops data and insert new
+          const uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
           labDb.db.prepare('DELETE FROM tops_inventory').run();
           const ins = labDb.db.prepare('INSERT INTO tops_inventory (sku, qty, upload_id) VALUES (?, ?, ?)');
           const totalQty = rows.reduce((s, r) => s + r.qty, 0);
@@ -1973,7 +1987,7 @@ Respond with a structured batching plan in this format:
           });
           insertAll();
 
-          console.log(`[TOPS] Uploaded ${rows.length} SKUs, ${totalQty} total qty from ${filename}`);
+          console.log(`[TOPS] Uploaded ${rows.length} SKUs, ${totalQty.toLocaleString()} total qty from ${filename}`);
           resolve(json(res, { ok: true, uploadId, filename, rowCount: rows.length, totalQty, uploadedAt: new Date().toISOString() }));
         } catch (e) {
           console.error('[TOPS] Upload error:', e);
