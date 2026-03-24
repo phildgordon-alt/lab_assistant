@@ -579,7 +579,7 @@ function getConsumption(fromDate, toDate) {
   `).all(from, to);
 
   const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
-  const isFrameSku = (sku) => /^(196016|8[0-9]{11}|850)/.test(sku);
+  const isFrameSku = (sku) => /^(196016|81003|85038)/.test(sku);
   let lenses = 0, frames = 0;
 
   for (const r of rows) {
