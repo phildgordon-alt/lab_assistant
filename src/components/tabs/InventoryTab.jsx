@@ -1922,7 +1922,6 @@ function InventoryTab({ ovenServerUrl, settings }) {
           const statuses = {};
           for (const o of orders) statuses[o.status] = (statuses[o.status] || 0) + 1;
           const totalQty = filtered.reduce((s, o) => s + o.totalQty, 0);
-          const totalRemaining = filtered.reduce((s, o) => s + o.totalRemaining, 0);
           const totalAmount = filtered.reduce((s, o) => s + o.totalAmount, 0);
 
           return (
@@ -1932,18 +1931,14 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono }}>Last sync: {poData?.lastSync ? new Date(poData.lastSync).toLocaleString() : '—'}</div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>OPEN POs</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{filtered.length}</div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL ORDERED</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL QTY ORDERED</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{totalQty.toLocaleString()}</div>
-                </Card>
-                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>REMAINING</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{totalRemaining.toLocaleString()}</div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.textDim}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL AMOUNT</div>
@@ -1982,8 +1977,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontFamily: mono, fontSize: 11 }}>
                           <span style={{ color: T.textMuted }}>{o.date}</span>
                           <span style={{ color: T.text }}>{o.lineCount} items</span>
-                          <span style={{ color: T.amber }}>Ord: {o.totalQty}</span>
-                          <span style={{ color: T.green }}>Rem: {o.totalRemaining}</span>
+                          <span style={{ color: T.amber }}>Qty: {o.totalQty}</span>
                           <span style={{ color: T.textDim }}>${Math.round(o.totalAmount).toLocaleString()}</span>
                           <span style={{ fontSize: 12, color: T.textDim }}>{poExpanded === o.id ? '▲' : '▼'}</span>
                         </div>
@@ -1996,9 +1990,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>SKU</th>
                                 <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>NAME</th>
                                 <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>CAT</th>
-                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>ORDERED</th>
-                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>RECEIVED</th>
-                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>REMAINING</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>QTY</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>RATE</th>
                                 <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>AMOUNT</th>
                               </tr>
                             </thead>
@@ -2009,8 +2002,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                   <td style={{ padding: '5px 8px', color: T.textMuted, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.name}</td>
                                   <td style={{ padding: '5px 8px', color: T.cyan, fontSize: 9 }}>{l.category}</td>
                                   <td style={{ padding: '5px 8px', textAlign: 'right', color: T.amber }}>{l.qty}</td>
-                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: T.green }}>{l.received}</td>
-                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: l.remaining > 0 ? T.text : T.textDim, fontWeight: l.remaining > 0 ? 700 : 400 }}>{l.remaining}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textMuted }}>${l.rate?.toFixed(2) || '—'}</td>
                                   <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textDim }}>${Math.round(l.amount).toLocaleString()}</td>
                                 </tr>
                               ))}
