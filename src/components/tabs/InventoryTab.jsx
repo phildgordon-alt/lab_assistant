@@ -1531,8 +1531,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: T.red, fontFamily: mono }}>{(sm.kardex?.breakages || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.kardex?.total > 0 ? (sm.kardex.breakages / sm.kardex.total * 100).toFixed(1) : 0}% rate</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.red, fontFamily: mono }}>{(sm.netsuite?.breakages || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{sm.netsuite?.total > 0 ? (sm.netsuite.breakages / sm.netsuite.total * 100).toFixed(1) : 0}% rate</div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE</div>
@@ -1624,7 +1624,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           </td>
                           <td style={{ padding: '6px 12px', textAlign: 'right', color: s.kardex_qty > 0 ? T.green : T.textDim }}>{s.kardex_qty > 0 ? s.kardex_qty.toLocaleString() : '—'}</td>
                           <td style={{ padding: '6px 12px', textAlign: 'right', color: s.netsuite_qty > 0 ? T.blue : T.textDim }}>{s.netsuite_qty > 0 ? s.netsuite_qty.toLocaleString() : '—'}</td>
-                          <td style={{ padding: '6px 12px', textAlign: 'right', color: s.kardex_breakages > 0 ? T.red : T.textDim }}>{s.kardex_breakages > 0 ? s.kardex_breakages.toLocaleString() : '—'}</td>
+                          <td style={{ padding: '6px 12px', textAlign: 'right', color: s.breakages > 0 ? T.red : T.textDim }}>{s.breakages > 0 ? s.breakages.toLocaleString() : '—'}</td>
                           <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 700, color: s.variance === 0 ? T.textDim : Math.abs(s.variance) > 100 ? T.red : T.amber }}>
                             {s.variance !== 0 ? (s.variance > 0 ? '+' : '') + s.variance.toLocaleString() : '—'}
                           </td>
