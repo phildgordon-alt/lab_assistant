@@ -151,19 +151,22 @@ async function poll() {
   const start = Date.now();
 
   try {
-    // Query all inventory items at Irvine 2 location with qty > 0
-    // Use upcCode as primary SKU match (same as ItemPath OPC code)
+    // Query inventory with UPC code for matching to ItemPath OPC
     const rows = await suiteql(`
       SELECT item.itemId AS itemid, item.displayName AS name,
              item.upcCode AS upc,
              invbal.quantityOnHand AS qty, invbal.quantityAvailable AS available,
              item.class AS classId
       FROM inventoryBalance invbal
-      JOIN item ON item.id = invbal.item
+      INNER JOIN item ON item.id = invbal.item
       WHERE invbal.location = ${LOCATION_ID}
         AND invbal.quantityOnHand > 0
       ORDER BY item.itemId
     `);
+
+    // Count UPC coverage
+    const withUpc = rows.filter(r => r.upc && r.upc !== r.itemid).length;
+    console.log(`[NetSuite] UPC coverage: ${withUpc}/${rows.length} items have UPC codes`);
 
     // Class ID → category mapping
     const CLASS_MAP = {
