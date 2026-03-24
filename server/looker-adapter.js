@@ -156,9 +156,23 @@ async function fetchFrameUsage() {
 // POLL
 // ─────────────────────────────────────────────────────────────────────────────
 async function poll() {
+  const db = require('./db');
+
   try {
     cache.daily = await fetchUsage();
-    console.log(`[Looker] Synced ${cache.daily.length} days of lens usage`);
+    // Save to SQLite
+    const delLens = db.db.prepare('DELETE FROM looker_lens_daily');
+    const insLens = db.db.prepare('INSERT OR REPLACE INTO looker_lens_daily (tran_date, opc, lenses, breakages) VALUES (?, ?, ?, ?)');
+    const saveLens = db.db.transaction(() => {
+      delLens.run();
+      for (const day of cache.daily) {
+        for (const [opc, v] of Object.entries(day.byOpc || {})) {
+          insLens.run(day.date, opc, v.lenses, v.breakages);
+        }
+      }
+    });
+    saveLens();
+    console.log(`[Looker] Synced ${cache.daily.length} days of lens usage → SQLite`);
   } catch (e) {
     cache.error = e.message;
     console.error('[Looker] Lens usage poll error:', e.message);
@@ -166,7 +180,19 @@ async function poll() {
 
   try {
     cache.frames = await fetchFrameUsage();
-    console.log(`[Looker] Synced ${cache.frames.length} weeks of frame usage`);
+    // Save to SQLite
+    const delFrame = db.db.prepare('DELETE FROM looker_frame_daily');
+    const insFrame = db.db.prepare('INSERT OR REPLACE INTO looker_frame_daily (tran_date, upc, jobs) VALUES (?, ?, ?)');
+    const saveFrame = db.db.transaction(() => {
+      delFrame.run();
+      for (const day of cache.frames) {
+        for (const [upc, count] of Object.entries(day.byUpc || {})) {
+          insFrame.run(day.date, upc, count);
+        }
+      }
+    });
+    saveFrame();
+    console.log(`[Looker] Synced ${cache.frames.length} days of frame usage → SQLite`);
   } catch (e) {
     console.error('[Looker] Frame usage poll error:', e.message);
   }
@@ -175,14 +201,57 @@ async function poll() {
   if (cache.daily?.length > 0) cache.error = null;
 }
 
+// Load from SQLite on startup (before API poll)
+function loadFromSQLite() {
+  try {
+    const db = require('./db');
+
+    // Load lens data
+    const lensRows = db.db.prepare('SELECT tran_date, opc, lenses, breakages FROM looker_lens_daily').all();
+    if (lensRows.length > 0) {
+      const byDate = {};
+      for (const r of lensRows) {
+        if (!byDate[r.tran_date]) byDate[r.tran_date] = { date: r.tran_date, lenses: 0, breakages: 0, byOpc: {} };
+        byDate[r.tran_date].lenses += r.lenses;
+        byDate[r.tran_date].breakages += r.breakages;
+        byDate[r.tran_date].byOpc[r.opc] = { lenses: r.lenses, breakages: r.breakages };
+      }
+      cache.daily = Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date));
+      console.log(`[Looker] Loaded ${cache.daily.length} days of lens usage from SQLite`);
+    }
+
+    // Load frame data
+    const frameRows = db.db.prepare('SELECT tran_date, upc, jobs FROM looker_frame_daily').all();
+    if (frameRows.length > 0) {
+      const byDate = {};
+      for (const r of frameRows) {
+        if (!byDate[r.tran_date]) byDate[r.tran_date] = { date: r.tran_date, frames: 0, byUpc: {} };
+        byDate[r.tran_date].frames += r.jobs;
+        byDate[r.tran_date].byUpc[r.upc] = r.jobs;
+      }
+      cache.frames = Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date));
+      console.log(`[Looker] Loaded ${cache.frames.length} days of frame usage from SQLite`);
+    }
+
+    if (lensRows.length > 0 || frameRows.length > 0) {
+      cache.lastSync = 'sqlite';
+    }
+  } catch (e) {
+    console.error('[Looker] SQLite load error:', e.message);
+  }
+}
+
 function start() {
+  // Load from SQLite immediately — instant data on startup
+  loadFromSQLite();
+
   if (!CONFIG.clientId || !CONFIG.clientSecret || !CONFIG.baseUrl) {
-    console.log('[Looker] No credentials configured — skipping');
+    console.log('[Looker] No credentials configured — serving from SQLite only');
     return;
   }
   console.log('[Looker] Starting — polling every', CONFIG.pollInterval / 1000, 's');
-  // Initial fetch after 5s delay (let other adapters start first)
-  setTimeout(() => poll(), 5000);
+  // Fetch from API after 10s, then on interval
+  setTimeout(() => poll(), 10000);
   pollTimer = setInterval(() => poll(), CONFIG.pollInterval);
 }
 

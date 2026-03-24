@@ -286,6 +286,25 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_ns_cd_date ON netsuite_consumption_daily(tran_date);
   CREATE INDEX IF NOT EXISTS idx_ns_cd_sku ON netsuite_consumption_daily(sku);
 
+  -- Looker lens usage (cached from Look 1118)
+  CREATE TABLE IF NOT EXISTS looker_lens_daily (
+    tran_date TEXT NOT NULL,
+    opc TEXT NOT NULL,
+    lenses INTEGER NOT NULL,
+    breakages INTEGER DEFAULT 0,
+    PRIMARY KEY(tran_date, opc)
+  );
+  CREATE INDEX IF NOT EXISTS idx_lk_lens_date ON looker_lens_daily(tran_date);
+
+  -- Looker frame usage (cached from Look 495)
+  CREATE TABLE IF NOT EXISTS looker_frame_daily (
+    tran_date TEXT NOT NULL,
+    upc TEXT NOT NULL,
+    jobs INTEGER NOT NULL,
+    PRIMARY KEY(tran_date, upc)
+  );
+  CREATE INDEX IF NOT EXISTS idx_lk_frame_date ON looker_frame_daily(tran_date);
+
   -- TOPS manual count uploads (CSV upload from inventory tab)
   CREATE TABLE IF NOT EXISTS tops_inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
