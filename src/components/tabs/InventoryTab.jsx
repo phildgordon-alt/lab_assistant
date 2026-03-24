@@ -1690,7 +1690,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Pipeline — DVI Shipped vs Looker → NetSuite</h3>
                 <div style={{ display: "flex", gap: 4 }}>
-                  {[14, 30, 60].map(d => (
+                  {[7, 14, 30, 60].map(d => (
                     <button key={d} onClick={() => { setPipelineData(null); setPipelineDays(d); }} style={{
                       padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
                       background: pipelineDays === d ? T.blue : 'transparent', color: pipelineDays === d ? '#fff' : T.textMuted,
@@ -1701,7 +1701,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
               </div>
 
               {/* KPI cards */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 20 }}>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>BREAKAGES</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.red, fontFamily: mono }}>{(totals.breakage || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>lens breakages (DVI)</div>
+                </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DVI (SHIPPED)</div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(totals.dvi || 0).toLocaleString()}</div>
@@ -1729,6 +1734,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <thead>
                       <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DATE</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGE</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI SHIPPED</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER → NS</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
@@ -1745,6 +1751,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         return (
                           <tr key={d.date} style={{ borderBottom: `1px solid ${T.border}22`, background: isToday ? `${T.blue}10` : 'transparent' }}>
                             <td style={{ padding: '6px 12px', color: isToday ? T.blue : T.textMuted, fontWeight: isToday ? 700 : 400 }}>{isToday ? 'TODAY' : dayName}</td>
+                            <td style={{ padding: '6px 12px', textAlign: 'right', color: d.breakage > 0 ? T.red : T.textDim }}>{d.breakage > 0 ? d.breakage.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.dvi > 0 ? T.amber : T.textDim }}>{d.dvi > 0 ? d.dvi.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.looker > 0 ? T.blue : T.textDim }}>{d.looker > 0 ? d.looker.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, color: variance === 0 ? T.textDim : Math.abs(variance) > 20 ? T.red : T.amber }}>
@@ -1983,8 +1990,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginTop: 4 }}>TOTAL UNITS</div>
                 </Card>
                 <Card style={{ padding: 16, textAlign: 'center' }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{topsData?.lastUpload ? new Date(topsData.lastUpload.uploaded_at).toLocaleString() : 'Never'}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginTop: 4 }}>LAST UPLOAD</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: T.text }}>{topsData?.items?.[0]?.count_date || (topsData?.lastUpload ? new Date(topsData.lastUpload.uploaded_at).toLocaleDateString() : 'Never')}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginTop: 4 }}>COUNT DATE</div>
                 </Card>
               </div>
 
@@ -2003,15 +2010,21 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                       <thead>
                         <tr>
-                          <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'left', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>SKU</th>
+                          <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'left', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>MODEL</th>
+                          <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'left', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>TOP CODE</th>
+                          <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'left', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>UPC</th>
                           <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'right', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>QTY</th>
+                          <th style={{ fontFamily: mono, fontSize: 9, color: T.textDim, letterSpacing: 1.5, textAlign: 'left', padding: '9px 12px', borderBottom: `2px solid ${T.border}`, textTransform: 'uppercase' }}>LOCATION</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filtered.map((item, i) => (
                           <tr key={i} style={{ borderBottom: `1px solid ${T.border}` }}>
-                            <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 12, color: T.text }}>{item.sku}</td>
+                            <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 12, color: T.text }}>{item.model_name || '—'}</td>
+                            <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 12, color: T.textMuted }}>{item.top_code || '—'}</td>
+                            <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 12, color: T.text }}>{item.upc || item.sku}</td>
                             <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 12, color: T.text, textAlign: 'right' }}>{item.qty.toLocaleString()}</td>
+                            <td style={{ padding: '8px 12px', fontFamily: mono, fontSize: 11, color: T.textMuted }}>{item.location || '—'}</td>
                           </tr>
                         ))}
                       </tbody>

@@ -1771,20 +1771,34 @@ Respond with a structured batching plan in this format:
         lkJobsByDate[day.date] = day.frames;
       }
 
+      // Looker: breakage per day from Look 1118
+      const lkData = looker.getUsage(9999);
+      const breakageByDate = {};
+      let totalBreakage = 0;
+      for (const day of (lkData.daily || [])) {
+        if (day.breakages > 0) {
+          breakageByDate[day.date] = day.breakages;
+          totalBreakage += day.breakages;
+        }
+      }
+
       // Merge dates
       const allDates = new Set([
         ...dviRows.map(r => r.d),
         ...Object.keys(lkJobsByDate),
+        ...Object.keys(breakageByDate),
       ]);
       const daily = [...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days).map(d => ({
         date: d,
         dvi: dviRows.find(r => r.d === d)?.jobs || 0,
         looker: lkJobsByDate[d] || 0,
+        breakage: breakageByDate[d] || 0,
       }));
 
       const totals = {
         dvi: daily.reduce((s, d) => s + d.dvi, 0),
         looker: daily.reduce((s, d) => s + d.looker, 0),
+        breakage: daily.reduce((s, d) => s + d.breakage, 0),
       };
 
       return json(res, { daily, totals, days: daily.length });
@@ -1944,18 +1958,27 @@ Respond with a structured batching plan in this format:
           let rows = [];
 
           if (isXlsx) {
-            // Parse XLSX — use most recent sheet, columns: UPC (C), Quantity (D)
             const XLSX = require('xlsx');
             const wb = XLSX.read(buf, { type: 'buffer' });
-            // Use first sheet (most recent count date)
             const sheetName = wb.SheetNames[0];
             const ws = wb.Sheets[sheetName];
             const data = XLSX.utils.sheet_to_json(ws, { defval: '' });
-            console.log(`[TOPS] Parsing XLSX sheet "${sheetName}" — ${data.length} rows`);
+            // Extract count date from sheet name (e.g. "Inv. 03.19.26" → "2026-03-19")
+            const dateMatch = sheetName.match(/(\d{1,2})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/);
+            let countDate = null;
+            if (dateMatch) {
+              const y = dateMatch[3].length === 2 ? '20' + dateMatch[3] : dateMatch[3];
+              countDate = `${y}-${dateMatch[1].padStart(2, '0')}-${dateMatch[2].padStart(2, '0')}`;
+            }
+            console.log(`[TOPS] Parsing XLSX sheet "${sheetName}" — ${data.length} rows, date: ${countDate || 'unknown'}`);
             for (const row of data) {
               const upc = String(row['UPC'] || row['upc'] || '').replace(/\.0$/, '').trim();
               const qty = parseInt(row['Quantity - UNITS'] || row['Quantity'] || row['qty'] || row['QTY'] || 0);
-              if (upc && qty > 0) rows.push({ sku: upc, qty });
+              const modelName = String(row['Model Name'] || row['model_name'] || '').trim();
+              const topCode = String(row['Top Code'] || row['top_code'] || '').trim();
+              const sku = String(row['SKU'] || row['sku'] || '').trim() || upc;
+              const location = String(row['Location'] || row['location'] || '').trim() || null;
+              if (upc && qty > 0) rows.push({ sku, upc, qty, modelName, topCode, location, countDate });
             }
           } else {
             // Parse CSV — columns: SKU, QTY
@@ -1978,11 +2001,11 @@ Respond with a structured batching plan in this format:
 
           const uploadId = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
           labDb.db.prepare('DELETE FROM tops_inventory').run();
-          const ins = labDb.db.prepare('INSERT INTO tops_inventory (sku, qty, upload_id) VALUES (?, ?, ?)');
+          const ins = labDb.db.prepare('INSERT INTO tops_inventory (sku, upc, model_name, top_code, qty, location, upload_id, count_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
           const totalQty = rows.reduce((s, r) => s + r.qty, 0);
 
           const insertAll = labDb.db.transaction(() => {
-            for (const r of rows) ins.run(r.sku, r.qty, uploadId);
+            for (const r of rows) ins.run(r.upc || r.sku, r.upc || null, r.modelName || null, r.topCode || null, r.qty, r.location || null, uploadId, r.countDate || null);
             labDb.db.prepare('INSERT INTO tops_uploads (id, filename, row_count, total_qty) VALUES (?, ?, ?, ?)').run(uploadId, filename, rows.length, totalQty);
           });
           insertAll();
@@ -1998,7 +2021,7 @@ Respond with a structured batching plan in this format:
   }
 
   if (req.method==='GET' && url.pathname==='/api/inventory/tops') {
-    const rows = labDb.db.prepare('SELECT sku, qty, uploaded_at FROM tops_inventory ORDER BY qty DESC').all();
+    const rows = labDb.db.prepare('SELECT sku, upc, model_name, top_code, qty, location, count_date, uploaded_at FROM tops_inventory ORDER BY qty DESC').all();
     const lastUpload = labDb.db.prepare('SELECT * FROM tops_uploads ORDER BY uploaded_at DESC LIMIT 1').get();
     return json(res, { items: rows, count: rows.length, totalQty: rows.reduce((s, r) => s + r.qty, 0), lastUpload: lastUpload || null });
   }

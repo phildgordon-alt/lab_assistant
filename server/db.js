@@ -28,6 +28,11 @@ db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 // SCHEMA MIGRATIONS — safe ALTER TABLE for existing databases
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
+try { db.exec('ALTER TABLE tops_inventory ADD COLUMN upc TEXT'); } catch {}
+try { db.exec('ALTER TABLE tops_inventory ADD COLUMN model_name TEXT'); } catch {}
+try { db.exec('ALTER TABLE tops_inventory ADD COLUMN top_code TEXT'); } catch {}
+try { db.exec('ALTER TABLE tops_inventory ADD COLUMN location TEXT'); } catch {}
+try { db.exec('ALTER TABLE tops_inventory ADD COLUMN count_date TEXT'); } catch {}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCHEMA
@@ -311,16 +316,22 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_lk_frame_date ON looker_frame_daily(tran_date);
 
-  -- TOPS manual count uploads (CSV upload from inventory tab)
+  -- TOPS manual count uploads
   CREATE TABLE IF NOT EXISTS tops_inventory (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     sku TEXT NOT NULL,
+    upc TEXT,
+    model_name TEXT,
+    top_code TEXT,
     qty INTEGER NOT NULL,
+    location TEXT,
     upload_id TEXT NOT NULL,
+    count_date TEXT,
     uploaded_at TEXT DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_tops_sku ON tops_inventory(sku);
   CREATE INDEX IF NOT EXISTS idx_tops_upload ON tops_inventory(upload_id);
+  CREATE INDEX IF NOT EXISTS idx_tops_upc ON tops_inventory(upc);
 
   CREATE TABLE IF NOT EXISTS tops_uploads (
     id TEXT PRIMARY KEY,
