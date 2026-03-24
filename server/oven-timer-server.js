@@ -1627,9 +1627,9 @@ Respond with a structured batching plan in this format:
     try {
       const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
       const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
-      const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
-      const isFrameSku = (sku) => /^(196016|81003|85038)/.test(sku);
-      const isLensOrFrame = (sku) => isLensSku(sku) || isFrameSku(sku);
+      const skuCat = (sku) => netsuite.getSkuCategory(sku);
+      const isLensOrFrame = (sku) => { const c = skuCat(sku); return c === 'Lenses' || c === 'Frames'; };
+      const isLensSku = (sku) => skuCat(sku) === 'Lenses';
 
       // ── KARDEX: Merge ItemPath picks + Looker (lenses+frames) ──
       // ItemPath has actual picks (Mar 6+), Looker has YTD history

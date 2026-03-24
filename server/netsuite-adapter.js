@@ -324,6 +324,12 @@ function lookupSku(sku) {
   return inventory[sku] || null;
 }
 
+function getSkuCategory(sku) {
+  const item = inventory[sku];
+  if (item) return item.category; // Lenses, Frames, Tops, Other
+  return null; // unknown — not in NetSuite
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // GETTERS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -578,17 +584,14 @@ function getConsumption(fromDate, toDate) {
     WHERE tran_date >= ? AND tran_date <= ?
   `).all(from, to);
 
-  const isLensSku = (sku) => /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
-  const isFrameSku = (sku) => /^(196016|81003|85038)/.test(sku);
   let lenses = 0, frames = 0;
 
   for (const r of rows) {
-    const isLens = isLensSku(r.sku);
-    const isFrame = isFrameSku(r.sku);
-    if (!isLens && !isFrame) continue; // skip non-lens/frame items
+    const cat = getSkuCategory(r.sku);
+    if (cat !== 'Lenses' && cat !== 'Frames') continue; // only lenses and frames
     total += r.qty;
-    if (isLens) lenses += r.qty; else frames += r.qty;
-    if (!bySku[r.sku]) bySku[r.sku] = { qty: 0, lines: 0 };
+    if (cat === 'Lenses') lenses += r.qty; else frames += r.qty;
+    if (!bySku[r.sku]) bySku[r.sku] = { qty: 0, lines: 0, category: cat };
     bySku[r.sku].qty += r.qty;
     bySku[r.sku].lines += r.lines;
     if (!byDate[r.tran_date]) byDate[r.tran_date] = { qty: 0, lines: 0 };
@@ -605,6 +608,7 @@ module.exports = {
   getHealth,
   reconcile,
   lookupSku,
+  getSkuCategory,
   getOpenPOs,
   fetchOpenPOs,
   syncConsumption,
