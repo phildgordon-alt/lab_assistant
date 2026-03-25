@@ -2083,15 +2083,20 @@ Respond with a structured batching plan in this format:
     const sv = jobs.filter(j => j.jobType === 'Single Vision');
     const surf = jobs.filter(j => j.jobType === 'Surfacing');
 
-    const zoneCounts = (list) => ({
-      total: list.length,
-      green: list.filter(j => j.zone === 'GREEN').length,
-      yellow: list.filter(j => j.zone === 'YELLOW').length,
-      red: list.filter(j => j.zone === 'RED').length,
-      critical: list.filter(j => j.zone === 'CRITICAL').length,
-      overSLA: list.filter(j => j.overSLA).length,
-      avgDays: list.length > 0 ? Math.round(list.reduce((s, j) => s + j.daysInLab, 0) / list.length * 10) / 10 : 0,
-    });
+    const zoneCounts = (list) => {
+      const r = list.filter(j => j.zone === 'RED').length;
+      const c = list.filter(j => j.zone === 'CRITICAL').length;
+      return {
+        total: list.length,
+        green: list.filter(j => j.zone === 'GREEN').length,
+        yellow: list.filter(j => j.zone === 'YELLOW').length,
+        red: r,
+        critical: c,
+        overSLA: list.filter(j => j.overSLA).length,
+        avgDays: list.length > 0 ? Math.round(list.reduce((s, j) => s + j.daysInLab, 0) / list.length * 10) / 10 : 0,
+        outlierPct: list.length > 0 ? Math.round(((r + c) / list.length) * 1000) / 10 : 0,
+      };
+    };
 
     const green = jobs.filter(j => j.zone === 'GREEN').length;
     const yellow = jobs.filter(j => j.zone === 'YELLOW').length;

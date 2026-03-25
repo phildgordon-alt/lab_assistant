@@ -5798,6 +5798,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                 <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{svData.total || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>TOTAL</div></div>
                 <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{svData.avgDays || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>AVG DAYS</div></div>
                 <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: svData.overSLA > 0 ? T.red : T.green }}>{svData.overSLA || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>OVER SLA</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: (svData.outlierPct || 0) > 5 ? T.red : T.green }}>{svData.outlierPct || 0}%</div><div style={{ fontSize: 8, color: T.textDim }}>OUTLIER</div></div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ fontSize: 10, color: T.green }}>{svData.green || 0}</span>
                   <span style={{ fontSize: 10, color: T.amber }}>{svData.yellow || 0}</span>
@@ -5815,6 +5816,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                 <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{surfData.total || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>TOTAL</div></div>
                 <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{surfData.avgDays || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>AVG DAYS</div></div>
                 <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: surfData.overSLA > 0 ? T.red : T.green }}>{surfData.overSLA || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>OVER SLA</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: (surfData.outlierPct || 0) > 5 ? T.red : T.green }}>{surfData.outlierPct || 0}%</div><div style={{ fontSize: 8, color: T.textDim }}>OUTLIER</div></div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <span style={{ fontSize: 10, color: T.green }}>{surfData.green || 0}</span>
                   <span style={{ fontSize: 10, color: T.amber }}>{surfData.yellow || 0}</span>
