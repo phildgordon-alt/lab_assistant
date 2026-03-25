@@ -537,6 +537,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [lensSettings, setLensSettings] = useState(false);
   const [lensDefaults, setLensDefaults] = useState({ manufacturing_weeks: 13, transit_weeks: 4, fda_hold_weeks: 2, safety_stock_weeks: 4 });
   const [lensSaving, setLensSaving] = useState(false);
+  const [lensSubTab, setLensSubTab] = useState('health');
+  const [modelParams, setModelParams] = useState(null);
   const [npiData, setNpiData] = useState(null);
   const [npiOpen, setNpiOpen] = useState(false);
   const [npiScenarios, setNpiScenarios] = useState(null);
@@ -2241,18 +2243,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
           return (
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Lens Intelligence</h3>
                 <div style={{ display: "flex", gap: 8 }}>
                   <ExportBtn label="Export CSV" onClick={() => window.open(`${ovenServerUrl}/api/lens-intel/export`, '_blank')} />
-                  <ExportBtn label="Order Report" onClick={async () => {
-                    const resp = await fetch(`${ovenServerUrl}/api/lens-intel/orders`);
-                    const data = await resp.json();
-                    downloadCSV('lens_order_recommendations.csv', ['sku','description','on_hand','avg_weekly_consumption','projected_weekly','consumption_method','weeks_of_supply','status','order_qty_recommended','dynamic_reorder_point','lead_time_weeks','manufacturing_weeks','transit_weeks','fda_hold_weeks','runout_date','days_at_risk','abc_class','regression_slope','regression_r2'], data.recommendations || []);
-                  }} />
-                  <button onClick={() => setLensSettings(!lensSettings)} style={{ background: lensSettings ? T.amber : 'transparent', border: `1px solid ${lensSettings ? T.amber : T.border}`, borderRadius: 6, padding: "6px 14px", color: lensSettings ? '#fff' : T.textMuted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
-                    Settings
-                  </button>
                   <button onClick={async () => {
                     await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
                     const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
@@ -2262,138 +2256,28 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </button>
                 </div>
               </div>
+              {/* Sub-tab navigation */}
+              <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: `1px solid ${T.border}`, paddingBottom: 8 }}>
+                {[{ id: 'health', label: 'Health' }, { id: 'orders', label: 'Orders' }, { id: 'long-tail', label: 'Long Tail' }, { id: 'npi', label: 'NPI' }, { id: 'model', label: 'Model' }].map(t => (
+                  <button key={t.id} onClick={() => setLensSubTab(t.id)} style={{
+                    background: lensSubTab === t.id ? T.blueDark : "transparent", border: `1px solid ${lensSubTab === t.id ? T.blue : T.border}`,
+                    borderRadius: 6, padding: "7px 16px", color: lensSubTab === t.id ? T.blue : T.textMuted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono
+                  }}>
+                    {t.label}
+                    {t.id === 'orders' && sm.orderRecommended > 0 ? <span style={{ marginLeft: 6, background: T.amber, color: "#000", borderRadius: 10, padding: "2px 6px", fontSize: 8 }}>{sm.orderRecommended}</span> : null}
+                  </button>
+                ))}
+              </div>
 
-              {/* Settings panel */}
-              {lensSettings && (
-                <Card style={{ padding: 16, marginBottom: 16, border: `1px solid ${T.amber}30`, background: `${T.amber}05` }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>Lead Time & Planning Settings</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
-                    <div>
-                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>MANUFACTURING (weeks)</label>
-                      <input type="number" step="0.5" value={lensDefaults.manufacturing_weeks} onChange={e => setLensDefaults(p => ({...p, manufacturing_weeks: parseFloat(e.target.value) || 0}))}
-                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
-                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Time to manufacture (default: 13 = 90 days)</div>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>OCEAN TRANSIT (weeks)</label>
-                      <input type="number" step="0.5" value={lensDefaults.transit_weeks} onChange={e => setLensDefaults(p => ({...p, transit_weeks: parseFloat(e.target.value) || 0}))}
-                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
-                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Shipping from supplier (default: 4)</div>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>FDA HOLD (weeks)</label>
-                      <input type="number" step="0.5" value={lensDefaults.fda_hold_weeks} onChange={e => setLensDefaults(p => ({...p, fda_hold_weeks: parseFloat(e.target.value) || 0}))}
-                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
-                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Customs/FDA clearance (default: 2)</div>
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>SAFETY STOCK (weeks)</label>
-                      <input type="number" step="0.5" value={lensDefaults.safety_stock_weeks} onChange={e => setLensDefaults(p => ({...p, safety_stock_weeks: parseFloat(e.target.value) || 0}))}
-                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
-                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Buffer stock (A=6, B=4, C=3)</div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono }}>
-                      Total lead time: <strong style={{ color: T.text }}>{(lensDefaults.manufacturing_weeks + lensDefaults.transit_weeks + lensDefaults.fda_hold_weeks).toFixed(1)} weeks</strong> ({Math.round((lensDefaults.manufacturing_weeks + lensDefaults.transit_weeks + lensDefaults.fda_hold_weeks) * 7)} days)
-                    </div>
-                    <button onClick={async () => {
-                      setLensSaving(true);
-                      await fetch(`${ovenServerUrl}/api/lens-intel/defaults`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(lensDefaults) });
-                      await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
-                      const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
-                      setLensIntelData(await resp.json());
-                      setLensSaving(false);
-                    }} disabled={lensSaving}
-                      style={{ background: T.green, border: "none", borderRadius: 6, padding: "8px 20px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono, opacity: lensSaving ? 0.6 : 1 }}>
-                      {lensSaving ? "Saving..." : "Apply to All & Recompute"}
-                    </button>
-                  </div>
-                  <div style={{ fontSize: 10, color: T.textDim, marginTop: 8 }}>
-                    Defaults for SKUs without custom params. Click a row to set per-SKU overrides. Mark discontinued = ABC class "X".
-                  </div>
-
-                  {/* Bulk edit by prefix */}
-                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 8 }}>Bulk Edit by SKU Prefix / Vendor</div>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>PREFIX</label>
-                        <select id="bulk-prefix" style={{ padding: '6px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }}>
-                          <option value="4800">4800 — Essilor</option>
-                          <option value="062">062x — Somo</option>
-                          <option value="026">026x</option>
-                          <option value="001">001x — Younger</option>
-                          <option value="5">5xxx — Conant</option>
-                          <option value="custom">Custom prefix...</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>CUSTOM PREFIX</label>
-                        <input type="text" id="bulk-custom-prefix" placeholder="e.g. 4800" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 80 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>MFG (wk)</label>
-                        <input type="number" step="0.5" id="bulk-mfg" defaultValue="13" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TRANSIT (wk)</label>
-                        <input type="number" step="0.5" id="bulk-transit" defaultValue="4" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FDA (wk)</label>
-                        <input type="number" step="0.5" id="bulk-fda" defaultValue="2" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SAFETY (wk)</label>
-                        <input type="number" step="0.5" id="bulk-safety" defaultValue="4" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>ABC</label>
-                        <select id="bulk-abc" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }}>
-                          <option value="">No change</option>
-                          <option value="A">A</option>
-                          <option value="B">B</option>
-                          <option value="C">C</option>
-                          <option value="X">X — Discontinued</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SUPPLIER</label>
-                        <input type="text" id="bulk-supplier" placeholder="e.g. Essilor" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 90 }} />
-                      </div>
-                      <button onClick={async () => {
-                        const prefixEl = document.getElementById('bulk-prefix');
-                        let prefix = prefixEl.value === 'custom' ? (document.getElementById('bulk-custom-prefix')?.value || '') : prefixEl.value;
-                        if (!prefix) { alert('Enter a prefix'); return; }
-                        const matching = (lensIntelData?.items || []).filter(i => i.sku.startsWith(prefix));
-                        if (matching.length === 0) { alert('No SKUs match prefix: ' + prefix); return; }
-                        if (!confirm(`Apply settings to ${matching.length} SKUs starting with "${prefix}"?`)) return;
-                        const params = {
-                          manufacturing_weeks: parseFloat(document.getElementById('bulk-mfg')?.value) || 13,
-                          transit_weeks: parseFloat(document.getElementById('bulk-transit')?.value) || 4,
-                          fda_hold_weeks: parseFloat(document.getElementById('bulk-fda')?.value) || 2,
-                          safety_stock_weeks: parseFloat(document.getElementById('bulk-safety')?.value) || 4,
-                          supplier: document.getElementById('bulk-supplier')?.value || null,
-                        };
-                        const abc = document.getElementById('bulk-abc')?.value;
-                        if (abc) params.abc_class = abc;
-                        const updates = matching.map(i => ({ sku: i.sku, ...params }));
-                        setLensSaving(true);
-                        await fetch(`${ovenServerUrl}/api/lens-intel/params/bulk`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ updates }) });
-                        await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
-                        const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
-                        setLensIntelData(await resp.json());
-                        setLensSaving(false);
-                        alert(`Updated ${updates.length} SKUs`);
-                      }} disabled={lensSaving}
-                        style={{ background: T.green, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono, opacity: lensSaving ? 0.6 : 1, whiteSpace: 'nowrap' }}>
-                        {lensSaving ? "Saving..." : "Apply to Prefix"}
-                      </button>
-                    </div>
-                  </div>
-                </Card>
-              )}
+              {/* ═══ HEALTH SUB-TAB ═══ */}
+              {lensSubTab === 'health' && (<div>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginBottom: 8 }}>
+                  <ExportBtn label="Order Report" onClick={async () => {
+                    const resp = await fetch(`${ovenServerUrl}/api/lens-intel/orders`);
+                    const data = await resp.json();
+                    downloadCSV('lens_order_recommendations.csv', ['sku','description','on_hand','avg_weekly_consumption','projected_weekly','consumption_method','weeks_of_supply','status','order_qty_recommended','demand_adj_qty','dynamic_reorder_point','lead_time_weeks','manufacturing_weeks','transit_weeks','fda_hold_weeks','runout_date','days_at_risk','abc_class','cv','routing','sku_type','regression_slope','regression_r2'], data.recommendations || []);
+                  }} />
+              </div>
 
               {/* KPI cards */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8, marginBottom: 16 }}>
@@ -2683,22 +2567,81 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </div>
                 </Card>
               )}
-              {/* NPI Section */}
-              <Card style={{ marginTop: 20 }}>
-                <div onClick={() => {
-                  setNpiOpen(!npiOpen);
-                  if (!npiScenarios && !npiOpen) fetch(`${ovenServerUrl}/api/npi/scenarios`).then(r => r.json()).then(d => setNpiScenarios(d.scenarios || [])).catch(() => setNpiScenarios([]));
-                }} style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              </div>)}
+
+              {/* ═══ ORDERS SUB-TAB ═══ */}
+              {lensSubTab === 'orders' && (() => {
+                const orderItems = items.filter(i => i.order_recommended === 1 && i.routing !== 'SURFACE');
+                return (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <div style={{ fontSize: 13, color: T.textMuted, fontFamily: mono }}>{orderItems.length} SKUs need ordering</div>
+                      <ExportBtn label="Export Order CSV" onClick={() => {
+                        downloadCSV('lens_order_export.csv', ['sku','description','on_hand','avg_weekly_consumption','order_qty_recommended','demand_adj_qty','dynamic_reorder_point','weeks_of_supply','status','abc_class','routing','sku_type','lead_time_weeks','runout_date','days_at_risk'], orderItems);
+                      }} />
+                    </div>
+                    <div style={{ maxHeight: 600, overflowY: 'auto', borderRadius: 8, border: `1px solid ${T.border}` }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, fontFamily: mono }}>
+                        <thead style={{ position: 'sticky', top: 0, background: T.surface, zIndex: 1 }}>
+                          <tr>
+                            <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>OPC / SKU</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'center', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>TYPE</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'center', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>ABC</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>ON HAND</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>AVG/WK</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>WOS</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>ROP</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.amber, borderBottom: `2px solid ${T.border}`, fontWeight: 800 }}>ORDER QTY</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.green, borderBottom: `2px solid ${T.border}`, fontWeight: 800 }}>DEMAND ADJ</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>OPEN PO</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'left', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>RUNOUT</th>
+                            <th style={{ padding: '8px 6px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>RISK</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {orderItems.sort((a, b) => (b.days_at_risk || 0) - (a.days_at_risk || 0)).map((i, idx) => (
+                            <tr key={i.sku} style={{ borderBottom: `1px solid ${T.border}15`, background: idx % 2 === 0 ? 'transparent' : `${T.bg}40` }}>
+                              <td style={{ padding: '6px 10px' }}>
+                                <div style={{ color: T.text, fontWeight: 600 }}>{i.sku}</div>
+                                {i.description && <div style={{ fontSize: 8, color: T.textDim, fontWeight: 400 }}>{i.description.slice(0, 40)}</div>}
+                              </td>
+                              <td style={{ padding: '6px', textAlign: 'center', fontSize: 8, color: T.textMuted }}>{i.sku_type === 'semifinished' ? 'SF' : 'FIN'}</td>
+                              <td style={{ padding: '6px', textAlign: 'center' }}>
+                                <span style={{ fontSize: 8, padding: '1px 5px', borderRadius: 3, fontWeight: 700, background: i.abc_class === 'A' ? `${T.green}20` : i.abc_class === 'B' ? `${T.amber}20` : `${T.textDim}20`, color: i.abc_class === 'A' ? T.green : i.abc_class === 'B' ? T.amber : T.textDim }}>{i.abc_class}</span>
+                              </td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: i.on_hand === 0 ? T.red : T.text }}>{i.on_hand}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: T.textMuted }}>{i.avg_weekly_consumption}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: i.weeks_of_supply < 10 ? T.red : T.textMuted }}>{i.weeks_of_supply}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: T.textDim }}>{i.dynamic_reorder_point}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: T.amber, fontWeight: 800, fontSize: 11 }}>{i.order_qty_recommended}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: T.green, fontWeight: 800, fontSize: 11 }}>{i.demand_adj_qty || i.order_qty_recommended}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: T.textMuted }}>{i.open_po_qty || 0}</td>
+                              <td style={{ padding: '6px', textAlign: 'left', color: i.runout_date ? T.text : T.textDim, fontSize: 9 }}>{i.runout_date || '—'}</td>
+                              <td style={{ padding: '6px', textAlign: 'right', color: i.days_at_risk > 0 ? T.red : T.textDim, fontWeight: i.days_at_risk > 0 ? 700 : 400 }}>{i.days_at_risk > 0 ? `${i.days_at_risk}d` : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {orderItems.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: T.textDim, fontSize: 12 }}>No orders recommended</div>}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ═══ NPI SUB-TAB ═══ */}
+              {lensSubTab === 'npi' && (() => {
+                if (!npiScenarios) {
+                  fetch(`${ovenServerUrl}/api/npi/scenarios`).then(r => r.json()).then(d => setNpiScenarios(d.scenarios || [])).catch(() => setNpiScenarios([]));
+                }
+                return (
+              <Card>
+                <div style={{ padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>NPI</div>
                     <div style={{ fontSize: 11, color: T.textMuted }}>New product introduction — model demand cannibalization and initial orders</div>
                   </div>
-                  <span style={{ fontSize: 14, color: T.textDim }}>{npiOpen ? '▲' : '▼'}</span>
                 </div>
-                {npiOpen && (() => {
-                  if (!npiScenarios) {
-                    fetch(`${ovenServerUrl}/api/npi/scenarios`).then(r => r.json()).then(d => setNpiScenarios(d.scenarios || [])).catch(() => setNpiScenarios([]));
-                  }
+                {(() => {
                   return (
                     <div style={{ padding: '0 16px 16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
@@ -2913,22 +2856,24 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   );
                 })()}
               </Card>
+                );
+              })()}
 
-              {/* Long Tail Analysis — Stock vs Surface */}
-              <Card style={{ marginTop: 20 }}>
-                <div onClick={() => {
-                  setLongTailOpen(!longTailOpen);
-                  if (!longTailData && !longTailOpen) fetch(`${ovenServerUrl}/api/lens-intel/long-tail`).then(r => r.json()).then(d => { if (d.results) setLongTailData(d); }).catch(() => {});
-                }} style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {/* ═══ LONG TAIL SUB-TAB ═══ */}
+              {lensSubTab === 'long-tail' && (() => {
+                if (!longTailData) {
+                  fetch(`${ovenServerUrl}/api/lens-intel/long-tail`).then(r => r.json()).then(d => { if (d.results) setLongTailData(d); }).catch(() => {});
+                }
+                return (<Card>
+                <div style={{ padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Long Tail Analysis</div>
                     <div style={{ fontSize: 11, color: T.textMuted }}>Stock vs Surface decision engine — break-even analysis by material type
                       {longTailData?.lastRun && <span style={{ marginLeft: 8, color: T.textDim }}>Last run: {new Date(longTailData.lastRun).toLocaleString()}</span>}
                     </div>
                   </div>
-                  <span style={{ fontSize: 14, color: T.textDim }}>{longTailOpen ? '▲' : '▼'}</span>
                 </div>
-                {longTailOpen && (() => {
+                {(() => {
                   const hasResults = longTailData?.results?.length > 0;
                   if (!hasResults) {
                     return (
@@ -3096,6 +3041,126 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   );
                 })()}
               </Card>
+                );
+              })()}
+
+              {/* ═══ MODEL SUB-TAB ═══ */}
+              {lensSubTab === 'model' && (() => {
+                if (!modelParams) {
+                  fetch(`${ovenServerUrl}/api/lens-intel/model-params`).then(r => r.json()).then(setModelParams).catch(() => setModelParams({}));
+                }
+                const mp = modelParams || {};
+                return (
+                  <div>
+                    <Card style={{ padding: 16, marginBottom: 16 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>Demand Model Parameters</div>
+                      <div style={{ fontSize: 11, color: T.textMuted, marginBottom: 16 }}>These parameters affect how Lens Intelligence calculates order quantities. Changes take effect on next Refresh.</div>
+
+                      {/* Stock-Out Compensation */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.text, marginBottom: 8, fontFamily: mono }}>STOCK-OUT COMPENSATION</div>
+                        <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 8 }}>Adjusts demand before calculating safety stock and reorder point. Compensates for understated demand during stockouts.</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FINISHED LENS ADJ %</label>
+                            <input type="number" value={mp.stockout_adj_finished ?? 10} onChange={e => setModelParams({ ...mp, stockout_adj_finished: Number(e.target.value) })} style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                            <div style={{ fontSize: 8, color: T.textDim, marginTop: 2 }}>+10 = demand was 10% understated (adds 10%)</div>
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SEMI-FINISHED ADJ %</label>
+                            <input type="number" value={mp.stockout_adj_semifin ?? -10} onChange={e => setModelParams({ ...mp, stockout_adj_semifin: Number(e.target.value) })} style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                            <div style={{ fontSize: 8, color: T.textDim, marginTop: 2 }}>-10 = demand was 10% overstated (reduces 10%)</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Weeks of Cover Override */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.text, marginBottom: 8, fontFamily: mono }}>SAFETY STOCK METHOD</div>
+                        <div style={{ display: 'flex', gap: 12, marginBottom: 8 }}>
+                          <button onClick={() => setModelParams({ ...mp, use_woc_override: false })} style={{
+                            background: !mp.use_woc_override ? T.blueDark : 'transparent', border: `1px solid ${!mp.use_woc_override ? T.blue : T.border}`,
+                            borderRadius: 6, padding: '6px 16px', color: !mp.use_woc_override ? T.blue : T.textMuted, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono
+                          }}>Z-Score by ABC Class</button>
+                          <button onClick={() => setModelParams({ ...mp, use_woc_override: true })} style={{
+                            background: mp.use_woc_override ? T.blueDark : 'transparent', border: `1px solid ${mp.use_woc_override ? T.blue : T.border}`,
+                            borderRadius: 6, padding: '6px 16px', color: mp.use_woc_override ? T.blue : T.textMuted, fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono
+                          }}>Weeks of Cover Override</button>
+                        </div>
+                        {!mp.use_woc_override && (
+                          <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, padding: 8, background: T.bg, borderRadius: 4 }}>
+                            A (99%): Z=2.33, 6wk safety &nbsp;|&nbsp; B (95%): Z=1.65, 4wk safety &nbsp;|&nbsp; C (90%): Z=1.28, 3wk safety
+                          </div>
+                        )}
+                        {mp.use_woc_override && (
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TARGET WEEKS OF COVER</label>
+                            <input type="number" value={mp.woc_target_weeks ?? 16} onChange={e => setModelParams({ ...mp, woc_target_weeks: Number(e.target.value) })} style={{ width: 120, padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                            <div style={{ fontSize: 8, color: T.amber, marginTop: 4 }}>Override mode: all SKUs use flat {mp.woc_target_weeks || 16} weeks of cover regardless of ABC class. Switch back to Z-Score after ordering.</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Lead Time Defaults — reuse existing */}
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.text, marginBottom: 8, fontFamily: mono }}>DEFAULT LEAD TIMES</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10 }}>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>MFG (weeks)</label>
+                            <input type="number" value={lensDefaults.manufacturing_weeks} onChange={e => setLensDefaults({ ...lensDefaults, manufacturing_weeks: Number(e.target.value) })} style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TRANSIT (weeks)</label>
+                            <input type="number" value={lensDefaults.transit_weeks} onChange={e => setLensDefaults({ ...lensDefaults, transit_weeks: Number(e.target.value) })} style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FDA HOLD (weeks)</label>
+                            <input type="number" value={lensDefaults.fda_hold_weeks} onChange={e => setLensDefaults({ ...lensDefaults, fda_hold_weeks: Number(e.target.value) })} style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TOTAL</label>
+                            <div style={{ padding: '6px 8px', background: T.bg, borderRadius: 4, color: T.green, fontSize: 12, fontFamily: mono, fontWeight: 700, border: `1px solid ${T.border}` }}>{lensDefaults.manufacturing_weeks + lensDefaults.transit_weeks + lensDefaults.fda_hold_weeks} weeks</div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Save */}
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={async () => {
+                          // Save model params
+                          await fetch(`${ovenServerUrl}/api/lens-intel/model-params`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(mp) });
+                          // Apply lead time defaults
+                          await fetch(`${ovenServerUrl}/api/lens-intel/defaults`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(lensDefaults) });
+                          // Recompute
+                          await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
+                          const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                          setLensIntelData(await resp.json());
+                          const mpResp = await fetch(`${ovenServerUrl}/api/lens-intel/model-params`);
+                          setModelParams(await mpResp.json());
+                        }} style={{ background: T.green, border: "none", borderRadius: 6, padding: "8px 24px", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer", fontFamily: mono }}>
+                          Save & Recompute
+                        </button>
+                      </div>
+                    </Card>
+
+                    {/* Bulk Edit by Prefix — reuse from old settings */}
+                    {lensSettings && (
+                      <Card style={{ padding: 16, border: `1px solid ${T.amber}30`, background: `${T.amber}05` }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.text, marginBottom: 8, fontFamily: mono }}>BULK EDIT BY PREFIX</div>
+                        <div style={{ fontSize: 10, color: T.textMuted, marginBottom: 8 }}>Apply settings to all SKUs matching a prefix</div>
+                        <button onClick={() => setLensSettings(!lensSettings)} style={{ background: T.amber, border: "none", borderRadius: 6, padding: "6px 14px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                          {lensSettings ? 'Close Bulk Edit' : 'Bulk Edit by Prefix'}
+                        </button>
+                      </Card>
+                    )}
+                    {!lensSettings && (
+                      <button onClick={() => setLensSettings(true)} style={{ marginTop: 8, background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 6, padding: "6px 14px", color: T.textMuted, fontSize: 10, fontWeight: 600, cursor: "pointer", fontFamily: mono }}>
+                        Bulk Edit by Prefix
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           );
         })()}

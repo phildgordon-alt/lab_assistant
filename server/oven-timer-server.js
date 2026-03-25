@@ -2182,10 +2182,20 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/lens-intel/export') {
     const data = lensIntel.getStatus(labDb.db);
     res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="lens_intelligence.csv"' });
-    const headers = ['sku','description','on_hand','avg_weekly_consumption','weeks_of_supply','weeks_of_supply_with_po','status','routing','open_po_qty','next_po_date','runout_date','will_stockout','days_at_risk','order_recommended','order_qty_recommended','dynamic_reorder_point','consumption_trend_pct','safety_stock_weeks','lead_time_weeks'];
+    const headers = ['sku','description','on_hand','avg_weekly_consumption','cv','weeks_of_supply','weeks_of_supply_with_po','status','routing','sku_type','open_po_qty','next_po_date','runout_date','will_stockout','days_at_risk','order_recommended','order_qty_recommended','demand_adj_qty','dynamic_reorder_point','consumption_trend_pct','safety_stock_weeks','lead_time_weeks','abc_class'];
     const csv = [headers.join(','), ...data.items.map(r => headers.map(h => { const v = r[h] ?? ''; return String(v).includes(',') ? `"${v}"` : v; }).join(','))].join('\n');
     res.end(csv);
     return;
+  }
+
+  // ── Model Parameters ──────────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/model-params') {
+    return json(res, lensIntel.getModelParams());
+  }
+  if (req.method==='POST' && url.pathname==='/api/lens-intel/model-params') {
+    const body = await readBody(req);
+    lensIntel.saveModelParams(labDb.db, body);
+    return json(res, { ok: true, params: lensIntel.getModelParams() });
   }
 
   // ── Long Tail Analysis (Stock vs Surface) ─────────────────

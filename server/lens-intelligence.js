@@ -29,8 +29,48 @@ const DEFAULTS = {
   abc_class: 'B',
 };
 
-// Safety stock by ABC class
+// Safety stock by ABC class (weeks)
 const SAFETY_BY_CLASS = { A: 6, B: 4, C: 3 };
+
+// Model parameters — persisted to model_params table, editable via UI
+let MODEL_PARAMS = {
+  stockout_adj_finished: 10,    // +10% demand uplift for finished lenses
+  stockout_adj_semifin: -10,    // -10% demand reduction for semi-finished
+  use_woc_override: false,      // toggle: weeks-of-cover vs Z-score safety stock
+  woc_target_weeks: 16,         // target weeks of cover when override is on
+};
+
+function loadModelParams(db) {
+  try {
+    db.exec("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
+    const rows = db.prepare('SELECT key, value FROM model_params').all();
+    for (const r of rows) {
+      if (r.key in MODEL_PARAMS) {
+        const v = r.value;
+        if (v === 'true') MODEL_PARAMS[r.key] = true;
+        else if (v === 'false') MODEL_PARAMS[r.key] = false;
+        else if (!isNaN(Number(v))) MODEL_PARAMS[r.key] = Number(v);
+        else MODEL_PARAMS[r.key] = v;
+      }
+    }
+  } catch {}
+}
+
+function saveModelParams(db, params) {
+  db.exec("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
+  const upsert = db.prepare('INSERT INTO model_params (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  const save = db.transaction(() => {
+    for (const [k, v] of Object.entries(params)) {
+      if (k in MODEL_PARAMS) {
+        MODEL_PARAMS[k] = v;
+        upsert.run(k, String(v));
+      }
+    }
+  });
+  save();
+}
+
+function getModelParams() { return { ...MODEL_PARAMS }; }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LINEAR REGRESSION — project consumption trend forward
@@ -163,6 +203,9 @@ function computeAll(db, itempath, netsuite) {
     db.exec("CREATE TABLE IF NOT EXISTS lens_sku_params (sku TEXT PRIMARY KEY, supplier TEXT, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, safety_stock_weeks REAL DEFAULT 4.0, abc_class TEXT DEFAULT 'B', min_order_qty INTEGER DEFAULT 0, notes TEXT, updated_at TEXT DEFAULT (datetime('now')))");
   } catch (e) { /* tables exist */ }
 
+  // Load model params
+  loadModelParams(db);
+
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 
@@ -206,15 +249,15 @@ function computeAll(db, itempath, netsuite) {
 
   // Drop and recreate to handle schema changes
   try { db.exec('DROP TABLE IF EXISTS lens_inventory_status'); } catch {}
-  db.exec("CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, projected_weekly REAL DEFAULT 0, consumption_method TEXT, consumption_trend_pct REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 19.0, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT 'OK', order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, abc_class TEXT DEFAULT 'B', routing TEXT DEFAULT 'STOCK', regression_slope REAL, regression_r2 REAL, computed_at TEXT DEFAULT (datetime('now')))");
+  db.exec("CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, projected_weekly REAL DEFAULT 0, consumption_method TEXT, consumption_trend_pct REAL DEFAULT 0, cv REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 19.0, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT 'OK', order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, demand_adj_qty INTEGER DEFAULT 0, abc_class TEXT DEFAULT 'B', routing TEXT DEFAULT 'STOCK', sku_type TEXT DEFAULT 'finished', regression_slope REAL, regression_r2 REAL, computed_at TEXT DEFAULT (datetime('now')))");
 
   const ins = db.prepare(`INSERT INTO lens_inventory_status
     (sku, description, category, on_hand, avg_weekly_consumption, projected_weekly, consumption_method,
-     consumption_trend_pct, weeks_of_supply, weeks_of_supply_with_po, safety_stock_weeks, lead_time_weeks,
+     consumption_trend_pct, cv, weeks_of_supply, weeks_of_supply_with_po, safety_stock_weeks, lead_time_weeks,
      manufacturing_weeks, transit_weeks, fda_hold_weeks, dynamic_reorder_point, open_po_qty, next_po_date,
      runout_date, runout_date_with_po, will_stockout, days_at_risk, status, order_recommended,
-     order_qty_recommended, abc_class, routing, regression_slope, regression_r2, computed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     order_qty_recommended, demand_adj_qty, abc_class, routing, sku_type, regression_slope, regression_r2, computed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
   let computed = 0;
   const compute = db.transaction(() => {
@@ -244,19 +287,41 @@ function computeAll(db, itempath, netsuite) {
       const transitWeeks = params.transit_weeks;
       const fdaWeeks = params.fda_hold_weeks;
       const totalLeadTime = mfgWeeks + transitWeeks + fdaWeeks;
-      const safetyWeeks = SAFETY_BY_CLASS[params.abc_class] || params.safety_stock_weeks;
+
+      // Detect SKU type: semi-finished starts with SF_ or common semi-fin prefixes
+      const skuType = /^(SF_|062|0[0-9]{2}[1-9])/.test(sku) ? 'semifinished' : 'finished';
 
       // Consumption projection with regression
       const projection = projectConsumption(weeks.slice(0, 8));
       const avgWeekly = projection.avgWeekly;
       const projectedWeekly = projection.projected;
-      const useRate = projectedWeekly; // use projected rate for planning
+
+      // Stock-out compensation: adjust demand before planning
+      const stockoutAdj = skuType === 'semifinished'
+        ? (1 + MODEL_PARAMS.stockout_adj_semifin / 100)
+        : (1 + MODEL_PARAMS.stockout_adj_finished / 100);
+      const useRate = projectedWeekly * stockoutAdj;
+
+      // Coefficient of variation (demand volatility)
+      const weeklyQtys = weeks.map(w => w.qty);
+      const stdDev = weeklyQtys.length >= 2
+        ? Math.sqrt(weeklyQtys.reduce((s, v) => s + (v - avgWeekly) ** 2, 0) / (weeklyQtys.length - 1))
+        : 0;
+      const cv = avgWeekly > 0 ? Math.round((stdDev / avgWeekly) * 100) / 100 : 0;
+
+      // Safety stock: Z-score method or Weeks-of-Cover override
+      let safetyWeeks;
+      if (MODEL_PARAMS.use_woc_override) {
+        safetyWeeks = MODEL_PARAMS.woc_target_weeks;
+      } else {
+        safetyWeeks = SAFETY_BY_CLASS[params.abc_class] || params.safety_stock_weeks;
+      }
 
       // Consumption trend
       const currentWeek = weeks.length > 0 ? weeks[0].qty : 0;
       const trendPct = avgWeekly > 0 ? Math.round(((currentWeek - avgWeekly) / avgWeekly) * 100) : 0;
 
-      // Weeks of supply (using projected consumption rate)
+      // Weeks of supply (using adjusted consumption rate)
       const wos = useRate > 0 ? Math.round((onHand / useRate) * 10) / 10 : 999;
 
       // Open PO data
@@ -265,7 +330,7 @@ function computeAll(db, itempath, netsuite) {
       const nextPoDate = po?.nextDate || null;
       const wosWithPo = useRate > 0 ? Math.round(((onHand + openPoQty) / useRate) * 10) / 10 : 999;
 
-      // Dynamic reorder point = total lead time × projected weekly consumption
+      // Dynamic reorder point = total lead time × adjusted weekly consumption
       const reorderPoint = Math.ceil(totalLeadTime * useRate);
 
       // Runout dates
@@ -298,14 +363,16 @@ function computeAll(db, itempath, netsuite) {
       // Order recommendation — SURFACE-routed SKUs should not be stocked
       let orderRecommended = 0;
       let orderQty = 0;
+      let demandAdjQty = 0;
       const routing = params.routing || 'STOCK';
       if (routing === 'SURFACE') {
-        // Long tail analysis says surface this SKU — don't order finished stock
-        status = onHand > 0 ? 'SURFACE' : 'SURFACE';
+        status = 'SURFACE';
       } else if (onHand <= reorderPoint || status === 'CRITICAL') {
         orderRecommended = 1;
         const targetQty = Math.ceil((totalLeadTime + safetyWeeks) * useRate);
         orderQty = Math.max(params.min_order_qty || 0, targetQty - onHand - openPoQty);
+        // Demand-adjusted qty (includes stock-out compensation already in useRate)
+        demandAdjQty = orderQty;
       }
 
       // ABC class (auto if not set)
@@ -314,10 +381,10 @@ function computeAll(db, itempath, netsuite) {
 
       ins.run(sku, desc, cat, onHand,
         Math.round(avgWeekly * 10) / 10, Math.round(projectedWeekly * 10) / 10, projection.method,
-        trendPct, wos, wosWithPo, safetyWeeks, totalLeadTime,
+        trendPct, cv, wos, wosWithPo, safetyWeeks, totalLeadTime,
         mfgWeeks, transitWeeks, fdaWeeks, reorderPoint, openPoQty, nextPoDate,
         runoutStr, runoutWithPoStr, willStockout, daysAtRisk, status,
-        orderRecommended, orderQty, abcClass, routing,
+        orderRecommended, orderQty, demandAdjQty, abcClass, routing, skuType,
         projection.regression?.slope ? Math.round(projection.regression.slope * 100) / 100 : null,
         projection.regression?.rSquared ? Math.round(projection.regression.rSquared * 100) / 100 : null,
         today);
@@ -437,4 +504,4 @@ function stop() {
   if (computeTimer) clearInterval(computeTimer);
 }
 
-module.exports = { start, stop, computeAll, getStatus, getSkuDetail, getOrderRecommendations, getSummary, updateSkuParams, getAllSkuParams };
+module.exports = { start, stop, computeAll, getStatus, getSkuDetail, getOrderRecommendations, getSummary, updateSkuParams, getAllSkuParams, getModelParams, saveModelParams };
