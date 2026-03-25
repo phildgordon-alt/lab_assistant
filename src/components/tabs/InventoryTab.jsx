@@ -2418,49 +2418,72 @@ function InventoryTab({ ovenServerUrl, settings }) {
           if (!inboundData) {
             fetch(`${ovenServerUrl}/api/inventory/inbound`).then(r => r.json()).then(setInboundData).catch(() => {});
           }
-          const orders = inboundData?.orders || [];
-          const filtered = inboundSearch ? orders.filter(o => {
-            const q = inboundSearch.toLowerCase();
-            return o.poNumber?.toLowerCase().includes(q) || o.vendor?.toLowerCase().includes(q) || o.memo?.toLowerCase().includes(q) || o.lines?.some(l => l.sku?.toLowerCase().includes(q));
-          }) : orders;
-          const byCat = inboundData?.byCategory || {};
+          const bp = inboundData?.byPhase || {};
+          const phaseColors = { 'On the Water': T.blue, 'Pending': T.amber, 'Received': T.green };
+
+          const renderPOList = (orders, phase) => {
+            const list = inboundSearch ? orders.filter(o => {
+              const q = inboundSearch.toLowerCase();
+              return o.poNumber?.toLowerCase().includes(q) || o.vendor?.toLowerCase().includes(q) || o.memo?.toLowerCase().includes(q) || o.lines?.some(l => l.sku?.toLowerCase().includes(q));
+            }) : orders;
+            if (list.length === 0) return null;
+            return list.map(o => (
+              <div key={o.id} style={{ borderBottom: `1px solid ${T.border}`, padding: '10px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                    <span style={{ fontFamily: mono, fontSize: 13, fontWeight: 700, color: T.text }}>{o.poNumber}</span>
+                    <span style={{ fontSize: 11, color: T.textMuted }}>{o.vendor}</span>
+                    <span style={{ fontSize: 9, padding: '2px 7px', borderRadius: 3, fontWeight: 700, fontFamily: mono, background: `${phaseColors[phase]}20`, color: phaseColors[phase] }}>{phase.toUpperCase()}</span>
+                    {o.shipDate && <span style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>Shipped: {o.shipDate}</span>}
+                  </div>
+                  <div style={{ display: 'flex', gap: 14, fontFamily: mono, fontSize: 11, color: T.textMuted }}>
+                    <span>PO: {o.date}</span>
+                    <span style={{ color: T.amber }}>{o.totalQty} units</span>
+                    <span>${Math.round(o.totalAmount).toLocaleString()}</span>
+                  </div>
+                </div>
+                {o.memo && <div style={{ fontSize: 10, color: T.textDim, marginBottom: 4 }}>{o.memo}</div>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {(o.lines || []).slice(0, 6).map((l, i) => (
+                    <span key={i} style={{ fontSize: 9, padding: '2px 6px', background: T.bg, borderRadius: 3, fontFamily: mono, color: T.textMuted }}>{l.sku} x{l.qty}</span>
+                  ))}
+                  {(o.lines || []).length > 6 && <span style={{ fontSize: 9, color: T.textDim }}>+{o.lines.length - 6} more</span>}
+                </div>
+              </div>
+            ));
+          };
 
           return (
             <div>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                 <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Inbound / In-Transit</h3>
                 <ExportBtn onClick={() => {
+                  const allOrders = [...(inboundData?.onTheWater || []), ...(inboundData?.pending || []), ...(inboundData?.received || [])];
                   const rows = [];
-                  for (const o of filtered) {
+                  for (const o of allOrders) {
                     for (const l of (o.lines || [])) {
-                      rows.push({ po: o.poNumber, date: o.date, vendor: o.vendor, memo: o.memo, status: o.status, sku: l.sku, name: l.name, category: l.category, qty: l.qty, rate: l.rate, amount: l.amount });
+                      rows.push({ po: o.poNumber, phase: o.phase, date: o.date, shipDate: o.shipDate || '', vendor: o.vendor, memo: o.memo, status: o.status, sku: l.sku, name: l.name, category: l.category, qty: l.qty, rate: l.rate, amount: l.amount });
                     }
                   }
-                  downloadCSV('inbound.csv', ['po','date','vendor','memo','status','sku','name','category','qty','rate','amount'], rows);
+                  downloadCSV('inbound.csv', ['po','phase','date','shipDate','vendor','memo','status','sku','name','category','qty','rate','amount'], rows);
                 }} />
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ON THE WATER</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inboundData?.count || 0}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>POs in transit</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{bp.onTheWater?.count || 0}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{(bp.onTheWater?.qty || 0).toLocaleString()} units · ${Math.round(bp.onTheWater?.amount || 0).toLocaleString()}</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL QTY</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(inboundData?.totalQty || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>PENDING / WIP</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{bp.pending?.count || 0}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{(bp.pending?.qty || 0).toLocaleString()} units · ${Math.round(bp.pending?.amount || 0).toLocaleString()}</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL VALUE</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>${Math.round(inboundData?.totalAmount || 0).toLocaleString()}</div>
-                </Card>
-                <Card style={{ padding: 14, borderLeft: `4px solid ${T.textDim}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1, marginBottom: 6 }}>BY CATEGORY</div>
-                  {Object.entries(byCat).map(([cat, v]) => (
-                    <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: mono, color: T.textMuted, marginBottom: 2 }}>
-                      <span>{cat}</span><span>{v.qty?.toLocaleString()} units</span>
-                    </div>
-                  ))}
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>RECEIVED</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{bp.received?.count || 0}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{(bp.received?.qty || 0).toLocaleString()} units · ${Math.round(bp.received?.amount || 0).toLocaleString()}</div>
                 </Card>
               </div>
 
@@ -2469,36 +2492,29 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   style={{ width: '100%', maxWidth: 400, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
               </div>
 
-              <Card>
-                <div style={{ maxHeight: 600, overflowY: 'auto' }}>
-                  {filtered.map(o => (
-                    <div key={o.id} style={{ borderBottom: `1px solid ${T.border}`, padding: '12px 16px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                          <span style={{ fontFamily: mono, fontSize: 14, fontWeight: 700, color: T.text }}>{o.poNumber}</span>
-                          <span style={{ fontSize: 11, color: T.textMuted }}>{o.vendor}</span>
-                          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontFamily: mono, background: `${T.blue}20`, color: T.blue }}>ON THE WATER</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: 16, fontFamily: mono, fontSize: 11, color: T.textMuted }}>
-                          <span>{o.date}</span>
-                          <span style={{ color: T.amber }}>{o.totalQty} units</span>
-                          <span>${Math.round(o.totalAmount).toLocaleString()}</span>
-                        </div>
-                      </div>
-                      {o.memo && <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6 }}>{o.memo}</div>}
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {(o.lines || []).slice(0, 8).map((l, i) => (
-                          <span key={i} style={{ fontSize: 10, padding: '3px 8px', background: T.bg, borderRadius: 4, fontFamily: mono, color: T.textMuted }}>
-                            {l.sku} × {l.qty}
-                          </span>
-                        ))}
-                        {(o.lines || []).length > 8 && <span style={{ fontSize: 10, color: T.textDim }}>+{o.lines.length - 8} more</span>}
-                      </div>
-                    </div>
-                  ))}
-                  {filtered.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>No in-transit POs found</div>}
-                </div>
-              </Card>
+              {/* On the Water */}
+              {(inboundData?.onTheWater || []).length > 0 && (
+                <Card style={{ marginBottom: 16 }}>
+                  <SectionHeader right={`${(inboundData?.onTheWater || []).length} POs`}>On the Water</SectionHeader>
+                  <div style={{ maxHeight: 400, overflowY: 'auto' }}>{renderPOList(inboundData?.onTheWater || [], 'On the Water')}</div>
+                </Card>
+              )}
+
+              {/* Pending / WIP */}
+              {(inboundData?.pending || []).length > 0 && (
+                <Card style={{ marginBottom: 16 }}>
+                  <SectionHeader right={`${(inboundData?.pending || []).length} POs`}>Pending / WIP</SectionHeader>
+                  <div style={{ maxHeight: 400, overflowY: 'auto' }}>{renderPOList(inboundData?.pending || [], 'Pending')}</div>
+                </Card>
+              )}
+
+              {/* Received */}
+              {(inboundData?.received || []).length > 0 && (
+                <Card style={{ marginBottom: 16 }}>
+                  <SectionHeader right={`${(inboundData?.received || []).length} POs`}>Received</SectionHeader>
+                  <div style={{ maxHeight: 300, overflowY: 'auto' }}>{renderPOList(inboundData?.received || [], 'Received')}</div>
+                </Card>
+              )}
             </div>
           );
         })()}

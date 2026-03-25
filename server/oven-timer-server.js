@@ -2102,28 +2102,24 @@ Respond with a structured batching plan in this format:
   // ── Inbound / In-Transit ───────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/inventory/inbound') {
     const poResp = netsuite.getOpenPOs();
-    const inTransit = (poResp.orders || []).filter(o => o.statusCode === 'B' || o.statusCode === 'C');
-    const totalQty = inTransit.reduce((s, o) => s + o.totalQty, 0);
-    const totalAmount = inTransit.reduce((s, o) => s + o.totalAmount, 0);
-    // Categorize
-    const byCategory = {};
-    for (const o of inTransit) {
-      for (const l of (o.lines || [])) {
-        const cat = l.category || 'Other';
-        if (!byCategory[cat]) byCategory[cat] = { qty: 0, amount: 0, pos: 0 };
-        byCategory[cat].qty += l.qty;
-        byCategory[cat].amount += l.amount;
-      }
-      const mainCat = (o.lines || [])[0]?.category || 'Other';
-      byCategory[mainCat] = byCategory[mainCat] || { qty: 0, amount: 0, pos: 0 };
-      byCategory[mainCat].pos++;
-    }
+    const allOrders = poResp.orders || [];
+
+    const onTheWater = allOrders.filter(o => o.phase === 'On the Water');
+    const pending = allOrders.filter(o => o.phase === 'Pending' || o.statusCode === 'A' || o.statusCode === 'E');
+    const received = allOrders.filter(o => o.phase === 'Received');
+
+    const byPhase = {
+      onTheWater: { count: onTheWater.length, qty: onTheWater.reduce((s, o) => s + o.totalQty, 0), amount: onTheWater.reduce((s, o) => s + o.totalAmount, 0) },
+      pending: { count: pending.length, qty: pending.reduce((s, o) => s + o.totalQty, 0), amount: pending.reduce((s, o) => s + o.totalAmount, 0) },
+      received: { count: received.length, qty: received.reduce((s, o) => s + o.totalQty, 0), amount: received.reduce((s, o) => s + o.totalAmount, 0) },
+    };
+
     return json(res, {
-      orders: inTransit,
-      count: inTransit.length,
-      totalQty,
-      totalAmount,
-      byCategory,
+      onTheWater,
+      pending,
+      received,
+      byPhase,
+      totalCount: allOrders.length,
     });
   }
 

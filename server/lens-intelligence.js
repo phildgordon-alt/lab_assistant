@@ -271,10 +271,10 @@ function getSummary(db) {
 // START — compute on startup and schedule periodic refresh
 // ─────────────────────────────────────────────────────────────────────────────
 function start(db, itempath, netsuite) {
-  // Initial compute after 30s (let data sources load first)
+  // Initial compute after 90s (let all data sources load and sync first)
   setTimeout(() => {
     try { computeAll(db, itempath, netsuite); } catch (e) { console.error('[Lens Intelligence] Initial compute error:', e.message); }
-  }, 30000);
+  }, 90000);
 
   // Recompute every 30 minutes
   computeTimer = setInterval(() => {

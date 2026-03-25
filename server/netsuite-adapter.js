@@ -356,7 +356,7 @@ async function fetchOpenPOs() {
     // Get open PO headers (entity join separately to avoid field errors)
     const headers = await suiteql(`
       SELECT t.id, t.tranId AS poNumber, t.tranDate AS date, t.status,
-             t.memo, t.entity AS entityId
+             t.memo, t.entity AS entityId, t.shipDate
       FROM transaction t
       WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
       ORDER BY t.tranDate DESC
@@ -402,19 +402,27 @@ async function fetchOpenPOs() {
       });
     }
 
-    const orders = headers.map(h => ({
-      id: h.id,
-      poNumber: h.ponumber,
-      date: h.date,
-      status: STATUS_MAP[h.status] || h.status,
-      statusCode: h.status,
-      vendor: vendorMap[h.entityid] || '',
-      memo: h.memo || '',
-      lines: linesByPO[h.id] || [],
-      lineCount: (linesByPO[h.id] || []).length,
-      totalQty: (linesByPO[h.id] || []).reduce((s, l) => s + l.qty, 0),
-      totalAmount: (linesByPO[h.id] || []).reduce((s, l) => s + l.amount, 0),
-    }));
+    const orders = headers.map(h => {
+      // Determine phase: WIP (not shipped), On the Water (shipped, not received), Received
+      let phase = 'WIP';
+      if (h.status === 'B' || h.status === 'C') phase = h.shipdate ? 'On the Water' : 'Pending';
+      else if (h.status === 'D' || h.status === 'F') phase = 'Received';
+      return {
+        id: h.id,
+        poNumber: h.ponumber,
+        date: h.date,
+        shipDate: h.shipdate || null,
+        status: STATUS_MAP[h.status] || h.status,
+        statusCode: h.status,
+        phase,
+        vendor: vendorMap[h.entityid] || '',
+        memo: h.memo || '',
+        lines: linesByPO[h.id] || [],
+        lineCount: (linesByPO[h.id] || []).length,
+        totalQty: (linesByPO[h.id] || []).reduce((s, l) => s + l.qty, 0),
+        totalAmount: (linesByPO[h.id] || []).reduce((s, l) => s + l.amount, 0),
+      };
+    });
 
     poCache = { orders, lastSync: new Date().toISOString() };
     console.log(`[NetSuite] POs: ${orders.length} open, ${lines.length} line items`);
