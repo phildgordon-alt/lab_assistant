@@ -348,11 +348,35 @@ function getStatus(db, statusFilter = null) {
   return { items: rows, summary };
 }
 
-function getSkuDetail(db, sku) {
+function getSkuDetail(db, sku, netsuite) {
   const status = db.prepare('SELECT * FROM lens_inventory_status WHERE sku = ?').get(sku);
   const weekly = db.prepare('SELECT * FROM lens_consumption_weekly WHERE sku = ? ORDER BY week_start DESC LIMIT 12').all(sku);
   const params = getSkuParams(db, sku);
-  return { status, weekly, params };
+
+  // Get PO detail for this SKU
+  const pos = [];
+  try {
+    const poData = netsuite.getOpenPOs();
+    for (const order of (poData.orders || [])) {
+      for (const line of (order.lines || [])) {
+        if (line.sku === sku) {
+          pos.push({
+            poNumber: order.poNumber,
+            date: order.date,
+            shipDate: order.shipDate || null,
+            phase: order.phase || '',
+            status: order.status,
+            vendor: order.vendor,
+            qty: line.qty,
+            rate: line.rate,
+            amount: line.amount,
+          });
+        }
+      }
+    }
+  } catch {}
+
+  return { status, weekly, params, pos };
 }
 
 function getOrderRecommendations(db) {

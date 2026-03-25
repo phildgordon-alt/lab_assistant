@@ -2137,7 +2137,7 @@ Respond with a structured batching plan in this format:
   }
   if (req.method==='GET' && url.pathname.startsWith('/api/lens-intel/sku/')) {
     const sku = decodeURIComponent(url.pathname.split('/').pop());
-    return json(res, lensIntel.getSkuDetail(labDb.db, sku));
+    return json(res, lensIntel.getSkuDetail(labDb.db, sku, netsuite));
   }
   if (req.method==='GET' && url.pathname==='/api/lens-intel/orders') {
     return json(res, { recommendations: lensIntel.getOrderRecommendations(labDb.db) });

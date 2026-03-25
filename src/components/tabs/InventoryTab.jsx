@@ -2553,6 +2553,45 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       </div>
                     </div>
                   )}
+                  {/* Open POs for this SKU */}
+                  {(lensIntelDetail.pos || []).length > 0 && (
+                    <div style={{ marginTop: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 6 }}>OPEN PURCHASE ORDERS</div>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                        <thead>
+                          <tr style={{ background: T.bg }}>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>PO #</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>VENDOR</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>STATUS</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>QTY</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>PO DATE</th>
+                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SHIPPED</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lensIntelDetail.pos.map((po, i) => (
+                            <tr key={i} style={{ borderBottom: `1px solid ${T.border}15` }}>
+                              <td style={{ padding: '4px 8px', fontWeight: 600, color: T.text }}>{po.poNumber}</td>
+                              <td style={{ padding: '4px 8px', color: T.textMuted }}>{po.vendor || '—'}</td>
+                              <td style={{ padding: '4px 8px' }}>
+                                <span style={{ fontSize: 8, padding: '2px 5px', borderRadius: 3, fontWeight: 700, fontFamily: mono,
+                                  background: po.phase === 'On the Water' ? `${T.blue}20` : `${T.amber}20`,
+                                  color: po.phase === 'On the Water' ? T.blue : T.amber
+                                }}>{po.phase || po.status}</span>
+                              </td>
+                              <td style={{ padding: '4px 8px', textAlign: 'right', fontWeight: 700, color: T.text }}>{po.qty?.toLocaleString()}</td>
+                              <td style={{ padding: '4px 8px', color: T.textMuted }}>{po.date || '—'}</td>
+                              <td style={{ padding: '4px 8px', color: po.shipDate ? T.blue : T.textDim }}>{po.shipDate || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginTop: 4 }}>
+                        Total on order: <strong style={{ color: T.text }}>{lensIntelDetail.pos.reduce((s, p) => s + (p.qty || 0), 0).toLocaleString()}</strong> units across {lensIntelDetail.pos.length} PO(s)
+                      </div>
+                    </div>
+                  )}
+
                   {/* Regression info */}
                   <div style={{ marginTop: 12, display: 'flex', gap: 16, padding: '10px 12px', background: T.bg, borderRadius: 6 }}>
                     <div style={{ fontSize: 10, fontFamily: mono, color: T.textMuted }}>
