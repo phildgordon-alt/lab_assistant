@@ -2198,7 +2198,7 @@ Respond with a structured batching plan in this format:
   }
   if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/') && !url.pathname.includes('/compute')) {
     const id = url.pathname.split('/').pop();
-    return json(res, npiEngine.getScenario(labDb.db, id));
+    return json(res, npiEngine.getScenario(labDb.db, id, netsuite));
   }
   if (req.method==='PUT' && url.pathname.startsWith('/api/npi/scenarios/')) {
     const id = url.pathname.split('/').pop();

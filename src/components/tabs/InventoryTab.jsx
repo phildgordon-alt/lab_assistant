@@ -2783,11 +2783,20 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                               <span style={{ fontSize: 13, fontWeight: 700, color: T.text }}>{s.name}</span>
-                              <span style={{ fontSize: 8, padding: '2px 5px', borderRadius: 3, fontWeight: 700, fontFamily: mono, background: s.status === 'active' ? `${T.green}20` : `${T.amber}20`, color: s.status === 'active' ? T.green : T.amber }}>{s.status.toUpperCase()}</span>
+                              <span style={{ fontSize: 8, padding: '2px 5px', borderRadius: 3, fontWeight: 700, fontFamily: mono,
+                                background: s.status === 'received' ? `${T.green}20` : s.status === 'on_the_water' ? `${T.blue}20` : s.status === 'in_production' ? `${T.purple || '#9b6ee0'}20` : s.status === 'approved' ? `${T.cyan}20` : `${T.amber}20`,
+                                color: s.status === 'received' ? T.green : s.status === 'on_the_water' ? T.blue : s.status === 'in_production' ? (T.purple || '#9b6ee0') : s.status === 'approved' ? T.cyan : T.amber
+                              }}>{s.status.replace(/_/g,' ').toUpperCase()}</span>
                               <span style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{s.adoption_pct}%</span>
                             </div>
                             <div style={{ display: 'flex', gap: 6 }}>
-                              {s.status === 'planning' && <button onClick={async (e) => { e.stopPropagation(); await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status: 'active' }) }); const r = await fetch(`${ovenServerUrl}/api/npi/scenarios`); setNpiScenarios((await r.json()).scenarios || []); }} style={{ background: T.green, border: "none", borderRadius: 3, padding: "3px 8px", color: "#fff", fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Activate</button>}
+                              {(() => {
+                                const nextStatus = { draft: 'approved', approved: 'in_production', in_production: 'on_the_water', on_the_water: 'received' };
+                                const nextLabel = { draft: 'Approve', approved: 'In Production', in_production: 'On the Water', on_the_water: 'Received' };
+                                const next = nextStatus[s.status];
+                                if (!next) return null;
+                                return <button onClick={async (e) => { e.stopPropagation(); await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status: next }) }); const r = await fetch(`${ovenServerUrl}/api/npi/scenarios`); setNpiScenarios((await r.json()).scenarios || []); }} style={{ background: next === 'received' ? T.green : T.blue, border: "none", borderRadius: 3, padding: "3px 8px", color: "#fff", fontSize: 9, fontWeight: 700, cursor: "pointer" }}>{nextLabel[s.status]}</button>;
+                              })()}
                               <button onClick={async (e) => { e.stopPropagation(); if (!confirm('Delete?')) return; await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}`, { method: 'DELETE' }); const r = await fetch(`${ovenServerUrl}/api/npi/scenarios`); setNpiScenarios((await r.json()).scenarios || []); if (npiSelected?.scenario?.id === s.id) setNpiSelected(null); }} style={{ background: T.red, border: "none", borderRadius: 3, padding: "3px 8px", color: "#fff", fontSize: 9, fontWeight: 700, cursor: "pointer" }}>Del</button>
                             </div>
                           </div>

@@ -14,6 +14,14 @@ function generateId() {
 // ─────────────────────────────────────────────────────────────────────────────
 // SCENARIO CRUD
 // ─────────────────────────────────────────────────────────────────────────────
+// Statuses:
+// draft = modeling only, no impact on reorders
+// approved = confirmed, but waiting for PO/inventory
+// in_production = PO placed with supplier
+// on_the_water = shipped, in transit
+// received = inventory arrived, fully active cannibalization
+const VALID_STATUSES = ['draft', 'approved', 'in_production', 'on_the_water', 'received'];
+
 function createScenario(db, data) {
   const id = generateId();
   db.prepare(`INSERT INTO npi_scenarios (id, name, description, new_sku_prefix, adoption_pct, source_type, source_value, proxy_sku, manufacturing_weeks, transit_weeks, fda_hold_weeks, status, launch_date)
@@ -21,7 +29,7 @@ function createScenario(db, data) {
     id, data.name, data.description || null, data.new_sku_prefix || null,
     data.adoption_pct || 50, data.source_type || 'prefix', data.source_value || null,
     data.proxy_sku || null, data.manufacturing_weeks || 13, data.transit_weeks || 4,
-    data.fda_hold_weeks || 2, data.status || 'planning', data.launch_date || null
+    data.fda_hold_weeks || 2, data.status || 'draft', data.launch_date || null
   );
   return id;
 }
@@ -48,10 +56,28 @@ function getScenarios(db) {
   return db.prepare('SELECT * FROM npi_scenarios ORDER BY created_at DESC').all();
 }
 
-function getScenario(db, id) {
+function getScenario(db, id, netsuite) {
   const scenario = db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(id);
   const cannibalization = db.prepare('SELECT * FROM npi_cannibalization WHERE scenario_id = ? ORDER BY lost_weekly DESC').all(id);
-  return { scenario, cannibalization };
+
+  // Check linked PO status if available
+  let linkedPO = null;
+  if (scenario?.new_sku_prefix && netsuite) {
+    try {
+      const poData = netsuite.getOpenPOs();
+      for (const order of (poData.orders || [])) {
+        for (const line of (order.lines || [])) {
+          if (line.sku?.startsWith(scenario.new_sku_prefix)) {
+            linkedPO = { poNumber: order.poNumber, date: order.date, shipDate: order.shipDate, phase: order.phase, status: order.status, vendor: order.vendor, qty: line.qty };
+            break;
+          }
+        }
+        if (linkedPO) break;
+      }
+    } catch {}
+  }
+
+  return { scenario, cannibalization, linkedPO };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -159,15 +185,20 @@ function computeCannibalization(db, scenarioId) {
 // GET ACTIVE CANNIBALIZATION ADJUSTMENTS (feeds into Lens Intelligence reorders)
 // ─────────────────────────────────────────────────────────────────────────────
 function getActiveAdjustments(db) {
-  // Get all active/launched scenarios
-  const scenarios = db.prepare("SELECT id, adoption_pct FROM npi_scenarios WHERE status IN ('active', 'launched')").all();
+  // Only apply cannibalization adjustments when product is close to arriving
+  // on_the_water = start ramping down source SKU reorders (product arriving soon)
+  // received = full cannibalization in effect
+  // draft/approved/in_production = too early to adjust reorders
+  const scenarios = db.prepare("SELECT id, adoption_pct, status FROM npi_scenarios WHERE status IN ('on_the_water', 'received')").all();
   if (scenarios.length === 0) return {};
 
   const adjustments = {}; // sku → reduction in weekly demand
   for (const s of scenarios) {
+    // Ramp: on_the_water = 50% of cannibalization, received = 100%
+    const ramp = s.status === 'received' ? 1.0 : 0.5;
     const canns = db.prepare('SELECT source_sku, lost_weekly FROM npi_cannibalization WHERE scenario_id = ?').all(s.id);
     for (const c of canns) {
-      adjustments[c.source_sku] = (adjustments[c.source_sku] || 0) + c.lost_weekly;
+      adjustments[c.source_sku] = (adjustments[c.source_sku] || 0) + (c.lost_weekly * ramp);
     }
   }
   return adjustments;
