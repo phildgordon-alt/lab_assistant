@@ -953,7 +953,7 @@ function poll() {
       machineStatus,
       slaPacing,
       stockConstraints,
-      recommendations: recs.length > 0 ? recs : (stmts.getPendingRecs.all() || []),
+      recommendations: stmts.getPendingRecs.all() || [],
     };
     lastRecs = lastSnapshot.recommendations;
 
