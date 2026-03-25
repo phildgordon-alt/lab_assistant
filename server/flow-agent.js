@@ -757,20 +757,23 @@ function computeCatchUp(lineId, scenario = {}) {
   const shifts = scenario.shifts ?? 2;
   const hoursPerDay = shiftHours * shifts;
 
-  // Incoming rate: count INCOMING scan events from DVI trace today
-  // These represent new jobs entering the lab today
+  // Incoming rate: count unique jobs whose first scan was today
+  // This gives us actual new jobs entering the lab, not cumulative scan events
   let incomingPerDay = scenario.incomingPerDay ?? null;
   if (incomingPerDay === null) {
     try {
       if (dviTrace) {
-        const stats = dviTrace.getStats();
-        // byStage.INCOMING = number of new job scans today (INCOMING stage events)
-        const incomingScansToday = stats?.byStage?.INCOMING || 0;
+        const allJobs = dviTrace.getJobs();
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const todayMs = todayStart.getTime();
+        // Count jobs whose firstSeen (first scan) is today
+        const newToday = allJobs.filter(j => j.firstSeen && j.firstSeen >= todayMs).length;
         const now = new Date();
         const hoursWorked = Math.max(1, now.getHours() + now.getMinutes() / 60 - 7);
         // Extrapolate to full working day
-        if (hoursWorked >= 1 && incomingScansToday > 0) {
-          incomingPerDay = Math.round((incomingScansToday / hoursWorked) * hoursPerDay);
+        if (hoursWorked >= 1 && newToday > 0) {
+          incomingPerDay = Math.round((newToday / hoursWorked) * hoursPerDay);
         }
       }
     } catch {}
