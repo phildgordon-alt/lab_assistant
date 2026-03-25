@@ -534,6 +534,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [lensIntelFilter, setLensIntelFilter] = useState("all");
   const [lensIntelSearch, setLensIntelSearch] = useState("");
   const [lensIntelDetail, setLensIntelDetail] = useState(null);
+  const [lensSettings, setLensSettings] = useState(false);
+  const [lensDefaults, setLensDefaults] = useState({ manufacturing_weeks: 13, transit_weeks: 4, fda_hold_weeks: 2, safety_stock_weeks: 4 });
+  const [lensSaving, setLensSaving] = useState(false);
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
   const [pipelineDetail, setPipelineDetail] = useState(null);
@@ -2236,8 +2239,11 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <ExportBtn label="Order Report" onClick={async () => {
                     const resp = await fetch(`${ovenServerUrl}/api/lens-intel/orders`);
                     const data = await resp.json();
-                    downloadCSV('lens_order_recommendations.csv', ['sku','description','on_hand','avg_weekly_consumption','weeks_of_supply','status','order_qty_recommended','dynamic_reorder_point','runout_date','days_at_risk'], data.recommendations || []);
+                    downloadCSV('lens_order_recommendations.csv', ['sku','description','on_hand','avg_weekly_consumption','projected_weekly','consumption_method','weeks_of_supply','status','order_qty_recommended','dynamic_reorder_point','lead_time_weeks','manufacturing_weeks','transit_weeks','fda_hold_weeks','runout_date','days_at_risk','abc_class','regression_slope','regression_r2'], data.recommendations || []);
                   }} />
+                  <button onClick={() => setLensSettings(!lensSettings)} style={{ background: lensSettings ? T.amber : 'transparent', border: `1px solid ${lensSettings ? T.amber : T.border}`, borderRadius: 6, padding: "6px 14px", color: lensSettings ? '#fff' : T.textMuted, fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                    Settings
+                  </button>
                   <button onClick={async () => {
                     await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
                     const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
@@ -2247,6 +2253,58 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </button>
                 </div>
               </div>
+
+              {/* Settings panel */}
+              {lensSettings && (
+                <Card style={{ padding: 16, marginBottom: 16, border: `1px solid ${T.amber}30`, background: `${T.amber}05` }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>Lead Time & Planning Settings</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 16 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>MANUFACTURING (weeks)</label>
+                      <input type="number" step="0.5" value={lensDefaults.manufacturing_weeks} onChange={e => setLensDefaults(p => ({...p, manufacturing_weeks: parseFloat(e.target.value) || 0}))}
+                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
+                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Time to manufacture (default: 13 = 90 days)</div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>OCEAN TRANSIT (weeks)</label>
+                      <input type="number" step="0.5" value={lensDefaults.transit_weeks} onChange={e => setLensDefaults(p => ({...p, transit_weeks: parseFloat(e.target.value) || 0}))}
+                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
+                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Shipping from supplier (default: 4)</div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>FDA HOLD (weeks)</label>
+                      <input type="number" step="0.5" value={lensDefaults.fda_hold_weeks} onChange={e => setLensDefaults(p => ({...p, fda_hold_weeks: parseFloat(e.target.value) || 0}))}
+                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
+                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Customs/FDA clearance (default: 2)</div>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 4 }}>SAFETY STOCK (weeks)</label>
+                      <input type="number" step="0.5" value={lensDefaults.safety_stock_weeks} onChange={e => setLensDefaults(p => ({...p, safety_stock_weeks: parseFloat(e.target.value) || 0}))}
+                        style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, fontFamily: mono }} />
+                      <div style={{ fontSize: 9, color: T.textDim, marginTop: 2 }}>Buffer stock (A=6, B=4, C=3)</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono }}>
+                      Total lead time: <strong style={{ color: T.text }}>{(lensDefaults.manufacturing_weeks + lensDefaults.transit_weeks + lensDefaults.fda_hold_weeks).toFixed(1)} weeks</strong> ({Math.round((lensDefaults.manufacturing_weeks + lensDefaults.transit_weeks + lensDefaults.fda_hold_weeks) * 7)} days)
+                    </div>
+                    <button onClick={async () => {
+                      setLensSaving(true);
+                      await fetch(`${ovenServerUrl}/api/lens-intel/defaults`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(lensDefaults) });
+                      await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
+                      const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                      setLensIntelData(await resp.json());
+                      setLensSaving(false);
+                    }} disabled={lensSaving}
+                      style={{ background: T.green, border: "none", borderRadius: 6, padding: "8px 20px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono, opacity: lensSaving ? 0.6 : 1 }}>
+                      {lensSaving ? "Saving..." : "Apply to All & Recompute"}
+                    </button>
+                  </div>
+                  <div style={{ fontSize: 10, color: T.textDim, marginTop: 8 }}>
+                    Defaults for SKUs without custom params. Click a row to set per-SKU overrides. Mark discontinued = ABC class "X".
+                  </div>
+                </Card>
+              )}
 
               {/* KPI cards */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8, marginBottom: 16 }}>
