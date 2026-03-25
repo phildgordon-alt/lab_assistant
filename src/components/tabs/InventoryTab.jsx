@@ -2303,6 +2303,86 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 10, color: T.textDim, marginTop: 8 }}>
                     Defaults for SKUs without custom params. Click a row to set per-SKU overrides. Mark discontinued = ABC class "X".
                   </div>
+
+                  {/* Bulk edit by prefix */}
+                  <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${T.border}` }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 8 }}>Bulk Edit by SKU Prefix / Vendor</div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>PREFIX</label>
+                        <select id="bulk-prefix" style={{ padding: '6px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }}>
+                          <option value="4800">4800 — Essilor</option>
+                          <option value="062">062x — Somo</option>
+                          <option value="026">026x</option>
+                          <option value="001">001x — Younger</option>
+                          <option value="5">5xxx — Conant</option>
+                          <option value="custom">Custom prefix...</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>CUSTOM PREFIX</label>
+                        <input type="text" id="bulk-custom-prefix" placeholder="e.g. 4800" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 80 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>MFG (wk)</label>
+                        <input type="number" step="0.5" id="bulk-mfg" defaultValue="13" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TRANSIT (wk)</label>
+                        <input type="number" step="0.5" id="bulk-transit" defaultValue="4" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FDA (wk)</label>
+                        <input type="number" step="0.5" id="bulk-fda" defaultValue="2" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SAFETY (wk)</label>
+                        <input type="number" step="0.5" id="bulk-safety" defaultValue="4" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 60 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>ABC</label>
+                        <select id="bulk-abc" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }}>
+                          <option value="">No change</option>
+                          <option value="A">A</option>
+                          <option value="B">B</option>
+                          <option value="C">C</option>
+                          <option value="X">X — Discontinued</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SUPPLIER</label>
+                        <input type="text" id="bulk-supplier" placeholder="e.g. Essilor" style={{ padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono, width: 90 }} />
+                      </div>
+                      <button onClick={async () => {
+                        const prefixEl = document.getElementById('bulk-prefix');
+                        let prefix = prefixEl.value === 'custom' ? (document.getElementById('bulk-custom-prefix')?.value || '') : prefixEl.value;
+                        if (!prefix) { alert('Enter a prefix'); return; }
+                        const matching = (lensIntelData?.items || []).filter(i => i.sku.startsWith(prefix));
+                        if (matching.length === 0) { alert('No SKUs match prefix: ' + prefix); return; }
+                        if (!confirm(`Apply settings to ${matching.length} SKUs starting with "${prefix}"?`)) return;
+                        const params = {
+                          manufacturing_weeks: parseFloat(document.getElementById('bulk-mfg')?.value) || 13,
+                          transit_weeks: parseFloat(document.getElementById('bulk-transit')?.value) || 4,
+                          fda_hold_weeks: parseFloat(document.getElementById('bulk-fda')?.value) || 2,
+                          safety_stock_weeks: parseFloat(document.getElementById('bulk-safety')?.value) || 4,
+                          supplier: document.getElementById('bulk-supplier')?.value || null,
+                        };
+                        const abc = document.getElementById('bulk-abc')?.value;
+                        if (abc) params.abc_class = abc;
+                        const updates = matching.map(i => ({ sku: i.sku, ...params }));
+                        setLensSaving(true);
+                        await fetch(`${ovenServerUrl}/api/lens-intel/params/bulk`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ updates }) });
+                        await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
+                        const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                        setLensIntelData(await resp.json());
+                        setLensSaving(false);
+                        alert(`Updated ${updates.length} SKUs`);
+                      }} disabled={lensSaving}
+                        style={{ background: T.green, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono, opacity: lensSaving ? 0.6 : 1, whiteSpace: 'nowrap' }}>
+                        {lensSaving ? "Saving..." : "Apply to Prefix"}
+                      </button>
+                    </div>
+                  </div>
                 </Card>
               )}
 
