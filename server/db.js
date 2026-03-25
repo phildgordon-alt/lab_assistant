@@ -29,6 +29,23 @@ db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
 
+// Lens Intelligence — SKU planning parameters (configurable per SKU)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS lens_sku_params (
+    sku TEXT PRIMARY KEY,
+    supplier TEXT,
+    manufacturing_weeks REAL DEFAULT 13.0,
+    transit_weeks REAL DEFAULT 4.0,
+    fda_hold_weeks REAL DEFAULT 2.0,
+    total_lead_time_weeks REAL GENERATED ALWAYS AS (manufacturing_weeks + transit_weeks + fda_hold_weeks) STORED,
+    safety_stock_weeks REAL DEFAULT 4.0,
+    abc_class TEXT DEFAULT 'B',
+    min_order_qty INTEGER DEFAULT 0,
+    notes TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
 // Lens Intelligence — inventory health, stockout prediction, reorder recommendations
 db.exec(`
   CREATE TABLE IF NOT EXISTS lens_inventory_status (

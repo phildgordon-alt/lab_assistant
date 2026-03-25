@@ -5,23 +5,99 @@
  * order recommendations, consumption regression.
  *
  * Data sources:
- * - ItemPath (Kardex): on-hand inventory by SKU
- * - Looker (looker_jobs): consumption by lens OPC per day
+ * - ItemPath (Kardex): on-hand inventory by SKU — PHYSICAL TRUTH
+ * - ItemPath picks_history: consumption by SKU per day
  * - NetSuite: open POs with expected receipt dates
- * - picks_history: historical Kardex consumption
+ *
+ * Lead time components (configurable per SKU in lens_sku_params):
+ * - Manufacturing: ~13 weeks (90 days)
+ * - Ocean transit: ~4 weeks
+ * - FDA hold: ~0-2 weeks
+ * - Total: ~17-19 weeks default
  */
 
 'use strict';
 
-const path = require('path');
-
 let computeTimer = null;
 
+// Default lead times (overridden by lens_sku_params per SKU)
+const DEFAULTS = {
+  manufacturing_weeks: 13,
+  transit_weeks: 4,
+  fda_hold_weeks: 2,
+  safety_stock_weeks: 4,
+  abc_class: 'B',
+};
+
+// Safety stock by ABC class
+const SAFETY_BY_CLASS = { A: 6, B: 4, C: 3 };
+
 // ─────────────────────────────────────────────────────────────────────────────
-// WEEKLY CONSUMPTION — aggregate from Looker job-level data + picks_history
+// LINEAR REGRESSION — project consumption trend forward
+// ─────────────────────────────────────────────────────────────────────────────
+function linearRegression(points) {
+  // points: [{ x: weekIndex, y: consumption }]
+  if (points.length < 3) return null;
+  const n = points.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (const p of points) {
+    sumX += p.x;
+    sumY += p.y;
+    sumXY += p.x * p.y;
+    sumXX += p.x * p.x;
+  }
+  const denom = (n * sumXX - sumX * sumX);
+  if (denom === 0) return null;
+  const slope = (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  const rSquared = (() => {
+    const meanY = sumY / n;
+    let ssTot = 0, ssRes = 0;
+    for (const p of points) {
+      ssTot += (p.y - meanY) ** 2;
+      ssRes += (p.y - (slope * p.x + intercept)) ** 2;
+    }
+    return ssTot > 0 ? 1 - ssRes / ssTot : 0;
+  })();
+  return { slope, intercept, rSquared };
+}
+
+function projectConsumption(weeks, weeksForward = 4) {
+  if (weeks.length < 3) {
+    // Not enough data for regression — use flat average
+    const avg = weeks.length > 0 ? weeks.reduce((s, w) => s + w.qty, 0) / weeks.length : 0;
+    return { avgWeekly: avg, projected: avg, method: 'average', regression: null };
+  }
+
+  // Build regression points (most recent = highest x)
+  const points = weeks.map((w, i) => ({ x: weeks.length - i, y: w.qty }));
+  const reg = linearRegression(points);
+
+  const avgWeekly = weeks.reduce((s, w) => s + w.qty, 0) / weeks.length;
+
+  if (!reg || reg.rSquared < 0.3) {
+    // Poor fit — use average
+    return { avgWeekly, projected: avgWeekly, method: 'average', regression: reg };
+  }
+
+  // Project forward
+  const projected = Math.max(0, reg.slope * (weeks.length + weeksForward) + reg.intercept);
+
+  // If trend is clearly up, use projected. If flat or down, use average (conservative)
+  const useProjected = reg.slope > 0 && reg.rSquared >= 0.5;
+
+  return {
+    avgWeekly,
+    projected: useProjected ? projected : avgWeekly,
+    method: useProjected ? 'regression' : 'average',
+    regression: reg,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WEEKLY CONSUMPTION — from ItemPath picks_history
 // ─────────────────────────────────────────────────────────────────────────────
 function buildWeeklyConsumption(db) {
-  // Source: ItemPath picks_history only (actual Kardex consumption)
   const ipRows = db.prepare(`
     SELECT sku, date(completed_at) as date, SUM(qty) as qty
     FROM picks_history
@@ -35,7 +111,6 @@ function buildWeeklyConsumption(db) {
     dailyBySku[r.sku][r.date] = (dailyBySku[r.sku][r.date] || 0) + r.qty;
   }
 
-  // Aggregate into weekly buckets
   const del = db.prepare('DELETE FROM lens_consumption_weekly');
   const ins = db.prepare('INSERT OR REPLACE INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)');
 
@@ -60,22 +135,40 @@ function buildWeeklyConsumption(db) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET SKU PARAMS — configurable per SKU with defaults
+// ─────────────────────────────────────────────────────────────────────────────
+function getSkuParams(db, sku) {
+  const row = db.prepare('SELECT * FROM lens_sku_params WHERE sku = ?').get(sku);
+  if (row) return row;
+  return {
+    manufacturing_weeks: DEFAULTS.manufacturing_weeks,
+    transit_weeks: DEFAULTS.transit_weeks,
+    fda_hold_weeks: DEFAULTS.fda_hold_weeks,
+    total_lead_time_weeks: DEFAULTS.manufacturing_weeks + DEFAULTS.transit_weeks + DEFAULTS.fda_hold_weeks,
+    safety_stock_weeks: DEFAULTS.safety_stock_weeks,
+    abc_class: DEFAULTS.abc_class,
+    min_order_qty: 0,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // COMPUTE HEALTH — for all lens SKUs
 // ─────────────────────────────────────────────────────────────────────────────
 function computeAll(db, itempath, netsuite) {
   // Ensure tables exist
   try {
-    db.exec('CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, consumption_trend_pct REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 6.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT "OK", order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, computed_at TEXT DEFAULT (datetime("now")))');
+    db.exec("CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, projected_weekly REAL DEFAULT 0, consumption_method TEXT, consumption_trend_pct REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 19.0, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT 'OK', order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, abc_class TEXT DEFAULT 'B', regression_slope REAL, regression_r2 REAL, computed_at TEXT DEFAULT (datetime('now')))");
     db.exec('CREATE TABLE IF NOT EXISTS lens_consumption_weekly (sku TEXT NOT NULL, week_start TEXT NOT NULL, units_consumed INTEGER DEFAULT 0, PRIMARY KEY(sku, week_start))');
-  } catch (e) { /* tables already exist */ }
+    db.exec("CREATE TABLE IF NOT EXISTS lens_sku_params (sku TEXT PRIMARY KEY, supplier TEXT, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, safety_stock_weeks REAL DEFAULT 4.0, abc_class TEXT DEFAULT 'B', min_order_qty INTEGER DEFAULT 0, notes TEXT, updated_at TEXT DEFAULT (datetime('now')))");
+  } catch (e) { /* tables exist */ }
 
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 
-  // Build weekly consumption first
+  // Build weekly consumption
   try { buildWeeklyConsumption(db); } catch (e) { console.error('[Lens Intelligence] Weekly consumption error:', e.message); }
 
-  // Get on-hand from ItemPath
+  // Get on-hand from ItemPath (physical Kardex truth)
   const inv = itempath.getInventory();
   const onHandBySku = {};
   for (const m of (inv.materials || [])) {
@@ -89,7 +182,7 @@ function computeAll(db, itempath, netsuite) {
     for (const line of (order.lines || [])) {
       if (!poBySku[line.sku]) poBySku[line.sku] = { totalQty: 0, nextDate: null, lines: [] };
       poBySku[line.sku].totalQty += line.qty;
-      poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, date: order.date, status: order.status });
+      poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase });
       if (order.date && (!poBySku[line.sku].nextDate || order.date < poBySku[line.sku].nextDate)) {
         poBySku[line.sku].nextDate = order.date;
       }
@@ -97,83 +190,77 @@ function computeAll(db, itempath, netsuite) {
   }
 
   // Get category from NetSuite
-  const getCat = (sku) => {
-    const cat = netsuite.getSkuCategory(sku);
-    return cat || 'Other';
-  };
+  const getCat = (sku) => netsuite.getSkuCategory(sku) || 'Other';
 
-  // Get weekly consumption for each SKU (last 8 weeks)
-  const weeklyRows = db.prepare(`
-    SELECT sku, week_start, units_consumed
-    FROM lens_consumption_weekly
-    ORDER BY sku, week_start DESC
-  `).all();
-
+  // Get weekly consumption for each SKU
+  const weeklyRows = db.prepare('SELECT sku, week_start, units_consumed FROM lens_consumption_weekly ORDER BY sku, week_start DESC').all();
   const weeklyBySku = {};
   for (const r of weeklyRows) {
     if (!weeklyBySku[r.sku]) weeklyBySku[r.sku] = [];
     weeklyBySku[r.sku].push({ week: r.week_start, qty: r.units_consumed });
   }
 
-  // Compute for all SKUs that have on-hand or consumption
+  // Compute for all SKUs
   const allSkus = new Set([...Object.keys(onHandBySku), ...Object.keys(weeklyBySku)]);
-  const del = db.prepare('DELETE FROM lens_inventory_status');
-  const ins = db.prepare(`INSERT OR REPLACE INTO lens_inventory_status
-    (sku, description, category, on_hand, avg_weekly_consumption, consumption_trend_pct,
-     weeks_of_supply, weeks_of_supply_with_po, safety_stock_weeks, lead_time_weeks,
-     dynamic_reorder_point, open_po_qty, next_po_date, runout_date, runout_date_with_po,
-     will_stockout, days_at_risk, status, order_recommended, order_qty_recommended, computed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
+  // Drop and recreate to handle schema changes
+  try { db.exec('DROP TABLE IF EXISTS lens_inventory_status'); } catch {}
+  db.exec("CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, projected_weekly REAL DEFAULT 0, consumption_method TEXT, consumption_trend_pct REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 19.0, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT 'OK', order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, abc_class TEXT DEFAULT 'B', regression_slope REAL, regression_r2 REAL, computed_at TEXT DEFAULT (datetime('now')))");
+
+  const ins = db.prepare(`INSERT INTO lens_inventory_status
+    (sku, description, category, on_hand, avg_weekly_consumption, projected_weekly, consumption_method,
+     consumption_trend_pct, weeks_of_supply, weeks_of_supply_with_po, safety_stock_weeks, lead_time_weeks,
+     manufacturing_weeks, transit_weeks, fda_hold_weeks, dynamic_reorder_point, open_po_qty, next_po_date,
+     runout_date, runout_date_with_po, will_stockout, days_at_risk, status, order_recommended,
+     order_qty_recommended, abc_class, regression_slope, regression_r2, computed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+  let computed = 0;
   const compute = db.transaction(() => {
-    del.run();
-    let computed = 0;
-
     for (const sku of allSkus) {
       const cat = getCat(sku);
-      // Only process lenses — skip known non-lens categories
       if (cat === 'Frames' || cat === 'Tops') continue;
 
       const onHand = onHandBySku[sku]?.qty || 0;
       const desc = onHandBySku[sku]?.name || sku;
-      const weeks = (weeklyBySku[sku] || []).slice(0, 8);
+      const weeks = (weeklyBySku[sku] || []).slice(0, 12);
+      const params = getSkuParams(db, sku);
 
-      // Safety stock and lead time by ABC class (approximation)
-      // A-class (high volume): 6 weeks safety, 6 week lead
-      // B-class: 4 weeks, 6 week lead
-      // C-class: 3 weeks, 6 week lead
-      const totalConsumption = weeks.reduce((s, w) => s + w.qty, 0);
-      const safetyWeeks = totalConsumption > 200 ? 6 : totalConsumption > 50 ? 4 : 3;
-      const leadTimeWeeks = 6;
+      // Lead time components
+      const mfgWeeks = params.manufacturing_weeks;
+      const transitWeeks = params.transit_weeks;
+      const fdaWeeks = params.fda_hold_weeks;
+      const totalLeadTime = mfgWeeks + transitWeeks + fdaWeeks;
+      const safetyWeeks = SAFETY_BY_CLASS[params.abc_class] || params.safety_stock_weeks;
 
-      // 4-week average consumption
-      const last4 = weeks.slice(0, 4);
-      const avgWeekly = last4.length > 0 ? last4.reduce((s, w) => s + w.qty, 0) / last4.length : 0;
+      // Consumption projection with regression
+      const projection = projectConsumption(weeks.slice(0, 8));
+      const avgWeekly = projection.avgWeekly;
+      const projectedWeekly = projection.projected;
+      const useRate = projectedWeekly; // use projected rate for planning
 
-      // Consumption trend (current week vs 4-week avg)
+      // Consumption trend
       const currentWeek = weeks.length > 0 ? weeks[0].qty : 0;
       const trendPct = avgWeekly > 0 ? Math.round(((currentWeek - avgWeekly) / avgWeekly) * 100) : 0;
 
-      // Weeks of supply
-      const wos = avgWeekly > 0 ? Math.round((onHand / avgWeekly) * 10) / 10 : 999;
+      // Weeks of supply (using projected consumption rate)
+      const wos = useRate > 0 ? Math.round((onHand / useRate) * 10) / 10 : 999;
 
       // Open PO data
       const po = poBySku[sku];
       const openPoQty = po?.totalQty || 0;
       const nextPoDate = po?.nextDate || null;
+      const wosWithPo = useRate > 0 ? Math.round(((onHand + openPoQty) / useRate) * 10) / 10 : 999;
 
-      // Weeks of supply with PO
-      const wosWithPo = avgWeekly > 0 ? Math.round(((onHand + openPoQty) / avgWeekly) * 10) / 10 : 999;
-
-      // Dynamic reorder point
-      const reorderPoint = Math.ceil(leadTimeWeeks * avgWeekly);
+      // Dynamic reorder point = total lead time × projected weekly consumption
+      const reorderPoint = Math.ceil(totalLeadTime * useRate);
 
       // Runout dates
-      const runoutDays = avgWeekly > 0 ? Math.round((onHand / avgWeekly) * 7) : 9999;
+      const runoutDays = useRate > 0 ? Math.round((onHand / useRate) * 7) : 9999;
       const runoutDate = new Date(now.getTime() + runoutDays * 86400000);
       const runoutStr = runoutDays < 9999 ? `${runoutDate.getFullYear()}-${String(runoutDate.getMonth()+1).padStart(2,'0')}-${String(runoutDate.getDate()).padStart(2,'0')}` : null;
 
-      const runoutWithPoDays = avgWeekly > 0 ? Math.round(((onHand + openPoQty) / avgWeekly) * 7) : 9999;
+      const runoutWithPoDays = useRate > 0 ? Math.round(((onHand + openPoQty) / useRate) * 7) : 9999;
       const runoutWithPoDate = new Date(now.getTime() + runoutWithPoDays * 86400000);
       const runoutWithPoStr = runoutWithPoDays < 9999 ? `${runoutWithPoDate.getFullYear()}-${String(runoutWithPoDate.getMonth()+1).padStart(2,'0')}-${String(runoutWithPoDate.getDate()).padStart(2,'0')}` : null;
 
@@ -183,41 +270,47 @@ function computeAll(db, itempath, netsuite) {
       if (nextPoDate && runoutWithPoStr) {
         willStockout = runoutWithPoStr < nextPoDate ? 1 : 0;
         if (willStockout) {
-          const diff = (new Date(nextPoDate) - runoutWithPoDate) / 86400000;
-          daysAtRisk = Math.max(0, Math.round(diff));
+          daysAtRisk = Math.max(0, Math.round((new Date(nextPoDate) - runoutWithPoDate) / 86400000));
         }
-      } else if (wosWithPo < leadTimeWeeks) {
+      } else if (wosWithPo < totalLeadTime) {
         willStockout = 1;
       }
 
       // Status
       let status = 'OK';
-      if (wosWithPo < leadTimeWeeks) status = 'CRITICAL';
-      else if (wosWithPo < leadTimeWeeks + safetyWeeks) status = 'WARNING';
-      else if (wosWithPo > 20) status = 'OVERSTOCK';
+      if (wosWithPo < totalLeadTime) status = 'CRITICAL';
+      else if (wosWithPo < totalLeadTime + safetyWeeks) status = 'WARNING';
+      else if (wosWithPo > 40) status = 'OVERSTOCK';
 
       // Order recommendation
       let orderRecommended = 0;
       let orderQty = 0;
       if (onHand <= reorderPoint || status === 'CRITICAL') {
         orderRecommended = 1;
-        // Order enough to cover lead time + safety stock
-        const targetQty = Math.ceil((leadTimeWeeks + safetyWeeks) * avgWeekly);
-        orderQty = Math.max(0, targetQty - onHand - openPoQty);
+        const targetQty = Math.ceil((totalLeadTime + safetyWeeks) * useRate);
+        orderQty = Math.max(params.min_order_qty || 0, targetQty - onHand - openPoQty);
       }
 
-      ins.run(sku, desc, cat, onHand, Math.round(avgWeekly * 10) / 10, trendPct,
-        wos, wosWithPo, safetyWeeks, leadTimeWeeks, reorderPoint, openPoQty, nextPoDate,
+      // ABC class (auto if not set)
+      const totalConsumption = weeks.reduce((s, w) => s + w.qty, 0);
+      const abcClass = params.abc_class || (totalConsumption > 200 ? 'A' : totalConsumption > 50 ? 'B' : 'C');
+
+      ins.run(sku, desc, cat, onHand,
+        Math.round(avgWeekly * 10) / 10, Math.round(projectedWeekly * 10) / 10, projection.method,
+        trendPct, wos, wosWithPo, safetyWeeks, totalLeadTime,
+        mfgWeeks, transitWeeks, fdaWeeks, reorderPoint, openPoQty, nextPoDate,
         runoutStr, runoutWithPoStr, willStockout, daysAtRisk, status,
-        orderRecommended, orderQty, today);
+        orderRecommended, orderQty, abcClass,
+        projection.regression?.slope ? Math.round(projection.regression.slope * 100) / 100 : null,
+        projection.regression?.rSquared ? Math.round(projection.regression.rSquared * 100) / 100 : null,
+        today);
       computed++;
     }
-    return computed;
   });
+  compute();
 
-  const count = compute();
-  console.log(`[Lens Intelligence] Computed health for ${count} lens SKUs`);
-  return count;
+  console.log(`[Lens Intelligence] Computed health for ${computed} lens SKUs`);
+  return computed;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -246,7 +339,8 @@ function getStatus(db, statusFilter = null) {
 function getSkuDetail(db, sku) {
   const status = db.prepare('SELECT * FROM lens_inventory_status WHERE sku = ?').get(sku);
   const weekly = db.prepare('SELECT * FROM lens_consumption_weekly WHERE sku = ? ORDER BY week_start DESC LIMIT 12').all(sku);
-  return { status, weekly };
+  const params = getSkuParams(db, sku);
+  return { status, weekly, params };
 }
 
 function getOrderRecommendations(db) {
@@ -254,20 +348,45 @@ function getOrderRecommendations(db) {
 }
 
 function getSummary(db) {
-  const all = getStatus(db);
-  return all.summary;
+  return getStatus(db).summary;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// START — compute on startup and schedule periodic refresh
+// SKU PARAMS MANAGEMENT
+// ─────────────────────────────────────────────────────────────────────────────
+function updateSkuParams(db, sku, params) {
+  const existing = db.prepare('SELECT * FROM lens_sku_params WHERE sku = ?').get(sku);
+  if (existing) {
+    const fields = [];
+    const vals = [];
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && k !== 'sku') { fields.push(`${k} = ?`); vals.push(v); }
+    }
+    if (fields.length > 0) {
+      fields.push("updated_at = datetime('now')");
+      vals.push(sku);
+      db.prepare(`UPDATE lens_sku_params SET ${fields.join(', ')} WHERE sku = ?`).run(...vals);
+    }
+  } else {
+    db.prepare(`INSERT INTO lens_sku_params (sku, supplier, manufacturing_weeks, transit_weeks, fda_hold_weeks, safety_stock_weeks, abc_class, min_order_qty)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      sku, params.supplier || null, params.manufacturing_weeks || 13, params.transit_weeks || 4,
+      params.fda_hold_weeks || 2, params.safety_stock_weeks || 4, params.abc_class || 'B', params.min_order_qty || 0);
+  }
+}
+
+function getAllSkuParams(db) {
+  return db.prepare('SELECT * FROM lens_sku_params ORDER BY sku').all();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// START
 // ─────────────────────────────────────────────────────────────────────────────
 function start(db, itempath, netsuite) {
-  // Initial compute after 120s (let all data sources load and sync first)
   setTimeout(() => {
     try { computeAll(db, itempath, netsuite); } catch (e) { console.error('[Lens Intelligence] Initial compute error:', e.message, e.stack?.split('\n')[1]); }
   }, 120000);
 
-  // Recompute every 30 minutes
   computeTimer = setInterval(() => {
     try { computeAll(db, itempath, netsuite); } catch (e) { console.error('[Lens Intelligence] Compute error:', e.message); }
   }, 1800000);
@@ -277,4 +396,4 @@ function stop() {
   if (computeTimer) clearInterval(computeTimer);
 }
 
-module.exports = { start, stop, computeAll, getStatus, getSkuDetail, getOrderRecommendations, getSummary };
+module.exports = { start, stop, computeAll, getStatus, getSkuDetail, getOrderRecommendations, getSummary, updateSkuParams, getAllSkuParams };

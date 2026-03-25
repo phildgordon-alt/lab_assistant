@@ -2146,6 +2146,36 @@ Respond with a structured batching plan in this format:
     const count = lensIntel.computeAll(labDb.db, itempath, netsuite);
     return json(res, { ok: true, computed: count });
   }
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/params') {
+    return json(res, { params: lensIntel.getAllSkuParams(labDb.db) });
+  }
+  if (req.method==='POST' && url.pathname==='/api/lens-intel/params') {
+    const body = await readBody(req);
+    lensIntel.updateSkuParams(labDb.db, body.sku, body);
+    return json(res, { ok: true });
+  }
+  if (req.method==='POST' && url.pathname==='/api/lens-intel/params/bulk') {
+    const body = await readBody(req);
+    const updates = body.updates || [];
+    for (const u of updates) {
+      lensIntel.updateSkuParams(labDb.db, u.sku, u);
+    }
+    return json(res, { ok: true, count: updates.length });
+  }
+  if (req.method==='POST' && url.pathname==='/api/lens-intel/defaults') {
+    const body = await readBody(req);
+    // Set defaults for all SKUs that don't have custom params
+    const allStatus = labDb.db.prepare('SELECT sku FROM lens_inventory_status').all();
+    let updated = 0;
+    for (const row of allStatus) {
+      const existing = labDb.db.prepare('SELECT sku FROM lens_sku_params WHERE sku = ?').get(row.sku);
+      if (!existing) {
+        lensIntel.updateSkuParams(labDb.db, row.sku, body);
+        updated++;
+      }
+    }
+    return json(res, { ok: true, updated });
+  }
   if (req.method==='GET' && url.pathname==='/api/lens-intel/export') {
     const data = lensIntel.getStatus(labDb.db);
     res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="lens_intelligence.csv"' });
