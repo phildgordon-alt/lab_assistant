@@ -55,6 +55,7 @@ const binning = require('./binning-intelligence');
 const netsuite = require('./netsuite-adapter');
 const looker = require('./looker-adapter');
 const lensIntel = require('./lens-intelligence');
+const npiEngine = require('./npi-engine');
 itempath.start();
 binning.start(itempath);
 netsuite.start();
@@ -2185,7 +2186,42 @@ Respond with a structured batching plan in this format:
     return;
   }
 
-  // ── NPI / Cannibalization Analysis ─────────────────────────
+  // ── NPI Scenarios ──────────────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/npi/scenarios') {
+    return json(res, { scenarios: npiEngine.getScenarios(labDb.db) });
+  }
+  if (req.method==='POST' && url.pathname==='/api/npi/scenarios') {
+    const body = await readBody(req);
+    const id = npiEngine.createScenario(labDb.db, body);
+    const result = npiEngine.computeCannibalization(labDb.db, id);
+    return json(res, { ok: true, id, ...result });
+  }
+  if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/') && !url.pathname.includes('/compute')) {
+    const id = url.pathname.split('/').pop();
+    return json(res, npiEngine.getScenario(labDb.db, id));
+  }
+  if (req.method==='PUT' && url.pathname.startsWith('/api/npi/scenarios/')) {
+    const id = url.pathname.split('/').pop();
+    const body = await readBody(req);
+    npiEngine.updateScenario(labDb.db, id, body);
+    const result = npiEngine.computeCannibalization(labDb.db, id);
+    return json(res, { ok: true, ...result });
+  }
+  if (req.method==='DELETE' && url.pathname.startsWith('/api/npi/scenarios/')) {
+    const id = url.pathname.split('/').pop();
+    npiEngine.deleteScenario(labDb.db, id);
+    return json(res, { ok: true });
+  }
+  if (req.method==='POST' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/compute')) {
+    const id = url.pathname.split('/')[3];
+    const result = npiEngine.computeCannibalization(labDb.db, id);
+    return json(res, result || { error: 'Scenario not found' });
+  }
+  if (req.method==='GET' && url.pathname==='/api/npi/adjustments') {
+    return json(res, { adjustments: npiEngine.getActiveAdjustments(labDb.db) });
+  }
+
+  // ── NPI / Cannibalization Analysis (legacy CR39 endpoint) ─
   if (req.method==='GET' && url.pathname==='/api/lens-intel/npi') {
     try {
       // CR39 = null OPC jobs in Looker (currently upgraded to poly)

@@ -29,6 +29,39 @@ db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
 
+// NPI — New Product Introduction scenarios
+db.exec(`
+  CREATE TABLE IF NOT EXISTS npi_scenarios (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    new_sku_prefix TEXT,
+    adoption_pct REAL DEFAULT 50,
+    source_type TEXT DEFAULT 'prefix',
+    source_value TEXT,
+    proxy_sku TEXT,
+    manufacturing_weeks REAL DEFAULT 13,
+    transit_weeks REAL DEFAULT 4,
+    fda_hold_weeks REAL DEFAULT 2,
+    status TEXT DEFAULT 'planning',
+    launch_date TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS npi_cannibalization (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    scenario_id TEXT NOT NULL,
+    source_sku TEXT NOT NULL,
+    current_weekly REAL DEFAULT 0,
+    lost_weekly REAL DEFAULT 0,
+    new_weekly REAL DEFAULT 0,
+    computed_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (scenario_id) REFERENCES npi_scenarios(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_npi_cann_scenario ON npi_cannibalization(scenario_id);
+`);
+
 // Lens Intelligence — SKU planning parameters (configurable per SKU)
 db.exec(`
   CREATE TABLE IF NOT EXISTS lens_sku_params (

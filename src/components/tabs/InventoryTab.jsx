@@ -539,6 +539,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [lensSaving, setLensSaving] = useState(false);
   const [npiData, setNpiData] = useState(null);
   const [npiOpen, setNpiOpen] = useState(false);
+  const [npiScenarios, setNpiScenarios] = useState(null);
+  const [npiSelected, setNpiSelected] = useState(null);
+  const [npiCreating, setNpiCreating] = useState(false);
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
   const [pipelineDetail, setPipelineDetail] = useState(null);
@@ -698,7 +701,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "lens-intel", label: "Lens Intelligence" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "inbound", label: "Inbound" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "lens-intel", label: "Lens Intelligence" }, { id: "npi", label: "New Products" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "inbound", label: "Inbound" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -2775,6 +2778,228 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 })()}
                 {npiOpen && !npiData && <div style={{ padding: 16, textAlign: 'center', color: T.textDim }}>Loading NPI analysis...</div>}
               </Card>
+            </div>
+          );
+        })()}
+
+        {sub === "npi" && (() => {
+          if (!npiScenarios) {
+            fetch(`${ovenServerUrl}/api/npi/scenarios`).then(r => r.json()).then(d => setNpiScenarios(d.scenarios || [])).catch(() => setNpiScenarios([]));
+          }
+
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>New Product Introduction</h3>
+                <button onClick={() => setNpiCreating(true)} style={{ background: T.blue, border: "none", borderRadius: 6, padding: "8px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                  + New Scenario
+                </button>
+              </div>
+
+              {/* Create new scenario form */}
+              {npiCreating && (
+                <Card style={{ padding: 16, marginBottom: 16, border: `1px solid ${T.blue}30` }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: T.text, marginBottom: 12 }}>Create NPI Scenario</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>PRODUCT NAME</label>
+                      <input type="text" id="npi-name" placeholder="e.g. CR 39 Launch" style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>NEW SKU PREFIX (optional)</label>
+                      <input type="text" id="npi-prefix" placeholder="e.g. CR39" style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>CANNIBALIZATION SOURCE</label>
+                      <select id="npi-source-type" style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }}>
+                        <option value="prefix">By SKU prefix (e.g. 4800 = all Essilor poly)</option>
+                        <option value="skus">Specific SKUs (comma-separated)</option>
+                        <option value="proxy">Emulate a proxy SKU's demand</option>
+                        <option value="null_opc">Null OPC orders (CR 39 free option)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SOURCE VALUE / PROXY SKU</label>
+                      <input type="text" id="npi-source-value" placeholder="e.g. 4800 or 4800150916,4800031249" style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 12 }}>
+                    <div>
+                      <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>ADOPTION %</label>
+                      <input type="number" id="npi-adoption" defaultValue="50" min="1" max="100" style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>MFG (wk)</label>
+                      <input type="number" id="npi-mfg" defaultValue="13" step="0.5" style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TRANSIT (wk)</label>
+                      <input type="number" id="npi-transit" defaultValue="4" step="0.5" style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FDA (wk)</label>
+                      <input type="number" id="npi-fda" defaultValue="2" step="0.5" style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>LAUNCH DATE</label>
+                      <input type="date" id="npi-launch" style={{ width: '100%', padding: '6px 8px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={async () => {
+                      const sourceType = document.getElementById('npi-source-type')?.value;
+                      const body = {
+                        name: document.getElementById('npi-name')?.value || 'New Product',
+                        new_sku_prefix: document.getElementById('npi-prefix')?.value || null,
+                        source_type: sourceType,
+                        source_value: sourceType !== 'null_opc' ? (document.getElementById('npi-source-value')?.value || null) : null,
+                        proxy_sku: sourceType === 'proxy' ? (document.getElementById('npi-source-value')?.value || null) : null,
+                        adoption_pct: parseFloat(document.getElementById('npi-adoption')?.value) || 50,
+                        manufacturing_weeks: parseFloat(document.getElementById('npi-mfg')?.value) || 13,
+                        transit_weeks: parseFloat(document.getElementById('npi-transit')?.value) || 4,
+                        fda_hold_weeks: parseFloat(document.getElementById('npi-fda')?.value) || 2,
+                        launch_date: document.getElementById('npi-launch')?.value || null,
+                      };
+                      const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+                      const result = await resp.json();
+                      setNpiSelected(result);
+                      setNpiCreating(false);
+                      const sResp = await fetch(`${ovenServerUrl}/api/npi/scenarios`);
+                      setNpiScenarios((await sResp.json()).scenarios || []);
+                    }} style={{ background: T.green, border: "none", borderRadius: 6, padding: "8px 20px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                      Create & Compute
+                    </button>
+                    <button onClick={() => setNpiCreating(false)} style={{ background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 6, padding: "8px 16px", color: T.textMuted, fontSize: 11, cursor: "pointer", fontFamily: mono }}>
+                      Cancel
+                    </button>
+                  </div>
+                </Card>
+              )}
+
+              {/* Scenario list */}
+              {(npiScenarios || []).length > 0 && (
+                <Card style={{ marginBottom: 16 }}>
+                  <SectionHeader right={`${npiScenarios.length} scenarios`}>Scenarios</SectionHeader>
+                  {npiScenarios.map(s => (
+                    <div key={s.id} onClick={async () => {
+                      const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}/compute`, { method: 'POST' });
+                      setNpiSelected(await resp.json());
+                    }} style={{ padding: '12px 16px', borderBottom: `1px solid ${T.border}`, cursor: 'pointer', background: npiSelected?.scenario?.id === s.id ? `${T.blue}08` : 'transparent' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                          <span style={{ fontSize: 14, fontWeight: 700, color: T.text }}>{s.name}</span>
+                          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, fontFamily: mono,
+                            background: s.status === 'active' ? `${T.green}20` : s.status === 'launched' ? `${T.blue}20` : `${T.amber}20`,
+                            color: s.status === 'active' ? T.green : s.status === 'launched' ? T.blue : T.amber
+                          }}>{s.status.toUpperCase()}</span>
+                          <span style={{ fontSize: 10, color: T.textMuted }}>{s.adoption_pct}% adoption</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          {s.status === 'planning' && (
+                            <button onClick={async (e) => {
+                              e.stopPropagation();
+                              await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ status: 'active' }) });
+                              const sResp = await fetch(`${ovenServerUrl}/api/npi/scenarios`);
+                              setNpiScenarios((await sResp.json()).scenarios || []);
+                            }} style={{ background: T.green, border: "none", borderRadius: 4, padding: "4px 10px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                              Activate
+                            </button>
+                          )}
+                          <button onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!confirm('Delete this scenario?')) return;
+                            await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}`, { method: 'DELETE' });
+                            const sResp = await fetch(`${ovenServerUrl}/api/npi/scenarios`);
+                            setNpiScenarios((await sResp.json()).scenarios || []);
+                            if (npiSelected?.scenario?.id === s.id) setNpiSelected(null);
+                          }} style={{ background: T.red, border: "none", borderRadius: 4, padding: "4px 10px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                      {s.description && <div style={{ fontSize: 10, color: T.textDim, marginTop: 4 }}>{s.description}</div>}
+                    </div>
+                  ))}
+                </Card>
+              )}
+
+              {/* Selected scenario results */}
+              {npiSelected && npiSelected.scenario && (
+                <Card style={{ padding: 16 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: T.text, marginBottom: 12 }}>{npiSelected.scenario.name} — Impact Analysis</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 16 }}>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.blue, fontFamily: mono }}>{npiSelected.scenario.adoption_pct}%</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>ADOPTION</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.amber, fontFamily: mono }}>{npiSelected.newProductWeeklyJobs || 0}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>NEW JOBS/WK</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.green, fontFamily: mono }}>{npiSelected.newProductWeeklyLenses || 0}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>NEW LENSES/WK</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.red, fontFamily: mono }}>{npiSelected.totalLostWeekly || 0}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>SOURCE REDUCTION/WK</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{(npiSelected.initialOrderQty || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>INITIAL ORDER</div>
+                      <div style={{ fontSize: 7, color: T.textDim }}>{npiSelected.totalLeadTime}wk lead + 4wk safety</div>
+                    </div>
+                  </div>
+
+                  {/* Cannibalization detail */}
+                  {npiSelected.scenario && (() => {
+                    const detail = npiSelected.cannibalization || [];
+                    // If we have cannibalization from the compute result, use scenario detail
+                    if (detail.length === 0 && npiSelected.sourceSkuCount > 0) {
+                      return <div style={{ padding: 12, textAlign: 'center', color: T.textDim, fontSize: 11 }}>Click scenario to load cannibalization detail</div>;
+                    }
+                    return detail.length > 0 ? (
+                      <div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 6 }}>IMPACTED SKUs ({detail.length})</div>
+                        <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                            <thead>
+                              <tr style={{ background: T.bg }}>
+                                <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>CURRENT/WK</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.red, borderBottom: `1px solid ${T.border}` }}>LOST/WK</th>
+                                <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.green, borderBottom: `1px solid ${T.border}` }}>NEW/WK</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {detail.map((c, i) => (
+                                <tr key={i} style={{ borderBottom: `1px solid ${T.border}15` }}>
+                                  <td style={{ padding: '4px 8px', fontWeight: 600, color: T.text }}>{c.source_sku}</td>
+                                  <td style={{ padding: '4px 8px', textAlign: 'right', color: T.textMuted }}>{c.current_weekly}</td>
+                                  <td style={{ padding: '4px 8px', textAlign: 'right', color: T.red }}>-{c.lost_weekly}</td>
+                                  <td style={{ padding: '4px 8px', textAlign: 'right', color: T.green }}>{c.new_weekly}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                        <ExportBtn label="Export Impact" onClick={() => {
+                          downloadCSV(`npi_${npiSelected.scenario.name.replace(/\s/g,'_')}.csv`, ['source_sku','current_weekly','lost_weekly','new_weekly'], detail);
+                        }} />
+                      </div>
+                    ) : null;
+                  })()}
+                </Card>
+              )}
+
+              {(npiScenarios || []).length === 0 && !npiCreating && (
+                <Card style={{ padding: 32, textAlign: 'center' }}>
+                  <div style={{ fontSize: 14, color: T.textMuted, marginBottom: 8 }}>No NPI scenarios yet</div>
+                  <div style={{ fontSize: 11, color: T.textDim }}>Create a scenario to model new product demand and cannibalization impact</div>
+                </Card>
+              )}
             </div>
           );
         })()}
