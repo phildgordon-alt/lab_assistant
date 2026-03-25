@@ -245,7 +245,7 @@ function getStatus(db, statusFilter = null) {
     query += ' WHERE status = ?';
     params.push(statusFilter);
   }
-  query += ' ORDER BY CASE status WHEN "CRITICAL" THEN 0 WHEN "WARNING" THEN 1 WHEN "OK" THEN 2 WHEN "OVERSTOCK" THEN 3 END, weeks_of_supply ASC';
+  query += " ORDER BY CASE status WHEN 'CRITICAL' THEN 0 WHEN 'WARNING' THEN 1 WHEN 'OK' THEN 2 WHEN 'OVERSTOCK' THEN 3 END, weeks_of_supply ASC";
   const rows = db.prepare(query).all(...params);
 
   const summary = { total: rows.length, critical: 0, warning: 0, ok: 0, overstock: 0, stockoutRisk: 0, orderRecommended: 0 };
