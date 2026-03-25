@@ -746,9 +746,30 @@ function computeCatchUp(lineId, scenario = {}) {
   // Measured assembly output rate
   const measuredOutputRate = lastSnapshot?.rates?.assembly?.total || 22;
 
-  // Estimate assembler count from measured rate (20-25 jobs/hr per assembler)
-  const jobsPerAssemblerHr = scenario.jobsPerAssemblerHr || 4; // ~4 jobs/hr per person (20-25 total / ~5-6 assemblers)
-  const measuredAssemblers = Math.max(1, Math.round(measuredOutputRate / jobsPerAssemblerHr));
+  // Count active assemblers: unique ASSEMBLY stations with movement today in DVI trace
+  let measuredAssemblers = 0;
+  if (dviTrace) {
+    const events = dviTrace.getRecentEvents(5000);
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayMs = todayStart.getTime();
+    const assemblyStations = new Set();
+    for (const evt of events) {
+      if (evt.timestamp >= todayMs && evt.stage === 'ASSEMBLY' && evt.station) {
+        // Only count numbered assembly stations (ASSEMBLY #1, #3, etc.)
+        if (/ASSEMBLY\s*#?\d/i.test(evt.station)) {
+          assemblyStations.add(evt.station);
+        }
+      }
+    }
+    measuredAssemblers = assemblyStations.size;
+  }
+  if (measuredAssemblers === 0) measuredAssemblers = 1; // fallback
+
+  // Jobs per assembler per hour: derived from measured output / measured assemblers
+  const jobsPerAssemblerHr = scenario.jobsPerAssemblerHr || (measuredAssemblers > 0
+    ? Math.round((measuredOutputRate / measuredAssemblers) * 10) / 10
+    : 4);
 
   // Apply scenario overrides
   const assemblers = scenario.assemblers ?? measuredAssemblers;
