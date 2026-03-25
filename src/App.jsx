@@ -5742,29 +5742,45 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
         </div>
       </div>
 
-      {/* Zone cards */}
+      {/* Zone cards with action descriptions */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
         {[
-          { zone: 'GREEN', label: '0-1 days', color: T.green },
-          { zone: 'YELLOW', label: '1-2 days', color: T.amber },
-          { zone: 'RED', label: '2-3 days', color: T.red },
-          { zone: 'CRITICAL', label: '3+ days', color: '#cc0000' },
+          { zone: 'GREEN', label: '0-1 days', color: T.green, action: 'On track. No action needed.' },
+          { zone: 'YELLOW', label: '1-2 days', color: T.amber, action: 'Watch list. Check if these jobs are stuck at a station.' },
+          { zone: 'RED', label: '2-3 days', color: T.red, action: 'Supervisor review. Find out why these jobs haven\'t moved. Check for holds, breakage, or missing materials.' },
+          { zone: 'CRITICAL', label: '3+ days', color: '#cc0000', action: 'Immediate escalation. These jobs are past SLA. Identify the blocker and resolve today.' },
         ].map(z => (
           <Card key={z.zone} onClick={() => setFilter(filter === z.zone ? 'all' : z.zone)}
-            style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${z.color}`, cursor: 'pointer', background: filter === z.zone ? `${z.color}10` : T.card }}>
-            <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>{sm[z.zone.toLowerCase()] || 0}</div>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{z.zone} ({z.label})</div>
+            style={{ padding: 14, borderLeft: `4px solid ${z.color}`, cursor: 'pointer', background: filter === z.zone ? `${z.color}10` : T.card }}>
+            <div style={{ textAlign: 'center', marginBottom: 6 }}>
+              <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>{sm[z.zone.toLowerCase()] || 0}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: z.color, fontFamily: mono }}>{z.zone} ({z.label})</div>
+            </div>
+            <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>{z.action}</div>
           </Card>
         ))}
       </div>
 
-      {/* Outlier gauge */}
-      {(sm.outlierPct || 0) > 5 && (
-        <Card style={{ padding: 12, marginBottom: 16, background: `${T.red}10`, border: `1px solid ${T.red}30` }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: T.red }}>Outlier Alert: {sm.outlierPct}% of jobs are 2+ days old (threshold: 5%)</div>
-          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>{sm.red + sm.critical} jobs need attention</div>
-        </Card>
-      )}
+      {/* Outlier explainer */}
+      <Card style={{ padding: 12, marginBottom: 16, background: (sm.outlierPct || 0) > 5 ? `${T.red}10` : T.bg, border: `1px solid ${(sm.outlierPct || 0) > 5 ? T.red + '30' : T.border}` }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: (sm.outlierPct || 0) > 5 ? T.red : T.green }}>
+              Outlier Rate: {sm.outlierPct || 0}% {(sm.outlierPct || 0) > 5 ? '— ABOVE THRESHOLD' : '— Within target'}
+            </div>
+            <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
+              <strong>What this means:</strong> {sm.outlierPct || 0}% of active WIP jobs ({sm.red + sm.critical || 0} jobs) have been in the lab 2 or more days.
+              Our target is under 5%. {(sm.outlierPct || 0) > 5
+                ? 'We are above target — review the Red and Critical jobs below to identify bottlenecks. Common causes: machine downtime, missing materials, breakage rework, or jobs stuck on hold.'
+                : 'We are within target. Continue monitoring.'}
+            </div>
+          </div>
+          <div style={{ textAlign: 'center', minWidth: 80 }}>
+            <div style={{ fontSize: 32, fontWeight: 800, color: (sm.outlierPct || 0) > 5 ? T.red : T.green, fontFamily: mono }}>{sm.outlierPct || 0}%</div>
+            <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>TARGET: 5%</div>
+          </div>
+        </div>
+      </Card>
 
       {/* Search */}
       <div style={{ marginBottom: 12 }}>
