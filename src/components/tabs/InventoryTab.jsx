@@ -2471,6 +2471,88 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       </div>
                     </div>
                   )}
+                  {/* Regression info */}
+                  <div style={{ marginTop: 12, display: 'flex', gap: 16, padding: '10px 12px', background: T.bg, borderRadius: 6 }}>
+                    <div style={{ fontSize: 10, fontFamily: mono, color: T.textMuted }}>
+                      Method: <strong style={{ color: T.text }}>{lensIntelDetail.status.consumption_method || 'average'}</strong>
+                    </div>
+                    <div style={{ fontSize: 10, fontFamily: mono, color: T.textMuted }}>
+                      Avg/wk: <strong style={{ color: T.text }}>{lensIntelDetail.status.avg_weekly_consumption}</strong>
+                    </div>
+                    <div style={{ fontSize: 10, fontFamily: mono, color: T.textMuted }}>
+                      Projected/wk: <strong style={{ color: T.blue }}>{lensIntelDetail.status.projected_weekly}</strong>
+                    </div>
+                    {lensIntelDetail.status.regression_slope != null && (
+                      <>
+                        <div style={{ fontSize: 10, fontFamily: mono, color: T.textMuted }}>
+                          Slope: <strong style={{ color: lensIntelDetail.status.regression_slope > 0 ? T.red : T.green }}>{lensIntelDetail.status.regression_slope > 0 ? '+' : ''}{lensIntelDetail.status.regression_slope}</strong>
+                        </div>
+                        <div style={{ fontSize: 10, fontFamily: mono, color: T.textMuted }}>
+                          R²: <strong style={{ color: lensIntelDetail.status.regression_r2 >= 0.5 ? T.green : T.amber }}>{lensIntelDetail.status.regression_r2}</strong>
+                          {lensIntelDetail.status.regression_r2 >= 0.5 ? ' (strong)' : lensIntelDetail.status.regression_r2 >= 0.3 ? ' (moderate)' : ' (weak)'}
+                        </div>
+                      </>
+                    )}
+                    <div style={{ fontSize: 10, fontFamily: mono, color: T.textDim }}>
+                      Lead: {lensIntelDetail.status.lead_time_weeks}wk ({lensIntelDetail.status.manufacturing_weeks}+{lensIntelDetail.status.transit_weeks}+{lensIntelDetail.status.fda_hold_weeks})
+                    </div>
+                  </div>
+
+                  {/* Per-SKU settings */}
+                  <div style={{ marginTop: 16, padding: 12, background: T.bg, borderRadius: 8 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, marginBottom: 8, fontFamily: mono }}>SKU SETTINGS</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 10 }}>
+                      {[
+                        { key: 'manufacturing_weeks', label: 'MFG (wk)', val: lensIntelDetail.params?.manufacturing_weeks ?? lensIntelDetail.status.manufacturing_weeks ?? 13 },
+                        { key: 'transit_weeks', label: 'Transit (wk)', val: lensIntelDetail.params?.transit_weeks ?? lensIntelDetail.status.transit_weeks ?? 4 },
+                        { key: 'fda_hold_weeks', label: 'FDA (wk)', val: lensIntelDetail.params?.fda_hold_weeks ?? lensIntelDetail.status.fda_hold_weeks ?? 2 },
+                        { key: 'safety_stock_weeks', label: 'Safety (wk)', val: lensIntelDetail.params?.safety_stock_weeks ?? lensIntelDetail.status.safety_stock_weeks ?? 4 },
+                        { key: 'min_order_qty', label: 'Min Order', val: lensIntelDetail.params?.min_order_qty ?? 0 },
+                      ].map(f => (
+                        <div key={f.key}>
+                          <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>{f.label}</label>
+                          <input type="number" step="0.5" defaultValue={f.val} id={`sku-param-${f.key}`}
+                            style={{ width: '100%', padding: '6px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 12, fontFamily: mono }} />
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <select defaultValue={lensIntelDetail.params?.abc_class || lensIntelDetail.status.abc_class || 'B'} id="sku-param-abc"
+                        style={{ padding: '6px 10px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }}>
+                        <option value="A">A — High Volume (6wk safety)</option>
+                        <option value="B">B — Medium (4wk safety)</option>
+                        <option value="C">C — Low Volume (3wk safety)</option>
+                        <option value="X">X — DISCONTINUED</option>
+                      </select>
+                      <button onClick={async () => {
+                        const params = {
+                          sku: lensIntelDetail.status.sku,
+                          manufacturing_weeks: parseFloat(document.getElementById('sku-param-manufacturing_weeks')?.value) || 13,
+                          transit_weeks: parseFloat(document.getElementById('sku-param-transit_weeks')?.value) || 4,
+                          fda_hold_weeks: parseFloat(document.getElementById('sku-param-fda_hold_weeks')?.value) || 2,
+                          safety_stock_weeks: parseFloat(document.getElementById('sku-param-safety_stock_weeks')?.value) || 4,
+                          min_order_qty: parseInt(document.getElementById('sku-param-min_order_qty')?.value) || 0,
+                          abc_class: document.getElementById('sku-param-abc')?.value || 'B',
+                        };
+                        await fetch(`${ovenServerUrl}/api/lens-intel/params`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(params) });
+                        await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
+                        const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                        setLensIntelData(await resp.json());
+                        setLensIntelDetail(null);
+                      }} style={{ background: T.blue, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                        Save & Recompute
+                      </button>
+                      <button onClick={async () => {
+                        await fetch(`${ovenServerUrl}/api/lens-intel/params`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ sku: lensIntelDetail.status.sku, abc_class: 'X' }) });
+                        await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
+                        const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                        setLensIntelData(await resp.json());
+                        setLensIntelDetail(null);
+                      }} style={{ background: T.red, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                        Mark Discontinued
+                      </button>
+                    </div>
+                  </div>
                 </Card>
               )}
             </div>
