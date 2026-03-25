@@ -2316,8 +2316,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         return (
                           <tr key={i.sku} style={{ borderBottom: `1px solid ${T.border}15`, background: i.status === 'CRITICAL' ? `${T.red}08` : i.will_stockout ? `${T.amber}06` : 'transparent', cursor: 'pointer' }}
                             onClick={async () => {
-                              const resp = await fetch(`${ovenServerUrl}/api/lens-intel/sku/${encodeURIComponent(i.sku)}`);
-                              setLensIntelDetail(await resp.json());
+                              try {
+                                const resp = await fetch(`${ovenServerUrl}/api/lens-intel/sku/${encodeURIComponent(i.sku)}`);
+                                const data = await resp.json();
+                                setLensIntelDetail(data?.status ? data : { status: i, weekly: [] });
+                              } catch (e) {
+                                setLensIntelDetail({ status: i, weekly: [] });
+                              }
                             }}>
                             <td style={{ padding: '5px 8px', fontWeight: 600, color: T.text, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={i.description}>{i.sku}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'center' }}>
