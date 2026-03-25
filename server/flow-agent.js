@@ -650,12 +650,14 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
       const pushBy = urgency === 'now' ? 'NOW' :
         drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
+      const feedHours = Math.round((75 / assemblyRate) * 10) / 10;
       let reason = '';
       if (cuttingDrainMin < assemblyDrainMin) {
         reason = `Cutting drains at ${drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
       } else {
         reason = `Assembly drains at ${drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
       }
+      reason += ` — 75 SV keeps assembly busy ~${feedHours}h at ${Math.round(assemblyRate)}/hr`;
       if (nextCoatingWave !== null) {
         const waveTime = new Date(now.getTime() + nextCoatingWave * 60000);
         reason += `, coating wave at ${waveTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
@@ -665,7 +667,7 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
 
       recs.push({
         line_id: 'sv',
-        push_qty: Math.min(svPush, 75), // max 75 (put wall capacity)
+        push_qty: 75, // put wall = 75 positions, always push a full wall
         urgency,
         push_by: pushBy,
         expires_at: computeExpiresAt(pushBy, urgency),
@@ -690,7 +692,7 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
     if (deficit > 5) {
       recs.push({
         line_id: 'surfacing',
-        push_qty: Math.min(deficit, 50),
+        push_qty: 75, // put wall = 75 positions, always push a full wall
         urgency: 'by_time',
         push_by: '2:00 PM',
         expires_at: computeExpiresAt('2:00 PM', 'by_time'),
@@ -720,21 +722,33 @@ function computeCatchUp(lineId, scenario = {}) {
   const line = stmts.getLine.get(lineId);
   if (!line) return null;
 
-  // Get current WIP for this line from latest snapshot
-  const stages = (line.stages || '').split(',').filter(Boolean);
+  // Get current WIP directly from DVI trace — the real count, not snapshot sums
+  const { dviTrace, dviJobIndex } = adapters;
   let totalWip = 0;
-  for (const stageId of stages) {
-    const snap = db.prepare(`SELECT current_count FROM flow_snapshots WHERE stage_id=?
-      ORDER BY ts DESC LIMIT 1`).get(stageId);
-    totalWip += snap?.current_count || 0;
+  let svWip = 0, surfWip = 0;
+  if (dviTrace) {
+    const allJobs = dviTrace.getJobs();
+    const active = allJobs.filter(j =>
+      j.status !== 'SHIPPED' && j.stage !== 'CANCELED' &&
+      j.stage !== 'SHIPPED' && j.status !== 'CANCELED'
+    );
+    for (const j of active) {
+      const jobLine = classifyJob(j, dviJobIndex);
+      if (jobLine === 'sv') svWip++;
+      else if (jobLine === 'surfacing') surfWip++;
+    }
   }
+  // Pick WIP for the requested line
+  if (lineId === 'sv') totalWip = svWip;
+  else if (lineId === 'surfacing') totalWip = surfWip;
+  else totalWip = svWip + surfWip; // edits or total
 
   // Measured assembly output rate
   const measuredOutputRate = lastSnapshot?.rates?.assembly?.total || 22;
 
   // Estimate assembler count from measured rate (20-25 jobs/hr per assembler)
   const jobsPerAssemblerHr = scenario.jobsPerAssemblerHr || 4; // ~4 jobs/hr per person (20-25 total / ~5-6 assemblers)
-  const measuredAssemblers = Math.round(measuredOutputRate / jobsPerAssemblerHr);
+  const measuredAssemblers = Math.max(1, Math.round(measuredOutputRate / jobsPerAssemblerHr));
 
   // Apply scenario overrides
   const assemblers = scenario.assemblers ?? measuredAssemblers;
@@ -743,18 +757,22 @@ function computeCatchUp(lineId, scenario = {}) {
   const shifts = scenario.shifts ?? 2;
   const hoursPerDay = shiftHours * shifts;
 
-  // Incoming rate: use shipped count from DVI trace as a proxy for daily volume
-  // (shipped �� incoming at steady state). Fall back to DVI stats.
+  // Incoming rate: count INCOMING scan events from DVI trace today
+  // These represent new jobs entering the lab today
   let incomingPerDay = scenario.incomingPerDay ?? null;
   if (incomingPerDay === null) {
     try {
-      const stats = adapters.dviTrace?.getStats();
-      // Use today's shipped as best proxy for daily incoming
-      const shippedToday = stats?.byStage?.SHIPPED || 0;
-      const now = new Date();
-      const hoursWorked = Math.max(1, now.getHours() + now.getMinutes() / 60 - 7);
-      // Extrapolate to full day based on hours worked so far
-      incomingPerDay = Math.round((shippedToday / hoursWorked) * hoursPerDay);
+      if (dviTrace) {
+        const stats = dviTrace.getStats();
+        // byStage.INCOMING = number of new job scans today (INCOMING stage events)
+        const incomingScansToday = stats?.byStage?.INCOMING || 0;
+        const now = new Date();
+        const hoursWorked = Math.max(1, now.getHours() + now.getMinutes() / 60 - 7);
+        // Extrapolate to full working day
+        if (hoursWorked >= 1 && incomingScansToday > 0) {
+          incomingPerDay = Math.round((incomingScansToday / hoursWorked) * hoursPerDay);
+        }
+      }
     } catch {}
     if (!incomingPerDay) incomingPerDay = 0;
   }
