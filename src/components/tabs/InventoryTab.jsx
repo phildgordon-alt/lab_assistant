@@ -537,6 +537,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [lensSettings, setLensSettings] = useState(false);
   const [lensDefaults, setLensDefaults] = useState({ manufacturing_weeks: 13, transit_weeks: 4, fda_hold_weeks: 2, safety_stock_weeks: 4 });
   const [lensSaving, setLensSaving] = useState(false);
+  const [npiData, setNpiData] = useState(null);
+  const [npiOpen, setNpiOpen] = useState(false);
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
   const [pipelineDetail, setPipelineDetail] = useState(null);
@@ -2635,6 +2637,105 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </div>
                 </Card>
               )}
+              {/* NPI / New Product Introduction */}
+              <Card style={{ marginTop: 20 }}>
+                <div onClick={() => {
+                  setNpiOpen(!npiOpen);
+                  if (!npiData && !npiOpen) fetch(`${ovenServerUrl}/api/lens-intel/npi`).then(r => r.json()).then(setNpiData).catch(() => {});
+                }} style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>New Product Introduction — CR 39 Cannibalization</div>
+                    <div style={{ fontSize: 11, color: T.textMuted }}>Null lens type orders = CR 39 baseline demand (currently upgraded to poly)</div>
+                  </div>
+                  <span style={{ fontSize: 14, color: T.textDim }}>{npiOpen ? '▲' : '▼'}</span>
+                </div>
+                {npiOpen && npiData && (() => {
+                  const sm = npiData.summary || {};
+                  return (
+                    <div style={{ padding: '0 16px 16px' }}>
+                      {/* KPIs */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 16 }}>
+                        <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sm.adoptionPct || 0}%</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>CR39 ADOPTION</div>
+                        </div>
+                        <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(sm.avgWeeklyCR39 || 0).toLocaleString()}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>CR39 JOBS/WK</div>
+                        </div>
+                        <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.green, fontFamily: mono }}>{(sm.cr39WeeklyLenses || 0).toLocaleString()}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>CR39 LENSES/WK</div>
+                        </div>
+                        <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.red, fontFamily: mono }}>{(npiData.totalPolyWeeklyReduction || 0).toLocaleString()}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>POLY REDUCTION/WK</div>
+                        </div>
+                        <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.text, fontFamily: mono }}>{(sm.cr39InitialOrder || 0).toLocaleString()}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>INITIAL ORDER QTY</div>
+                          <div style={{ fontSize: 8, color: T.textDim }}>({sm.leadTimeWeeks}wk lead + {sm.safetyWeeks}wk safety)</div>
+                        </div>
+                      </div>
+
+                      {/* Weekly trend */}
+                      {(npiData.weekly || []).length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 6 }}>WEEKLY CR39 DEMAND TREND</div>
+                          <div style={{ display: 'flex', gap: 3, alignItems: 'flex-end', height: 60 }}>
+                            {[...(npiData.weekly || [])].reverse().slice(-12).map(w => {
+                              const maxW = Math.max(1, ...(npiData.weekly || []).map(x => x.cr39));
+                              const pct = Math.round((w.cr39 / maxW) * 100);
+                              return (
+                                <div key={w.week} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                                  <div style={{ fontSize: 8, color: T.textMuted, fontFamily: mono }}>{w.cr39}</div>
+                                  <div style={{ width: '100%', background: T.blue, borderRadius: 2, opacity: 0.7, height: `${pct}%`, minHeight: 2 }} />
+                                  <div style={{ fontSize: 7, color: T.textDim }}>{w.week.slice(5)}</div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Cannibalized SKUs */}
+                      {(npiData.cannibalizedSkus || []).length > 0 && (
+                        <div>
+                          <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 6 }}>POLY SKUs IMPACTED BY CR39 ({sm.adoptionPct}% reduction)</div>
+                          <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                              <thead>
+                                <tr style={{ background: T.bg }}>
+                                  <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>CURRENT/WK</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.red, borderBottom: `1px solid ${T.border}` }}>LOST/WK</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.green, borderBottom: `1px solid ${T.border}` }}>NEW/WK</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SHARE %</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(npiData.cannibalizedSkus || []).map(s => (
+                                  <tr key={s.sku} style={{ borderBottom: `1px solid ${T.border}15` }}>
+                                    <td style={{ padding: '4px 8px', color: T.text, fontWeight: 600 }}>{s.sku}</td>
+                                    <td style={{ padding: '4px 8px', textAlign: 'right', color: T.textMuted }}>{s.currentWeekly}</td>
+                                    <td style={{ padding: '4px 8px', textAlign: 'right', color: T.red }}>-{s.lostWeekly}</td>
+                                    <td style={{ padding: '4px 8px', textAlign: 'right', color: T.green }}>{s.newWeekly}</td>
+                                    <td style={{ padding: '4px 8px', textAlign: 'right', color: T.textDim }}>{s.share}%</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          <ExportBtn label="Export Cannibalization" onClick={() => {
+                            downloadCSV('cr39_cannibalization.csv', ['sku','currentWeekly','lostWeekly','newWeekly','share'], npiData.cannibalizedSkus || []);
+                          }} />
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+                {npiOpen && !npiData && <div style={{ padding: 16, textAlign: 'center', color: T.textDim }}>Loading NPI analysis...</div>}
+              </Card>
             </div>
           );
         })()}

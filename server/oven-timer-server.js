@@ -2185,6 +2185,85 @@ Respond with a structured batching plan in this format:
     return;
   }
 
+  // ── NPI / Cannibalization Analysis ─────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/npi') {
+    try {
+      // CR39 = null OPC jobs in Looker (currently upgraded to poly)
+      const dailyNull = labDb.db.prepare(`
+        SELECT sent_from_lab_date as date,
+               COUNT(DISTINCT job_id) as total_jobs,
+               COUNT(DISTINCT CASE WHEN opc IS NULL OR opc = '' THEN job_id END) as cr39_jobs
+        FROM looker_jobs
+        GROUP BY sent_from_lab_date
+        ORDER BY date DESC
+      `).all();
+
+      // Weekly aggregation
+      const weeklyMap = {};
+      for (const d of dailyNull) {
+        const dt = new Date(d.date + 'T00:00:00');
+        const day = dt.getDay();
+        const mondayOffset = day === 0 ? 6 : day - 1;
+        dt.setDate(dt.getDate() - mondayOffset);
+        const wk = `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+        if (!weeklyMap[wk]) weeklyMap[wk] = { total: 0, cr39: 0 };
+        weeklyMap[wk].total += d.total_jobs;
+        weeklyMap[wk].cr39 += d.cr39_jobs;
+      }
+      const weekly = Object.entries(weeklyMap).sort((a,b) => b[0].localeCompare(a[0])).map(([wk, v]) => ({
+        week: wk, total: v.total, cr39: v.cr39, pct: v.total > 0 ? Math.round(v.cr39 / v.total * 1000) / 10 : 0
+      }));
+
+      // Totals
+      const totalJobs = dailyNull.reduce((s, d) => s + d.total_jobs, 0);
+      const totalCR39 = dailyNull.reduce((s, d) => s + d.cr39_jobs, 0);
+      const avgWeeklyCR39 = weekly.length > 0 ? Math.round(weekly.slice(0, 4).reduce((s, w) => s + w.cr39, 0) / Math.min(4, weekly.length)) : 0;
+      const avgWeeklyTotal = weekly.length > 0 ? Math.round(weekly.slice(0, 4).reduce((s, w) => s + w.total, 0) / Math.min(4, weekly.length)) : 0;
+      const adoptionPct = totalJobs > 0 ? Math.round(totalCR39 / totalJobs * 1000) / 10 : 0;
+
+      // Poly SKUs that will be cannibalized (current poly consumption)
+      const polyConsumption = labDb.db.prepare(`
+        SELECT sku, SUM(units_consumed) as total, COUNT(*) as weeks
+        FROM lens_consumption_weekly
+        WHERE sku LIKE '4800%' OR sku LIKE '062%'
+        GROUP BY sku
+        ORDER BY total DESC
+        LIMIT 50
+      `).all();
+
+      // Project cannibalization: each poly SKU loses proportionally
+      const totalPolyConsumption = polyConsumption.reduce((s, r) => s + r.total, 0);
+      const cannibalizedSkus = polyConsumption.map(r => {
+        const share = totalPolyConsumption > 0 ? r.total / totalPolyConsumption : 0;
+        const weeklyAvg = r.weeks > 0 ? Math.round(r.total / r.weeks * 10) / 10 : 0;
+        const lostWeekly = Math.round(weeklyAvg * (adoptionPct / 100) * 10) / 10;
+        const newWeekly = Math.round((weeklyAvg - lostWeekly) * 10) / 10;
+        return { sku: r.sku, currentWeekly: weeklyAvg, lostWeekly, newWeekly, share: Math.round(share * 1000) / 10 };
+      });
+
+      // CR39 inventory needs
+      const cr39WeeklyLenses = avgWeeklyCR39 * 2; // 2 lenses per job
+      const leadTimeWeeks = 19; // default, configurable
+      const safetyWeeks = 4;
+      const cr39InitialOrder = Math.ceil((leadTimeWeeks + safetyWeeks) * cr39WeeklyLenses);
+
+      return json(res, {
+        summary: {
+          totalJobs, totalCR39, adoptionPct, avgWeeklyCR39, avgWeeklyTotal,
+          cr39WeeklyLenses, cr39InitialOrder, leadTimeWeeks, safetyWeeks,
+          days: dailyNull.length,
+        },
+        weekly,
+        daily: dailyNull.slice(0, 30),
+        cannibalizedSkus: cannibalizedSkus.slice(0, 30),
+        totalPolyWeeklyReduction: Math.round(cannibalizedSkus.reduce((s, r) => s + r.lostWeekly, 0)),
+      });
+    } catch (e) {
+      console.error('[NPI] Error:', e.message);
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
   // ── Inbound / In-Transit ───────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/inventory/inbound') {
     const poResp = netsuite.getOpenPOs();
