@@ -1809,7 +1809,14 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   ))}
                   <ExportBtn onClick={() => {
                     downloadCSV('pipeline.csv', ['date','dvi','looker','breakage','variance'], (pipelineData?.daily || []).map(d => ({...d, variance: d.dvi - d.looker})));
-                  }} />
+                  }} label="Export Summary" />
+                  <ExportBtn onClick={async () => {
+                    try {
+                      const resp = await fetch(`${ovenServerUrl}/api/shipping/detail?days=${pipelineDays}`);
+                      const data = await resp.json();
+                      downloadCSV(`shipped_jobs_${pipelineDays}d.csv`, ['date','invoice','tray','coating','lensType','lensMat','frameStyle','frameSku','department','daysInLab','entryDate','rush'], data.jobs || []);
+                    } catch (e) { console.error(e); }
+                  }} label="Export All Jobs" />
                 </div>
               </div>
 

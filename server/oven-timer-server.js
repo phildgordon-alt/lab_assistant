@@ -1813,18 +1813,47 @@ Respond with a structured batching plan in this format:
     }
   }
 
-  // ── Shipped job detail for a specific day ──────────────────
+  // ── Shipped job detail — single day or date range ──────────
   if (req.method==='GET' && url.pathname==='/api/shipping/detail') {
     const date = url.searchParams.get('date');
-    if (!date) return json(res, { error: 'date param required' }, 400);
-    // Convert YYYY-MM-DD to MM/DD/YY for matching
-    const [yyyy, mm, dd] = date.split('-');
-    const matchDate = `${mm}/${dd}/${yyyy.slice(2)}`;
+    const from = url.searchParams.get('from');
+    const to = url.searchParams.get('to');
+    const days = parseInt(url.searchParams.get('days') || '0');
+
+    // Build set of dates to match (MM/DD/YY format)
+    const matchDates = new Set();
+    if (date) {
+      const [yyyy, mm, dd] = date.split('-');
+      matchDates.add(`${mm}/${dd}/${yyyy.slice(2)}`);
+    } else if (from && to) {
+      const d = new Date(from + 'T00:00:00');
+      const end = new Date(to + 'T00:00:00');
+      while (d <= end) {
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        const yy = String(d.getFullYear()).slice(2);
+        matchDates.add(`${mm}/${dd}/${yy}`);
+        d.setDate(d.getDate() + 1);
+      }
+    } else if (days > 0) {
+      for (let i = 0; i < days; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const mm = String(d.getMonth()+1).padStart(2,'0');
+        const dd = String(d.getDate()).padStart(2,'0');
+        const yy = String(d.getFullYear()).slice(2);
+        matchDates.add(`${mm}/${dd}/${yy}`);
+      }
+    } else {
+      return json(res, { error: 'Provide date, from+to, or days param' }, 400);
+    }
 
     const jobs = [];
     for (const [jobNum, xml] of shippedJobIndex) {
-      if (xml.shipDate === matchDate) {
+      if (matchDates.has(xml.shipDate)) {
+        const [mm, dd, yy] = xml.shipDate.split('/');
         jobs.push({
+          date: `20${yy}-${mm}-${dd}`,
           invoice: xml.invoice || jobNum,
           tray: xml.tray || jobNum,
           coating: xml.coating || '',
@@ -1840,8 +1869,8 @@ Respond with a structured batching plan in this format:
         });
       }
     }
-    jobs.sort((a, b) => (a.invoice || '').localeCompare(b.invoice || ''));
-    return json(res, { date, jobs, count: jobs.length });
+    jobs.sort((a, b) => b.date.localeCompare(a.date) || (a.invoice || '').localeCompare(b.invoice || ''));
+    return json(res, { jobs, count: jobs.length, dates: matchDates.size });
   }
 
   // ── NetSuite consumption endpoints ─────────────────────────
