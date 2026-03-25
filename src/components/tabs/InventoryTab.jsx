@@ -2813,11 +2813,22 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, marginBottom: 12 }}>
                     <div>
                       <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>CANNIBALIZATION SOURCE</label>
-                      <select id="npi-source-type" style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }}>
+                      <select id="npi-source-type" onChange={async (e) => {
+                        if (e.target.value === 'null_opc') {
+                          try {
+                            const resp = await fetch(`${ovenServerUrl}/api/npi/adoption-rate`);
+                            const data = await resp.json();
+                            const adoptionEl = document.getElementById('npi-adoption');
+                            if (adoptionEl && data.recentPct > 0) adoptionEl.value = data.recentPct;
+                            const srcEl = document.getElementById('npi-source-value');
+                            if (srcEl) srcEl.value = 'Auto-detected from Looker (' + data.nullJobs + ' null OPC jobs / ' + data.totalJobs + ' total = ' + data.adoptionPct + '% YTD, ' + data.recentPct + '% recent)';
+                          } catch {}
+                        }
+                      }} style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }}>
                         <option value="prefix">By SKU prefix (e.g. 4800 = all Essilor poly)</option>
                         <option value="skus">Specific SKUs (comma-separated)</option>
                         <option value="proxy">Emulate a proxy SKU's demand</option>
-                        <option value="null_opc">Null OPC orders (CR 39 free option)</option>
+                        <option value="null_opc">Null OPC orders (CR 39 free option) — auto-detects adoption rate</option>
                       </select>
                     </div>
                     <div>

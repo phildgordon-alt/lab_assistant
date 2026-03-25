@@ -2217,6 +2217,36 @@ Respond with a structured batching plan in this format:
     const result = npiEngine.computeCannibalization(labDb.db, id);
     return json(res, result || { error: 'Scenario not found' });
   }
+  if (req.method==='GET' && url.pathname==='/api/npi/adoption-rate') {
+    // Calculate actual null OPC adoption rate from Looker data
+    try {
+      const stats = labDb.db.prepare(`
+        SELECT COUNT(DISTINCT job_id) as total_jobs,
+               COUNT(DISTINCT CASE WHEN opc IS NULL OR opc = '' THEN job_id END) as null_jobs
+        FROM looker_jobs
+      `).get();
+      const total = stats?.total_jobs || 0;
+      const nullJobs = stats?.null_jobs || 0;
+      const adoptionPct = total > 0 ? Math.round(nullJobs / total * 1000) / 10 : 0;
+      // Weekly breakdown for last 4 weeks
+      const weekly = labDb.db.prepare(`
+        SELECT sent_from_lab_date as date,
+               COUNT(DISTINCT job_id) as total,
+               COUNT(DISTINCT CASE WHEN opc IS NULL OR opc = '' THEN job_id END) as null_jobs
+        FROM looker_jobs
+        GROUP BY sent_from_lab_date
+        ORDER BY date DESC
+        LIMIT 20
+      `).all();
+      const recentWeekly = weekly.slice(0, 5);
+      const recentTotal = recentWeekly.reduce((s, d) => s + d.total, 0);
+      const recentNull = recentWeekly.reduce((s, d) => s + d.null_jobs, 0);
+      const recentPct = recentTotal > 0 ? Math.round(recentNull / recentTotal * 1000) / 10 : 0;
+      return json(res, { adoptionPct, recentPct, totalJobs: total, nullJobs, recentDays: recentWeekly.length });
+    } catch (e) {
+      return json(res, { adoptionPct: 0, recentPct: 0, error: e.message });
+    }
+  }
   if (req.method==='GET' && url.pathname==='/api/npi/adjustments') {
     return json(res, { adjustments: npiEngine.getActiveAdjustments(labDb.db) });
   }
