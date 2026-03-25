@@ -21,33 +21,18 @@ let computeTimer = null;
 // WEEKLY CONSUMPTION — aggregate from Looker job-level data + picks_history
 // ─────────────────────────────────────────────────────────────────────────────
 function buildWeeklyConsumption(db) {
-  // Source 1: Looker job-level data (lens OPCs with count_lenses by day)
-  const lkRows = db.prepare(`
-    SELECT opc as sku, sent_from_lab_date as date, SUM(count_lenses) as lenses
-    FROM looker_jobs
-    WHERE opc IS NOT NULL AND opc != ''
-    GROUP BY opc, sent_from_lab_date
-  `).all();
-
-  // Source 2: ItemPath picks_history (for SKUs not in Looker)
+  // Source: ItemPath picks_history only (actual Kardex consumption)
   const ipRows = db.prepare(`
-    SELECT sku, date(completed_at) as date, SUM(qty) as lenses
+    SELECT sku, date(completed_at) as date, SUM(qty) as qty
     FROM picks_history
     WHERE completed_at IS NOT NULL AND qty <= 10
     GROUP BY sku, date(completed_at)
   `).all();
 
-  // Merge — Looker is primary, ItemPath fills gaps
   const dailyBySku = {};
-  for (const r of lkRows) {
-    if (!dailyBySku[r.sku]) dailyBySku[r.sku] = {};
-    dailyBySku[r.sku][r.date] = (dailyBySku[r.sku][r.date] || 0) + r.lenses;
-  }
   for (const r of ipRows) {
     if (!dailyBySku[r.sku]) dailyBySku[r.sku] = {};
-    if (!dailyBySku[r.sku][r.date]) {
-      dailyBySku[r.sku][r.date] = r.lenses;
-    }
+    dailyBySku[r.sku][r.date] = (dailyBySku[r.sku][r.date] || 0) + r.qty;
   }
 
   // Aggregate into weekly buckets
@@ -146,8 +131,8 @@ function computeAll(db, itempath, netsuite) {
 
     for (const sku of allSkus) {
       const cat = getCat(sku);
-      // Only process lenses for now
-      if (cat !== 'Lenses' && cat !== null) continue;
+      // Only process lenses — skip known non-lens categories
+      if (cat === 'Frames' || cat === 'Tops') continue;
 
       const onHand = onHandBySku[sku]?.qty || 0;
       const desc = onHandBySku[sku]?.name || sku;
