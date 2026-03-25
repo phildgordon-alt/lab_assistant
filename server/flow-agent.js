@@ -785,11 +785,20 @@ function computeCatchUp(lineId, scenario = {}) {
   const requiredPerHr = Math.round((requiredPerDay / Math.max(1, hoursPerDay)) * 10) / 10;
   const requiredAssemblers = Math.ceil(requiredPerHr / Math.max(1, jobsPerAssemblerHr));
 
-  // Weekly milestones
-  const milestones = [1, 2, 3, 4, 5].map(w => ({
-    week: w,
-    projectedWip: Math.max(0, Math.round(totalWip - (netPerDay * 5 * w))),
-  }));
+  // Weekly milestones — show projected WIP at end of each week
+  // Also show daily ship target for that week
+  const milestones = [1, 2, 3, 4, 5].map(w => {
+    const projWip = Math.max(0, Math.round(totalWip - (netPerDay * 5 * w)));
+    // If clearing faster than target, show "cleared" status
+    const daysToClearFromHere = netPerDay > 0 ? Math.round(projWip / netPerDay) : null;
+    return {
+      week: w,
+      projectedWip: projWip,
+      shipPerDay: Math.round(outputPerDay),
+      daysToClearRemaining: daysToClearFromHere,
+      cleared: projWip === 0,
+    };
+  });
 
   return {
     line_id: lineId,

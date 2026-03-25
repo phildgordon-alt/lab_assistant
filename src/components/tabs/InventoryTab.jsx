@@ -2546,10 +2546,11 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           min_order_qty: parseInt(document.getElementById('sku-param-min_order_qty')?.value) || 0,
                           abc_class: document.getElementById('sku-param-abc')?.value || 'B',
                         };
-                        await fetch(`${ovenServerUrl}/api/lens-intel/params`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(params) });
+                        const saveResp = await fetch(`${ovenServerUrl}/api/lens-intel/params`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(params) });
+                        if (!saveResp.ok) { console.error('SKU params save failed:', saveResp.status); return; }
                         await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
                         const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
-                        setLensIntelData(await resp.json());
+                        if (resp.ok) setLensIntelData(await resp.json());
                         setLensIntelDetail(null);
                       }} style={{ background: T.blue, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
                         Save & Recompute
@@ -2815,7 +2816,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                     launch_date: document.getElementById('npi-edit-launch')?.value || null,
                                   };
                                   const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${sc.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
-                                  setNpiSelected(await resp.json());
+                                  if (!resp.ok) { console.error('NPI save failed:', resp.status); return; }
+                                  // Recompute cannibalization after saving
+                                  const compResp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${sc.id}/compute`, { method: 'POST' });
+                                  if (compResp.ok) setNpiSelected(await compResp.json());
                                   const sResp = await fetch(`${ovenServerUrl}/api/npi/scenarios`);
                                   setNpiScenarios((await sResp.json()).scenarios || []);
                                 }} style={{ background: T.blue, border: "none", borderRadius: 3, padding: "5px 14px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: mono, width: '100%' }}>
@@ -3902,7 +3906,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: inventory.status === "ok" || inventory.status === "mock" ? T.green : T.red }} />
             <span style={{ fontSize: 11, color: T.textDim, fontFamily: mono }}>
-              {inventory.status === "mock" ? "Mock Mode" : "ItemPath"} - {inventory.lastSync ? new Date(inventory.lastSync).toLocaleTimeString() : "Not synced"}
+              {inventory.status === "mock" ? "Mock Mode" : "ItemPath"} — {inventory.lastSync ? new Date(inventory.lastSync).toLocaleTimeString() : inventory.status === 'pending' ? "Loading..." : "Connected"}
             </span>
           </div>
           <span style={{ fontSize: 10, color: T.textDim }}>Auto-refresh every 30s</span>

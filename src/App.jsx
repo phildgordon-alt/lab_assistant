@@ -8178,9 +8178,10 @@ function FlowAgentTab({ovenServerUrl,settings}){
                   <div style={{fontFamily:mono,fontSize:11,color:"#6b7280",marginBottom:8}}>WEEKLY MILESTONES</div>
                   <div style={{display:"flex",gap:8}}>
                     {catchUp.weeklyMilestones.map(w=>(
-                      <div key={w.week} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:"8px 14px",textAlign:"center",flex:1}}>
+                      <div key={w.week} style={{background:w.cleared?"rgba(34,197,94,0.08)":"rgba(0,0,0,0.2)",border:w.cleared?"1px solid rgba(34,197,94,0.2)":"1px solid transparent",borderRadius:6,padding:"8px 14px",textAlign:"center",flex:1}}>
                         <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Week {w.week}</div>
-                        <div style={{fontSize:16,fontWeight:700,color:w.projectedWip===0?"#22c55e":"#e5e7eb",fontFamily:mono}}>{w.projectedWip}</div>
+                        <div style={{fontSize:18,fontWeight:700,color:w.cleared?"#22c55e":"#e5e7eb",fontFamily:mono}}>{w.cleared?"CLEAR":w.projectedWip.toLocaleString()}</div>
+                        <div style={{fontSize:9,color:"#6b7280",fontFamily:mono,marginTop:2}}>{w.cleared?"":"remaining"}</div>
                       </div>
                     ))}
                   </div>
