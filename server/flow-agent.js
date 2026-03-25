@@ -706,23 +706,29 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
 }
 
 /**
- * Catch-up calculator: project when a line clears backlog given current rates.
- * Accepts scenario overrides to model what-if (add/remove assemblers, hours, etc.)
+ * Catch-up calculator: pure what-if planning tool.
  *
- * @param {string} lineId
- * @param {object} scenario — optional overrides:
- *   assemblers: number of assemblers (default: measured from throughput)
- *   jobsPerAssemblerHr: jobs/hr per assembler (default: 22 for assembly)
- *   shiftHours: hours per shift (default: 8)
- *   shifts: shifts per day (default: 2)
- *   incomingPerDay: incoming jobs/day (default: measured)
- *   targetDays: target days to clear (compute required rate)
+ * LIVE DATA (read-only, from DVI trace):
+ *   - Current WIP by line
+ *   - Incoming jobs/day (new jobs entering lab today, extrapolated)
+ *
+ * USER INPUTS (all scenario fields — the knobs to turn):
+ *   - assemblers: number of assembly people
+ *   - jobsPerAssemblerHr: output per person per hour
+ *   - shiftHours: hours per shift
+ *   - shifts: shifts per day
+ *   - incomingPerDay: override incoming if desired
+ *   - targetDays: "I want to clear in N days"
+ *
+ * CALCULATED from inputs:
+ *   - Output per day, net per day, days to clear
+ *   - Required ship/day and assemblers to hit target
  */
 function computeCatchUp(lineId, scenario = {}) {
   const line = stmts.getLine.get(lineId);
   if (!line) return null;
 
-  // Get current WIP directly from DVI trace — the real count, not snapshot sums
+  // ── LIVE DATA: Current WIP from DVI trace ──
   const { dviTrace, dviJobIndex } = adapters;
   let totalWip = 0;
   let svWip = 0, surfWip = 0;
@@ -738,80 +744,46 @@ function computeCatchUp(lineId, scenario = {}) {
       else if (jobLine === 'surfacing') surfWip++;
     }
   }
-  // Pick WIP for the requested line
   if (lineId === 'sv') totalWip = svWip;
   else if (lineId === 'surfacing') totalWip = surfWip;
-  else totalWip = svWip + surfWip; // edits or total
+  else totalWip = svWip + surfWip;
 
-  // Measured assembly output rate
-  const measuredOutputRate = lastSnapshot?.rates?.assembly?.total || 22;
-
-  // Count active assemblers: unique ASSEMBLY stations with movement today in DVI trace
-  let measuredAssemblers = 0;
-  if (dviTrace) {
-    const events = dviTrace.getRecentEvents(5000);
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayMs = todayStart.getTime();
-    const assemblyStations = new Set();
-    for (const evt of events) {
-      if (evt.timestamp >= todayMs && evt.stage === 'ASSEMBLY' && evt.station) {
-        // Only count numbered assembly stations (ASSEMBLY #1, #3, etc.)
-        if (/ASSEMBLY\s*#?\d/i.test(evt.station)) {
-          assemblyStations.add(evt.station);
-        }
+  // ── LIVE DATA: Incoming jobs/day from DVI trace ──
+  let liveIncomingPerDay = 0;
+  try {
+    if (dviTrace) {
+      const allJobs = dviTrace.getJobs();
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const todayMs = todayStart.getTime();
+      const newToday = allJobs.filter(j => j.firstSeen && j.firstSeen >= todayMs).length;
+      const now = new Date();
+      const hoursWorked = Math.max(1, now.getHours() + now.getMinutes() / 60 - 7);
+      if (hoursWorked >= 1 && newToday > 0) {
+        liveIncomingPerDay = Math.round((newToday / hoursWorked) * 16); // assume 16hr day for extrapolation
       }
     }
-    measuredAssemblers = assemblyStations.size;
-  }
-  if (measuredAssemblers === 0) measuredAssemblers = 1; // fallback
+  } catch {}
 
-  // Jobs per assembler per hour: derived from measured output / measured assemblers
-  const jobsPerAssemblerHr = scenario.jobsPerAssemblerHr || (measuredAssemblers > 0
-    ? Math.round((measuredOutputRate / measuredAssemblers) * 10) / 10
-    : 4);
-
-  // Apply scenario overrides
-  const assemblers = scenario.assemblers ?? measuredAssemblers;
-  const outputRatePerHr = assemblers * jobsPerAssemblerHr;
+  // ── USER INPUTS (with defaults) ──
+  const assemblers = scenario.assemblers ?? 6;
+  const jobsPerAssemblerHr = scenario.jobsPerAssemblerHr ?? 4;
   const shiftHours = scenario.shiftHours ?? 8;
   const shifts = scenario.shifts ?? 2;
-  const hoursPerDay = shiftHours * shifts;
-
-  // Incoming rate: count unique jobs whose first scan was today
-  // This gives us actual new jobs entering the lab, not cumulative scan events
-  let incomingPerDay = scenario.incomingPerDay ?? null;
-  if (incomingPerDay === null) {
-    try {
-      if (dviTrace) {
-        const allJobs = dviTrace.getJobs();
-        const todayStart = new Date();
-        todayStart.setHours(0, 0, 0, 0);
-        const todayMs = todayStart.getTime();
-        // Count jobs whose firstSeen (first scan) is today
-        const newToday = allJobs.filter(j => j.firstSeen && j.firstSeen >= todayMs).length;
-        const now = new Date();
-        const hoursWorked = Math.max(1, now.getHours() + now.getMinutes() / 60 - 7);
-        // Extrapolate to full working day
-        if (hoursWorked >= 1 && newToday > 0) {
-          incomingPerDay = Math.round((newToday / hoursWorked) * hoursPerDay);
-        }
-      }
-    } catch {}
-    if (!incomingPerDay) incomingPerDay = 0;
-  }
-
-  const outputPerDay = outputRatePerHr * hoursPerDay;
-  const netPerDay = outputPerDay - incomingPerDay;
-
-  // Days to clear: if net positive, how many days to clear WIP
-  const daysToClear = netPerDay > 0 ? Math.ceil(totalWip / netPerDay) : null;
-
-  // Required output per day to clear in N target days (default: SLA days)
+  const incomingPerDay = scenario.incomingPerDay ?? liveIncomingPerDay;
   const targetDays = scenario.targetDays ?? (line.sla_days || 2);
-  const requiredPerDay = Math.ceil((totalWip / targetDays) + incomingPerDay);
-  const requiredPerHr = Math.round((requiredPerDay / hoursPerDay) * 10) / 10;
-  const requiredAssemblers = Math.ceil(requiredPerHr / jobsPerAssemblerHr);
+
+  // ── CALCULATIONS ──
+  const hoursPerDay = shiftHours * shifts;
+  const outputPerHr = assemblers * jobsPerAssemblerHr;
+  const outputPerDay = outputPerHr * hoursPerDay;
+  const netPerDay = outputPerDay - incomingPerDay;
+  const daysToClear = netPerDay > 0 ? Math.round((totalWip / netPerDay) * 10) / 10 : null;
+
+  // To clear in targetDays: how much do we need to ship per day?
+  const requiredPerDay = Math.ceil((totalWip / Math.max(1, targetDays)) + incomingPerDay);
+  const requiredPerHr = Math.round((requiredPerDay / Math.max(1, hoursPerDay)) * 10) / 10;
+  const requiredAssemblers = Math.ceil(requiredPerHr / Math.max(1, jobsPerAssemblerHr));
 
   // Weekly milestones
   const milestones = [1, 2, 3, 4, 5].map(w => ({
@@ -822,29 +794,27 @@ function computeCatchUp(lineId, scenario = {}) {
   return {
     line_id: lineId,
     label: line.label,
+    // Live data
     currentWip: totalWip,
-    // Measured
-    measuredOutputRate: Math.round(measuredOutputRate * 10) / 10,
-    measuredAssemblers,
-    // Scenario
+    liveIncomingPerDay,
+    // User inputs (echoed back so UI stays in sync)
     assemblers,
     jobsPerAssemblerHr,
     shiftHours,
     shifts,
-    hoursPerDay,
-    // Rates
-    outputPerHr: Math.round(outputRatePerHr * 10) / 10,
-    outputPerDay: Math.round(outputPerDay),
     incomingPerDay: Math.round(incomingPerDay),
+    targetDays,
+    // Calculated
+    hoursPerDay,
+    outputPerHr: Math.round(outputPerHr * 10) / 10,
+    outputPerDay: Math.round(outputPerDay),
     netPerDay: Math.round(netPerDay),
     daysToClear,
-    // Target
-    targetDays,
+    // What's needed to hit target
     requiredPerDay,
     requiredPerHr,
     requiredAssemblers,
     slaDays: line.sla_days,
-    // Milestones
     weeklyMilestones: milestones,
   };
 }
