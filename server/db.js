@@ -29,6 +29,43 @@ db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
 
+// Lens Intelligence — inventory health, stockout prediction, reorder recommendations
+db.exec(`
+  CREATE TABLE IF NOT EXISTS lens_inventory_status (
+    sku TEXT PRIMARY KEY,
+    description TEXT,
+    category TEXT,
+    on_hand INTEGER DEFAULT 0,
+    avg_weekly_consumption REAL DEFAULT 0,
+    consumption_trend_pct REAL DEFAULT 0,
+    weeks_of_supply REAL DEFAULT 0,
+    weeks_of_supply_with_po REAL DEFAULT 0,
+    safety_stock_weeks REAL DEFAULT 4.0,
+    lead_time_weeks REAL DEFAULT 6.0,
+    dynamic_reorder_point INTEGER DEFAULT 0,
+    open_po_qty INTEGER DEFAULT 0,
+    next_po_date TEXT,
+    runout_date TEXT,
+    runout_date_with_po TEXT,
+    will_stockout INTEGER DEFAULT 0,
+    days_at_risk INTEGER DEFAULT 0,
+    status TEXT DEFAULT 'OK',
+    order_recommended INTEGER DEFAULT 0,
+    order_qty_recommended INTEGER DEFAULT 0,
+    computed_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_lis_status ON lens_inventory_status(status);
+  CREATE INDEX IF NOT EXISTS idx_lis_wos ON lens_inventory_status(weeks_of_supply);
+
+  CREATE TABLE IF NOT EXISTS lens_consumption_weekly (
+    sku TEXT NOT NULL,
+    week_start TEXT NOT NULL,
+    units_consumed INTEGER DEFAULT 0,
+    PRIMARY KEY(sku, week_start)
+  );
+  CREATE INDEX IF NOT EXISTS idx_lcw_sku ON lens_consumption_weekly(sku);
+`);
+
 // Looker job-level data (single source of truth for NetSuite/DVI data)
 db.exec(`
   CREATE TABLE IF NOT EXISTS looker_jobs (

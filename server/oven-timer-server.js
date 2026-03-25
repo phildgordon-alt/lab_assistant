@@ -40,10 +40,12 @@ const itempath = require('./itempath-adapter');
 const binning = require('./binning-intelligence');
 const netsuite = require('./netsuite-adapter');
 const looker = require('./looker-adapter');
+const lensIntel = require('./lens-intelligence');
 itempath.start();
 binning.start(itempath);
 netsuite.start();
 looker.start();
+lensIntel.start(labDb.db, itempath, netsuite);
 
 // ── Limble CMMS maintenance integration ───────────────────────
 const limble = require('./limble-adapter');
@@ -2025,6 +2027,34 @@ Respond with a structured batching plan in this format:
       console.error('[Compare] Error:', e.message);
       return json(res, { error: e.message, jobs: [], summary: {} }, 500);
     }
+  }
+
+  // ── Lens Intelligence ──────────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/status') {
+    const status = url.searchParams.get('status') || null;
+    return json(res, lensIntel.getStatus(labDb.db, status));
+  }
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/summary') {
+    return json(res, lensIntel.getSummary(labDb.db));
+  }
+  if (req.method==='GET' && url.pathname.startsWith('/api/lens-intel/sku/')) {
+    const sku = decodeURIComponent(url.pathname.split('/').pop());
+    return json(res, lensIntel.getSkuDetail(labDb.db, sku));
+  }
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/orders') {
+    return json(res, { recommendations: lensIntel.getOrderRecommendations(labDb.db) });
+  }
+  if (req.method==='POST' && url.pathname==='/api/lens-intel/refresh') {
+    const count = lensIntel.computeAll(labDb.db, itempath, netsuite);
+    return json(res, { ok: true, computed: count });
+  }
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/export') {
+    const data = lensIntel.getStatus(labDb.db);
+    res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="lens_intelligence.csv"' });
+    const headers = ['sku','description','on_hand','avg_weekly_consumption','weeks_of_supply','weeks_of_supply_with_po','status','open_po_qty','next_po_date','runout_date','will_stockout','days_at_risk','order_recommended','order_qty_recommended','dynamic_reorder_point','consumption_trend_pct','safety_stock_weeks','lead_time_weeks'];
+    const csv = [headers.join(','), ...data.items.map(r => headers.map(h => { const v = r[h] ?? ''; return String(v).includes(',') ? `"${v}"` : v; }).join(','))].join('\n');
+    res.end(csv);
+    return;
   }
 
   // ── Inbound / In-Transit ───────────────────────────────────

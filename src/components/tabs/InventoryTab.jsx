@@ -530,6 +530,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [poExpanded, setPoExpanded] = useState(null);
   const [inboundData, setInboundData] = useState(null);
   const [inboundSearch, setInboundSearch] = useState("");
+  const [lensIntelData, setLensIntelData] = useState(null);
+  const [lensIntelFilter, setLensIntelFilter] = useState("all");
+  const [lensIntelSearch, setLensIntelSearch] = useState("");
+  const [lensIntelDetail, setLensIntelDetail] = useState(null);
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
   const [pipelineDetail, setPipelineDetail] = useState(null);
@@ -689,7 +693,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "inbound", label: "Inbound" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "lens-intel", label: "Lens Intelligence" }, { id: "inbound", label: "Inbound" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -2204,6 +2208,206 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       </tbody>
                     </table>
                   </div>
+                </Card>
+              )}
+            </div>
+          );
+        })()}
+
+        {sub === "lens-intel" && (() => {
+          if (!lensIntelData) {
+            fetch(`${ovenServerUrl}/api/lens-intel/status`).then(r => r.json()).then(setLensIntelData).catch(() => {});
+          }
+          const items = lensIntelData?.items || [];
+          const sm = lensIntelData?.summary || {};
+          let filtered = items;
+          if (lensIntelFilter !== 'all') filtered = filtered.filter(i => i.status === lensIntelFilter);
+          if (lensIntelSearch) {
+            const q = lensIntelSearch.toLowerCase();
+            filtered = filtered.filter(i => i.sku?.toLowerCase().includes(q) || i.description?.toLowerCase().includes(q));
+          }
+
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Lens Intelligence</h3>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <ExportBtn label="Export CSV" onClick={() => window.open(`${ovenServerUrl}/api/lens-intel/export`, '_blank')} />
+                  <ExportBtn label="Order Report" onClick={async () => {
+                    const resp = await fetch(`${ovenServerUrl}/api/lens-intel/orders`);
+                    const data = await resp.json();
+                    downloadCSV('lens_order_recommendations.csv', ['sku','description','on_hand','avg_weekly_consumption','weeks_of_supply','status','order_qty_recommended','dynamic_reorder_point','runout_date','days_at_risk'], data.recommendations || []);
+                  }} />
+                  <button onClick={async () => {
+                    await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
+                    const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                    setLensIntelData(await resp.json());
+                  }} style={{ background: T.blue, border: "none", borderRadius: 6, padding: "6px 14px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 8, marginBottom: 16 }}>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.red, fontFamily: mono }}>{sm.critical || 0}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>CRITICAL</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{sm.warning || 0}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>WARNING</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{sm.ok || 0}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>OK</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sm.overstock || 0}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>OVERSTOCK</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.red}` }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.red, fontFamily: mono }}>{sm.stockoutRisk || 0}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>STOCKOUT RISK</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{sm.orderRecommended || 0}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>ORDER NOW</div>
+                </Card>
+              </div>
+
+              {/* Filters */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+                <input type="text" placeholder="Search SKU or description..." value={lensIntelSearch} onChange={e => setLensIntelSearch(e.target.value)}
+                  style={{ flex: 1, maxWidth: 300, padding: "8px 12px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
+                {['all', 'CRITICAL', 'WARNING', 'OK', 'OVERSTOCK'].map(f => (
+                  <button key={f} onClick={() => setLensIntelFilter(f)} style={{
+                    padding: "7px 12px", borderRadius: 6, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                    background: lensIntelFilter === f ? (f === 'CRITICAL' ? T.red : f === 'WARNING' ? T.amber : f === 'OK' ? T.green : f === 'OVERSTOCK' ? T.blue : T.blue) : 'transparent',
+                    color: lensIntelFilter === f ? '#fff' : T.textMuted,
+                    border: `1px solid ${lensIntelFilter === f ? 'transparent' : T.border}`
+                  }}>{f === 'all' ? `All (${sm.total || 0})` : `${f} (${sm[f.toLowerCase()] || 0})`}</button>
+                ))}
+              </div>
+
+              {/* Main table */}
+              <Card>
+                <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                    <thead>
+                      <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
+                        <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>STATUS</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ON HAND</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>AVG/WK</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>TREND</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>WOS</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>WOS+PO</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ROP</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>OPEN PO</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>RUNOUT</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'center', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>RISK</th>
+                        <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ORDER QTY</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.slice(0, 200).map(i => {
+                        const statusColor = i.status === 'CRITICAL' ? T.red : i.status === 'WARNING' ? T.amber : i.status === 'OK' ? T.green : T.blue;
+                        return (
+                          <tr key={i.sku} style={{ borderBottom: `1px solid ${T.border}15`, background: i.status === 'CRITICAL' ? `${T.red}08` : i.will_stockout ? `${T.amber}06` : 'transparent', cursor: 'pointer' }}
+                            onClick={async () => {
+                              const resp = await fetch(`${ovenServerUrl}/api/lens-intel/sku/${encodeURIComponent(i.sku)}`);
+                              setLensIntelDetail(await resp.json());
+                            }}>
+                            <td style={{ padding: '5px 8px', fontWeight: 600, color: T.text, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={i.description}>{i.sku}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                              <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 3, fontWeight: 700, background: `${statusColor}20`, color: statusColor }}>{i.status}</span>
+                            </td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.text }}>{i.on_hand?.toLocaleString()}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textMuted }}>{i.avg_weekly_consumption}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: i.consumption_trend_pct > 10 ? T.red : i.consumption_trend_pct < -10 ? T.green : T.textDim }}>
+                              {i.consumption_trend_pct > 0 ? '+' : ''}{i.consumption_trend_pct}%
+                            </td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: i.weeks_of_supply < 6 ? T.red : i.weeks_of_supply < 10 ? T.amber : T.green }}>{i.weeks_of_supply}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textMuted }}>{i.weeks_of_supply_with_po}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: i.on_hand <= i.dynamic_reorder_point ? T.red : T.textDim }}>{i.dynamic_reorder_point}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: i.open_po_qty > 0 ? T.blue : T.textDim }}>{i.open_po_qty || '—'}</td>
+                            <td style={{ padding: '5px 8px', color: T.textMuted, fontSize: 10 }}>{i.runout_date || '—'}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                              {i.will_stockout ? <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 3, fontWeight: 700, background: `${T.red}20`, color: T.red }}>{i.days_at_risk}d</span> : '—'}
+                            </td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: i.order_recommended ? 700 : 400, color: i.order_recommended ? T.amber : T.textDim }}>
+                              {i.order_recommended ? i.order_qty_recommended?.toLocaleString() : '—'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  {filtered.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>Loading lens intelligence...</div>}
+                </div>
+              </Card>
+
+              {/* Detail panel */}
+              {lensIntelDetail?.status && (
+                <Card style={{ marginTop: 16, padding: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 800, color: T.text, fontFamily: mono }}>{lensIntelDetail.status.sku}</div>
+                      <div style={{ fontSize: 12, color: T.textMuted }}>{lensIntelDetail.status.description}</div>
+                    </div>
+                    <button onClick={() => setLensIntelDetail(null)} style={{ background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, fontSize: 11, cursor: 'pointer' }}>Close</button>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 16 }}>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{lensIntelDetail.status.on_hand?.toLocaleString()}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>ON HAND</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.amber, fontFamily: mono }}>{lensIntelDetail.status.weeks_of_supply}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>WEEKS SUPPLY</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.blue, fontFamily: mono }}>{lensIntelDetail.status.open_po_qty || 0}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>OPEN PO QTY</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: lensIntelDetail.status.will_stockout ? T.red : T.green, fontFamily: mono }}>
+                        {lensIntelDetail.status.will_stockout ? `${lensIntelDetail.status.days_at_risk}d risk` : 'Safe'}
+                      </div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>STOCKOUT</div>
+                    </div>
+                  </div>
+                  {/* Weekly consumption chart */}
+                  {lensIntelDetail.weekly?.length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 8 }}>WEEKLY CONSUMPTION</div>
+                      <div style={{ display: 'flex', gap: 4, alignItems: 'flex-end', height: 80 }}>
+                        {[...lensIntelDetail.weekly].reverse().map((w, i) => {
+                          const maxW = Math.max(1, ...lensIntelDetail.weekly.map(x => x.units_consumed));
+                          const pct = Math.round((w.units_consumed / maxW) * 100);
+                          return (
+                            <div key={w.week_start} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                              <div style={{ fontSize: 9, color: T.textMuted, fontFamily: mono }}>{w.units_consumed}</div>
+                              <div style={{ width: '100%', background: T.blue, borderRadius: 2, opacity: 0.7, height: `${pct}%`, minHeight: 2 }} />
+                              <div style={{ fontSize: 8, color: T.textDim }}>{w.week_start.slice(5)}</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                  {/* Order recommendation */}
+                  {lensIntelDetail.status.order_recommended === 1 && (
+                    <div style={{ marginTop: 16, padding: 12, background: `${T.amber}10`, borderRadius: 8, border: `1px solid ${T.amber}30` }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: T.amber, marginBottom: 4 }}>Order Recommended</div>
+                      <div style={{ fontSize: 11, color: T.textMuted }}>
+                        Recommend ordering <strong style={{ color: T.text }}>{lensIntelDetail.status.order_qty_recommended?.toLocaleString()}</strong> units.
+                        Current on-hand ({lensIntelDetail.status.on_hand}) is below reorder point ({lensIntelDetail.status.dynamic_reorder_point}).
+                        {lensIntelDetail.status.runout_date && <> Projected runout: <strong style={{ color: T.red }}>{lensIntelDetail.status.runout_date}</strong></>}
+                      </div>
+                    </div>
+                  )}
                 </Card>
               )}
             </div>
