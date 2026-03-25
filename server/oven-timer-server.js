@@ -88,6 +88,9 @@ const ews = require('./ews-engine');
 const ewsCollectors = require('./ews-collectors');
 // Collectors are registered after all adapters are loaded (see setTimeout below)
 
+// ── Flow Agent (Work Release Control) ─────────────────────────
+const flowAgent = require('./flow-agent');
+
 // ── DVI File Sync integration ─────────────────────────────────
 const dviSync = require('./dvi-sync');
 // Only start if configured (env vars set)
@@ -165,6 +168,11 @@ setTimeout(() => {
   ews.start();
   // Start time-at-lab tracking (listens to DVI trace events + backfills)
   timeAtLab.start(dviTrace, dviJobIndex);
+  // Start flow agent (work release control)
+  flowAgent.start({
+    dviTrace, dviJobIndex, som, itempath, timeAtLab,
+    getOvenState: () => liveTimers, ews,
+  });
 }, 20000); // 20s — after adapters have had time to poll
 
 // ── Periodic SQLite sync for inventory + maintenance ────────────
@@ -5050,6 +5058,113 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   if (req.method==='POST' && url.pathname==='/api/network/refresh') {
     await network.refresh();
     return json(res, { ok: true, health: network.getHealth() });
+  }
+
+  // ── Flow Agent (Work Release Control) ───────────────────────
+
+  // GET /api/flow/snapshot — all stages + lines + gap predictions
+  if (req.method==='GET' && url.pathname==='/api/flow/snapshot') {
+    return json(res, flowAgent.getSnapshot());
+  }
+
+  // GET /api/flow/stage/:id — stage detail + trend
+  if (req.method==='GET' && url.pathname.startsWith('/api/flow/stage/')) {
+    const stageId = url.pathname.split('/api/flow/stage/')[1];
+    const detail = flowAgent.getStageDetail(stageId);
+    if (!detail) return json(res, { error: 'Stage not found' }, 404);
+    return json(res, detail);
+  }
+
+  // GET /api/flow/line/:id — line-level view
+  if (req.method==='GET' && url.pathname.startsWith('/api/flow/line/') && !url.pathname.includes('/trend')) {
+    const lineId = url.pathname.split('/api/flow/line/')[1];
+    const detail = flowAgent.getLineDetail(lineId);
+    if (!detail) return json(res, { error: 'Line not found' }, 404);
+    return json(res, detail);
+  }
+
+  // GET /api/flow/line/:id/trend?hours=8 — snapshots for trend chart
+  if (req.method==='GET' && url.pathname.match(/^\/api\/flow\/line\/[^/]+\/trend$/)) {
+    const lineId = url.pathname.split('/api/flow/line/')[1].replace('/trend', '');
+    const hours = parseInt(url.searchParams.get('hours') || '8');
+    const trend = flowAgent.getLineTrend(lineId, hours);
+    if (!trend) return json(res, { error: 'Line not found' }, 404);
+    return json(res, trend);
+  }
+
+  // GET /api/flow/recommendations — push recommendations
+  if (req.method==='GET' && url.pathname==='/api/flow/recommendations') {
+    const status = url.searchParams.get('status') || 'all';
+    return json(res, flowAgent.getRecommendations(status));
+  }
+
+  // POST /api/flow/recommendations/:id/ack — acknowledge
+  if (req.method==='POST' && url.pathname.match(/^\/api\/flow\/recommendations\/\d+\/ack$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    const body = await readBody(req);
+    return json(res, flowAgent.acknowledgeRec(id, body.operator || 'unknown'));
+  }
+
+  // POST /api/flow/recommendations/:id/complete — complete
+  if (req.method==='POST' && url.pathname.match(/^\/api\/flow\/recommendations\/\d+\/complete$/)) {
+    const id = parseInt(url.pathname.split('/')[4]);
+    const body = await readBody(req);
+    return json(res, flowAgent.completeRec(id, body.operator, body.note, body.actual_qty));
+  }
+
+  // POST /api/flow/push — log manual push
+  if (req.method==='POST' && url.pathname==='/api/flow/push') {
+    const body = await readBody(req);
+    if (!body.line_id || !body.qty) return json(res, { error: 'line_id and qty required' }, 400);
+    return json(res, flowAgent.logPush(body.line_id, body.qty, body.operator, body.note));
+  }
+
+  // GET /api/flow/history — push history
+  if (req.method==='GET' && url.pathname==='/api/flow/history') {
+    const hours = parseInt(url.searchParams.get('hours') || '24');
+    return json(res, flowAgent.getPushHistory(hours));
+  }
+
+  // GET /api/flow/config/stages — stage configurations
+  if (req.method==='GET' && url.pathname==='/api/flow/config/stages') {
+    return json(res, flowAgent.getStageConfigs());
+  }
+
+  // PUT /api/flow/config/stages/:id — update stage config
+  if (req.method==='PUT' && url.pathname.startsWith('/api/flow/config/stages/')) {
+    const stageId = url.pathname.split('/api/flow/config/stages/')[1];
+    const body = await readBody(req);
+    return json(res, flowAgent.updateStageConfig(stageId, body));
+  }
+
+  // GET /api/flow/config/lines — line configurations
+  if (req.method==='GET' && url.pathname==='/api/flow/config/lines') {
+    return json(res, flowAgent.getLineConfigs());
+  }
+
+  // PUT /api/flow/config/lines/:id — update line config
+  if (req.method==='PUT' && url.pathname.startsWith('/api/flow/config/lines/')) {
+    const lineId = url.pathname.split('/api/flow/config/lines/')[1];
+    const body = await readBody(req);
+    return json(res, flowAgent.updateLineConfig(lineId, body));
+  }
+
+  // GET /api/flow/catchup/:lineId — catch-up projection
+  if (req.method==='GET' && url.pathname.startsWith('/api/flow/catchup/')) {
+    const lineId = url.pathname.split('/api/flow/catchup/')[1];
+    const result = flowAgent.getCatchUp(lineId);
+    if (!result) return json(res, { error: 'Line not found' }, 404);
+    return json(res, result);
+  }
+
+  // GET /api/flow/health — engine status
+  if (req.method==='GET' && url.pathname==='/api/flow/health') {
+    return json(res, flowAgent.getHealth());
+  }
+
+  // GET /api/flow/ai-context — AI-ready summary
+  if (req.method==='GET' && url.pathname==='/api/flow/ai-context') {
+    return json(res, flowAgent.getAIContext());
   }
 
   // ── EWS (Early Warning System) ──────────────────────────────

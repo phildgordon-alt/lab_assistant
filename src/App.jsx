@@ -7673,6 +7673,528 @@ function TimeAtLabTab({ovenServerUrl,settings}){
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// FLOW AGENT TAB — Work Release Control System
+// ═══════════════════════════════════════════════════════════════════
+
+function FlowAgentTab({ovenServerUrl,settings}){
+  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const mono="'JetBrains Mono',monospace";
+
+  const [snapshot,setSnapshot]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState(null);
+  const [subTab,setSubTab]=useState("pipeline");
+  const [expandedStage,setExpandedStage]=useState(null);
+  const [recommendations,setRecommendations]=useState([]);
+  const [pushHistory,setPushHistory]=useState([]);
+  const [stageConfigs,setStageConfigs]=useState([]);
+  const [lineConfigs,setLineConfigs]=useState([]);
+  const [catchUp,setCatchUp]=useState(null);
+  const [catchUpLine,setCatchUpLine]=useState("sv");
+  const [trendData,setTrendData]=useState(null);
+  const [trendLine,setTrendLine]=useState("sv");
+  const [health,setHealth]=useState(null);
+  const [showConfig,setShowConfig]=useState(false);
+  const [editingStage,setEditingStage]=useState(null);
+  const [stageEdits,setStageEdits]=useState({});
+  const [pushForm,setPushForm]=useState({line_id:"sv",qty:"",operator:"",note:""});
+  const [lastRefresh,setLastRefresh]=useState(null);
+
+  // Fetch snapshot + recs on mount and every 60s
+  useEffect(()=>{
+    let mounted=true;
+    const load=async()=>{
+      try{
+        const [snapRes,recRes,histRes,healthRes]=await Promise.all([
+          fetch(`${base}/api/flow/snapshot`),
+          fetch(`${base}/api/flow/recommendations?status=pending`),
+          fetch(`${base}/api/flow/history?hours=24`),
+          fetch(`${base}/api/flow/health`),
+        ]);
+        if(!mounted)return;
+        if(snapRes.ok){const d=await snapRes.json();setSnapshot(d);}
+        if(recRes.ok){const d=await recRes.json();setRecommendations(d);}
+        if(histRes.ok){const d=await histRes.json();setPushHistory(d);}
+        if(healthRes.ok){const d=await healthRes.json();setHealth(d);}
+        setLoading(false);setError(null);
+        setLastRefresh(new Date());
+      }catch(e){if(mounted){setError(e.message);setLoading(false);}}
+    };
+    load();
+    const iv=setInterval(load,60000);
+    return()=>{mounted=false;clearInterval(iv);};
+  },[base]);
+
+  // Load configs when config drawer opens
+  useEffect(()=>{
+    if(!showConfig)return;
+    fetch(`${base}/api/flow/config/stages`).then(r=>r.json()).then(setStageConfigs).catch(()=>{});
+    fetch(`${base}/api/flow/config/lines`).then(r=>r.json()).then(setLineConfigs).catch(()=>{});
+  },[showConfig,base]);
+
+  // Load catch-up when tab switches
+  useEffect(()=>{
+    if(subTab!=="catchup")return;
+    fetch(`${base}/api/flow/catchup/${catchUpLine}`).then(r=>r.json()).then(setCatchUp).catch(()=>{});
+  },[subTab,catchUpLine,base]);
+
+  // Load trend when tab switches
+  useEffect(()=>{
+    if(subTab!=="trend")return;
+    fetch(`${base}/api/flow/line/${trendLine}/trend?hours=8`).then(r=>r.json()).then(setTrendData).catch(()=>{});
+  },[subTab,trendLine,base]);
+
+  const ackRec=async(id)=>{
+    await fetch(`${base}/api/flow/recommendations/${id}/ack`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator:"dashboard"})});
+    setRecommendations(prev=>prev.filter(r=>r.id!==id));
+  };
+
+  const completeRec=async(id)=>{
+    await fetch(`${base}/api/flow/recommendations/${id}/complete`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({operator:"dashboard"})});
+    setRecommendations(prev=>prev.filter(r=>r.id!==id));
+  };
+
+  const logPush=async()=>{
+    if(!pushForm.qty)return;
+    await fetch(`${base}/api/flow/push`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({line_id:pushForm.line_id,qty:parseInt(pushForm.qty),operator:pushForm.operator,note:pushForm.note})});
+    setPushForm(p=>({...p,qty:"",note:""}));
+    fetch(`${base}/api/flow/history?hours=24`).then(r=>r.json()).then(setPushHistory).catch(()=>{});
+  };
+
+  const saveStageConfig=async(stageId)=>{
+    await fetch(`${base}/api/flow/config/stages/${stageId}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(stageEdits)});
+    setEditingStage(null);setStageEdits({});
+    fetch(`${base}/api/flow/config/stages`).then(r=>r.json()).then(setStageConfigs).catch(()=>{});
+  };
+
+  // Status colors
+  const statusColor=(s)=>({critical:"#ef4444",warning:"#f59e0b",watch:"#06b6d4",healthy:"#22c55e"}[s]||"#6b7280");
+  const statusBg=(s)=>({critical:"rgba(239,68,68,0.12)",warning:"rgba(245,158,11,0.10)",watch:"rgba(6,182,212,0.08)",healthy:"rgba(34,197,94,0.08)"}[s]||"rgba(107,114,128,0.08)");
+
+  // Sub-tab buttons
+  const subTabs=[
+    {id:"pipeline",label:"Pipeline",icon:"🌊"},
+    {id:"recommendations",label:"Recommendations",icon:"📋"},
+    {id:"catchup",label:"Catch-Up",icon:"📈"},
+    {id:"trend",label:"8hr Trend",icon:"📊"},
+    {id:"history",label:"Push History",icon:"📜"},
+  ];
+
+  if(loading)return(<div style={{textAlign:"center",padding:60,color:"#9ca3af",fontFamily:mono}}>Loading Flow Agent...</div>);
+  if(error)return(<div style={{textAlign:"center",padding:60,color:"#ef4444",fontFamily:mono}}>Flow Agent Error: {error}</div>);
+
+  const stages=snapshot?.stages||[];
+  const ovenETAs=snapshot?.ovenETAs||[];
+  const pacing=snapshot?.slaPacing||{};
+
+  return(
+    <div>
+      {/* HEADER */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          <span style={{fontSize:28}}>🌊</span>
+          <div>
+            <h2 style={{margin:0,fontFamily:"'Bebas Neue',sans-serif",fontSize:28,letterSpacing:1,color:"#e5e7eb"}}>Flow Agent</h2>
+            <span style={{fontSize:11,color:"#6b7280",fontFamily:mono}}>Work Release Control — Pipeline Wave Model</span>
+          </div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:12}}>
+          {health&&<span style={{fontSize:11,fontFamily:mono,color:health.running?"#22c55e":"#ef4444"}}>{health.running?"RUNNING":"STOPPED"} · Poll #{health.pollCount} · {health.lastPollMs}ms</span>}
+          <button onClick={()=>setShowConfig(!showConfig)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:6,padding:"6px 12px",color:"#9ca3af",cursor:"pointer",fontSize:12}}>⚙ Config</button>
+        </div>
+      </div>
+
+      {/* SUB-TAB NAV */}
+      <div style={{display:"flex",gap:4,marginBottom:16,borderBottom:"1px solid rgba(255,255,255,0.06)",paddingBottom:8}}>
+        {subTabs.map(t=>(
+          <button key={t.id} onClick={()=>setSubTab(t.id)} style={{background:subTab===t.id?"rgba(59,130,246,0.15)":"transparent",border:subTab===t.id?"1px solid rgba(59,130,246,0.3)":"1px solid transparent",borderRadius:6,padding:"6px 14px",color:subTab===t.id?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+            <span>{t.icon}</span>{t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══════ PIPELINE VIEW ═══════ */}
+      {subTab==="pipeline"&&(
+        <div>
+          {/* Recommendation banner */}
+          {recommendations.length>0&&(
+            <div style={{background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:10,padding:16,marginBottom:16}}>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,color:"#f59e0b",marginBottom:8,letterSpacing:1}}>PUSH RECOMMENDATIONS</div>
+              {recommendations.map(r=>(
+                <div key={r.id} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderBottom:"1px solid rgba(255,255,255,0.04)"}}>
+                  <div style={{flex:1}}>
+                    <span style={{fontFamily:mono,fontSize:13,color:r.urgency==="now"?"#ef4444":"#f59e0b",fontWeight:700}}>
+                      {r.urgency==="now"?"PUSH NOW":"PUSH BY "+r.push_by}:
+                    </span>
+                    <span style={{fontFamily:mono,fontSize:13,color:"#e5e7eb",marginLeft:8}}>
+                      {r.push_qty} {r.line_id.toUpperCase()} jobs
+                    </span>
+                    <div style={{fontSize:11,color:"#9ca3af",fontFamily:mono,marginTop:2}}>{r.reason}</div>
+                    {r.constrained_by&&r.constrained_by!=="none"&&(
+                      <span style={{fontSize:10,color:"#ef4444",fontFamily:mono}}>⚠ Constrained: {r.constrained_by}</span>
+                    )}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>ackRec(r.id)} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:4,padding:"4px 10px",color:"#60a5fa",cursor:"pointer",fontSize:11,fontFamily:mono}}>ACK</button>
+                    <button onClick={()=>completeRec(r.id)} style={{background:"rgba(34,197,94,0.15)",border:"1px solid rgba(34,197,94,0.3)",borderRadius:4,padding:"4px 10px",color:"#22c55e",cursor:"pointer",fontSize:11,fontFamily:mono}}>DONE</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Pipeline diagram */}
+          <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:20,marginBottom:16,overflowX:"auto"}}>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",marginBottom:12,letterSpacing:1}}>SURFACING PATH</div>
+            <div style={{display:"flex",alignItems:"center",gap:0,minWidth:900}}>
+              {stages.filter(s=>["blocking","surfacing","detray","dip_coat","oven","coating"].includes(s.stage_id)).map((s,i,arr)=>(
+                <React.Fragment key={s.stage_id}>
+                  <div onClick={()=>setExpandedStage(expandedStage===s.stage_id?null:s.stage_id)} style={{background:statusBg(s.status),border:`1px solid ${statusColor(s.status)}40`,borderRadius:8,padding:"10px 14px",minWidth:120,cursor:"pointer",textAlign:"center",position:"relative"}}>
+                    <div style={{fontFamily:mono,fontSize:11,color:"#9ca3af",marginBottom:4}}>{s.label}</div>
+                    <div style={{fontFamily:mono,fontSize:22,fontWeight:700,color:statusColor(s.status)}}>{s.current_count}</div>
+                    <div style={{fontFamily:mono,fontSize:10,color:"#6b7280",marginTop:2}}>
+                      {s.drain_time_minutes!=null?`drains ${s.drain_time_minutes}m`:"—"}
+                    </div>
+                    <div style={{fontFamily:mono,fontSize:10,color:"#6b7280"}}>{s.completion_rate}/hr</div>
+                    {s.gap_minutes!=null&&s.gap_minutes>0&&(
+                      <div style={{position:"absolute",top:-8,right:-8,background:"#ef4444",borderRadius:10,padding:"1px 5px",fontSize:9,fontFamily:mono,color:"#fff"}}>gap {s.gap_minutes}m</div>
+                    )}
+                    {s.stage_id==="oven"&&ovenETAs.length>0&&(
+                      <div style={{fontSize:9,fontFamily:mono,color:"#a78bfa",marginTop:2}}>next batch {ovenETAs[0].etaTime}</div>
+                    )}
+                  </div>
+                  {i<arr.length-1&&<div style={{width:24,height:2,background:"rgba(255,255,255,0.15)",flexShrink:0}}/>}
+                </React.Fragment>
+              ))}
+            </div>
+
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",marginTop:20,marginBottom:12,letterSpacing:1}}>SHARED STAGES (SV + SURFACING CONVERGE)</div>
+            <div style={{display:"flex",alignItems:"center",gap:0}}>
+              {stages.filter(s=>["cutting","assembly"].includes(s.stage_id)).map((s,i,arr)=>(
+                <React.Fragment key={s.stage_id}>
+                  <div onClick={()=>setExpandedStage(expandedStage===s.stage_id?null:s.stage_id)} style={{background:statusBg(s.status),border:`1px solid ${statusColor(s.status)}40`,borderRadius:8,padding:"10px 14px",minWidth:160,cursor:"pointer",textAlign:"center",position:"relative"}}>
+                    <div style={{fontFamily:mono,fontSize:11,color:"#9ca3af",marginBottom:4}}>{s.label}</div>
+                    <div style={{display:"flex",justifyContent:"center",gap:16}}>
+                      <div>
+                        <div style={{fontSize:9,color:"#60a5fa",fontFamily:mono}}>SV</div>
+                        <div style={{fontFamily:mono,fontSize:18,fontWeight:700,color:"#60a5fa"}}>{s.by_line?.sv||0}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:"#a78bfa",fontFamily:mono}}>SURF</div>
+                        <div style={{fontFamily:mono,fontSize:18,fontWeight:700,color:"#a78bfa"}}>{s.by_line?.surfacing||0}</div>
+                      </div>
+                      <div>
+                        <div style={{fontSize:9,color:"#9ca3af",fontFamily:mono}}>TOTAL</div>
+                        <div style={{fontFamily:mono,fontSize:18,fontWeight:700,color:statusColor(s.status)}}>{s.current_count}</div>
+                      </div>
+                    </div>
+                    <div style={{fontFamily:mono,fontSize:10,color:"#6b7280",marginTop:4}}>
+                      {s.drain_time_minutes!=null?`drains ${s.drain_time_minutes}m`:"—"} · {s.completion_rate}/hr
+                    </div>
+                    {s.gap_minutes!=null&&s.gap_minutes>0&&(
+                      <div style={{position:"absolute",top:-8,right:-8,background:"#ef4444",borderRadius:10,padding:"1px 5px",fontSize:9,fontFamily:mono,color:"#fff"}}>gap {s.gap_minutes}m</div>
+                    )}
+                  </div>
+                  {i<arr.length-1&&<div style={{width:24,height:2,background:"rgba(255,255,255,0.15)",flexShrink:0}}/>}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+
+          {/* Expanded stage detail */}
+          {expandedStage&&(()=>{
+            const s=stages.find(s=>s.stage_id===expandedStage);
+            if(!s)return null;
+            return(
+              <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:16,marginBottom:16}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <span style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,color:"#e5e7eb",letterSpacing:1}}>{s.label} DETAIL</span>
+                  <button onClick={()=>setExpandedStage(null)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:14}}>✕</button>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12}}>
+                  {[
+                    {label:"Jobs",value:s.current_count,color:"#e5e7eb"},
+                    {label:"SV",value:s.by_line?.sv||0,color:"#60a5fa"},
+                    {label:"Surfacing",value:s.by_line?.surfacing||0,color:"#a78bfa"},
+                    {label:"Rate",value:`${s.completion_rate}/hr`,color:"#22c55e"},
+                    {label:"Drain",value:s.drain_time_minutes!=null?`${s.drain_time_minutes}m`:"—",color:statusColor(s.status)},
+                    {label:"Next Wave",value:s.next_wave_eta_minutes!=null?`${s.next_wave_eta_minutes}m`:"—",color:"#06b6d4"},
+                    {label:"Gap",value:s.gap_minutes!=null?`${s.gap_minutes}m`:"—",color:s.gap_minutes>0?"#ef4444":"#22c55e"},
+                    {label:"Machines Up",value:s.machines?.active||0,color:"#22c55e"},
+                    {label:"Machines Down",value:s.machines?.down||0,color:s.machines?.down?"#ef4444":"#6b7280"},
+                    {label:"No Demand",value:s.machines?.no_demand||0,color:s.machines?.no_demand?"#f59e0b":"#6b7280"},
+                  ].map((m,i)=>(
+                    <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:10,textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{m.label}</div>
+                      <div style={{fontSize:16,fontWeight:700,color:m.color,fontFamily:mono}}>{m.value}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* SLA Pacing cards */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            {[{key:"sv",label:"Single Vision",sla:"2-day SLA",color:"#60a5fa"},{key:"surfacing",label:"Surfacing",sla:"3-day SLA",color:"#a78bfa"}].map(l=>{
+              const p=pacing[l.key]||{};
+              return(
+                <div key={l.key} style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:14}}>
+                  <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:l.color,letterSpacing:1,marginBottom:6}}>{l.label} — {l.sla}</div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>WIP</div>
+                      <div style={{fontSize:18,fontWeight:700,color:"#e5e7eb",fontFamily:mono}}>{p.wip||0}</div>
+                    </div>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Target/hr</div>
+                      <div style={{fontSize:18,fontWeight:700,color:l.color,fontFamily:mono}}>{p.hourlyTarget||0}</div>
+                    </div>
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>At Risk</div>
+                      <div style={{fontSize:18,fontWeight:700,color:p.atRiskCount?"#ef4444":"#22c55e",fontFamily:mono}}>{p.atRiskCount||0}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Oven ETAs */}
+          {ovenETAs.length>0&&(
+            <div style={{background:"rgba(167,139,250,0.06)",border:"1px solid rgba(167,139,250,0.2)",borderRadius:10,padding:14,marginBottom:16}}>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#a78bfa",letterSpacing:1,marginBottom:8}}>OVEN BATCH ETAs</div>
+              <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
+                {ovenETAs.map((e,i)=>(
+                  <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:"8px 12px",fontFamily:mono,fontSize:12}}>
+                    <span style={{color:"#a78bfa"}}>{e.ovenId} R{e.rackIndex}</span>
+                    <span style={{color:"#6b7280",margin:"0 6px"}}>·</span>
+                    <span style={{color:"#e5e7eb"}}>{e.jobs} jobs</span>
+                    <span style={{color:"#6b7280",margin:"0 6px"}}>·</span>
+                    <span style={{color:e.etaMinutes<30?"#22c55e":"#f59e0b"}}>{e.etaTime} ({Math.round(e.etaMinutes)}m)</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ RECOMMENDATIONS VIEW ═══════ */}
+      {subTab==="recommendations"&&(
+        <div>
+          {/* Manual push form */}
+          <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16,marginBottom:16}}>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",letterSpacing:1,marginBottom:10}}>LOG MANUAL PUSH</div>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <div>
+                <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>Line</div>
+                <select value={pushForm.line_id} onChange={e=>setPushForm(p=>({...p,line_id:e.target.value}))} style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"6px 10px",color:"#e5e7eb",fontFamily:mono,fontSize:12}}>
+                  <option value="sv">SV</option>
+                  <option value="surfacing">Surfacing</option>
+                  <option value="edits">Edits</option>
+                </select>
+              </div>
+              <div>
+                <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>Qty</div>
+                <input type="number" value={pushForm.qty} onChange={e=>setPushForm(p=>({...p,qty:e.target.value}))} placeholder="20" style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"6px 10px",color:"#e5e7eb",fontFamily:mono,fontSize:12,width:60}}/>
+              </div>
+              <div>
+                <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>Operator</div>
+                <input value={pushForm.operator} onChange={e=>setPushForm(p=>({...p,operator:e.target.value}))} placeholder="Name" style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"6px 10px",color:"#e5e7eb",fontFamily:mono,fontSize:12,width:100}}/>
+              </div>
+              <div style={{flex:1}}>
+                <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>Note</div>
+                <input value={pushForm.note} onChange={e=>setPushForm(p=>({...p,note:e.target.value}))} placeholder="Optional note" style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"6px 10px",color:"#e5e7eb",fontFamily:mono,fontSize:12,width:"100%"}}/>
+              </div>
+              <button onClick={logPush} disabled={!pushForm.qty} style={{background:pushForm.qty?"rgba(34,197,94,0.15)":"rgba(255,255,255,0.04)",border:`1px solid ${pushForm.qty?"rgba(34,197,94,0.3)":"rgba(255,255,255,0.06)"}`,borderRadius:6,padding:"6px 16px",color:pushForm.qty?"#22c55e":"#6b7280",cursor:pushForm.qty?"pointer":"default",fontFamily:mono,fontSize:12}}>LOG PUSH</button>
+            </div>
+          </div>
+
+          {/* Active recommendations */}
+          <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",letterSpacing:1,marginBottom:8}}>PENDING RECOMMENDATIONS ({recommendations.length})</div>
+          {recommendations.length===0?(
+            <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono,fontSize:13}}>No pending recommendations — pipeline is balanced</div>
+          ):recommendations.map(r=>(
+            <div key={r.id} style={{background:r.urgency==="now"?"rgba(239,68,68,0.06)":"rgba(245,158,11,0.06)",border:`1px solid ${r.urgency==="now"?"rgba(239,68,68,0.2)":"rgba(245,158,11,0.2)"}`,borderRadius:8,padding:14,marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <span style={{fontFamily:mono,fontSize:14,fontWeight:700,color:r.urgency==="now"?"#ef4444":"#f59e0b"}}>{r.urgency==="now"?"PUSH NOW":"PUSH BY "+r.push_by}</span>
+                  <span style={{fontFamily:mono,fontSize:14,color:"#e5e7eb",marginLeft:10}}>{r.push_qty} {r.line_id.toUpperCase()} jobs</span>
+                </div>
+                <div style={{display:"flex",gap:6}}>
+                  <button onClick={()=>ackRec(r.id)} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:4,padding:"4px 12px",color:"#60a5fa",cursor:"pointer",fontSize:11,fontFamily:mono}}>ACKNOWLEDGE</button>
+                  <button onClick={()=>completeRec(r.id)} style={{background:"rgba(34,197,94,0.15)",border:"1px solid rgba(34,197,94,0.3)",borderRadius:4,padding:"4px 12px",color:"#22c55e",cursor:"pointer",fontSize:11,fontFamily:mono}}>COMPLETE</button>
+                </div>
+              </div>
+              <div style={{fontSize:12,color:"#9ca3af",fontFamily:mono,marginTop:4}}>{r.reason}</div>
+              {r.constrained_by&&r.constrained_by!=="none"&&<div style={{fontSize:11,color:"#ef4444",fontFamily:mono,marginTop:2}}>Constraint: {r.constrained_by}</div>}
+              <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginTop:4}}>Created {r.created_at}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ═══════ CATCH-UP VIEW ═══════ */}
+      {subTab==="catchup"&&(
+        <div>
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            {["sv","surfacing","edits"].map(l=>(
+              <button key={l} onClick={()=>setCatchUpLine(l)} style={{background:catchUpLine===l?"rgba(59,130,246,0.15)":"transparent",border:catchUpLine===l?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:catchUpLine===l?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>{l.toUpperCase()}</button>
+            ))}
+          </div>
+          {catchUp?(
+            <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:20}}>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,color:"#e5e7eb",letterSpacing:1,marginBottom:16}}>{catchUp.label} CATCH-UP PROJECTION</div>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+                {[
+                  {label:"Current WIP",value:catchUp.currentWip,color:"#e5e7eb"},
+                  {label:"Output/hr",value:catchUp.outputRate,color:"#22c55e"},
+                  {label:"Incoming/hr",value:catchUp.incomingRate,color:"#f59e0b"},
+                  {label:"Net/hr",value:catchUp.netRate,color:catchUp.netRate>0?"#22c55e":"#ef4444"},
+                  {label:"Net/day",value:catchUp.dailyNetRate,color:catchUp.dailyNetRate>0?"#22c55e":"#ef4444"},
+                  {label:"Days to Clear",value:catchUp.daysToClears||"∞",color:catchUp.daysToClears?"#60a5fa":"#ef4444"},
+                ].map((m,i)=>(
+                  <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:12,textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{m.label}</div>
+                    <div style={{fontSize:20,fontWeight:700,color:m.color,fontFamily:mono}}>{m.value}</div>
+                  </div>
+                ))}
+              </div>
+              {catchUp.weeklyMilestones&&catchUp.weeklyMilestones.length>0&&(
+                <div>
+                  <div style={{fontFamily:mono,fontSize:11,color:"#6b7280",marginBottom:8}}>WEEKLY MILESTONES</div>
+                  <div style={{display:"flex",gap:8}}>
+                    {catchUp.weeklyMilestones.map(w=>(
+                      <div key={w.week} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:"8px 14px",textAlign:"center",flex:1}}>
+                        <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Week {w.week}</div>
+                        <div style={{fontSize:16,fontWeight:700,color:w.projectedWip===0?"#22c55e":"#e5e7eb",fontFamily:mono}}>{w.projectedWip}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ):(
+            <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading catch-up data...</div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ TREND VIEW ═══════ */}
+      {subTab==="trend"&&(
+        <div>
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            {["sv","surfacing"].map(l=>(
+              <button key={l} onClick={()=>setTrendLine(l)} style={{background:trendLine===l?"rgba(59,130,246,0.15)":"transparent",border:trendLine===l?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:trendLine===l?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>{l.toUpperCase()}</button>
+            ))}
+          </div>
+          {trendData&&trendData.trends?(
+            <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:20}}>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,color:"#e5e7eb",letterSpacing:1,marginBottom:16}}>8-HOUR BUFFER TREND — {trendLine.toUpperCase()}</div>
+              {Object.entries(trendData.trends).map(([stageId,points])=>{
+                if(!points||points.length===0)return null;
+                const max=Math.max(...points.map(p=>p.current_count||0),1);
+                const barW=Math.max(2,Math.floor(600/points.length));
+                return(
+                  <div key={stageId} style={{marginBottom:16}}>
+                    <div style={{fontFamily:mono,fontSize:11,color:"#9ca3af",marginBottom:4}}>{stageId}</div>
+                    <div style={{display:"flex",alignItems:"flex-end",gap:1,height:60,background:"rgba(0,0,0,0.2)",borderRadius:4,padding:"4px 2px",overflow:"hidden"}}>
+                      {points.map((p,i)=>{
+                        const h=Math.max(2,(p.current_count/max)*52);
+                        const clr=p.status==="critical"?"#ef4444":p.status==="warning"?"#f59e0b":"#22c55e";
+                        return <div key={i} style={{width:barW,height:h,background:clr,borderRadius:1,opacity:0.7}} title={`${p.current_count} jobs at ${p.ts}`}/>;
+                      })}
+                    </div>
+                    <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#6b7280",fontFamily:mono,marginTop:2}}>
+                      <span>{points[0]?.ts?.split("T")[1]?.slice(0,5)||""}</span>
+                      <span>{points[points.length-1]?.ts?.split("T")[1]?.slice(0,5)||""}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ):(
+            <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading trend data...</div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ PUSH HISTORY VIEW ═══════ */}
+      {subTab==="history"&&(
+        <div>
+          <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",letterSpacing:1,marginBottom:8}}>PUSH HISTORY (24H)</div>
+          {pushHistory.length===0?(
+            <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>No push history in last 24 hours</div>
+          ):(
+            <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,overflow:"hidden"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontFamily:mono,fontSize:12}}>
+                <thead>
+                  <tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                    {["Time","Line","Qty","Operator","Note"].map(h=>(
+                      <th key={h} style={{padding:"8px 12px",textAlign:"left",color:"#6b7280",fontSize:10,fontWeight:600}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {pushHistory.map((p,i)=>(
+                    <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                      <td style={{padding:"6px 12px",color:"#9ca3af"}}>{p.ts?.split("T")[1]?.slice(0,5)||p.ts}</td>
+                      <td style={{padding:"6px 12px",color:"#60a5fa"}}>{p.line_id?.toUpperCase()}</td>
+                      <td style={{padding:"6px 12px",color:"#e5e7eb",fontWeight:700}}>{p.push_qty}</td>
+                      <td style={{padding:"6px 12px",color:"#9ca3af"}}>{p.operator||"—"}</td>
+                      <td style={{padding:"6px 12px",color:"#6b7280"}}>{p.note||"—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ CONFIG DRAWER ═══════ */}
+      {showConfig&&(
+        <div style={{position:"fixed",top:0,right:0,width:420,height:"100vh",background:"#0D1117",borderLeft:"1px solid rgba(255,255,255,0.1)",padding:20,overflowY:"auto",zIndex:1000}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
+            <span style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,color:"#e5e7eb",letterSpacing:1}}>STAGE CONFIG</span>
+            <button onClick={()=>setShowConfig(false)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:18}}>✕</button>
+          </div>
+          {stageConfigs.map(s=>(
+            <div key={s.stage_id} style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:8,padding:12,marginBottom:8}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:editingStage===s.stage_id?8:0}}>
+                <span style={{fontFamily:mono,fontSize:12,color:"#e5e7eb"}}>{s.label}</span>
+                <button onClick={()=>{if(editingStage===s.stage_id){saveStageConfig(s.stage_id);}else{setEditingStage(s.stage_id);setStageEdits({cycle_time_min:s.cycle_time_min,cycle_time_max:s.cycle_time_max,typical_batch_size:s.typical_batch_size});}}} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:4,padding:"2px 8px",color:"#60a5fa",cursor:"pointer",fontSize:10,fontFamily:mono}}>{editingStage===s.stage_id?"SAVE":"EDIT"}</button>
+              </div>
+              {editingStage===s.stage_id?(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6}}>
+                  <div>
+                    <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>Min (min)</div>
+                    <input type="number" value={stageEdits.cycle_time_min||""} onChange={e=>setStageEdits(p=>({...p,cycle_time_min:parseFloat(e.target.value)}))} style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:3,padding:4,color:"#e5e7eb",fontFamily:mono,fontSize:11,width:"100%"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>Max (min)</div>
+                    <input type="number" value={stageEdits.cycle_time_max||""} onChange={e=>setStageEdits(p=>({...p,cycle_time_max:parseFloat(e.target.value)}))} style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:3,padding:4,color:"#e5e7eb",fontFamily:mono,fontSize:11,width:"100%"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>Batch Size</div>
+                    <input type="number" value={stageEdits.typical_batch_size||""} onChange={e=>setStageEdits(p=>({...p,typical_batch_size:parseInt(e.target.value)||null}))} style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:3,padding:4,color:"#e5e7eb",fontFamily:mono,fontSize:11,width:"100%"}}/>
+                  </div>
+                </div>
+              ):(
+                <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginTop:4}}>
+                  {s.cycle_time_min}–{s.cycle_time_max||s.cycle_time_min}min · {s.is_batch?"Batch ("+s.typical_batch_size+")":"Continuous"} · {s.path} · → {s.feeds_stage||"end"}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EarlyWarningTab({ovenServerUrl,settings}){
   const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
   const mono="'JetBrains Mono',monospace";
@@ -10330,6 +10852,7 @@ function LabAssistantV2(){
       {id:"qc",label:"QC & Breakage",icon:"✓"},
     ]},
     {id:"intelligence",label:"Intelligence",icon:"🧠",type:"dropdown",items:[
+      {id:"flow",label:"Flow Agent",icon:"🌊"},
       {id:"ai",label:"AI Assistant",icon:"🤖"},
       {id:"ews",label:"Early Warning",icon:"⚡"},
       {id:"network",label:"Network NOC",icon:"🔀"},
@@ -10439,6 +10962,7 @@ function LabAssistantV2(){
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="aging"&&<AgingJobsTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="timeatlab"&&<TimeAtLabTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="flow"&&<FlowAgentTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="ews"&&<EarlyWarningTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="network"&&<NetworkTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="settings"&&<SettingsTab settings={settings} setSettings={setSettings} ovenServerUrl={ovenServerUrl} onNavigate={setView}/>}

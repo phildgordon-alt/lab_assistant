@@ -226,6 +226,9 @@ const HIGH_BAD = new Set([
   'oven_overdue_racks', 'maintenance_open_work_orders',
   // Vision
   'vision_exception_count',
+  // Flow Agent — gap metrics (positive gap = will starve = bad)
+  'flow_gap_blocking', 'flow_gap_surfacing', 'flow_gap_detray', 'flow_gap_dip_coat',
+  'flow_gap_oven', 'flow_gap_coating', 'flow_gap_cutting', 'flow_gap_assembly',
 ]);
 
 const LOW_BAD = new Set([
@@ -236,6 +239,9 @@ const LOW_BAD = new Set([
   'network_wan_status',
   // Vision
   'vision_match_rate',
+  // Flow Agent — drain metrics (low drain = stage about to empty = bad)
+  'flow_drain_blocking', 'flow_drain_surfacing', 'flow_drain_detray', 'flow_drain_dip_coat',
+  'flow_drain_oven', 'flow_drain_coating', 'flow_drain_cutting', 'flow_drain_assembly',
 ]);
 
 // ─── ALERT DETAIL TEMPLATES ──────────────────────────────────────────────
@@ -343,6 +349,14 @@ const RULES = [
   { metric: 'vision_match_rate',           op: '<=', threshold: 80, tier: 'P2', message: 'WARNING: Vision scan accuracy below 80% — check lighting, camera, lens positioning' },
   { metric: 'vision_match_rate',           op: '<=', threshold: 60, tier: 'P1', message: 'CRITICAL: Vision scan accuracy below 60% — scanner system needs immediate attention' },
   { metric: 'vision_exception_count',      op: '>=', threshold: 20, tier: 'P2', message: 'WARNING: 20+ unresolved vision exceptions — operator review needed' },
+
+  // Flow Agent — pipeline gap/starvation
+  { metric: 'flow_gap_assembly',           op: '>=', threshold: 60, tier: 'P1', message: 'CRITICAL: Assembly will starve for 1+ hour — push SV NOW', channels: ['#lens-kitchen', '#lab-ops'] },
+  { metric: 'flow_gap_assembly',           op: '>=', threshold: 30, tier: 'P2', message: 'WARNING: Assembly gap in 30 min — push SV jobs', channels: ['#lens-kitchen'] },
+  { metric: 'flow_gap_cutting',            op: '>=', threshold: 60, tier: 'P1', message: 'CRITICAL: Cutting will starve for 1+ hour — push SV NOW', channels: ['#lens-kitchen', '#lab-ops'] },
+  { metric: 'flow_gap_cutting',            op: '>=', threshold: 30, tier: 'P2', message: 'WARNING: Cutting gap in 30 min — push SV jobs', channels: ['#lens-kitchen'] },
+  { metric: 'flow_drain_surfacing',        op: '<=', threshold: 60, tier: 'P2', message: 'WARNING: Surfacing drains in <1hr — push surfacing jobs', channels: ['#lens-kitchen'] },
+  { metric: 'flow_drain_assembly',         op: '<=', threshold: 30, tier: 'P2', message: 'WARNING: Assembly buffer under 30 min — needs immediate feed', channels: ['#lens-kitchen'] },
 ];
 
 /**
