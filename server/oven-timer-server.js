@@ -2200,13 +2200,25 @@ Respond with a structured batching plan in this format:
 
   // ── Long Tail Analysis (Stock vs Surface) ─────────────────
   if (req.method==='GET' && url.pathname==='/api/lens-intel/long-tail') {
-    return json(res, { ...global._longTailCache, lastRun: global._longTailLastRun || null });
+    // Load cached results + lastRun from SQLite
+    if (!global._longTailCache) {
+      try {
+        const cached = labDb.db.prepare("SELECT value FROM model_params WHERE key = 'long_tail_cache'").get();
+        const lastRun = labDb.db.prepare("SELECT value FROM model_params WHERE key = 'long_tail_last_run'").get();
+        if (cached?.value) global._longTailCache = JSON.parse(cached.value);
+        if (lastRun?.value) global._longTailLastRun = lastRun.value;
+      } catch {}
+    }
+    return json(res, { ...(global._longTailCache || {}), lastRun: global._longTailLastRun || null });
   }
   if (req.method==='POST' && url.pathname==='/api/lens-intel/long-tail') {
     try {
       const analysis = longTail.runAnalysis(labDb.db);
       global._longTailCache = analysis;
       global._longTailLastRun = new Date().toISOString();
+      // Persist to SQLite
+      labDb.db.prepare("INSERT INTO model_params (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run('long_tail_cache', JSON.stringify(analysis));
+      labDb.db.prepare("INSERT INTO model_params (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run('long_tail_last_run', global._longTailLastRun);
       return json(res, { ...analysis, lastRun: global._longTailLastRun });
     } catch (e) {
       console.error('[LongTail] Error:', e.message);
