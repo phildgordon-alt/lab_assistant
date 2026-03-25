@@ -1826,15 +1826,15 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     }}>{d}d</button>
                   ))}
                   <ExportBtn onClick={() => {
-                    downloadCSV('pipeline.csv', ['date','dvi','looker','breakage','variance'], (pipelineData?.daily || []).map(d => ({...d, variance: d.dvi - d.looker})));
+                    downloadCSV('pipeline_summary.csv', ['date','dvi','looker','breakage','variance'], (pipelineData?.daily || []).map(d => ({...d, variance: d.dvi - d.looker})));
                   }} label="Export Summary" />
                   <ExportBtn onClick={async () => {
                     try {
-                      const resp = await fetch(`${ovenServerUrl}/api/shipping/detail?days=${pipelineDays}`);
+                      const resp = await fetch(`${ovenServerUrl}/api/shipping/compare?days=${pipelineDays}`);
                       const data = await resp.json();
-                      downloadCSV(`shipped_jobs_${pipelineDays}d.csv`, ['date','invoice','tray','coating','lensType','lensMat','frameStyle','frameSku','department','daysInLab','entryDate','rush'], data.jobs || []);
+                      downloadCSV(`pipeline_comparison_${pipelineDays}d.csv`, ['date','order_number','source','invoice','job_id','dvi_id','dvi_coating','dvi_frame','dvi_department','dvi_days_in_lab','dvi_entry_date','dvi_rush','lk_frame_upc','lk_opcs','lk_lenses','lk_breakages'], data.jobs || []);
                     } catch (e) { console.error(e); }
-                  }} label="Export All Jobs" />
+                  }} label="Export DVI vs Looker" />
                 </div>
               </div>
 
