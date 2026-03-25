@@ -91,6 +91,7 @@ const KPI_METRICS = {
   coating_wip:       { label: "Coating WIP",      desc: "Jobs in coating",               accent: T.amber,  category: "Department" },
   cutting_wip:       { label: "Cutting WIP",      desc: "Jobs in cutting/edging",        accent: T.purple, category: "Department" },
   assembly_wip:      { label: "Assembly WIP",     desc: "Jobs in assembly",              accent: T.pink,   category: "Department" },
+  assembled_today:   { label: "Assembled",       desc: "Jobs assembled today",          accent: T.green,  category: "Department" },
   surfacing_wip:     { label: "Surfacing WIP",    desc: "Jobs in surfacing",             accent: T.orange, category: "Department" },
   qc_wip:            { label: "QC WIP",           desc: "Jobs in QC",                    accent: T.cyan,   category: "Department" },
   breakage:          { label: "Breakage",         desc: "Broken jobs today",             accent: T.red,    category: "Quality" },
@@ -349,6 +350,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
       case 'coating_wip': return {value:dviJobs.filter(j=>(j.stage||'').toUpperCase().includes('COAT')||(j.station||'').includes('CCL')||(j.station||'').includes('CCP')||(j.station||'').includes('SENT TO COAT')).length,sub:"in coating"};
       case 'cutting_wip': return {value:dviJobs.filter(j=>(j.stage||'').toUpperCase().includes('CUT')||(j.station||'').includes('EDGER')||(j.station||'').includes('LCU')).length,sub:"in cutting"};
       case 'assembly_wip': return {value:dviByStage('ASSEMBL'),sub:"in assembly"};
+      case 'assembled_today': { const as=data?.assemblyStats||{}; return {value:as.assembledToday||0,sub:`pass: ${as.passToday||0} · fail: ${as.failToday||0}`}; }
       case 'surfacing_wip': return {value:dviJobs.filter(j=>(j.stage||'').toUpperCase().includes('SURF')||(j.station||'').includes('GENERATOR')||(j.station||'').includes('AUTO BLKER')||(j.station||'').includes('DIGITAL CALC')).length,sub:"in surfacing"};
       case 'qc_wip': return {value:dviByStage('QC'),sub:"in QC"};
       case 'breakage': return {value:dviJobs.filter(j=>(j.station||'').toUpperCase().includes('BREAKAGE')).length,sub:"today",accent:T.red};
@@ -812,7 +814,7 @@ function OverviewAICard({trays,batches,settings}){
 }
 
 // ── Main OverviewTab Component ────────────────────────────────
-export default function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[],dviJobs=[],wipJobs=[],shippedStats={},setView}){
+export default function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[],dviJobs=[],wipJobs=[],shippedStats={},assemblyStats={},setView}){
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
     return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
@@ -1122,7 +1124,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     switch(card.type){
       case "kpi_row": return(
         <ConfigurableKPIRow
-          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats,somOrders,pickStats}}
+          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats,assemblyStats,somOrders,pickStats}}
           settings={settings}
           cardConfig={card.config}
           onConfigChange={(cfg)=>updateCardConfig(card.id,cfg)}

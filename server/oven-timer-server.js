@@ -2902,6 +2902,20 @@ Respond with a structured batching plan in this format:
     const shippedYesterday = allShipped.filter(j => j.lastSeen && j.lastSeen >= yesterdayMs && j.lastSeen < todayMs);
     const shippedThisWeek = allShipped.filter(j => j.lastSeen && j.lastSeen >= weekMs);
 
+    // Count assembly completions today from trace history
+    let assembledToday = 0;
+    let assemblyPassToday = 0;
+    let assemblyFailToday = 0;
+    for (const j of allTracedJobs) {
+      const history = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+      if (!history || !history.events) continue;
+      for (const e of history.events) {
+        if (e.timestamp < todayMs) continue;
+        if (e.station === 'ASSEMBLY PASS') { assembledToday++; assemblyPassToday++; }
+        else if (e.station === 'ASSEMBLY FAIL') { assembledToday++; assemblyFailToday++; }
+      }
+    }
+
     return json(res, {
       jobs: enriched,
       shipped: {
@@ -2911,6 +2925,11 @@ Respond with a structured batching plan in this format:
         todayJobs: shippedToday,
         yesterdayJobs: shippedYesterday,
         total: allShipped.length
+      },
+      assembly: {
+        assembledToday,
+        passToday: assemblyPassToday,
+        failToday: assemblyFailToday,
       },
       stats: dviTrace.getStats(),
       source: 'dvi-trace+xml+shipped',

@@ -965,6 +965,7 @@ const KPI_METRICS = {
   coating_wip:       { label: "Coating WIP",      desc: "Jobs in coating",               accent: T.amber,  category: "Department" },
   cutting_wip:       { label: "Cutting WIP",      desc: "Jobs in cutting/edging",        accent: T.purple, category: "Department" },
   assembly_wip:      { label: "Assembly WIP",     desc: "Jobs in assembly",              accent: T.pink,   category: "Department" },
+  assembled_today:   { label: "Assembled",       desc: "Jobs assembled today",          accent: T.green,  category: "Department" },
   surfacing_wip:     { label: "Surfacing WIP",    desc: "Jobs in surfacing",             accent: T.orange, category: "Department" },
   qc_wip:            { label: "QC WIP",           desc: "Jobs in QC",                    accent: T.cyan,   category: "Department" },
   breakage:          { label: "Breakage",         desc: "Broken jobs today",             accent: T.red,    category: "Quality" },
@@ -1065,6 +1066,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
       case 'coating_wip': return {value:dviByStage('COAT')+dviJobs.filter(j=>(j.station||'').includes('CCL')||(j.station||'').includes('CCP')).length,sub:"in coating"};
       case 'cutting_wip': return {value:dviByStage('CUT')+dviJobs.filter(j=>(j.station||'').includes('EDGER')||(j.station||'').includes('LCU')).length,sub:"in cutting"};
       case 'assembly_wip': return {value:dviByStage('ASSEMBL'),sub:"in assembly"};
+      case 'assembled_today': { const as=data?.assemblyStats||{}; return {value:as.assembledToday||0,sub:`pass: ${as.passToday||0} · fail: ${as.failToday||0}`}; }
       case 'surfacing_wip': return {value:dviByStage('SURF')+dviJobs.filter(j=>(j.station||'').includes('GENERATOR')).length,sub:"in surfacing"};
       case 'qc_wip': return {value:dviByStage('QC'),sub:"in QC"};
       case 'breakage': return {value:dviJobs.filter(j=>(j.station||'').toUpperCase().includes('BREAKAGE')).length,sub:"today",accent:T.red};
@@ -5070,12 +5072,16 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
             <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{assemblyJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>ASSEMBLED</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{asmData?.completedToday || 0}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>PASSED</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{passJobs.length}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{asmData?.passFailToday?.pass || passJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>FAILED</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: failJobs.length > 0 ? T.red : T.green, fontFamily: mono }}>{failJobs.length}</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: (asmData?.passFailToday?.fail || failJobs.length) > 0 ? T.red : T.green, fontFamily: mono }}>{asmData?.passFailToday?.fail || failJobs.length}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>RUSH</div>
@@ -10116,6 +10122,7 @@ function LabAssistantV2(){
   // DVI jobs from gateway + shipped stats
   const [dviJobs,setDviJobs]=useState([]);
   const [shippedStats,setShippedStats]=useState({today:0,yesterday:0,thisWeek:0});
+  const [assemblyStats,setAssemblyStats]=useState({assembledToday:0,passToday:0,failToday:0});
   const [wipJobs,setWipJobs]=useState([]);
 
   // Load WIP data from localStorage (populated by WIPFeed component)
@@ -10155,6 +10162,9 @@ function LabAssistantV2(){
           // Update shipped stats if available
           if(data.shipped){
             setShippedStats(data.shipped);
+          }
+          if(data.assembly){
+            setAssemblyStats(data.assembly);
           }
         }
       }catch(e){ console.warn("DVI fetch:",e.message); }
@@ -10413,7 +10423,7 @@ function LabAssistantV2(){
         <VisionDashboard ovenServerUrl={ovenServerUrl} settings={settings} isTablet={isTablet}/>
       ):(
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto",position:"relative",zIndex:1}}>
-        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats}/>}
+        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats} assemblyStats={assemblyStats}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events} wipJobs={wipJobs}/>}
         {view==="coating"&&<CoatingTab batches={batches} trays={trays} dviJobs={mergedJobs} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
