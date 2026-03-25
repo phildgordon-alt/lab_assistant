@@ -226,7 +226,11 @@ function computeAll(db, itempath, netsuite) {
 
     for (const sku of allSkus) {
       const cat = getCat(sku);
-      if (cat === 'Frames' || cat === 'Tops') continue;
+      // Only lenses — must be categorized as Lenses or have lens OPC prefix
+      const isLensPrefix = /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
+      if (cat === 'Lenses') { /* confirmed lens */ }
+      else if (cat === null && isLensPrefix) { /* uncategorized but looks like lens OPC */ }
+      else continue; // skip frames, tops, other, unknown non-lens
       if (discontinuedSkus.has(sku)) continue;
 
       const onHand = onHandBySku[sku]?.qty || 0;
