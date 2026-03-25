@@ -104,6 +104,20 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  -- Persisted catch-up scenario inputs per line
+  CREATE TABLE IF NOT EXISTS flow_catchup_scenario (
+    line_id TEXT PRIMARY KEY,
+    assemblers INTEGER,
+    jobs_per_assembler_hr REAL,
+    shift_hours REAL,
+    shifts INTEGER,
+    incoming_per_day INTEGER,
+    target_days REAL,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
 // Safe migration: add expires_at column to existing databases
 try { db.exec('ALTER TABLE flow_recommendations ADD COLUMN expires_at TEXT'); } catch {}
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_flow_rec_expires ON flow_recommendations(expires_at)'); } catch {}
@@ -178,6 +192,10 @@ const stmts = {
   expirePending:  db.prepare(`UPDATE flow_recommendations SET status='expired' WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < datetime('now')`),
   ackRec:       db.prepare(`UPDATE flow_recommendations SET status='acknowledged', acknowledged_at=datetime('now'), operator=? WHERE id=?`),
   completeRec:  db.prepare(`UPDATE flow_recommendations SET status='completed', completed_at=datetime('now'), operator=coalesce(?,operator), note=? WHERE id=?`),
+  saveCatchUpScenario: db.prepare(`INSERT OR REPLACE INTO flow_catchup_scenario
+    (line_id, assemblers, jobs_per_assembler_hr, shift_hours, shifts, incoming_per_day, target_days, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`),
+  getCatchUpScenario: db.prepare(`SELECT * FROM flow_catchup_scenario WHERE line_id=?`),
   insertPush:   db.prepare(`INSERT INTO flow_push_history (line_id, push_qty, operator, note) VALUES (?, ?, ?, ?)`),
   getPushHistory: db.prepare(`SELECT * FROM flow_push_history WHERE ts > datetime('now', ?) ORDER BY ts DESC`),
   pruneSnapshots: db.prepare(`DELETE FROM flow_snapshots WHERE ts < datetime('now', '-30 days')`),
@@ -728,6 +746,18 @@ function computeCatchUp(lineId, scenario = {}) {
   const line = stmts.getLine.get(lineId);
   if (!line) return null;
 
+  // ── Load saved scenario as defaults, merge with any new inputs ──
+  const saved = stmts.getCatchUpScenario.get(lineId);
+  if (saved) {
+    // Saved values become defaults — scenario overrides take precedence
+    if (scenario.assemblers == null && saved.assemblers != null) scenario.assemblers = saved.assemblers;
+    if (scenario.jobsPerAssemblerHr == null && saved.jobs_per_assembler_hr != null) scenario.jobsPerAssemblerHr = saved.jobs_per_assembler_hr;
+    if (scenario.shiftHours == null && saved.shift_hours != null) scenario.shiftHours = saved.shift_hours;
+    if (scenario.shifts == null && saved.shifts != null) scenario.shifts = saved.shifts;
+    if (scenario.incomingPerDay == null && saved.incoming_per_day != null) scenario.incomingPerDay = saved.incoming_per_day;
+    if (scenario.targetDays == null && saved.target_days != null) scenario.targetDays = saved.target_days;
+  }
+
   // ── LIVE DATA: Current WIP from DVI trace ──
   const { dviTrace, dviJobIndex } = adapters;
   let totalWip = 0;
@@ -799,6 +829,9 @@ function computeCatchUp(lineId, scenario = {}) {
       cleared: projWip === 0,
     };
   });
+
+  // Persist scenario inputs for next load
+  stmts.saveCatchUpScenario.run(lineId, assemblers, jobsPerAssemblerHr, shiftHours, shifts, incomingPerDay, targetDays);
 
   return {
     line_id: lineId,
