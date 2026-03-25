@@ -100,7 +100,32 @@ function detectMaterial(sku, description = '') {
 // ─────────────────────────────────────────────────────────────────────────────
 // RUN LONG TAIL ANALYSIS
 // ─────────────────────────────────────────────────────────────────────────────
-function runAnalysis(db) {
+function runAnalysis(db, overrides = {}) {
+  // Load configurable thresholds from model_params or use overrides
+  try {
+    db.exec("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
+    const keys = ['long_tail_carrying_pct', 'long_tail_low_runner', 'long_tail_surf_premium_ply', 'long_tail_surf_premium_bly', 'long_tail_surf_premium_h67', 'long_tail_surf_premium_b67', 'long_tail_surf_premium_cr39', 'long_tail_lens_cost_ply', 'long_tail_lens_cost_bly', 'long_tail_lens_cost_h67', 'long_tail_lens_cost_b67', 'long_tail_lens_cost_cr39'];
+    for (const k of keys) {
+      const row = db.prepare('SELECT value FROM model_params WHERE key = ?').get(k);
+      if (row?.value) overrides[k] = Number(row.value);
+    }
+  } catch {}
+
+  const carryingPct = overrides.long_tail_carrying_pct ?? DEFAULT_CARRYING_PCT;
+  const lowRunnerThreshold = overrides.long_tail_low_runner ?? DEFAULT_LOW_RUNNER_THRESHOLD;
+
+  // Allow per-material cost overrides
+  const costs = JSON.parse(JSON.stringify(MATERIAL_COSTS));
+  if (overrides.long_tail_lens_cost_ply) costs.PLY.lensCost = overrides.long_tail_lens_cost_ply;
+  if (overrides.long_tail_lens_cost_bly) costs.BLY.lensCost = overrides.long_tail_lens_cost_bly;
+  if (overrides.long_tail_lens_cost_h67) costs.H67.lensCost = overrides.long_tail_lens_cost_h67;
+  if (overrides.long_tail_lens_cost_b67) costs.B67.lensCost = overrides.long_tail_lens_cost_b67;
+  if (overrides.long_tail_lens_cost_cr39) costs.CR39.lensCost = overrides.long_tail_lens_cost_cr39;
+  if (overrides.long_tail_surf_premium_ply) costs.PLY.surfPremium = overrides.long_tail_surf_premium_ply;
+  if (overrides.long_tail_surf_premium_bly) costs.BLY.surfPremium = overrides.long_tail_surf_premium_bly;
+  if (overrides.long_tail_surf_premium_h67) costs.H67.surfPremium = overrides.long_tail_surf_premium_h67;
+  if (overrides.long_tail_surf_premium_b67) costs.B67.surfPremium = overrides.long_tail_surf_premium_b67;
+  if (overrides.long_tail_surf_premium_cr39) costs.CR39.surfPremium = overrides.long_tail_surf_premium_cr39;
   // Get weekly consumption data
   const weeklyRows = db.prepare(`
     SELECT sku, SUM(units_consumed) as total, COUNT(DISTINCT week_start) as weeks
@@ -127,11 +152,11 @@ function runAnalysis(db) {
     const status = statusMap[r.sku] || {};
     const desc = status.description || '';
     const material = detectMaterial(r.sku, desc);
-    const costs = MATERIAL_COSTS[material] || MATERIAL_COSTS.PLY;
+    const matCosts = costs[material] || costs.PLY;
     const abcClass = paramsMap[r.sku]?.abc_class || (monthlyVol >= 100 ? 'A' : monthlyVol >= 20 ? 'B' : 'C');
 
     // Break-even
-    const breakEven = calculateBreakEven(costs.lensCost, costs.surfPremium);
+    const breakEven = calculateBreakEven(matCosts.lensCost, matCosts.surfPremium, carryingPct);
     const decision = monthlyVol < breakEven ? 'SURFACE' : 'STOCK';
 
     // Statistical safety stock
@@ -154,26 +179,26 @@ function runAnalysis(db) {
       sku: r.sku,
       description: desc,
       material,
-      materialName: costs.name,
+      materialName: matCosts.name,
       abcClass,
       monthlyVolume: Math.round(monthlyVol * 10) / 10,
       adjustedMonthly,
       seasonalMultiplier,
       breakEven: Math.round(breakEven * 10) / 10,
       decision,
-      lensCost: costs.lensCost,
-      surfPremium: costs.surfPremium,
+      lensCost: matCosts.lensCost,
+      surfPremium: matCosts.surfPremium,
       onHand: status.on_hand || 0,
       safetyStock,
       zScore,
       stdDev: Math.round(stdDev * 10) / 10,
-      annualCarryCost: decision === 'STOCK' ? Math.round(status.on_hand * costs.lensCost * DEFAULT_CARRYING_PCT * 100) / 100 : 0,
-      annualSurfCost: decision === 'SURFACE' ? Math.round(monthlyVol * 12 * costs.surfPremium * 100) / 100 : 0,
+      annualCarryCost: decision === 'STOCK' ? Math.round(status.on_hand * matCosts.lensCost * carryingPct * 100) / 100 : 0,
+      annualSurfCost: decision === 'SURFACE' ? Math.round(monthlyVol * 12 * matCosts.surfPremium * 100) / 100 : 0,
     };
     results.push(result);
 
     // Aggregate by material
-    if (!byMaterial[material]) byMaterial[material] = { material, name: costs.name, totalSkus: 0, lowRunners: 0, stockSkus: 0, surfaceSkus: 0, totalMonthlyVol: 0, lowRunnerVol: 0, totalCarryCost: 0, totalSurfCost: 0 };
+    if (!byMaterial[material]) byMaterial[material] = { material, name: matCosts.name, totalSkus: 0, lowRunners: 0, stockSkus: 0, surfaceSkus: 0, totalMonthlyVol: 0, lowRunnerVol: 0, totalCarryCost: 0, totalSurfCost: 0 };
     byMaterial[material].totalSkus++;
     byMaterial[material].totalMonthlyVol += monthlyVol;
     if (decision === 'SURFACE') {
@@ -208,6 +233,14 @@ function runAnalysis(db) {
   const totalSurface = results.filter(r => r.decision === 'SURFACE').length;
   const totalStock = results.filter(r => r.decision === 'STOCK').length;
 
+  // Surfacing workload impact — how much work goes to surfacing
+  const surfaceResults = results.filter(r => r.decision === 'SURFACE');
+  const surfacingMonthlyVol = surfaceResults.reduce((s, r) => s + r.monthlyVolume, 0);
+  const surfacingWeeklyVol = Math.round(surfacingMonthlyVol / 4.33);
+  const surfacingDailyVol = Math.round(surfacingMonthlyVol / 21.7); // ~21.7 working days/month
+  const surfacingAnnualCost = surfaceResults.reduce((s, r) => s + r.annualSurfCost, 0);
+  const stockingAnnualCost = results.filter(r => r.decision === 'STOCK').reduce((s, r) => s + r.annualCarryCost, 0);
+
   return {
     results,
     summary: {
@@ -216,11 +249,20 @@ function runAnalysis(db) {
       stockCount: totalStock,
       surfacePct: results.length > 0 ? Math.round(totalSurface / results.length * 1000) / 10 : 0,
     },
+    surfacingImpact: {
+      skus: totalSurface,
+      dailyVolume: surfacingDailyVol,
+      weeklyVolume: surfacingWeeklyVol,
+      monthlyVolume: Math.round(surfacingMonthlyVol),
+      annualSurfacingCost: Math.round(surfacingAnnualCost),
+      annualStockingCost: Math.round(stockingAnnualCost),
+      netSavings: Math.round(stockingAnnualCost - surfacingAnnualCost),
+    },
     byMaterial: Object.values(byMaterial).sort((a, b) => b.totalMonthlyVol - a.totalMonthlyVol),
     parameters: {
-      carryingCostPct: DEFAULT_CARRYING_PCT,
-      lowRunnerThreshold: DEFAULT_LOW_RUNNER_THRESHOLD,
-      materialCosts: MATERIAL_COSTS,
+      carryingCostPct: carryingPct,
+      lowRunnerThreshold,
+      materialCosts: costs,
       seasonality: SEASONALITY,
       zScores: Z_SCORES,
       currentSeasonality: SEASONALITY[new Date().getMonth() + 1] || 1.0,

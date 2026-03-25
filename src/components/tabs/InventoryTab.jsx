@@ -2930,6 +2930,85 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         </div>
                       </div>
 
+                      {/* Surfacing Impact */}
+                      {longTailData.surfacingImpact && (() => {
+                        const si = longTailData.surfacingImpact;
+                        return (
+                          <div style={{ marginBottom: 16, padding: 14, background: `${T.amber}08`, border: `1px solid ${T.amber}30`, borderRadius: 8 }}>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: T.amber, fontFamily: mono, marginBottom: 10 }}>SURFACING WORKLOAD IMPACT</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                              <div style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{si.dailyVolume}</div>
+                                <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>LENSES / DAY</div>
+                              </div>
+                              <div style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{si.weeklyVolume}</div>
+                                <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>LENSES / WEEK</div>
+                              </div>
+                              <div style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{si.monthlyVolume}</div>
+                                <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>LENSES / MONTH</div>
+                              </div>
+                              <div style={{ textAlign: 'center' }}>
+                                <div style={{ fontSize: 20, fontWeight: 800, color: si.netSavings > 0 ? T.green : T.red, fontFamily: mono }}>${si.netSavings > 0 ? '+' : ''}{si.netSavings.toLocaleString()}</div>
+                                <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>NET SAVINGS / YR</div>
+                              </div>
+                            </div>
+                            <div style={{ marginTop: 8, fontSize: 9, color: T.textDim, fontFamily: mono }}>
+                              Surfacing cost: ${si.annualSurfacingCost.toLocaleString()}/yr &nbsp;|&nbsp; Avoided carrying cost: ${si.annualStockingCost.toLocaleString()}/yr &nbsp;|&nbsp; {si.skus} SKUs routed to surfacing
+                            </div>
+                          </div>
+                        );
+                      })()}
+
+                      {/* Threshold Controls */}
+                      <div style={{ marginBottom: 16, padding: 12, background: T.bg, borderRadius: 8, border: `1px solid ${T.border}` }}>
+                        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>CARRYING COST %</label>
+                            <input type="number" step="1" defaultValue={(params.carryingCostPct * 100) || 25} id="lt-carrying" style={{ width: 70, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>PLY COST $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.PLY?.lensCost || 3} id="lt-cost-ply" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>BLY COST $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.BLY?.lensCost || 5} id="lt-cost-bly" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>H67 COST $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.H67?.lensCost || 12} id="lt-cost-h67" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>B67 COST $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.B67?.lensCost || 15} id="lt-cost-b67" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SURF PREMIUM $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.PLY?.surfPremium || 2} id="lt-surf-premium" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <button onClick={async () => {
+                            const p = {
+                              long_tail_carrying_pct: (parseFloat(document.getElementById('lt-carrying')?.value) || 25) / 100,
+                              long_tail_lens_cost_ply: parseFloat(document.getElementById('lt-cost-ply')?.value) || 3,
+                              long_tail_lens_cost_bly: parseFloat(document.getElementById('lt-cost-bly')?.value) || 5,
+                              long_tail_lens_cost_h67: parseFloat(document.getElementById('lt-cost-h67')?.value) || 12,
+                              long_tail_lens_cost_b67: parseFloat(document.getElementById('lt-cost-b67')?.value) || 15,
+                              long_tail_surf_premium_ply: parseFloat(document.getElementById('lt-surf-premium')?.value) || 2,
+                              long_tail_surf_premium_bly: parseFloat(document.getElementById('lt-surf-premium')?.value) || 2,
+                              long_tail_surf_premium_h67: parseFloat(document.getElementById('lt-surf-premium')?.value) || 2,
+                              long_tail_surf_premium_b67: parseFloat(document.getElementById('lt-surf-premium')?.value) || 2,
+                            };
+                            await fetch(`${ovenServerUrl}/api/lens-intel/long-tail/params`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(p) });
+                            const resp = await fetch(`${ovenServerUrl}/api/lens-intel/long-tail`, { method: 'POST' });
+                            setLongTailData(await resp.json());
+                          }} style={{ background: T.green, border: "none", borderRadius: 6, padding: "5px 16px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                            Save & Re-run
+                          </button>
+                        </div>
+                      </div>
+
                       {/* By Material breakdown */}
                       {byMaterial.length > 0 && (
                         <div style={{ marginBottom: 16 }}>

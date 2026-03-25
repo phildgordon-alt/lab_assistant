@@ -2226,6 +2226,27 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // Long tail threshold settings
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/long-tail/params') {
+    const params = {};
+    try {
+      const rows = labDb.db.prepare("SELECT key, value FROM model_params WHERE key LIKE 'long_tail_%'").all();
+      for (const r of rows) params[r.key] = isNaN(Number(r.value)) ? r.value : Number(r.value);
+    } catch {}
+    return json(res, params);
+  }
+  if (req.method==='POST' && url.pathname==='/api/lens-intel/long-tail/params') {
+    const body = await readBody(req);
+    const upsert = labDb.db.prepare("INSERT INTO model_params (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
+    const save = labDb.db.transaction(() => {
+      for (const [k, v] of Object.entries(body)) {
+        if (k.startsWith('long_tail_')) upsert.run(k, String(v));
+      }
+    });
+    save();
+    return json(res, { ok: true });
+  }
+
   // Long tail DVI export — OPC-based CSV for DVI surfacing routing
   if (req.method==='GET' && url.pathname==='/api/lens-intel/long-tail/export-dvi') {
     const cache = global._longTailCache;
