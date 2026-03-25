@@ -5711,7 +5711,8 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   const jobs = data?.jobs || [];
   const sm = data?.summary || {};
   let filtered = jobs;
-  if (filter !== 'all') filtered = filtered.filter(j => j.zone === filter);
+  if (filter === 'Single Vision' || filter === 'Surfacing') filtered = filtered.filter(j => j.jobType === filter);
+  else if (filter !== 'all') filtered = filtered.filter(j => j.zone === filter);
   if (search) {
     const q = search.toLowerCase();
     filtered = filtered.filter(j => (j.job_id||'').toLowerCase().includes(q) || (j.station||'').toLowerCase().includes(q) || (j.coating||'').toLowerCase().includes(q));
@@ -5782,10 +5783,61 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
         </div>
       </Card>
 
-      {/* Search */}
-      <div style={{ marginBottom: 12 }}>
+      {/* SV vs Surfacing breakdown */}
+      {(() => {
+        const svData = data?.singleVision || {};
+        const surfData = data?.surfacing || {};
+        return (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10, marginBottom: 16 }}>
+            <Card style={{ padding: 14, borderLeft: `4px solid ${T.cyan}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.cyan }}>Single Vision</div>
+                <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SLA: {svData.slaTarget || 2} days</div>
+              </div>
+              <div style={{ display: 'flex', gap: 16, fontFamily: mono }}>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{svData.total || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>TOTAL</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{svData.avgDays || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>AVG DAYS</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: svData.overSLA > 0 ? T.red : T.green }}>{svData.overSLA || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>OVER SLA</div></div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 10, color: T.green }}>{svData.green || 0}</span>
+                  <span style={{ fontSize: 10, color: T.amber }}>{svData.yellow || 0}</span>
+                  <span style={{ fontSize: 10, color: T.red }}>{svData.red || 0}</span>
+                  <span style={{ fontSize: 10, color: '#cc0000' }}>{svData.critical || 0}</span>
+                </div>
+              </div>
+            </Card>
+            <Card style={{ padding: 14, borderLeft: `4px solid ${T.purple || '#9b6ee0'}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: T.purple || '#9b6ee0' }}>Surfacing</div>
+                <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SLA: {surfData.slaTarget || 3} days</div>
+              </div>
+              <div style={{ display: 'flex', gap: 16, fontFamily: mono }}>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{surfData.total || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>TOTAL</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: T.text }}>{surfData.avgDays || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>AVG DAYS</div></div>
+                <div style={{ textAlign: 'center' }}><div style={{ fontSize: 20, fontWeight: 800, color: surfData.overSLA > 0 ? T.red : T.green }}>{surfData.overSLA || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>OVER SLA</div></div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 10, color: T.green }}>{surfData.green || 0}</span>
+                  <span style={{ fontSize: 10, color: T.amber }}>{surfData.yellow || 0}</span>
+                  <span style={{ fontSize: 10, color: T.red }}>{surfData.red || 0}</span>
+                  <span style={{ fontSize: 10, color: '#cc0000' }}>{surfData.critical || 0}</span>
+                </div>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
+
+      {/* Search + filter by type */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
         <input type="text" placeholder="Search job ID, station, coating..." value={search} onChange={e => setSearch(e.target.value)}
-          style={{ width: '100%', maxWidth: 400, padding: "10px 14px", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
+          style={{ flex: 1, maxWidth: 400, padding: "10px 14px", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
+        {['all', 'Single Vision', 'Surfacing'].map(f => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: '8px 14px', borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: 'pointer',
+            background: filter === f ? T.blue : 'transparent', color: filter === f ? '#fff' : T.textMuted,
+            border: `1px solid ${filter === f ? T.blue : T.border}`
+          }}>{f === 'all' ? 'All' : f}</button>
+        ))}
       </div>
 
       {/* Job table */}
@@ -5796,8 +5848,10 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
             <thead>
               <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
                 <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>JOB ID</th>
+                <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>TYPE</th>
                 <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ZONE</th>
                 <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DAYS</th>
+                <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SLA</th>
                 <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>STAGE</th>
                 <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>STATION</th>
                 <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>COATING</th>
@@ -5810,9 +5864,13 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                 <tr key={j.job_id} style={{ borderBottom: `1px solid ${T.border}22`, background: j.zone === 'CRITICAL' ? `${'#cc0000'}08` : j.zone === 'RED' ? `${T.red}06` : 'transparent' }}>
                   <td style={{ padding: '6px 12px', fontWeight: 600, color: T.text }}>{j.job_id}</td>
                   <td style={{ padding: '6px 12px', textAlign: 'center' }}>
+                    <span style={{ fontSize: 8, padding: '2px 5px', borderRadius: 3, fontWeight: 700, background: j.jobType === 'Surfacing' ? `${T.purple || '#9b6ee0'}20` : `${T.cyan}20`, color: j.jobType === 'Surfacing' ? (T.purple || '#9b6ee0') : T.cyan }}>{j.jobType === 'Surfacing' ? 'SURF' : 'SV'}</span>
+                  </td>
+                  <td style={{ padding: '6px 12px', textAlign: 'center' }}>
                     <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, background: `${zoneColors[j.zone]}20`, color: zoneColors[j.zone] }}>{j.zone}</span>
                   </td>
                   <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 700, color: zoneColors[j.zone] }}>{j.daysInLab}</td>
+                  <td style={{ padding: '6px 12px', textAlign: 'right', color: j.overSLA ? T.red : T.textDim }}>{j.slaTarget}d</td>
                   <td style={{ padding: '6px 12px', color: T.textMuted }}>{j.stage}</td>
                   <td style={{ padding: '6px 12px', color: T.textMuted }}>{j.station}</td>
                   <td style={{ padding: '6px 12px', color: T.textMuted }}>{j.coating || '—'}</td>
@@ -10258,7 +10316,6 @@ function LabAssistantV2(){
       {id:"analytics",label:"Analytics",icon:"📊"},
       {id:"aging",label:"Aging Jobs",icon:"⏳"},
       {id:"qc",label:"QC & Breakage",icon:"✓"},
-      {id:"timeatlab",label:"Time at Lab",icon:"⏱"},
     ]},
     {id:"intelligence",label:"Intelligence",icon:"🧠",type:"dropdown",items:[
       {id:"ai",label:"AI Assistant",icon:"🤖"},

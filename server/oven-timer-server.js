@@ -2039,18 +2039,40 @@ Respond with a structured batching plan in this format:
       .map(j => {
         const enteredMs = j.firstSeen || j.enteredAt || now;
         const daysInLab = Math.round((now - enteredMs) / 86400000 * 10) / 10;
+
+        // Enrich with XML data for lens type
+        const xml = dviJobIndex.get(j.job_id);
+        const lensType = j.lensType || xml?.lensType || '';
+        // S=Single Vision, P=Progressive, B=Bifocal
+        // Surfacing jobs: P or B (need surfacing). SV: S or unknown (finished lens path)
+        const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing' : 'Single Vision';
+        const slaTarget = jobType === 'Surfacing' ? 3 : 2;
+
+        // Zone based on job type SLA target
         let zone = 'GREEN';
-        if (daysInLab >= 3) zone = 'CRITICAL';
-        else if (daysInLab >= 2) zone = 'RED';
-        else if (daysInLab >= 1) zone = 'YELLOW';
+        if (jobType === 'Surfacing') {
+          if (daysInLab >= 3) zone = 'CRITICAL';
+          else if (daysInLab >= 2) zone = 'RED';
+          else if (daysInLab >= 1) zone = 'YELLOW';
+        } else {
+          // Single Vision: tighter targets (2 day SLA)
+          if (daysInLab >= 2) zone = 'CRITICAL';
+          else if (daysInLab >= 1.5) zone = 'RED';
+          else if (daysInLab >= 0.75) zone = 'YELLOW';
+        }
+
         return {
           job_id: j.job_id,
           invoice: j.invoice || j.job_id,
           stage: j.stage,
           station: j.station,
-          coating: j.coating || '',
+          coating: j.coating || xml?.coating || '',
           rush: j.rush || 'N',
+          lensType,
+          jobType,
+          slaTarget,
           daysInLab: Math.round(daysInLab * 10) / 10,
+          overSLA: daysInLab >= slaTarget,
           zone,
           enteredAt: enteredMs ? new Date(enteredMs).toISOString().slice(0, 10) : '',
         };
@@ -2058,6 +2080,19 @@ Respond with a structured batching plan in this format:
       .sort((a, b) => b.daysInLab - a.daysInLab);
 
     const total = jobs.length;
+    const sv = jobs.filter(j => j.jobType === 'Single Vision');
+    const surf = jobs.filter(j => j.jobType === 'Surfacing');
+
+    const zoneCounts = (list) => ({
+      total: list.length,
+      green: list.filter(j => j.zone === 'GREEN').length,
+      yellow: list.filter(j => j.zone === 'YELLOW').length,
+      red: list.filter(j => j.zone === 'RED').length,
+      critical: list.filter(j => j.zone === 'CRITICAL').length,
+      overSLA: list.filter(j => j.overSLA).length,
+      avgDays: list.length > 0 ? Math.round(list.reduce((s, j) => s + j.daysInLab, 0) / list.length * 10) / 10 : 0,
+    });
+
     const green = jobs.filter(j => j.zone === 'GREEN').length;
     const yellow = jobs.filter(j => j.zone === 'YELLOW').length;
     const red = jobs.filter(j => j.zone === 'RED').length;
@@ -2068,6 +2103,8 @@ Respond with a structured batching plan in this format:
     return json(res, {
       jobs,
       summary: { total, green, yellow, red, critical, outlierPct, avgDays, outlierThreshold: 5 },
+      singleVision: { ...zoneCounts(sv), slaTarget: 2 },
+      surfacing: { ...zoneCounts(surf), slaTarget: 3 },
     });
   }
 

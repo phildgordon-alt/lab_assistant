@@ -78,11 +78,17 @@ function buildWeeklyConsumption(db) {
 // COMPUTE HEALTH — for all lens SKUs
 // ─────────────────────────────────────────────────────────────────────────────
 function computeAll(db, itempath, netsuite) {
+  // Ensure tables exist
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, consumption_trend_pct REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 6.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT "OK", order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, computed_at TEXT DEFAULT (datetime("now")))');
+    db.exec('CREATE TABLE IF NOT EXISTS lens_consumption_weekly (sku TEXT NOT NULL, week_start TEXT NOT NULL, units_consumed INTEGER DEFAULT 0, PRIMARY KEY(sku, week_start))');
+  } catch (e) { /* tables already exist */ }
+
   const now = new Date();
   const today = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
 
   // Build weekly consumption first
-  buildWeeklyConsumption(db);
+  try { buildWeeklyConsumption(db); } catch (e) { console.error('[Lens Intelligence] Weekly consumption error:', e.message); }
 
   // Get on-hand from ItemPath
   const inv = itempath.getInventory();
@@ -271,10 +277,10 @@ function getSummary(db) {
 // START — compute on startup and schedule periodic refresh
 // ─────────────────────────────────────────────────────────────────────────────
 function start(db, itempath, netsuite) {
-  // Initial compute after 90s (let all data sources load and sync first)
+  // Initial compute after 120s (let all data sources load and sync first)
   setTimeout(() => {
-    try { computeAll(db, itempath, netsuite); } catch (e) { console.error('[Lens Intelligence] Initial compute error:', e.message); }
-  }, 90000);
+    try { computeAll(db, itempath, netsuite); } catch (e) { console.error('[Lens Intelligence] Initial compute error:', e.message, e.stack?.split('\n')[1]); }
+  }, 120000);
 
   // Recompute every 30 minutes
   computeTimer = setInterval(() => {
