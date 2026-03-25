@@ -542,6 +542,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [npiScenarios, setNpiScenarios] = useState(null);
   const [npiSelected, setNpiSelected] = useState(null);
   const [npiCreating, setNpiCreating] = useState(false);
+  const [longTailData, setLongTailData] = useState(null);
+  const [longTailOpen, setLongTailOpen] = useState(false);
+  const [longTailFilter, setLongTailFilter] = useState('all');
+  const [longTailSearch, setLongTailSearch] = useState('');
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
   const [pipelineDetail, setPipelineDetail] = useState(null);
@@ -2905,6 +2909,188 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         </div>
                         );
                       })()}
+                    </div>
+                  );
+                })()}
+              </Card>
+
+              {/* Long Tail Analysis — Stock vs Surface */}
+              <Card style={{ marginTop: 20 }}>
+                <div onClick={() => {
+                  setLongTailOpen(!longTailOpen);
+                  if (!longTailData && !longTailOpen) fetch(`${ovenServerUrl}/api/lens-intel/long-tail`).then(r => r.json()).then(d => { if (d.results) setLongTailData(d); }).catch(() => {});
+                }} style={{ padding: '14px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: T.text }}>Long Tail Analysis</div>
+                    <div style={{ fontSize: 11, color: T.textMuted }}>Stock vs Surface decision engine — break-even analysis by material type
+                      {longTailData?.lastRun && <span style={{ marginLeft: 8, color: T.textDim }}>Last run: {new Date(longTailData.lastRun).toLocaleString()}</span>}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 14, color: T.textDim }}>{longTailOpen ? '▲' : '▼'}</span>
+                </div>
+                {longTailOpen && (() => {
+                  const hasResults = longTailData?.results?.length > 0;
+                  if (!hasResults) {
+                    return (
+                      <div style={{ padding: '16px 16px 20px', textAlign: 'center' }}>
+                        {longTailData?.lastRun === undefined && <div style={{ fontSize: 12, color: T.textMuted, marginBottom: 12 }}>No analysis has been run yet.</div>}
+                        <button onClick={async () => {
+                          setLongTailData({ _loading: true });
+                          const resp = await fetch(`${ovenServerUrl}/api/lens-intel/long-tail`, { method: 'POST' });
+                          setLongTailData(await resp.json());
+                        }} style={{ background: T.green, border: "none", borderRadius: 8, padding: "10px 28px", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: mono }}>
+                          {longTailData?._loading ? 'Running...' : 'Run Analysis'}
+                        </button>
+                      </div>
+                    );
+                  }
+                  if (longTailData.error) return <div style={{ padding: 16, color: T.red, fontSize: 12 }}>{longTailData.error}</div>;
+
+                  const results = longTailData.results || [];
+                  const summary = longTailData.summary || {};
+                  const byMaterial = longTailData.byMaterial || [];
+                  const params = longTailData.parameters || {};
+
+                  let filtered = results;
+                  if (longTailFilter === 'SURFACE') filtered = filtered.filter(r => r.decision === 'SURFACE');
+                  else if (longTailFilter === 'STOCK') filtered = filtered.filter(r => r.decision === 'STOCK');
+                  if (longTailSearch) {
+                    const q = longTailSearch.toLowerCase();
+                    filtered = filtered.filter(r => r.sku?.toLowerCase().includes(q) || r.description?.toLowerCase().includes(q) || r.materialName?.toLowerCase().includes(q));
+                  }
+
+                  return (
+                    <div style={{ padding: '0 16px 16px' }}>
+                      {/* Summary KPIs */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10, marginBottom: 16 }}>
+                        <div style={{ padding: 12, background: T.bg, borderRadius: 8, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.text, fontFamily: mono }}>{summary.totalSkus || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>TOTAL SKUs</div>
+                        </div>
+                        <div style={{ padding: 12, background: T.bg, borderRadius: 8, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.green, fontFamily: mono }}>{summary.stockCount || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>STOCK</div>
+                        </div>
+                        <div style={{ padding: 12, background: T.bg, borderRadius: 8, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.amber, fontFamily: mono }}>{summary.surfaceCount || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>SURFACE</div>
+                        </div>
+                        <div style={{ padding: 12, background: T.bg, borderRadius: 8, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.blue, fontFamily: mono }}>{summary.surfacePct || 0}%</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>SURFACE %</div>
+                        </div>
+                        <div style={{ padding: 12, background: T.bg, borderRadius: 8, textAlign: 'center' }}>
+                          <div style={{ fontSize: 22, fontWeight: 800, color: T.purple || T.blue, fontFamily: mono }}>x{params.currentSeasonality?.toFixed(2) || '1.00'}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>SEASON</div>
+                        </div>
+                      </div>
+
+                      {/* By Material breakdown */}
+                      {byMaterial.length > 0 && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 6 }}>BY MATERIAL</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(byMaterial.length, 5)}, 1fr)`, gap: 8 }}>
+                            {byMaterial.map(m => (
+                              <div key={m.material} style={{ padding: 10, background: T.bg, borderRadius: 6, border: `1px solid ${T.border}` }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: T.text, marginBottom: 4 }}>{m.name || m.material}</div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: mono }}>
+                                  <span style={{ color: T.textMuted }}>{m.totalSkus} SKUs</span>
+                                  <span style={{ color: T.amber }}>{m.surfaceSkus} surf</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: mono, marginTop: 2 }}>
+                                  <span style={{ color: T.textMuted }}>Vol: {Math.round(m.totalMonthlyVol)}/mo</span>
+                                  <span style={{ color: T.green }}>{m.stockSkus} stock</span>
+                                </div>
+                                {m.totalCarryCost > 0 && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginTop: 2 }}>Carry: ${m.totalCarryCost.toFixed(0)}/yr</div>}
+                                {m.totalSurfCost > 0 && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Surf: ${m.totalSurfCost.toFixed(0)}/yr</div>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Filters */}
+                      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+                        {['all', 'SURFACE', 'STOCK'].map(f => (
+                          <button key={f} onClick={() => setLongTailFilter(f)} style={{
+                            background: longTailFilter === f ? (f === 'SURFACE' ? `${T.amber}20` : f === 'STOCK' ? `${T.green}20` : T.blueDark) : 'transparent',
+                            border: `1px solid ${longTailFilter === f ? (f === 'SURFACE' ? T.amber : f === 'STOCK' ? T.green : T.blue) : T.border}`,
+                            borderRadius: 6, padding: '5px 12px', color: longTailFilter === f ? (f === 'SURFACE' ? T.amber : f === 'STOCK' ? T.green : T.blue) : T.textMuted,
+                            fontSize: 10, fontWeight: 600, cursor: 'pointer', fontFamily: mono
+                          }}>
+                            {f === 'all' ? `All (${results.length})` : f === 'SURFACE' ? `Surface (${summary.surfaceCount || 0})` : `Stock (${summary.stockCount || 0})`}
+                          </button>
+                        ))}
+                        <input value={longTailSearch} onChange={e => setLongTailSearch(e.target.value)} placeholder="Search SKU..." style={{
+                          marginLeft: 'auto', padding: '5px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 11, fontFamily: mono, width: 180
+                        }} />
+                        <button onClick={async () => {
+                          const resp = await fetch(`${ovenServerUrl}/api/lens-intel/long-tail`, { method: 'POST' });
+                          setLongTailData(await resp.json());
+                        }} style={{ background: T.green, border: "none", borderRadius: 6, padding: "5px 12px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
+                          Re-run Analysis
+                        </button>
+                        <ExportBtn label="Export CSV" onClick={() => {
+                          downloadCSV('long_tail_analysis.csv', ['sku','description','material','materialName','abcClass','monthlyVolume','adjustedMonthly','seasonalMultiplier','breakEven','decision','lensCost','surfPremium','onHand','safetyStock','zScore','stdDev','annualCarryCost','annualSurfCost'], filtered);
+                        }} />
+                      </div>
+
+                      {/* Results table */}
+                      <div style={{ maxHeight: 500, overflowY: 'auto', borderRadius: 8, border: `1px solid ${T.border}` }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, fontFamily: mono }}>
+                          <thead style={{ position: 'sticky', top: 0, background: T.surface, zIndex: 1 }}>
+                            <tr>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>SKU</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'left', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>MATERIAL</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'center', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>ABC</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>MO VOL</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>ADJUSTED</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>BREAK-EVEN</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'center', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>DECISION</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>ON HAND</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>SAFETY</th>
+                              <th style={{ padding: '8px 10px', textAlign: 'right', fontSize: 8, color: T.textDim, borderBottom: `2px solid ${T.border}` }}>ANNUAL COST</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.slice(0, 200).map((r, i) => (
+                              <tr key={r.sku} style={{ borderBottom: `1px solid ${T.border}15`, background: i % 2 === 0 ? 'transparent' : `${T.bg}40` }}>
+                                <td style={{ padding: '6px 10px', color: T.text, fontWeight: 600 }}>
+                                  <div>{r.sku}</div>
+                                  {r.description && <div style={{ fontSize: 8, color: T.textDim, fontWeight: 400 }}>{r.description.slice(0, 40)}</div>}
+                                </td>
+                                <td style={{ padding: '6px 10px', color: T.textMuted }}>{r.materialName || r.material}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                  <span style={{ fontSize: 9, padding: '1px 6px', borderRadius: 3, fontWeight: 700, background: r.abcClass === 'A' ? `${T.green}20` : r.abcClass === 'B' ? `${T.amber}20` : `${T.textDim}20`, color: r.abcClass === 'A' ? T.green : r.abcClass === 'B' ? T.amber : T.textDim }}>{r.abcClass}</span>
+                                </td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: T.text }}>{r.monthlyVolume}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: r.seasonalMultiplier > 1.05 ? T.green : r.seasonalMultiplier < 0.95 ? T.red : T.textMuted }}>{r.adjustedMonthly}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: T.textMuted }}>{r.breakEven}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                  <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, fontWeight: 800, background: r.decision === 'SURFACE' ? `${T.amber}20` : `${T.green}20`, color: r.decision === 'SURFACE' ? T.amber : T.green }}>{r.decision}</span>
+                                </td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: r.onHand === 0 ? T.red : T.text }}>{r.onHand}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: T.textMuted }}>{r.safetyStock}</td>
+                                <td style={{ padding: '6px 10px', textAlign: 'right', color: T.textMuted }}>
+                                  {r.decision === 'STOCK' ? `$${r.annualCarryCost}/yr carry` : `$${r.annualSurfCost}/yr surf`}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {filtered.length > 200 && <div style={{ padding: 8, textAlign: 'center', fontSize: 10, color: T.textDim }}>Showing 200 of {filtered.length}</div>}
+                        {filtered.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: T.textDim, fontSize: 12 }}>No results</div>}
+                      </div>
+
+                      {/* Parameters info + last run */}
+                      <div style={{ marginTop: 12, display: 'flex', gap: 16, flexWrap: 'wrap', fontSize: 9, color: T.textDim, fontFamily: mono, justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                          <span>Carrying cost: {(params.carryingCostPct * 100 || 25)}%/yr</span>
+                          <span>Low runner threshold: {params.lowRunnerThreshold || 3} units/mo</span>
+                          <span>Seasonality: {new Date().toLocaleString('en', { month: 'short' })} = x{params.currentSeasonality?.toFixed(2) || '1.00'}</span>
+                        </div>
+                        {longTailData?.lastRun && <span style={{ color: T.textMuted }}>Last run: {new Date(longTailData.lastRun).toLocaleString()}</span>}
+                      </div>
                     </div>
                   );
                 })()}

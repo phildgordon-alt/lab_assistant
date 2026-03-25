@@ -56,6 +56,7 @@ const netsuite = require('./netsuite-adapter');
 const looker = require('./looker-adapter');
 const lensIntel = require('./lens-intelligence');
 const npiEngine = require('./npi-engine');
+const longTail = require('./long-tail-analysis');
 itempath.start();
 binning.start(itempath);
 netsuite.start();
@@ -2185,6 +2186,22 @@ Respond with a structured batching plan in this format:
     const csv = [headers.join(','), ...data.items.map(r => headers.map(h => { const v = r[h] ?? ''; return String(v).includes(',') ? `"${v}"` : v; }).join(','))].join('\n');
     res.end(csv);
     return;
+  }
+
+  // ── Long Tail Analysis (Stock vs Surface) ─────────────────
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/long-tail') {
+    return json(res, { ...global._longTailCache, lastRun: global._longTailLastRun || null });
+  }
+  if (req.method==='POST' && url.pathname==='/api/lens-intel/long-tail') {
+    try {
+      const analysis = longTail.runAnalysis(labDb.db);
+      global._longTailCache = analysis;
+      global._longTailLastRun = new Date().toISOString();
+      return json(res, { ...analysis, lastRun: global._longTailLastRun });
+    } catch (e) {
+      console.error('[LongTail] Error:', e.message);
+      return json(res, { error: e.message }, 500);
+    }
   }
 
   // ── NPI Scenarios ──────────────────────────────────────────
