@@ -1985,7 +1985,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     )}
                     {compareData && (
                       <ExportBtn label="Export Comparison" onClick={() => {
-                        downloadCSV(`job_comparison_${pipelineDays}d.csv`, ['date','reference','source','invoice','dvi_id','coating','frame','department'], compareData.jobs || []);
+                        downloadCSV(`job_comparison_${pipelineDays}d.csv`, ['date','order_number','source','invoice','job_id','dvi_id','dvi_coating','dvi_frame','dvi_department','dvi_days_in_lab','dvi_entry_date','dvi_rush','lk_frame_upc','lk_opcs','lk_lenses','lk_breakages'], compareData.jobs || []);
                       }} />
                     )}
                   </div>
@@ -1998,7 +1998,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   if (compareFilter !== 'all') filtered = filtered.filter(j => j.source === compareFilter);
                   if (compareSearch) {
                     const q = compareSearch.toLowerCase();
-                    filtered = filtered.filter(j => (j.reference||'').includes(q) || (j.invoice||'').includes(q) || (j.coating||'').toLowerCase().includes(q) || (j.frame||'').toLowerCase().includes(q));
+                    filtered = filtered.filter(j => (j.order_number||'').includes(q) || (j.invoice||'').includes(q) || (j.job_id||'').includes(q) || (j.dvi_coating||'').toLowerCase().includes(q) || (j.dvi_frame||'').toLowerCase().includes(q) || (j.lk_frame_upc||'').includes(q) || (j.lk_opcs||'').includes(q));
                   }
                   return (
                     <div>
@@ -2039,30 +2039,36 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
                           <thead>
                             <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
-                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DATE</th>
-                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>REFERENCE</th>
-                              <th style={{ padding: '6px 10px', textAlign: 'center', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SOURCE</th>
-                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>INVOICE</th>
-                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>COATING</th>
-                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>FRAME</th>
-                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DEPT</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DATE</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ORDER #</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'center', fontSize: 8, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SOURCE</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI INV</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI COAT</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI FRAME</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LK JOB ID</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LK FRAME</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 8, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LK OPCs</th>
+                              <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 8, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LENSES</th>
                             </tr>
                           </thead>
                           <tbody>
                             {filtered.slice(0, 300).map((j, i) => (
                               <tr key={i} style={{ borderBottom: `1px solid ${T.border}15`, background: j.source === 'DVI Only' ? `${T.amber}08` : j.source === 'Looker Only' ? `${T.blue}08` : 'transparent' }}>
-                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.date}</td>
-                                <td style={{ padding: '4px 10px', color: T.text, fontWeight: 600 }}>{j.reference}</td>
-                                <td style={{ padding: '4px 10px', textAlign: 'center' }}>
-                                  <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700,
+                                <td style={{ padding: '3px 8px', color: T.textMuted, fontSize: 10 }}>{j.date}</td>
+                                <td style={{ padding: '3px 8px', color: T.text, fontWeight: 600 }}>{j.order_number}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'center' }}>
+                                  <span style={{ fontSize: 8, padding: '2px 5px', borderRadius: 3, fontWeight: 700,
                                     background: j.source === 'Both' ? `${T.green}20` : j.source === 'DVI Only' ? `${T.amber}20` : `${T.blue}20`,
                                     color: j.source === 'Both' ? T.green : j.source === 'DVI Only' ? T.amber : T.blue
                                   }}>{j.source}</span>
                                 </td>
-                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.invoice || '—'}</td>
-                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.coating || '—'}</td>
-                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.frame || '—'}</td>
-                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.department || '—'}</td>
+                                <td style={{ padding: '3px 8px', color: T.amber }}>{j.invoice || '—'}</td>
+                                <td style={{ padding: '3px 8px', color: T.textMuted }}>{j.dvi_coating || '—'}</td>
+                                <td style={{ padding: '3px 8px', color: T.textMuted }}>{j.dvi_frame || '—'}</td>
+                                <td style={{ padding: '3px 8px', color: T.blue }}>{j.job_id || '—'}</td>
+                                <td style={{ padding: '3px 8px', color: T.textMuted }}>{j.lk_frame_upc || '—'}</td>
+                                <td style={{ padding: '3px 8px', color: T.textMuted, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.lk_opcs || '—'}</td>
+                                <td style={{ padding: '3px 8px', textAlign: 'right', color: T.textMuted }}>{j.lk_lenses || '—'}</td>
                               </tr>
                             ))}
                           </tbody>

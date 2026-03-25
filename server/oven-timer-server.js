@@ -1895,73 +1895,132 @@ Respond with a structured batching plan in this format:
           dates.push({ iso: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, mdy: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}` });
         }
       }
-
-      // DVI shipped jobs by reference number
-      const dviByRef = {};
       const mdySet = new Set(dates.map(d => d.mdy));
+
+      // ── DVI shipped jobs (keyed by invoice number) ──
+      const dviJobs = [];
       for (const [jobNum, xml] of shippedJobIndex) {
         if (!mdySet.has(xml.shipDate)) continue;
-        const ref = xml.rxNum || xml.invoice || jobNum;
         const [mm, dd, yy] = xml.shipDate.split('/');
-        dviByRef[ref] = { date: `20${yy}-${mm}-${dd}`, invoice: xml.invoice || jobNum, reference: ref, coating: xml.coating || '', frameStyle: xml.frameStyle || '', frameSku: xml.frameSku || '', department: xml.department || '' };
+        dviJobs.push({
+          invoice: xml.invoice || jobNum,
+          reference: xml.rxNum || xml.invoice || jobNum,
+          date: `20${yy}-${mm}-${dd}`,
+          coating: xml.coating || '',
+          lensType: xml.lensType || '',
+          frameStyle: xml.frameStyle || '',
+          frameSku: xml.frameSku || '',
+          department: xml.department || '',
+          daysInLab: xml.daysInLab || '',
+          entryDate: xml.entryDate || '',
+          rush: xml.rush || 'N',
+        });
       }
 
-      // Looker jobs from SQLite (no ad-hoc API call — uses cached job-level data)
-      const lkByRef = {};
+      // ── Looker/NetSuite jobs from SQLite (keyed by job_id) ──
+      const lkJobs = [];
       try {
         const isoList = dates.map(d => d.iso);
         const placeholders = isoList.map(() => '?').join(',');
-        const lkRows = labDb.db.prepare(
-          `SELECT DISTINCT job_id, order_number, dvi_id, sent_from_lab_date, frame_upc
-           FROM looker_jobs WHERE sent_from_lab_date IN (${placeholders})`
-        ).all(...isoList);
+        // Get unique jobs (dedup by job_id since each job has 2 lens rows)
+        const lkRows = labDb.db.prepare(`
+          SELECT job_id, order_number, dvi_id, sent_from_lab_date, frame_upc,
+                 GROUP_CONCAT(DISTINCT opc) as opcs, SUM(count_lenses) as total_lenses, SUM(count_breakages) as total_breakages
+          FROM looker_jobs WHERE sent_from_lab_date IN (${placeholders})
+          GROUP BY job_id
+        `).all(...isoList);
         for (const r of lkRows) {
-          const ref = r.order_number;
-          if (ref && !lkByRef[ref]) {
-            lkByRef[ref] = { date: r.sent_from_lab_date, reference: ref, dviId: r.dvi_id || '', frameUpc: r.frame_upc || '' };
-          }
+          lkJobs.push({
+            job_id: r.job_id,
+            order_number: r.order_number,
+            dvi_id: r.dvi_id || '',
+            date: r.sent_from_lab_date,
+            frame_upc: r.frame_upc || '',
+            opcs: r.opcs || '',
+            lenses: r.total_lenses || 0,
+            breakages: r.total_breakages || 0,
+          });
         }
       } catch (e) { console.error('[Compare] SQLite query error:', e.message); }
 
-      // Merge
-      const allRefs = new Set([...Object.keys(dviByRef), ...Object.keys(lkByRef)]);
-      const jobs = [];
-      let bothCount = 0, dviOnly = 0, lookerOnly = 0;
-      for (const ref of allRefs) {
-        const dvi = dviByRef[ref];
-        const lk = lkByRef[ref];
-        const source = dvi && lk ? 'Both' : dvi ? 'DVI Only' : 'Looker Only';
-        if (source === 'Both') bothCount++;
-        else if (source === 'DVI Only') dviOnly++;
-        else lookerOnly++;
-        jobs.push({
-          date: dvi?.date || lk?.date || '',
-          reference: ref,
-          source,
-          invoice: dvi?.invoice || '',
-          dvi_id: lk?.dviId || '',
-          coating: dvi?.coating || '',
-          frame: dvi?.frameStyle || dvi?.frameSku || lk?.frameUpc || '',
-          department: dvi?.department || '',
-        });
+      // ── Cross-reference by order_number (Reference) ──
+      // Build lookup: order_number → [Looker jobs] for matching
+      const lkByOrder = {};
+      for (const lk of lkJobs) {
+        if (!lkByOrder[lk.order_number]) lkByOrder[lk.order_number] = [];
+        lkByOrder[lk.order_number].push(lk);
       }
-      jobs.sort((a, b) => b.date.localeCompare(a.date) || a.reference.localeCompare(b.reference));
+
+      // Build lookup: order_number → [DVI jobs]
+      const dviByRef = {};
+      for (const dvi of dviJobs) {
+        if (!dviByRef[dvi.reference]) dviByRef[dvi.reference] = [];
+        dviByRef[dvi.reference].push(dvi);
+      }
+
+      // Match jobs
+      const matchedLkIds = new Set();
+      const matchedDviInvoices = new Set();
+      const merged = [];
+      let bothCount = 0, dviOnly = 0, lookerOnly = 0;
+
+      // First pass: match by order_number
+      const allOrderNums = new Set([...Object.keys(dviByRef), ...Object.keys(lkByOrder)]);
+      for (const orderNum of allOrderNums) {
+        const dviList = dviByRef[orderNum] || [];
+        const lkList = lkByOrder[orderNum] || [];
+
+        // Match DVI jobs to Looker jobs within the same order
+        const maxLen = Math.max(dviList.length, lkList.length);
+        for (let i = 0; i < maxLen; i++) {
+          const dvi = dviList[i] || null;
+          const lk = lkList[i] || null;
+          const source = dvi && lk ? 'Both' : dvi ? 'DVI Only' : 'Looker Only';
+          if (source === 'Both') bothCount++;
+          else if (source === 'DVI Only') dviOnly++;
+          else lookerOnly++;
+
+          if (dvi) matchedDviInvoices.add(dvi.invoice);
+          if (lk) matchedLkIds.add(lk.job_id);
+
+          merged.push({
+            date: dvi?.date || lk?.date || '',
+            order_number: orderNum,
+            source,
+            // DVI fields
+            invoice: dvi?.invoice || '',
+            dvi_coating: dvi?.coating || '',
+            dvi_frame: dvi?.frameStyle || dvi?.frameSku || '',
+            dvi_department: dvi?.department || '',
+            dvi_days_in_lab: dvi?.daysInLab || '',
+            dvi_entry_date: dvi?.entryDate || '',
+            dvi_rush: dvi?.rush || '',
+            // Looker/NetSuite fields
+            job_id: lk?.job_id || '',
+            dvi_id: lk?.dvi_id || '',
+            lk_frame_upc: lk?.frame_upc || '',
+            lk_opcs: lk?.opcs || '',
+            lk_lenses: lk?.lenses || 0,
+            lk_breakages: lk?.breakages || 0,
+          });
+        }
+      }
+
+      merged.sort((a, b) => b.date.localeCompare(a.date) || a.order_number.localeCompare(b.order_number));
 
       // Save to SQLite
       try {
         const upsert = labDb.db.prepare(`INSERT OR REPLACE INTO shipped_jobs (reference, date, invoice, dvi_id, coating, frame_upc, frame_style, department, in_dvi, in_looker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
         const save = labDb.db.transaction(() => {
-          for (const j of jobs) {
-            const dvi = dviByRef[j.reference];
-            const lk = lkByRef[j.reference];
-            upsert.run(j.reference, j.date, j.invoice, j.dvi_id, j.coating, lk?.frameUpc || '', dvi?.frameStyle || dvi?.frameSku || '', j.department, dvi ? 1 : 0, lk ? 1 : 0);
+          for (const j of merged) {
+            upsert.run(j.order_number, j.date, j.invoice, j.dvi_id, j.dvi_coating, j.lk_frame_upc, j.dvi_frame, j.dvi_department, j.source !== 'Looker Only' ? 1 : 0, j.source !== 'DVI Only' ? 1 : 0);
           }
         });
         save();
-        console.log(`[Compare] Saved ${jobs.length} jobs to shipped_jobs table`);
+        console.log(`[Compare] Saved ${merged.length} jobs to shipped_jobs table`);
       } catch (e) { console.error('[Compare] SQLite save error:', e.message); }
 
-      return json(res, { jobs, count: jobs.length, summary: { both: bothCount, dviOnly, lookerOnly, dviTotal: Object.keys(dviByRef).length, lookerTotal: Object.keys(lkByRef).length } });
+      return json(res, { jobs: merged, count: merged.length, summary: { both: bothCount, dviOnly, lookerOnly, dviTotal: dviJobs.length, lookerTotal: lkJobs.length } });
     } catch (e) {
       console.error('[Compare] Error:', e.message);
       return json(res, { error: e.message, jobs: [], summary: {} }, 500);
