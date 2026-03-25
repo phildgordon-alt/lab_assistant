@@ -3033,6 +3033,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <ExportBtn label="Export CSV" onClick={() => {
                           downloadCSV('long_tail_analysis.csv', ['sku','description','material','materialName','abcClass','monthlyVolume','adjustedMonthly','seasonalMultiplier','breakEven','decision','lensCost','surfPremium','onHand','safetyStock','zScore','stdDev','annualCarryCost','annualSurfCost'], filtered);
                         }} />
+                        <ExportBtn label="Export for DVI (Surface OPCs)" onClick={() => window.open(`${ovenServerUrl}/api/lens-intel/long-tail/export-dvi`, '_blank')} />
                       </div>
 
                       {/* Results table */}

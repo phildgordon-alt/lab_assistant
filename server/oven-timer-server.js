@@ -2182,7 +2182,7 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/lens-intel/export') {
     const data = lensIntel.getStatus(labDb.db);
     res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="lens_intelligence.csv"' });
-    const headers = ['sku','description','on_hand','avg_weekly_consumption','weeks_of_supply','weeks_of_supply_with_po','status','open_po_qty','next_po_date','runout_date','will_stockout','days_at_risk','order_recommended','order_qty_recommended','dynamic_reorder_point','consumption_trend_pct','safety_stock_weeks','lead_time_weeks'];
+    const headers = ['sku','description','on_hand','avg_weekly_consumption','weeks_of_supply','weeks_of_supply_with_po','status','routing','open_po_qty','next_po_date','runout_date','will_stockout','days_at_risk','order_recommended','order_qty_recommended','dynamic_reorder_point','consumption_trend_pct','safety_stock_weeks','lead_time_weeks'];
     const csv = [headers.join(','), ...data.items.map(r => headers.map(h => { const v = r[h] ?? ''; return String(v).includes(',') ? `"${v}"` : v; }).join(','))].join('\n');
     res.end(csv);
     return;
@@ -2202,6 +2202,20 @@ Respond with a structured batching plan in this format:
       console.error('[LongTail] Error:', e.message);
       return json(res, { error: e.message }, 500);
     }
+  }
+
+  // Long tail DVI export — OPC-based CSV for DVI surfacing routing
+  if (req.method==='GET' && url.pathname==='/api/lens-intel/long-tail/export-dvi') {
+    const cache = global._longTailCache;
+    if (!cache?.results) return json(res, { error: 'Run the analysis first' }, 400);
+    const surfaceSkus = cache.results.filter(r => r.decision === 'SURFACE');
+    const headers = ['OPC','Description','Material','MonthlyVolume','BreakEven','Decision','ABCClass'];
+    const csv = [headers.join(','), ...surfaceSkus.map(r =>
+      [r.sku, `"${(r.description || '').replace(/"/g, '""')}"`, r.material, r.monthlyVolume, r.breakEven, r.decision, r.abcClass].join(',')
+    )].join('\n');
+    res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename="dvi_surface_routing.csv"' });
+    res.end(csv);
+    return;
   }
 
   // ── NPI Scenarios ──────────────────────────────────────────

@@ -78,6 +78,8 @@ db.exec(`
     updated_at TEXT DEFAULT (datetime('now'))
   );
 `);
+// Add routing column for long-tail stock/surface decisions
+try { db.exec("ALTER TABLE lens_sku_params ADD COLUMN routing TEXT DEFAULT 'STOCK'"); } catch {}
 
 // Lens Intelligence — inventory health, stockout prediction, reorder recommendations
 db.exec(`

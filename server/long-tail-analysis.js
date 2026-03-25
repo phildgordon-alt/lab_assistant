@@ -187,6 +187,18 @@ function runAnalysis(db) {
     }
   }
 
+  // Persist routing decisions to lens_sku_params
+  const upsertRouting = db.prepare(`
+    INSERT INTO lens_sku_params (sku, routing, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(sku) DO UPDATE SET routing = excluded.routing, updated_at = datetime('now')
+  `);
+  const saveRouting = db.transaction(() => {
+    for (const r of results) {
+      upsertRouting.run(r.sku, r.decision);
+    }
+  });
+  try { saveRouting(); } catch (e) { console.error('[LongTail] Error saving routing:', e.message); }
+
   // Sort: surface candidates first, then by monthly volume ascending
   results.sort((a, b) => {
     if (a.decision !== b.decision) return a.decision === 'SURFACE' ? -1 : 1;
