@@ -1769,14 +1769,14 @@ Respond with a structured batching plan in this format:
         dviByDate[d] = (dviByDate[d] || 0) + 1;
       }
 
-      // Looker: Look 495 frame jobs per day (= jobs reported to NetSuite)
-      const frameData = looker.getFrameUsage();
+      // Looker: jobs per day from job-level data (COUNT DISTINCT job_id)
       const lkJobsByDate = {};
-      for (const day of (frameData.daily || [])) {
-        lkJobsByDate[day.date] = day.frames;
+      const lkDayCounts = looker.getJobCountByDay(days);
+      for (const row of lkDayCounts) {
+        lkJobsByDate[row.date] = row.jobs;
       }
 
-      // Looker: breakage per day from Look 1118
+      // Breakages per day from cache
       const lkData = looker.getUsage(9999);
       const breakageByDate = {};
       let totalBreakage = 0;
@@ -1906,35 +1906,22 @@ Respond with a structured batching plan in this format:
         dviByRef[ref] = { date: `20${yy}-${mm}-${dd}`, invoice: xml.invoice || jobNum, reference: ref, coating: xml.coating || '', frameStyle: xml.frameStyle || '', frameSku: xml.frameSku || '', department: xml.department || '' };
       }
 
-      // Looker jobs by order_number
-      const dateFilter = dates.map(d => d.iso).join(',');
+      // Looker jobs from SQLite (no ad-hoc API call — uses cached job-level data)
       const lkByRef = {};
       try {
-        const fetch2 = (await import('node-fetch')).default;
-        const loginResp = await fetch2('https://PairEyewear.cloud.looker.com:19999/api/4.0/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: `client_id=${process.env.LOOKER_CLIENT_ID}&client_secret=${process.env.LOOKER_CLIENT_SECRET}`
-        });
-        const { access_token } = await loginResp.json();
-        const lkResp = await fetch2('https://PairEyewear.cloud.looker.com:19999/api/4.0/queries/run/json', {
-          method: 'POST',
-          headers: { 'Authorization': `token ${access_token}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'operations', view: 'poms_jobs',
-            fields: ['dvi_jobs.sent_from_lab_date', 'poms_jobs.order_number', 'poms_jobs.dvi_id', 'dvi_jobs.frame_upc', 'poms_jobs.count_jobs'],
-            filters: { 'dvi_jobs.dvi_destination': 'PAIR', 'dvi_jobs.sent_from_lab_date': dates.map(d => d.iso).join(',') },
-            sorts: ['dvi_jobs.sent_from_lab_date desc', 'poms_jobs.order_number'], limit: 50000
-          })
-        });
-        const lkData = await lkResp.json();
-        for (const r of (Array.isArray(lkData) ? lkData : [])) {
-          const ref = r['poms_jobs.order_number'];
+        const isoList = dates.map(d => d.iso);
+        const placeholders = isoList.map(() => '?').join(',');
+        const lkRows = labDb.db.prepare(
+          `SELECT DISTINCT job_id, order_number, dvi_id, sent_from_lab_date, frame_upc
+           FROM looker_jobs WHERE sent_from_lab_date IN (${placeholders})`
+        ).all(...isoList);
+        for (const r of lkRows) {
+          const ref = r.order_number;
           if (ref && !lkByRef[ref]) {
-            lkByRef[ref] = { date: r['dvi_jobs.sent_from_lab_date'], reference: ref, dviId: r['poms_jobs.dvi_id'] || '', frameUpc: r['dvi_jobs.frame_upc'] || '' };
+            lkByRef[ref] = { date: r.sent_from_lab_date, reference: ref, dviId: r.dvi_id || '', frameUpc: r.frame_upc || '' };
           }
         }
-      } catch (e) { console.error('[Compare] Looker fetch error:', e.message); }
+      } catch (e) { console.error('[Compare] SQLite query error:', e.message); }
 
       // Merge
       const allRefs = new Set([...Object.keys(dviByRef), ...Object.keys(lkByRef)]);
