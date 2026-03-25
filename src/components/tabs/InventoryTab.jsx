@@ -2804,15 +2804,81 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       ))}
 
                       {/* Selected scenario results */}
-                      {npiSelected?.scenario && (
+                      {npiSelected?.scenario && (() => {
+                        const sc = npiSelected.scenario;
+                        return (
                         <div style={{ marginTop: 12, padding: 12, background: T.surface, borderRadius: 8 }}>
+                          {/* KPIs */}
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 6, marginBottom: 12 }}>
-                            <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.blue, fontFamily: mono }}>{npiSelected.scenario.adoption_pct}%</div><div style={{ fontSize: 8, color: T.textDim }}>ADOPTION</div></div>
+                            <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sc.adoption_pct}%</div><div style={{ fontSize: 8, color: T.textDim }}>ADOPTION</div></div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{npiSelected.newProductWeeklyJobs || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>JOBS/WK</div></div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.green, fontFamily: mono }}>{npiSelected.newProductWeeklyLenses || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>LENSES/WK</div></div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{npiSelected.totalLostWeekly || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>REDUCTION/WK</div></div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.text, fontFamily: mono }}>{(npiSelected.initialOrderQty || 0).toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>INITIAL ORDER</div></div>
                           </div>
+
+                          {/* Edit form */}
+                          <div style={{ padding: 10, background: T.bg, borderRadius: 6, marginBottom: 12 }}>
+                            <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 8 }}>EDIT SCENARIO</div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 8 }}>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>NAME</label>
+                                <input type="text" defaultValue={sc.name} id="npi-edit-name" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>ADOPTION %</label>
+                                <input type="number" defaultValue={sc.adoption_pct} id="npi-edit-adoption" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SOURCE VALUE</label>
+                                <input type="text" defaultValue={sc.source_value || ''} id="npi-edit-source" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>NEW SKU PREFIX</label>
+                                <input type="text" defaultValue={sc.new_sku_prefix || ''} id="npi-edit-prefix" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                            </div>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 8 }}>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>MFG (wk)</label>
+                                <input type="number" step="0.5" defaultValue={sc.manufacturing_weeks} id="npi-edit-mfg" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TRANSIT (wk)</label>
+                                <input type="number" step="0.5" defaultValue={sc.transit_weeks} id="npi-edit-transit" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FDA (wk)</label>
+                                <input type="number" step="0.5" defaultValue={sc.fda_hold_weeks} id="npi-edit-fda" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>LAUNCH DATE</label>
+                                <input type="date" defaultValue={sc.launch_date || ''} id="npi-edit-launch" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+                                <button onClick={async () => {
+                                  const body = {
+                                    name: document.getElementById('npi-edit-name')?.value,
+                                    adoption_pct: parseFloat(document.getElementById('npi-edit-adoption')?.value) || 50,
+                                    source_value: document.getElementById('npi-edit-source')?.value || null,
+                                    new_sku_prefix: document.getElementById('npi-edit-prefix')?.value || null,
+                                    manufacturing_weeks: parseFloat(document.getElementById('npi-edit-mfg')?.value) || 13,
+                                    transit_weeks: parseFloat(document.getElementById('npi-edit-transit')?.value) || 4,
+                                    fda_hold_weeks: parseFloat(document.getElementById('npi-edit-fda')?.value) || 2,
+                                    launch_date: document.getElementById('npi-edit-launch')?.value || null,
+                                  };
+                                  const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${sc.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
+                                  setNpiSelected(await resp.json());
+                                  const sResp = await fetch(`${ovenServerUrl}/api/npi/scenarios`);
+                                  setNpiScenarios((await sResp.json()).scenarios || []);
+                                }} style={{ background: T.blue, border: "none", borderRadius: 3, padding: "5px 14px", color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer", fontFamily: mono, width: '100%' }}>
+                                  Save & Recompute
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Cannibalization table */}
                           {(npiSelected.cannibalization || []).length > 0 && (
                             <div style={{ maxHeight: 200, overflowY: 'auto' }}>
                               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, fontFamily: mono }}>
@@ -2825,8 +2891,20 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               </table>
                             </div>
                           )}
+
+                          {/* Linked PO */}
+                          {npiSelected.linkedPO && (
+                            <div style={{ marginTop: 8, padding: 8, background: T.bg, borderRadius: 4, fontSize: 10, fontFamily: mono }}>
+                              <span style={{ color: T.textDim }}>Linked PO:</span> <span style={{ color: T.text, fontWeight: 700 }}>{npiSelected.linkedPO.poNumber}</span>
+                              <span style={{ color: T.textMuted, marginLeft: 8 }}>{npiSelected.linkedPO.vendor}</span>
+                              <span style={{ marginLeft: 8, fontSize: 8, padding: '2px 5px', borderRadius: 3, fontWeight: 700, background: npiSelected.linkedPO.phase === 'On the Water' ? `${T.blue}20` : `${T.amber}20`, color: npiSelected.linkedPO.phase === 'On the Water' ? T.blue : T.amber }}>{npiSelected.linkedPO.phase}</span>
+                              <span style={{ color: T.textMuted, marginLeft: 8 }}>Qty: {npiSelected.linkedPO.qty}</span>
+                              {npiSelected.linkedPO.shipDate && <span style={{ color: T.blue, marginLeft: 8 }}>Shipped: {npiSelected.linkedPO.shipDate}</span>}
+                            </div>
+                          )}
                         </div>
-                      )}
+                        );
+                      })()}
                     </div>
                   );
                 })()}
