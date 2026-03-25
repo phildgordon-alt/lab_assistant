@@ -7849,7 +7849,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
             <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",marginBottom:12,letterSpacing:1}}>SURFACING PATH</div>
             <div style={{display:"flex",alignItems:"center",gap:0,minWidth:900}}>
               {stages.filter(s=>["blocking","surfacing","detray","dip_coat","oven","coating"].includes(s.stage_id)).map((s,i,arr)=>(
-                <React.Fragment key={s.stage_id}>
+                <div key={s.stage_id} style={{display:"flex",alignItems:"center",gap:0}}>
                   <div onClick={()=>setExpandedStage(expandedStage===s.stage_id?null:s.stage_id)} style={{background:statusBg(s.status),border:`1px solid ${statusColor(s.status)}40`,borderRadius:8,padding:"10px 14px",minWidth:120,cursor:"pointer",textAlign:"center",position:"relative"}}>
                     <div style={{fontFamily:mono,fontSize:11,color:"#9ca3af",marginBottom:4}}>{s.label}</div>
                     <div style={{fontFamily:mono,fontSize:22,fontWeight:700,color:statusColor(s.status)}}>{s.current_count}</div>
@@ -7865,14 +7865,14 @@ function FlowAgentTab({ovenServerUrl,settings}){
                     )}
                   </div>
                   {i<arr.length-1&&<div style={{width:24,height:2,background:"rgba(255,255,255,0.15)",flexShrink:0}}/>}
-                </React.Fragment>
+                </div>
               ))}
             </div>
 
             <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",marginTop:20,marginBottom:12,letterSpacing:1}}>SHARED STAGES (SV + SURFACING CONVERGE)</div>
             <div style={{display:"flex",alignItems:"center",gap:0}}>
               {stages.filter(s=>["cutting","assembly"].includes(s.stage_id)).map((s,i,arr)=>(
-                <React.Fragment key={s.stage_id}>
+                <div key={s.stage_id} style={{display:"flex",alignItems:"center",gap:0}}>
                   <div onClick={()=>setExpandedStage(expandedStage===s.stage_id?null:s.stage_id)} style={{background:statusBg(s.status),border:`1px solid ${statusColor(s.status)}40`,borderRadius:8,padding:"10px 14px",minWidth:160,cursor:"pointer",textAlign:"center",position:"relative"}}>
                     <div style={{fontFamily:mono,fontSize:11,color:"#9ca3af",marginBottom:4}}>{s.label}</div>
                     <div style={{display:"flex",justifyContent:"center",gap:16}}>
@@ -7897,7 +7897,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
                     )}
                   </div>
                   {i<arr.length-1&&<div style={{width:24,height:2,background:"rgba(255,255,255,0.15)",flexShrink:0}}/>}
-                </React.Fragment>
+                </div>
               ))}
             </div>
           </div>
