@@ -528,6 +528,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [poFilter, setPoFilter] = useState("all");
   const [poSearch, setPoSearch] = useState("");
   const [poExpanded, setPoExpanded] = useState(null);
+  const [inboundData, setInboundData] = useState(null);
+  const [inboundSearch, setInboundSearch] = useState("");
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
   const [pipelineDetail, setPipelineDetail] = useState(null);
@@ -687,7 +689,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "inbound", label: "Inbound" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -2208,6 +2210,95 @@ function InventoryTab({ ovenServerUrl, settings }) {
           );
         })()}
 
+        {sub === "inbound" && (() => {
+          if (!inboundData) {
+            fetch(`${ovenServerUrl}/api/inventory/inbound`).then(r => r.json()).then(setInboundData).catch(() => {});
+          }
+          const orders = inboundData?.orders || [];
+          const filtered = inboundSearch ? orders.filter(o => {
+            const q = inboundSearch.toLowerCase();
+            return o.poNumber?.toLowerCase().includes(q) || o.vendor?.toLowerCase().includes(q) || o.memo?.toLowerCase().includes(q) || o.lines?.some(l => l.sku?.toLowerCase().includes(q));
+          }) : orders;
+          const byCat = inboundData?.byCategory || {};
+
+          return (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Inbound / In-Transit</h3>
+                <ExportBtn onClick={() => {
+                  const rows = [];
+                  for (const o of filtered) {
+                    for (const l of (o.lines || [])) {
+                      rows.push({ po: o.poNumber, date: o.date, vendor: o.vendor, memo: o.memo, status: o.status, sku: l.sku, name: l.name, category: l.category, qty: l.qty, rate: l.rate, amount: l.amount });
+                    }
+                  }
+                  downloadCSV('inbound.csv', ['po','date','vendor','memo','status','sku','name','category','qty','rate','amount'], rows);
+                }} />
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ON THE WATER</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{inboundData?.count || 0}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>POs in transit</div>
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL QTY</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(inboundData?.totalQty || 0).toLocaleString()}</div>
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL VALUE</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>${Math.round(inboundData?.totalAmount || 0).toLocaleString()}</div>
+                </Card>
+                <Card style={{ padding: 14, borderLeft: `4px solid ${T.textDim}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1, marginBottom: 6 }}>BY CATEGORY</div>
+                  {Object.entries(byCat).map(([cat, v]) => (
+                    <div key={cat} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: mono, color: T.textMuted, marginBottom: 2 }}>
+                      <span>{cat}</span><span>{v.qty?.toLocaleString()} units</span>
+                    </div>
+                  ))}
+                </Card>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <input type="text" placeholder="Search PO#, vendor, SKU, memo..." value={inboundSearch} onChange={e => setInboundSearch(e.target.value)}
+                  style={{ width: '100%', maxWidth: 400, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
+              </div>
+
+              <Card>
+                <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+                  {filtered.map(o => (
+                    <div key={o.id} style={{ borderBottom: `1px solid ${T.border}`, padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                          <span style={{ fontFamily: mono, fontSize: 14, fontWeight: 700, color: T.text }}>{o.poNumber}</span>
+                          <span style={{ fontSize: 11, color: T.textMuted }}>{o.vendor}</span>
+                          <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontFamily: mono, background: `${T.blue}20`, color: T.blue }}>ON THE WATER</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 16, fontFamily: mono, fontSize: 11, color: T.textMuted }}>
+                          <span>{o.date}</span>
+                          <span style={{ color: T.amber }}>{o.totalQty} units</span>
+                          <span>${Math.round(o.totalAmount).toLocaleString()}</span>
+                        </div>
+                      </div>
+                      {o.memo && <div style={{ fontSize: 11, color: T.textDim, marginBottom: 6 }}>{o.memo}</div>}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {(o.lines || []).slice(0, 8).map((l, i) => (
+                          <span key={i} style={{ fontSize: 10, padding: '3px 8px', background: T.bg, borderRadius: 4, fontFamily: mono, color: T.textMuted }}>
+                            {l.sku} × {l.qty}
+                          </span>
+                        ))}
+                        {(o.lines || []).length > 8 && <span style={{ fontSize: 10, color: T.textDim }}>+{o.lines.length - 8} more</span>}
+                      </div>
+                    </div>
+                  ))}
+                  {filtered.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>No in-transit POs found</div>}
+                </div>
+              </Card>
+            </div>
+          );
+        })()}
+
         {sub === "pos" && (() => {
           if (!poData) {
             fetch(`${ovenServerUrl}/api/netsuite/pos`).then(r => r.json()).then(setPoData).catch(() => {});
@@ -2274,6 +2365,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             background: o.statusCode === 'B' ? `${T.amber}20` : o.statusCode === 'C' ? `${T.green}20` : `${T.blue}20`,
                             color: o.statusCode === 'B' ? T.amber : o.statusCode === 'C' ? T.green : T.blue
                           }}>{o.status}</span>
+                          {(o.statusCode === 'B' || o.statusCode === 'C') && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, fontFamily: mono, background: `${T.blue}20`, color: T.blue }}>ON THE WATER</span>}
                         </div>
                         <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontFamily: mono, fontSize: 11 }}>
                           <span style={{ color: T.textMuted }}>{o.date}</span>

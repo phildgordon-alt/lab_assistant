@@ -2027,6 +2027,34 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Inbound / In-Transit ───────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/inventory/inbound') {
+    const poResp = netsuite.getOpenPOs();
+    const inTransit = (poResp.orders || []).filter(o => o.statusCode === 'B' || o.statusCode === 'C');
+    const totalQty = inTransit.reduce((s, o) => s + o.totalQty, 0);
+    const totalAmount = inTransit.reduce((s, o) => s + o.totalAmount, 0);
+    // Categorize
+    const byCategory = {};
+    for (const o of inTransit) {
+      for (const l of (o.lines || [])) {
+        const cat = l.category || 'Other';
+        if (!byCategory[cat]) byCategory[cat] = { qty: 0, amount: 0, pos: 0 };
+        byCategory[cat].qty += l.qty;
+        byCategory[cat].amount += l.amount;
+      }
+      const mainCat = (o.lines || [])[0]?.category || 'Other';
+      byCategory[mainCat] = byCategory[mainCat] || { qty: 0, amount: 0, pos: 0 };
+      byCategory[mainCat].pos++;
+    }
+    return json(res, {
+      orders: inTransit,
+      count: inTransit.length,
+      totalQty,
+      totalAmount,
+      byCategory,
+    });
+  }
+
   // ── NetSuite consumption endpoints ─────────────────────────
   if (req.method==='GET' && url.pathname==='/api/netsuite/consumption') {
     const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
