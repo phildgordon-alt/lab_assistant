@@ -5691,6 +5691,128 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
 // ══════════════════════════════════════════════════════════════
 // ── Claude AI Assistant Tab ───────────────────────────────────
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+// ── Aging Jobs Tab ──────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+function AgingJobsTab({ ovenServerUrl, settings }) {
+  const mono = "'JetBrains Mono',monospace";
+  const [data, setData] = useState(null);
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!ovenServerUrl) return;
+    const go = () => fetch(`${ovenServerUrl}/api/aging/jobs`).then(r => r.json()).then(setData).catch(() => {});
+    go();
+    const iv = setInterval(go, 60000);
+    return () => clearInterval(iv);
+  }, [ovenServerUrl]);
+
+  const jobs = data?.jobs || [];
+  const sm = data?.summary || {};
+  let filtered = jobs;
+  if (filter !== 'all') filtered = filtered.filter(j => j.zone === filter);
+  if (search) {
+    const q = search.toLowerCase();
+    filtered = filtered.filter(j => (j.job_id||'').toLowerCase().includes(q) || (j.station||'').toLowerCase().includes(q) || (j.coating||'').toLowerCase().includes(q));
+  }
+
+  const zoneColors = { GREEN: T.green, YELLOW: T.amber, RED: T.red, CRITICAL: '#cc0000' };
+
+  return (
+    <ProductionStageTab domain="aging" contextData={{ avgDays: sm.avgDays, outlierPct: sm.outlierPct }} serverUrl={ovenServerUrl} settings={settings}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <div>
+          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>Aging Jobs</h2>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Active WIP jobs by time in lab</p>
+        </div>
+        <div style={{ display: "flex", gap: 16 }}>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>AVG DAYS</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{sm.avgDays || 0}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>OUTLIER %</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: (sm.outlierPct || 0) > 5 ? T.red : T.green, fontFamily: mono }}>{sm.outlierPct || 0}%</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TOTAL WIP</div>
+            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sm.total || 0}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Zone cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+        {[
+          { zone: 'GREEN', label: '0-1 days', color: T.green },
+          { zone: 'YELLOW', label: '1-2 days', color: T.amber },
+          { zone: 'RED', label: '2-3 days', color: T.red },
+          { zone: 'CRITICAL', label: '3+ days', color: '#cc0000' },
+        ].map(z => (
+          <Card key={z.zone} onClick={() => setFilter(filter === z.zone ? 'all' : z.zone)}
+            style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${z.color}`, cursor: 'pointer', background: filter === z.zone ? `${z.color}10` : T.card }}>
+            <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>{sm[z.zone.toLowerCase()] || 0}</div>
+            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{z.zone} ({z.label})</div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Outlier gauge */}
+      {(sm.outlierPct || 0) > 5 && (
+        <Card style={{ padding: 12, marginBottom: 16, background: `${T.red}10`, border: `1px solid ${T.red}30` }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: T.red }}>Outlier Alert: {sm.outlierPct}% of jobs are 2+ days old (threshold: 5%)</div>
+          <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>{sm.red + sm.critical} jobs need attention</div>
+        </Card>
+      )}
+
+      {/* Search */}
+      <div style={{ marginBottom: 12 }}>
+        <input type="text" placeholder="Search job ID, station, coating..." value={search} onChange={e => setSearch(e.target.value)}
+          style={{ width: '100%', maxWidth: 400, padding: "10px 14px", background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
+      </div>
+
+      {/* Job table */}
+      <Card>
+        <SectionHeader right={`${filtered.length} jobs`}>Job List</SectionHeader>
+        <div style={{ maxHeight: 600, overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
+            <thead>
+              <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
+                <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>JOB ID</th>
+                <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ZONE</th>
+                <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DAYS</th>
+                <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>STAGE</th>
+                <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>STATION</th>
+                <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>COATING</th>
+                <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ENTERED</th>
+                <th style={{ padding: '8px 12px', textAlign: 'center', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>RUSH</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.slice(0, 200).map(j => (
+                <tr key={j.job_id} style={{ borderBottom: `1px solid ${T.border}22`, background: j.zone === 'CRITICAL' ? `${'#cc0000'}08` : j.zone === 'RED' ? `${T.red}06` : 'transparent' }}>
+                  <td style={{ padding: '6px 12px', fontWeight: 600, color: T.text }}>{j.job_id}</td>
+                  <td style={{ padding: '6px 12px', textAlign: 'center' }}>
+                    <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, background: `${zoneColors[j.zone]}20`, color: zoneColors[j.zone] }}>{j.zone}</span>
+                  </td>
+                  <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 700, color: zoneColors[j.zone] }}>{j.daysInLab}</td>
+                  <td style={{ padding: '6px 12px', color: T.textMuted }}>{j.stage}</td>
+                  <td style={{ padding: '6px 12px', color: T.textMuted }}>{j.station}</td>
+                  <td style={{ padding: '6px 12px', color: T.textMuted }}>{j.coating || '—'}</td>
+                  <td style={{ padding: '6px 12px', color: T.textDim }}>{j.enteredAt}</td>
+                  <td style={{ padding: '6px 12px', textAlign: 'center' }}>{j.rush === 'Y' ? <span style={{ color: T.red }}>RUSH</span> : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filtered.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>No aging jobs</div>}
+        </div>
+      </Card>
+    </ProductionStageTab>
+  );
+}
+
 function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl=`http://${window.location.hostname}:3002`,settings}){
   // Get coater machines from settings (fallback to MACHINES constant)
   const coaterMachines=useMemo(()=>{
@@ -10118,6 +10240,7 @@ function LabAssistantV2(){
     ]},
     {id:"analytics_menu",label:"Analytics",icon:"📊",type:"dropdown",items:[
       {id:"analytics",label:"Analytics",icon:"📊"},
+      {id:"aging",label:"Aging Jobs",icon:"⏳"},
       {id:"qc",label:"QC & Breakage",icon:"✓"},
       {id:"timeatlab",label:"Time at Lab",icon:"⏱"},
     ]},
@@ -10229,6 +10352,7 @@ function LabAssistantV2(){
         {view==="qc"&&<QCTab trays={trays} dviJobs={mergedJobs} breakage={breakage} setBreakage={setBreakage}/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="aging"&&<AgingJobsTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="timeatlab"&&<TimeAtLabTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="ews"&&<EarlyWarningTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="network"&&<NetworkTab ovenServerUrl={ovenServerUrl} settings={settings}/>}

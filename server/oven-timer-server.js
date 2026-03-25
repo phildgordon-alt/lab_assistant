@@ -2029,6 +2029,48 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Aging Jobs ─────────────────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/aging/jobs') {
+    const allJobs = dviTrace.getJobs();
+    const now = Date.now();
+
+    const jobs = allJobs
+      .filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED' && j.stage !== 'SHIPPED')
+      .map(j => {
+        const enteredMs = j.firstSeen || j.enteredAt || now;
+        const daysInLab = Math.round((now - enteredMs) / 86400000 * 10) / 10;
+        let zone = 'GREEN';
+        if (daysInLab >= 3) zone = 'CRITICAL';
+        else if (daysInLab >= 2) zone = 'RED';
+        else if (daysInLab >= 1) zone = 'YELLOW';
+        return {
+          job_id: j.job_id,
+          invoice: j.invoice || j.job_id,
+          stage: j.stage,
+          station: j.station,
+          coating: j.coating || '',
+          rush: j.rush || 'N',
+          daysInLab: Math.round(daysInLab * 10) / 10,
+          zone,
+          enteredAt: enteredMs ? new Date(enteredMs).toISOString().slice(0, 10) : '',
+        };
+      })
+      .sort((a, b) => b.daysInLab - a.daysInLab);
+
+    const total = jobs.length;
+    const green = jobs.filter(j => j.zone === 'GREEN').length;
+    const yellow = jobs.filter(j => j.zone === 'YELLOW').length;
+    const red = jobs.filter(j => j.zone === 'RED').length;
+    const critical = jobs.filter(j => j.zone === 'CRITICAL').length;
+    const outlierPct = total > 0 ? Math.round(((red + critical) / total) * 1000) / 10 : 0;
+    const avgDays = total > 0 ? Math.round(jobs.reduce((s, j) => s + j.daysInLab, 0) / total * 10) / 10 : 0;
+
+    return json(res, {
+      jobs,
+      summary: { total, green, yellow, red, critical, outlierPct, avgDays, outlierThreshold: 5 },
+    });
+  }
+
   // ── Lens Intelligence ──────────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/lens-intel/status') {
     const status = url.searchParams.get('status') || null;
