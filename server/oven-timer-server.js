@@ -1,7 +1,22 @@
 // Load environment variables from .env file (check both server dir and parent dir)
 const path = require('path');
+const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+
+// Crash protection — log errors instead of dying
+const logFile = path.join(__dirname, '..', 'data', 'server-errors.log');
+process.on('uncaughtException', (err) => {
+  const msg = `[${new Date().toISOString()}] UNCAUGHT: ${err.message}\n${err.stack}\n\n`;
+  console.error(msg);
+  try { fs.appendFileSync(logFile, msg); } catch {}
+  // Don't exit — keep the server running
+});
+process.on('unhandledRejection', (reason) => {
+  const msg = `[${new Date().toISOString()}] UNHANDLED REJECTION: ${reason?.message || reason}\n${reason?.stack || ''}\n\n`;
+  console.error(msg);
+  try { fs.appendFileSync(logFile, msg); } catch {}
+});
 
 /**
  * oven-timer-server.js — Lab_Assistant Oven Timer Bridge
@@ -26,7 +41,6 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
  */
 
 const http = require('http');
-const fs   = require('fs');
 const { URL } = require('url');
 
 // ── SQLite database (shared with gateway MCP tools) ────────────
