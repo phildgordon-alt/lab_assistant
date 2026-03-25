@@ -533,6 +533,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [pipelineDetail, setPipelineDetail] = useState(null);
   const [pipelineDetailDate, setPipelineDetailDate] = useState(null);
   const [pipelineDetailSearch, setPipelineDetailSearch] = useState("");
+  const [compareData, setCompareData] = useState(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareFilter, setCompareFilter] = useState("all");
+  const [compareSearch, setCompareSearch] = useState("");
 
   // Lazy-load: only fetch data needed for the active sub-tab
   const fetchedRef = useRef({});
@@ -1960,6 +1964,115 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker → NetSuite</span>
                   <span>Click a day to see job detail + export</span>
                 </div>
+              </Card>
+
+              {/* Job Comparison: DVI vs Looker */}
+              <Card style={{ marginTop: 20 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: `1px solid ${T.border}` }}>
+                  <SectionHeader style={{ margin: 0 }}>Job Comparison — DVI vs Looker</SectionHeader>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    {!compareData && !compareLoading && (
+                      <button onClick={async () => {
+                        setCompareLoading(true);
+                        try {
+                          const resp = await fetch(`${ovenServerUrl}/api/shipping/compare?days=${pipelineDays}`);
+                          setCompareData(await resp.json());
+                        } catch (e) { console.error(e); }
+                        setCompareLoading(false);
+                      }} style={{ background: T.blue, border: 'none', borderRadius: 6, padding: '8px 16px', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
+                        Load Comparison
+                      </button>
+                    )}
+                    {compareData && (
+                      <ExportBtn label="Export Comparison" onClick={() => {
+                        downloadCSV(`job_comparison_${pipelineDays}d.csv`, ['date','reference','source','invoice','dvi_id','coating','frame','department'], compareData.jobs || []);
+                      }} />
+                    )}
+                  </div>
+                </div>
+                {compareLoading && <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>Loading job comparison from DVI + Looker...</div>}
+                {compareData && (() => {
+                  const sm = compareData.summary || {};
+                  const jobs = compareData.jobs || [];
+                  let filtered = jobs;
+                  if (compareFilter !== 'all') filtered = filtered.filter(j => j.source === compareFilter);
+                  if (compareSearch) {
+                    const q = compareSearch.toLowerCase();
+                    filtered = filtered.filter(j => (j.reference||'').includes(q) || (j.invoice||'').includes(q) || (j.coating||'').toLowerCase().includes(q) || (j.frame||'').toLowerCase().includes(q));
+                  }
+                  return (
+                    <div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, padding: '12px 16px' }}>
+                        <div style={{ textAlign: 'center', padding: 8, background: T.bg, borderRadius: 6 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: T.green, fontFamily: mono }}>{sm.both || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>BOTH</div>
+                        </div>
+                        <div style={{ textAlign: 'center', padding: 8, background: T.bg, borderRadius: 6 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: T.amber, fontFamily: mono }}>{sm.dviOnly || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>DVI ONLY</div>
+                        </div>
+                        <div style={{ textAlign: 'center', padding: 8, background: T.bg, borderRadius: 6 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sm.lookerOnly || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>LOOKER ONLY</div>
+                        </div>
+                        <div style={{ textAlign: 'center', padding: 8, background: T.bg, borderRadius: 6 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: T.amber, fontFamily: mono }}>{sm.dviTotal || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>DVI TOTAL</div>
+                        </div>
+                        <div style={{ textAlign: 'center', padding: 8, background: T.bg, borderRadius: 6 }}>
+                          <div style={{ fontSize: 20, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sm.lookerTotal || 0}</div>
+                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>LOOKER TOTAL</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, padding: '8px 16px', alignItems: 'center' }}>
+                        <input type="text" placeholder="Search reference, invoice, coating..." value={compareSearch} onChange={e => setCompareSearch(e.target.value)}
+                          style={{ flex: 1, padding: '6px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 11, fontFamily: mono }} />
+                        {['all', 'Both', 'DVI Only', 'Looker Only'].map(f => (
+                          <button key={f} onClick={() => setCompareFilter(f)} style={{
+                            padding: '6px 12px', borderRadius: 6, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: 'pointer',
+                            background: compareFilter === f ? T.blue : 'transparent', color: compareFilter === f ? '#fff' : T.textMuted,
+                            border: `1px solid ${compareFilter === f ? T.blue : T.border}`
+                          }}>{f === 'all' ? 'All' : f}</button>
+                        ))}
+                      </div>
+                      <div style={{ maxHeight: 500, overflowY: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                          <thead>
+                            <tr style={{ background: T.bg, position: 'sticky', top: 0, zIndex: 1 }}>
+                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DATE</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>REFERENCE</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'center', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SOURCE</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>INVOICE</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>COATING</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>FRAME</th>
+                              <th style={{ padding: '6px 10px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DEPT</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {filtered.slice(0, 300).map((j, i) => (
+                              <tr key={i} style={{ borderBottom: `1px solid ${T.border}15`, background: j.source === 'DVI Only' ? `${T.amber}08` : j.source === 'Looker Only' ? `${T.blue}08` : 'transparent' }}>
+                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.date}</td>
+                                <td style={{ padding: '4px 10px', color: T.text, fontWeight: 600 }}>{j.reference}</td>
+                                <td style={{ padding: '4px 10px', textAlign: 'center' }}>
+                                  <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700,
+                                    background: j.source === 'Both' ? `${T.green}20` : j.source === 'DVI Only' ? `${T.amber}20` : `${T.blue}20`,
+                                    color: j.source === 'Both' ? T.green : j.source === 'DVI Only' ? T.amber : T.blue
+                                  }}>{j.source}</span>
+                                </td>
+                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.invoice || '—'}</td>
+                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.coating || '—'}</td>
+                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.frame || '—'}</td>
+                                <td style={{ padding: '4px 10px', color: T.textMuted }}>{j.department || '—'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {filtered.length > 300 && <div style={{ padding: 8, textAlign: 'center', fontSize: 10, color: T.textDim }}>Showing 300 of {filtered.length}</div>}
+                      </div>
+                    </div>
+                  );
+                })()}
+                {!compareData && !compareLoading && <div style={{ padding: 16, textAlign: 'center', color: T.textDim, fontSize: 11 }}>Click "Load Comparison" to cross-reference DVI shipped jobs against Looker</div>}
               </Card>
             </div>
           );

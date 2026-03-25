@@ -1873,6 +1873,100 @@ Respond with a structured batching plan in this format:
     return json(res, { jobs, count: jobs.length, dates: matchDates.size });
   }
 
+  // ── DVI vs Looker job comparison ────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/shipping/compare') {
+    try {
+      const days = parseInt(url.searchParams.get('days') || '7');
+      const from = url.searchParams.get('from');
+      const to = url.searchParams.get('to');
+
+      // Build date range
+      const dates = [];
+      if (from && to) {
+        const d = new Date(from + 'T00:00:00');
+        const end = new Date(to + 'T00:00:00');
+        while (d <= end) {
+          dates.push({ iso: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, mdy: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}` });
+          d.setDate(d.getDate() + 1);
+        }
+      } else {
+        for (let i = 0; i < days; i++) {
+          const d = new Date(); d.setDate(d.getDate() - i);
+          dates.push({ iso: `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`, mdy: `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}/${String(d.getFullYear()).slice(2)}` });
+        }
+      }
+
+      // DVI shipped jobs by reference number
+      const dviByRef = {};
+      const mdySet = new Set(dates.map(d => d.mdy));
+      for (const [jobNum, xml] of shippedJobIndex) {
+        if (!mdySet.has(xml.shipDate)) continue;
+        const ref = xml.rxNum || xml.invoice || jobNum;
+        const [mm, dd, yy] = xml.shipDate.split('/');
+        dviByRef[ref] = { date: `20${yy}-${mm}-${dd}`, invoice: xml.invoice || jobNum, reference: ref, coating: xml.coating || '', frameStyle: xml.frameStyle || '', frameSku: xml.frameSku || '', department: xml.department || '' };
+      }
+
+      // Looker jobs by order_number
+      const dateFilter = dates.map(d => d.iso).join(',');
+      const lkByRef = {};
+      try {
+        const fetch2 = (await import('node-fetch')).default;
+        const loginResp = await fetch2('https://PairEyewear.cloud.looker.com:19999/api/4.0/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: `client_id=${process.env.LOOKER_CLIENT_ID}&client_secret=${process.env.LOOKER_CLIENT_SECRET}`
+        });
+        const { access_token } = await loginResp.json();
+        const lkResp = await fetch2('https://PairEyewear.cloud.looker.com:19999/api/4.0/queries/run/json', {
+          method: 'POST',
+          headers: { 'Authorization': `token ${access_token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: 'operations', view: 'poms_jobs',
+            fields: ['dvi_jobs.sent_from_lab_date', 'poms_jobs.order_number', 'poms_jobs.dvi_id', 'dvi_jobs.frame_upc', 'poms_jobs.count_jobs'],
+            filters: { 'dvi_jobs.dvi_destination': 'PAIR', 'dvi_jobs.sent_from_lab_date': dates.map(d => d.iso).join(',') },
+            sorts: ['dvi_jobs.sent_from_lab_date desc', 'poms_jobs.order_number'], limit: 50000
+          })
+        });
+        const lkData = await lkResp.json();
+        for (const r of (Array.isArray(lkData) ? lkData : [])) {
+          const ref = r['poms_jobs.order_number'];
+          if (ref && !lkByRef[ref]) {
+            lkByRef[ref] = { date: r['dvi_jobs.sent_from_lab_date'], reference: ref, dviId: r['poms_jobs.dvi_id'] || '', frameUpc: r['dvi_jobs.frame_upc'] || '' };
+          }
+        }
+      } catch (e) { console.error('[Compare] Looker fetch error:', e.message); }
+
+      // Merge
+      const allRefs = new Set([...Object.keys(dviByRef), ...Object.keys(lkByRef)]);
+      const jobs = [];
+      let bothCount = 0, dviOnly = 0, lookerOnly = 0;
+      for (const ref of allRefs) {
+        const dvi = dviByRef[ref];
+        const lk = lkByRef[ref];
+        const source = dvi && lk ? 'Both' : dvi ? 'DVI Only' : 'Looker Only';
+        if (source === 'Both') bothCount++;
+        else if (source === 'DVI Only') dviOnly++;
+        else lookerOnly++;
+        jobs.push({
+          date: dvi?.date || lk?.date || '',
+          reference: ref,
+          source,
+          invoice: dvi?.invoice || '',
+          dvi_id: lk?.dviId || '',
+          coating: dvi?.coating || '',
+          frame: dvi?.frameStyle || dvi?.frameSku || lk?.frameUpc || '',
+          department: dvi?.department || '',
+        });
+      }
+      jobs.sort((a, b) => b.date.localeCompare(a.date) || a.reference.localeCompare(b.reference));
+
+      return json(res, { jobs, count: jobs.length, summary: { both: bothCount, dviOnly, lookerOnly, dviTotal: Object.keys(dviByRef).length, lookerTotal: Object.keys(lkByRef).length } });
+    } catch (e) {
+      console.error('[Compare] Error:', e.message);
+      return json(res, { error: e.message, jobs: [], summary: {} }, 500);
+    }
+  }
+
   // ── NetSuite consumption endpoints ─────────────────────────
   if (req.method==='GET' && url.pathname==='/api/netsuite/consumption') {
     const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
