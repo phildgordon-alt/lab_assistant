@@ -2,6 +2,27 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { T, mono } from '../../constants';
 import { Card, SectionHeader } from '../shared';
 
+// CSV export helper
+function downloadCSV(filename, headers, rows) {
+  const csv = [headers.join(','), ...rows.map(r => headers.map(h => {
+    const v = r[h] ?? '';
+    return String(v).includes(',') ? `"${v}"` : v;
+  }).join(','))].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+}
+
+const ExportBtn = ({ onClick, label = "Export CSV" }) => (
+  <button onClick={onClick} style={{
+    background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 6,
+    padding: '6px 14px', color: T.textMuted, fontSize: 11, fontWeight: 600,
+    fontFamily: "'JetBrains Mono',monospace", cursor: 'pointer'
+  }}>{label}</button>
+);
+
 // Local component - Pill (simple styled tag)
 const Pill = ({ children, color, bg, style }) => (
   <span style={{ fontSize: 11, fontWeight: 700, padding: "3px 10px", borderRadius: 5, background: bg || `${color}20`, color, fontFamily: mono, textTransform: "uppercase", whiteSpace: "nowrap", ...style }}>{children}</span>
@@ -940,6 +961,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     style={{ background: T.blue, border: "none", borderRadius: 8, padding: "8px 16px", color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer", opacity: reconRefreshing ? 0.6 : 1, fontFamily: mono }}>
                     {reconRefreshing ? "Syncing..." : "↻ Refresh NetSuite"}
                   </button>
+                  <ExportBtn onClick={() => {
+                    const rows = reconData.discrepancies || [];
+                    downloadCSV('reconciliation.csv', ['sku','name','category','wh1','wh2','wh3','itempath','netsuite','diff','severity'], rows);
+                  }} />
                 </div>
 
                 {/* Filters */}
@@ -1579,6 +1604,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       border: `1px solid ${consumeFilter === p.id ? T.blue : T.border}`
                     }}>{p.label}</button>
                   ))}
+                  <ExportBtn onClick={() => {
+                    const skuRows = consumeData?.skus || [];
+                    downloadCSV('consumption.csv', ['sku','type','kardex_qty','netsuite_qty','breakages','variance'], skuRows);
+                  }} />
                 </div>
               </div>
 
@@ -1775,6 +1804,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       border: `1px solid ${pipelineDays === d ? T.blue : T.border}`
                     }}>{d}d</button>
                   ))}
+                  <ExportBtn onClick={() => {
+                    downloadCSV('pipeline.csv', ['date','dvi','looker','breakage','variance'], (pipelineData?.daily || []).map(d => ({...d, variance: d.dvi - d.looker})));
+                  }} />
                 </div>
               </div>
 
@@ -1884,6 +1916,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       border: `1px solid ${usageDays === d ? T.blue : T.border}`
                     }}>{d}d</button>
                   ))}
+                  <ExportBtn onClick={() => {
+                    const skuRows = usageData?.skuComparison || [];
+                    downloadCSV('transactions.csv', ['sku','looker_qty','looker_breakages','itempath_qty','variance'], skuRows);
+                  }} />
                 </div>
               </div>
 
