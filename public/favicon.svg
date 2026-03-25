@@ -1,4 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="28" fill="#3b5afe"/>
-  <text x="64" y="88" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="bold" font-size="72" fill="white">LA</text>
+  <rect width="128" height="128" rx="16" fill="#2563EB"/>
+  <g transform="translate(16, 8)" fill="white">
+    <!-- L -->
+    <path d="M20,18 L20,95 L58,95 L58,82 L36,82 L36,18 Z"/>
+    <!-- A overlapping -->
+    <path d="M48,30 L68,95 L84,95 L98,52 L108,95 L108,95 L84,95 L80,82 L62,82 L56,95 L40,95 L65,18 L82,18 L107,95 L90,95 L71,38 L60,72 L78,72 L82,82 L56,82 L48,30 Z"/>
+  </g>
 </svg>
