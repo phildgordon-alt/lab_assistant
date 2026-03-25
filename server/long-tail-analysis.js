@@ -104,7 +104,7 @@ function runAnalysis(db, overrides = {}) {
   // Load configurable thresholds from model_params or use overrides
   try {
     db.exec("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
-    const keys = ['long_tail_carrying_pct', 'long_tail_low_runner', 'long_tail_surf_premium_ply', 'long_tail_surf_premium_bly', 'long_tail_surf_premium_h67', 'long_tail_surf_premium_b67', 'long_tail_surf_premium_cr39', 'long_tail_lens_cost_ply', 'long_tail_lens_cost_bly', 'long_tail_lens_cost_h67', 'long_tail_lens_cost_b67', 'long_tail_lens_cost_cr39'];
+    const keys = ['long_tail_carrying_pct', 'long_tail_low_runner', 'long_tail_surf_premium_ply', 'long_tail_surf_premium_bly', 'long_tail_surf_premium_h67', 'long_tail_surf_premium_b67', 'long_tail_surf_premium_cr39', 'long_tail_lens_cost_ply', 'long_tail_lens_cost_bly', 'long_tail_lens_cost_h67', 'long_tail_lens_cost_b67', 'long_tail_lens_cost_cr39', 'long_tail_surf_lead_days', 'long_tail_finished_lead_days', 'long_tail_lead_time_cost_per_day', 'long_tail_surf_daily_cap'];
     for (const k of keys) {
       const row = db.prepare('SELECT value FROM model_params WHERE key = ?').get(k);
       if (row?.value) overrides[k] = Number(row.value);
@@ -113,6 +113,16 @@ function runAnalysis(db, overrides = {}) {
 
   const carryingPct = overrides.long_tail_carrying_pct ?? DEFAULT_CARRYING_PCT;
   const lowRunnerThreshold = overrides.long_tail_low_runner ?? DEFAULT_LOW_RUNNER_THRESHOLD;
+
+  // Lead time weighting — surfacing takes longer, that has a cost
+  const surfLeadDays = overrides.long_tail_surf_lead_days ?? 3.0;      // days in surfacing
+  const finishedLeadDays = overrides.long_tail_finished_lead_days ?? 1.75; // days for finished stock
+  const leadTimeCostPerDay = overrides.long_tail_lead_time_cost_per_day ?? 0.50; // $/lens/extra day
+  const extraDays = Math.max(0, surfLeadDays - finishedLeadDays);
+  const leadTimePenalty = extraDays * leadTimeCostPerDay; // added to surfacing premium
+
+  // Surfacing capacity cap — max lenses/day from long-tail routing
+  const surfDailyCap = overrides.long_tail_surf_daily_cap ?? 0; // 0 = no cap
 
   // Allow per-material cost overrides
   const costs = JSON.parse(JSON.stringify(MATERIAL_COSTS));
@@ -155,9 +165,10 @@ function runAnalysis(db, overrides = {}) {
     const matCosts = costs[material] || costs.PLY;
     const abcClass = paramsMap[r.sku]?.abc_class || (monthlyVol >= 100 ? 'A' : monthlyVol >= 20 ? 'B' : 'C');
 
-    // Break-even
-    const breakEven = calculateBreakEven(matCosts.lensCost, matCosts.surfPremium, carryingPct);
-    const decision = monthlyVol < breakEven ? 'SURFACE' : 'STOCK';
+    // Break-even — surfacing premium includes lead time penalty
+    const effectiveSurfPremium = matCosts.surfPremium + leadTimePenalty;
+    const breakEven = calculateBreakEven(matCosts.lensCost, effectiveSurfPremium, carryingPct);
+    let decision = monthlyVol < breakEven ? 'SURFACE' : 'STOCK';
 
     // Statistical safety stock
     const weeklyValues = db.prepare('SELECT units_consumed FROM lens_consumption_weekly WHERE sku = ? ORDER BY week_start DESC LIMIT 12').all(r.sku).map(w => w.units_consumed);
@@ -193,7 +204,9 @@ function runAnalysis(db, overrides = {}) {
       zScore,
       stdDev: Math.round(stdDev * 10) / 10,
       annualCarryCost: decision === 'STOCK' ? Math.round(status.on_hand * matCosts.lensCost * carryingPct * 100) / 100 : 0,
-      annualSurfCost: decision === 'SURFACE' ? Math.round(monthlyVol * 12 * matCosts.surfPremium * 100) / 100 : 0,
+      effectiveSurfPremium,
+      leadTimePenalty,
+      annualSurfCost: decision === 'SURFACE' ? Math.round(monthlyVol * 12 * effectiveSurfPremium * 100) / 100 : 0,
     };
     results.push(result);
 
@@ -209,6 +222,36 @@ function runAnalysis(db, overrides = {}) {
     } else {
       byMaterial[material].stockSkus++;
       byMaterial[material].totalCarryCost += result.annualCarryCost;
+    }
+  }
+
+  // Capacity cap: if surfacing daily volume exceeds cap, flip highest-volume SURFACE SKUs back to STOCK
+  let cappedSkus = 0;
+  if (surfDailyCap > 0) {
+    // Sort SURFACE results by monthly volume descending (highest volume flipped first)
+    const surfaceResults = results.filter(r => r.decision === 'SURFACE').sort((a, b) => b.monthlyVolume - a.monthlyVolume);
+    let totalSurfDaily = surfaceResults.reduce((s, r) => s + r.monthlyVolume, 0) / 21.7;
+    for (const r of surfaceResults) {
+      if (totalSurfDaily <= surfDailyCap) break;
+      // Flip this SKU back to STOCK — it's the highest volume SURFACE SKU
+      r.decision = 'STOCK';
+      r.annualCarryCost = Math.round(r.onHand * r.lensCost * carryingPct * 100) / 100;
+      r.annualSurfCost = 0;
+      totalSurfDaily -= (r.monthlyVolume / 21.7);
+      cappedSkus++;
+    }
+    // Rebuild byMaterial aggregates
+    for (const m of Object.values(byMaterial)) {
+      m.stockSkus = 0; m.surfaceSkus = 0; m.lowRunners = 0; m.lowRunnerVol = 0; m.totalCarryCost = 0; m.totalSurfCost = 0;
+    }
+    for (const r of results) {
+      const m = byMaterial[r.material];
+      if (!m) continue;
+      if (r.decision === 'SURFACE') {
+        m.surfaceSkus++; m.lowRunners++; m.lowRunnerVol += r.monthlyVolume; m.totalSurfCost += r.annualSurfCost;
+      } else {
+        m.stockSkus++; m.totalCarryCost += r.annualCarryCost;
+      }
     }
   }
 
@@ -257,11 +300,18 @@ function runAnalysis(db, overrides = {}) {
       annualSurfacingCost: Math.round(surfacingAnnualCost),
       annualStockingCost: Math.round(stockingAnnualCost),
       netSavings: Math.round(stockingAnnualCost - surfacingAnnualCost),
+      cappedSkus,
+      dailyCap: surfDailyCap,
     },
     byMaterial: Object.values(byMaterial).sort((a, b) => b.totalMonthlyVol - a.totalMonthlyVol),
     parameters: {
       carryingCostPct: carryingPct,
       lowRunnerThreshold,
+      surfLeadDays,
+      finishedLeadDays,
+      leadTimeCostPerDay,
+      leadTimePenalty,
+      surfDailyCap,
       materialCosts: costs,
       seasonality: SEASONALITY,
       zScores: Z_SCORES,

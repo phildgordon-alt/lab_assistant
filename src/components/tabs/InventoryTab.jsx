@@ -2963,34 +2963,64 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
                       {/* Threshold Controls */}
                       <div style={{ marginBottom: 16, padding: 12, background: T.bg, borderRadius: 8, border: `1px solid ${T.border}` }}>
-                        <div style={{ display: 'flex', gap: 16, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 8 }}>LEAD TIME & CAPACITY</div>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 12 }}>
                           <div>
-                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>CARRYING COST %</label>
-                            <input type="number" step="1" defaultValue={(params.carryingCostPct * 100) || 25} id="lt-carrying" style={{ width: 70, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SURFACING DAYS</label>
+                            <input type="number" step="0.25" defaultValue={params.surfLeadDays ?? 3} id="lt-surf-days" style={{ width: 65, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
                           </div>
                           <div>
-                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>PLY COST $</label>
-                            <input type="number" step="0.5" defaultValue={params.materialCosts?.PLY?.lensCost || 3} id="lt-cost-ply" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FINISHED DAYS</label>
+                            <input type="number" step="0.25" defaultValue={params.finishedLeadDays ?? 1.75} id="lt-fin-days" style={{ width: 65, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
                           </div>
                           <div>
-                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>BLY COST $</label>
-                            <input type="number" step="0.5" defaultValue={params.materialCosts?.BLY?.lensCost || 5} id="lt-cost-bly" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>$/LENS/EXTRA DAY</label>
+                            <input type="number" step="0.1" defaultValue={params.leadTimeCostPerDay ?? 0.5} id="lt-day-cost" style={{ width: 65, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div style={{ fontSize: 10, color: T.amber, fontFamily: mono, padding: '5px 0' }}>
+                            = ${((params.surfLeadDays ?? 3) - (params.finishedLeadDays ?? 1.75)).toFixed(2)} extra days × ${params.leadTimeCostPerDay ?? 0.5}/lens = <strong>${(params.leadTimePenalty ?? 0.625).toFixed(3)}</strong> penalty/lens
+                          </div>
+                          <div style={{ marginLeft: 16, borderLeft: `1px solid ${T.border}`, paddingLeft: 16 }}>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>DAILY CAP (0=none)</label>
+                            <input type="number" step="10" defaultValue={params.surfDailyCap ?? 0} id="lt-daily-cap" style={{ width: 70, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          {longTailData?.surfacingImpact?.cappedSkus > 0 && (
+                            <div style={{ fontSize: 9, color: T.red, fontFamily: mono }}>{longTailData.surfacingImpact.cappedSkus} SKUs flipped back to STOCK (over cap)</div>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 8 }}>COST INPUTS</div>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>CARRYING %</label>
+                            <input type="number" step="1" defaultValue={Math.round((params.carryingCostPct || 0.25) * 100)} id="lt-carrying" style={{ width: 55, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
                           </div>
                           <div>
-                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>H67 COST $</label>
-                            <input type="number" step="0.5" defaultValue={params.materialCosts?.H67?.lensCost || 12} id="lt-cost-h67" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>PLY $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.PLY?.lensCost || 3} id="lt-cost-ply" style={{ width: 50, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
                           </div>
                           <div>
-                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>B67 COST $</label>
-                            <input type="number" step="0.5" defaultValue={params.materialCosts?.B67?.lensCost || 15} id="lt-cost-b67" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>BLY $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.BLY?.lensCost || 5} id="lt-cost-bly" style={{ width: 50, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
                           </div>
                           <div>
-                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SURF PREMIUM $</label>
-                            <input type="number" step="0.5" defaultValue={params.materialCosts?.PLY?.surfPremium || 2} id="lt-surf-premium" style={{ width: 60, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>H67 $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.H67?.lensCost || 12} id="lt-cost-h67" style={{ width: 50, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>B67 $</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.B67?.lensCost || 15} id="lt-cost-b67" style={{ width: 50, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                          </div>
+                          <div>
+                            <label style={{ fontSize: 9, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SURF $/LENS</label>
+                            <input type="number" step="0.5" defaultValue={params.materialCosts?.PLY?.surfPremium || 2} id="lt-surf-premium" style={{ width: 55, padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
                           </div>
                           <button onClick={async () => {
                             const p = {
                               long_tail_carrying_pct: (parseFloat(document.getElementById('lt-carrying')?.value) || 25) / 100,
+                              long_tail_surf_lead_days: parseFloat(document.getElementById('lt-surf-days')?.value) || 3,
+                              long_tail_finished_lead_days: parseFloat(document.getElementById('lt-fin-days')?.value) || 1.75,
+                              long_tail_lead_time_cost_per_day: parseFloat(document.getElementById('lt-day-cost')?.value) || 0.5,
+                              long_tail_surf_daily_cap: parseFloat(document.getElementById('lt-daily-cap')?.value) || 0,
                               long_tail_lens_cost_ply: parseFloat(document.getElementById('lt-cost-ply')?.value) || 3,
                               long_tail_lens_cost_bly: parseFloat(document.getElementById('lt-cost-bly')?.value) || 5,
                               long_tail_lens_cost_h67: parseFloat(document.getElementById('lt-cost-h67')?.value) || 12,
