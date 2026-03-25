@@ -1960,6 +1960,20 @@ Respond with a structured batching plan in this format:
       }
       jobs.sort((a, b) => b.date.localeCompare(a.date) || a.reference.localeCompare(b.reference));
 
+      // Save to SQLite
+      try {
+        const upsert = labDb.db.prepare(`INSERT OR REPLACE INTO shipped_jobs (reference, date, invoice, dvi_id, coating, frame_upc, frame_style, department, in_dvi, in_looker) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+        const save = labDb.db.transaction(() => {
+          for (const j of jobs) {
+            const dvi = dviByRef[j.reference];
+            const lk = lkByRef[j.reference];
+            upsert.run(j.reference, j.date, j.invoice, j.dvi_id, j.coating, lk?.frameUpc || '', dvi?.frameStyle || dvi?.frameSku || '', j.department, dvi ? 1 : 0, lk ? 1 : 0);
+          }
+        });
+        save();
+        console.log(`[Compare] Saved ${jobs.length} jobs to shipped_jobs table`);
+      } catch (e) { console.error('[Compare] SQLite save error:', e.message); }
+
       return json(res, { jobs, count: jobs.length, summary: { both: bothCount, dviOnly, lookerOnly, dviTotal: Object.keys(dviByRef).length, lookerTotal: Object.keys(lkByRef).length } });
     } catch (e) {
       console.error('[Compare] Error:', e.message);

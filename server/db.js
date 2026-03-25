@@ -29,6 +29,31 @@ db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
 
+// Shipped jobs unified (DVI + Looker cross-reference)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shipped_jobs (
+    reference TEXT NOT NULL,
+    date TEXT NOT NULL,
+    invoice TEXT,
+    dvi_id TEXT,
+    coating TEXT,
+    lens_type TEXT,
+    lens_opc TEXT,
+    frame_upc TEXT,
+    frame_style TEXT,
+    department TEXT,
+    days_in_lab TEXT,
+    entry_date TEXT,
+    rush TEXT,
+    in_dvi INTEGER DEFAULT 0,
+    in_looker INTEGER DEFAULT 0,
+    last_sync TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY(reference, date)
+  );
+  CREATE INDEX IF NOT EXISTS idx_shipped_date ON shipped_jobs(date);
+  CREATE INDEX IF NOT EXISTS idx_shipped_source ON shipped_jobs(in_dvi, in_looker);
+`);
+
 // PO tables
 db.exec(`
   CREATE TABLE IF NOT EXISTS purchase_orders (
