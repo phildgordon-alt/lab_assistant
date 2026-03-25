@@ -8155,20 +8155,6 @@ function FlowAgentTab({ovenServerUrl,settings}){
                     <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Ship/hr</div>
                     <div style={{fontSize:22,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerHr}</div>
                   </div>
-                  <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Assemblers needed</div>
-                    <div style={{fontSize:22,fontWeight:700,color:catchUp.requiredAssemblers>catchUp.assemblers?"#ef4444":"#22c55e",fontFamily:mono}}>{catchUp.requiredAssemblers}</div>
-                  </div>
-                  {catchUp.requiredAssemblers!==catchUp.assemblers&&(
-                    <div style={{textAlign:"center"}}>
-                      <div style={{fontSize:10,color:catchUp.requiredAssemblers>catchUp.assemblers?"#ef4444":"#22c55e",fontFamily:mono}}>
-                        {catchUp.requiredAssemblers>catchUp.assemblers?"Gap":"Surplus"}
-                      </div>
-                      <div style={{fontSize:22,fontWeight:700,color:catchUp.requiredAssemblers>catchUp.assemblers?"#ef4444":"#22c55e",fontFamily:mono}}>
-                        {catchUp.requiredAssemblers>catchUp.assemblers?`+${catchUp.requiredAssemblers-catchUp.assemblers} needed`:`${catchUp.assemblers-catchUp.requiredAssemblers} extra`}
-                      </div>
-                    </div>
-                  )}
                 </div>
               </div>
 
