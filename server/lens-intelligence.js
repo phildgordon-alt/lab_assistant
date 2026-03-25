@@ -217,9 +217,17 @@ function computeAll(db, itempath, netsuite) {
 
   let computed = 0;
   const compute = db.transaction(() => {
+    // Get discontinued SKUs
+    let discontinuedSkus = new Set();
+    try {
+      const disc = db.prepare("SELECT sku FROM lens_sku_params WHERE abc_class = 'X'").all();
+      discontinuedSkus = new Set(disc.map(r => r.sku));
+    } catch {}
+
     for (const sku of allSkus) {
       const cat = getCat(sku);
       if (cat === 'Frames' || cat === 'Tops') continue;
+      if (discontinuedSkus.has(sku)) continue;
 
       const onHand = onHandBySku[sku]?.qty || 0;
       const desc = onHandBySku[sku]?.name || sku;
