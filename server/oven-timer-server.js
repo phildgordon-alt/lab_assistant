@@ -245,15 +245,16 @@ function parseDviXml(xml) {
   const shipTime = getAttr('OrderData', 'ShipTime');
   const entryDate = getAttr('OrderData', 'EntryDate');
   const invoice = getAttr('OrderData', 'Invoice');
+  const reference = getAttr('OrderData', 'Reference');
   const daysInLab = getAttr('RxOrder', 'DaysInLab');
 
   return {
     status: getAttr('Job', 'Status'),
     date: get('Date'),
-    shipDate, shipTime, entryDate, invoice, daysInLab,
+    shipDate, shipTime, entryDate, invoice, reference, daysInLab,
     rmtInv: get('RmtInv'),
     tray: get('Tray'),
-    rxNum: get('RxNum'),
+    rxNum: reference || get('RxNum'),
     patient: get('Patient'),
     origin: get('Origin'),
     coating: getLens('Coat') || get('Coat'),
