@@ -1813,6 +1813,37 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Shipped job detail for a specific day ──────────────────
+  if (req.method==='GET' && url.pathname==='/api/shipping/detail') {
+    const date = url.searchParams.get('date');
+    if (!date) return json(res, { error: 'date param required' }, 400);
+    // Convert YYYY-MM-DD to MM/DD/YY for matching
+    const [yyyy, mm, dd] = date.split('-');
+    const matchDate = `${mm}/${dd}/${yyyy.slice(2)}`;
+
+    const jobs = [];
+    for (const [jobNum, xml] of shippedJobIndex) {
+      if (xml.shipDate === matchDate) {
+        jobs.push({
+          invoice: xml.invoice || jobNum,
+          tray: xml.tray || jobNum,
+          coating: xml.coating || '',
+          lensType: xml.lensType || '',
+          lensMat: xml.lensMat || '',
+          frameStyle: xml.frameStyle || '',
+          frameSku: xml.frameSku || '',
+          department: xml.department || '',
+          daysInLab: xml.daysInLab || '',
+          entryDate: xml.entryDate || '',
+          shipDate: xml.shipDate || '',
+          rush: xml.rush || 'N',
+        });
+      }
+    }
+    jobs.sort((a, b) => (a.invoice || '').localeCompare(b.invoice || ''));
+    return json(res, { date, jobs, count: jobs.length });
+  }
+
   // ── NetSuite consumption endpoints ─────────────────────────
   if (req.method==='GET' && url.pathname==='/api/netsuite/consumption') {
     const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;

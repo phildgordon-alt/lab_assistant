@@ -530,6 +530,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [poExpanded, setPoExpanded] = useState(null);
   const [pipelineData, setPipelineData] = useState(null);
   const [pipelineDays, setPipelineDays] = useState(30);
+  const [pipelineDetail, setPipelineDetail] = useState(null);
+  const [pipelineDetailDate, setPipelineDetailDate] = useState(null);
+  const [pipelineDetailSearch, setPipelineDetailSearch] = useState("");
 
   // Lazy-load: only fetch data needed for the active sub-tab
   const fetchedRef = useRef({});
@@ -1858,9 +1861,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         const isToday = d.date === new Date().toISOString().slice(0, 10);
                         const dviPct = Math.round((d.dvi / maxJobs) * 100);
                         const lkPct = Math.round((d.looker / maxJobs) * 100);
-                        return (
-                          <tr key={d.date} style={{ borderBottom: `1px solid ${T.border}22`, background: isToday ? `${T.blue}10` : 'transparent' }}>
-                            <td style={{ padding: '6px 12px', color: isToday ? T.blue : T.textMuted, fontWeight: isToday ? 700 : 400 }}>{isToday ? 'TODAY' : dayName}</td>
+                        const isExpanded = pipelineDetailDate === d.date;
+                        return [
+                          <tr key={d.date} onClick={() => {
+                            if (isExpanded) { setPipelineDetailDate(null); setPipelineDetail(null); }
+                            else {
+                              setPipelineDetailDate(d.date);
+                              setPipelineDetail(null);
+                              setPipelineDetailSearch("");
+                              fetch(`${ovenServerUrl}/api/shipping/detail?date=${d.date}`).then(r => r.json()).then(setPipelineDetail).catch(() => {});
+                            }
+                          }} style={{ borderBottom: `1px solid ${T.border}22`, background: isExpanded ? `${T.amber}10` : isToday ? `${T.blue}10` : 'transparent', cursor: 'pointer' }}>
+                            <td style={{ padding: '6px 12px', color: isToday ? T.blue : T.textMuted, fontWeight: isToday ? 700 : 400 }}>{isToday ? 'TODAY' : dayName} {isExpanded ? '▲' : '▼'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.breakage > 0 ? T.red : T.textDim }}>{d.breakage > 0 ? d.breakage.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.dvi > 0 ? T.amber : T.textDim }}>{d.dvi > 0 ? d.dvi.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.looker > 0 ? T.blue : T.textDim }}>{d.looker > 0 ? d.looker.toLocaleString() : '—'}</td>
@@ -1877,8 +1889,61 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 </div>
                               </div>
                             </td>
-                          </tr>
-                        );
+                          </tr>,
+                          isExpanded && (
+                            <tr key={d.date + '-detail'}>
+                              <td colSpan={6} style={{ padding: 0, background: `${T.amber}05` }}>
+                                {!pipelineDetail ? (
+                                  <div style={{ padding: 16, textAlign: 'center', color: T.textDim, fontSize: 12 }}>Loading jobs...</div>
+                                ) : (
+                                  <div style={{ padding: '12px 16px' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: T.text, fontFamily: mono }}>{pipelineDetail.count} DVI shipped jobs — {d.date}</span>
+                                      <div style={{ display: 'flex', gap: 8 }}>
+                                        <input type="text" placeholder="Search invoice, coating, frame..." value={pipelineDetailSearch} onChange={e => setPipelineDetailSearch(e.target.value)}
+                                          style={{ padding: '5px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 11, fontFamily: mono, width: 200 }} />
+                                        <ExportBtn label="Export Jobs" onClick={() => {
+                                          downloadCSV(`shipped_${d.date}.csv`, ['invoice','tray','coating','lensType','lensMat','frameStyle','frameSku','department','daysInLab','entryDate','shipDate','rush'], pipelineDetail.jobs);
+                                        }} />
+                                      </div>
+                                    </div>
+                                    <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                                        <thead>
+                                          <tr style={{ background: T.bg }}>
+                                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>INVOICE</th>
+                                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>COATING</th>
+                                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>LENS</th>
+                                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>FRAME</th>
+                                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DEPT</th>
+                                            <th style={{ padding: '5px 8px', textAlign: 'right', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>DAYS</th>
+                                            <th style={{ padding: '5px 8px', textAlign: 'left', fontSize: 9, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>ENTRY</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {(pipelineDetailSearch ? pipelineDetail.jobs.filter(j => {
+                                            const q = pipelineDetailSearch.toLowerCase();
+                                            return (j.invoice||'').toLowerCase().includes(q) || (j.coating||'').toLowerCase().includes(q) || (j.frameStyle||'').toLowerCase().includes(q) || (j.frameSku||'').toLowerCase().includes(q) || (j.department||'').toLowerCase().includes(q);
+                                          }) : pipelineDetail.jobs).slice(0, 200).map((j, i) => (
+                                            <tr key={i} style={{ borderBottom: `1px solid ${T.border}15` }}>
+                                              <td style={{ padding: '4px 8px', color: T.text, fontWeight: 600 }}>{j.invoice}</td>
+                                              <td style={{ padding: '4px 8px', color: T.textMuted }}>{j.coating || '—'}</td>
+                                              <td style={{ padding: '4px 8px', color: T.textMuted }}>{j.lensType || '—'}</td>
+                                              <td style={{ padding: '4px 8px', color: T.textMuted }}>{j.frameStyle || j.frameSku || '—'}</td>
+                                              <td style={{ padding: '4px 8px', color: T.textMuted }}>{j.department || '—'}</td>
+                                              <td style={{ padding: '4px 8px', textAlign: 'right', color: T.textMuted }}>{j.daysInLab || '—'}</td>
+                                              <td style={{ padding: '4px 8px', color: T.textDim }}>{j.entryDate || '—'}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        ];
                       })}
                     </tbody>
                   </table>
@@ -1886,7 +1951,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <div style={{ display: "flex", gap: 16, padding: "8px 12px", borderTop: `1px solid ${T.border}`, fontSize: 10, fontFamily: mono, color: T.textDim }}>
                   <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.amber, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />DVI shipped jobs</span>
                   <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker → NetSuite</span>
-                  <span>Variance = DVI minus Looker (positive = DVI shipped more than reported)</span>
+                  <span>Click a day to see job detail + export</span>
                 </div>
               </Card>
             </div>
