@@ -104,6 +104,10 @@ db.exec(`
   );
 `);
 
+// Safe migration: add expires_at column to existing databases
+try { db.exec('ALTER TABLE flow_recommendations ADD COLUMN expires_at TEXT'); } catch {}
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_flow_rec_expires ON flow_recommendations(expires_at)'); } catch {}
+
 // ─── DEFAULT STAGE CONFIG ──────────────────────────────────────────────────
 
 const DEFAULT_STAGES = [
@@ -166,16 +170,18 @@ const stmts = {
   getSnapshots: db.prepare(`SELECT * FROM flow_snapshots WHERE ts > datetime('now', ?) ORDER BY ts DESC`),
   getStageSnapshots: db.prepare(`SELECT * FROM flow_snapshots WHERE stage_id=? AND ts > datetime('now', ?) ORDER BY ts`),
   insertRec:    db.prepare(`INSERT INTO flow_recommendations
-    (line_id, push_qty, urgency, push_by, reason, available_in_queue, constrained_by, priority_jobs)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+    (line_id, push_qty, urgency, push_by, reason, available_in_queue, constrained_by, priority_jobs, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   getPendingRecs: db.prepare(`SELECT * FROM flow_recommendations WHERE status='pending' ORDER BY created_at DESC`),
   getRecentRecs:  db.prepare(`SELECT * FROM flow_recommendations WHERE created_at > datetime('now', ?) ORDER BY created_at DESC`),
+  getExpiredRecs: db.prepare(`SELECT * FROM flow_recommendations WHERE status='expired' AND created_at > datetime('now', ?) ORDER BY created_at DESC`),
+  expirePending:  db.prepare(`UPDATE flow_recommendations SET status='expired' WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < datetime('now')`),
   ackRec:       db.prepare(`UPDATE flow_recommendations SET status='acknowledged', acknowledged_at=datetime('now'), operator=? WHERE id=?`),
   completeRec:  db.prepare(`UPDATE flow_recommendations SET status='completed', completed_at=datetime('now'), operator=coalesce(?,operator), note=? WHERE id=?`),
   insertPush:   db.prepare(`INSERT INTO flow_push_history (line_id, push_qty, operator, note) VALUES (?, ?, ?, ?)`),
   getPushHistory: db.prepare(`SELECT * FROM flow_push_history WHERE ts > datetime('now', ?) ORDER BY ts DESC`),
   pruneSnapshots: db.prepare(`DELETE FROM flow_snapshots WHERE ts < datetime('now', '-30 days')`),
-  pruneRecs:      db.prepare(`DELETE FROM flow_recommendations WHERE created_at < datetime('now', '-30 days') AND status IN ('completed','acknowledged')`),
+  pruneRecs:      db.prepare(`DELETE FROM flow_recommendations WHERE created_at < datetime('now', '-30 days') AND status IN ('completed','acknowledged','expired')`),
 };
 
 // ─── STAGE → DVI TRACE STAGE MAPPING ───────────────────────────────────────
@@ -572,6 +578,35 @@ function getStockConstraints(itempath) {
 }
 
 /**
+ * Compute expiration timestamp from push_by string.
+ * 'NOW' → 30 min from now. '2:00 PM' → that time today (or +30 min if already past).
+ */
+function computeExpiresAt(pushBy, urgency) {
+  const now = new Date();
+  if (urgency === 'now' || pushBy === 'NOW') {
+    return new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+  }
+  // Parse "2:00 PM" style times
+  try {
+    const match = pushBy.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (match) {
+      let hours = parseInt(match[1]);
+      const minutes = parseInt(match[2]);
+      const ampm = match[3].toUpperCase();
+      if (ampm === 'PM' && hours < 12) hours += 12;
+      if (ampm === 'AM' && hours === 12) hours = 0;
+      const target = new Date(now);
+      target.setHours(hours, minutes, 0, 0);
+      // If target is already past, expire in 30 min instead
+      if (target <= now) return new Date(now.getTime() + 30 * 60 * 1000).toISOString();
+      return target.toISOString();
+    }
+  } catch {}
+  // Default: expire in 60 min
+  return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+}
+
+/**
  * Generate push recommendations based on gap analysis + SLA pacing
  */
 function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, slaPacing, stockConstraints, stageConfigs) {
@@ -633,6 +668,7 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
         push_qty: Math.min(svPush, 75), // max 75 (put wall capacity)
         urgency,
         push_by: pushBy,
+        expires_at: computeExpiresAt(pushBy, urgency),
         reason,
         constrained_by: constraint,
       });
@@ -657,6 +693,7 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
         push_qty: Math.min(deficit, 50),
         urgency: 'by_time',
         push_by: '2:00 PM',
+        expires_at: computeExpiresAt('2:00 PM', 'by_time'),
         reason: `Surfacing pipeline thin (${totalSurfPipeline} jobs) — needs feed for tomorrow's coating`,
         constrained_by: stockConstraints.constrained ? 'stock' : 'none',
       });
@@ -667,9 +704,19 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
 }
 
 /**
- * Catch-up calculator: project when a line clears backlog given current rates
+ * Catch-up calculator: project when a line clears backlog given current rates.
+ * Accepts scenario overrides to model what-if (add/remove assemblers, hours, etc.)
+ *
+ * @param {string} lineId
+ * @param {object} scenario — optional overrides:
+ *   assemblers: number of assemblers (default: measured from throughput)
+ *   jobsPerAssemblerHr: jobs/hr per assembler (default: 22 for assembly)
+ *   shiftHours: hours per shift (default: 8)
+ *   shifts: shifts per day (default: 2)
+ *   incomingPerDay: incoming jobs/day (default: measured)
+ *   targetDays: target days to clear (compute required rate)
  */
-function computeCatchUp(lineId) {
+function computeCatchUp(lineId, scenario = {}) {
   const line = stmts.getLine.get(lineId);
   if (!line) return null;
 
@@ -682,38 +729,81 @@ function computeCatchUp(lineId) {
     totalWip += snap?.current_count || 0;
   }
 
-  // Get output rate (assembly exits for this line)
-  const outputRate = lastSnapshot?.rates?.assembly?.total || 22;
+  // Measured assembly output rate
+  const measuredOutputRate = lastSnapshot?.rates?.assembly?.total || 22;
 
-  // Incoming rate estimate: today's entries / hours worked
-  const now = new Date();
-  const hoursWorked = Math.max(1, now.getHours() + now.getMinutes() / 60 - 7);
+  // Estimate assembler count from measured rate (20-25 jobs/hr per assembler)
+  const jobsPerAssemblerHr = scenario.jobsPerAssemblerHr || 4; // ~4 jobs/hr per person (20-25 total / ~5-6 assemblers)
+  const measuredAssemblers = Math.round(measuredOutputRate / jobsPerAssemblerHr);
 
-  // Estimate incoming from DVI stats
-  let incomingRate = 0;
-  try {
-    const stats = adapters.dviTrace?.getStats();
-    const incoming = stats?.byStage?.INCOMING || 0;
-    incomingRate = incoming / hoursWorked;
-  } catch {}
+  // Apply scenario overrides
+  const assemblers = scenario.assemblers ?? measuredAssemblers;
+  const outputRatePerHr = assemblers * jobsPerAssemblerHr;
+  const shiftHours = scenario.shiftHours ?? 8;
+  const shifts = scenario.shifts ?? 2;
+  const hoursPerDay = shiftHours * shifts;
 
-  const netRate = outputRate - incomingRate; // jobs/hr net reduction
-  const dailyNetRate = netRate * 8; // 8-hour shift
+  // Incoming rate: use shipped count from DVI trace as a proxy for daily volume
+  // (shipped �� incoming at steady state). Fall back to DVI stats.
+  let incomingPerDay = scenario.incomingPerDay ?? null;
+  if (incomingPerDay === null) {
+    try {
+      const stats = adapters.dviTrace?.getStats();
+      // Use today's shipped as best proxy for daily incoming
+      const shippedToday = stats?.byStage?.SHIPPED || 0;
+      const now = new Date();
+      const hoursWorked = Math.max(1, now.getHours() + now.getMinutes() / 60 - 7);
+      // Extrapolate to full day based on hours worked so far
+      incomingPerDay = Math.round((shippedToday / hoursWorked) * hoursPerDay);
+    } catch {}
+    if (!incomingPerDay) incomingPerDay = 0;
+  }
+
+  const outputPerDay = outputRatePerHr * hoursPerDay;
+  const netPerDay = outputPerDay - incomingPerDay;
+
+  // Days to clear: if net positive, how many days to clear WIP
+  const daysToClear = netPerDay > 0 ? Math.ceil(totalWip / netPerDay) : null;
+
+  // Required output per day to clear in N target days (default: SLA days)
+  const targetDays = scenario.targetDays ?? (line.sla_days || 2);
+  const requiredPerDay = Math.ceil((totalWip / targetDays) + incomingPerDay);
+  const requiredPerHr = Math.round((requiredPerDay / hoursPerDay) * 10) / 10;
+  const requiredAssemblers = Math.ceil(requiredPerHr / jobsPerAssemblerHr);
+
+  // Weekly milestones
+  const milestones = [1, 2, 3, 4, 5].map(w => ({
+    week: w,
+    projectedWip: Math.max(0, Math.round(totalWip - (netPerDay * 5 * w))),
+  }));
 
   return {
     line_id: lineId,
     label: line.label,
     currentWip: totalWip,
-    outputRate: Math.round(outputRate * 10) / 10,
-    incomingRate: Math.round(incomingRate * 10) / 10,
-    netRate: Math.round(netRate * 10) / 10,
-    dailyNetRate: Math.round(dailyNetRate),
-    daysToClears: netRate > 0 ? Math.ceil(totalWip / dailyNetRate) : null,
+    // Measured
+    measuredOutputRate: Math.round(measuredOutputRate * 10) / 10,
+    measuredAssemblers,
+    // Scenario
+    assemblers,
+    jobsPerAssemblerHr,
+    shiftHours,
+    shifts,
+    hoursPerDay,
+    // Rates
+    outputPerHr: Math.round(outputRatePerHr * 10) / 10,
+    outputPerDay: Math.round(outputPerDay),
+    incomingPerDay: Math.round(incomingPerDay),
+    netPerDay: Math.round(netPerDay),
+    daysToClear,
+    // Target
+    targetDays,
+    requiredPerDay,
+    requiredPerHr,
+    requiredAssemblers,
     slaDays: line.sla_days,
-    weeklyMilestones: netRate > 0 ? [1, 2, 3, 4, 5].map(w => ({
-      week: w,
-      projectedWip: Math.max(0, Math.round(totalWip - (dailyNetRate * 5 * w))),
-    })) : [],
+    // Milestones
+    weeklyMilestones: milestones,
   };
 }
 
@@ -778,6 +868,12 @@ function poll() {
       );
     }
 
+    // Expire stale pending recommendations whose push_by time has passed
+    const expired = stmts.expirePending.run();
+    if (expired.changes > 0) {
+      console.log(`[Flow] Expired ${expired.changes} unacknowledged recommendation(s)`);
+    }
+
     // Generate recommendations (throttled: only if last rec is >30 min old)
     const lastRecTime = db.prepare(`SELECT MAX(created_at) as t FROM flow_recommendations`).get()?.t;
     const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
@@ -788,7 +884,8 @@ function poll() {
         stmts.insertRec.run(
           r.line_id, r.push_qty, r.urgency, r.push_by,
           r.reason, r.available_in_queue || null, r.constrained_by || 'none',
-          r.priority_jobs ? JSON.stringify(r.priority_jobs) : null
+          r.priority_jobs ? JSON.stringify(r.priority_jobs) : null,
+          r.expires_at || null
         );
       }
     }
@@ -932,6 +1029,7 @@ module.exports = {
 
   getRecommendations(status) {
     if (status === 'pending') return stmts.getPendingRecs.all();
+    if (status === 'expired') return stmts.getExpiredRecs.all('-24 hours');
     return stmts.getRecentRecs.all('-24 hours');
   },
 
@@ -995,8 +1093,8 @@ module.exports = {
 
   // ── Catch-up ──
 
-  getCatchUp(lineId) {
-    return computeCatchUp(lineId);
+  getCatchUp(lineId, scenario) {
+    return computeCatchUp(lineId, scenario);
   },
 
   // ── Health ──

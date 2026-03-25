@@ -5149,10 +5149,11 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, flowAgent.updateLineConfig(lineId, body));
   }
 
-  // GET /api/flow/catchup/:lineId — catch-up projection
-  if (req.method==='GET' && url.pathname.startsWith('/api/flow/catchup/')) {
+  // GET/POST /api/flow/catchup/:lineId — catch-up projection (POST accepts scenario overrides)
+  if ((req.method==='GET'||req.method==='POST') && url.pathname.startsWith('/api/flow/catchup/')) {
     const lineId = url.pathname.split('/api/flow/catchup/')[1];
-    const result = flowAgent.getCatchUp(lineId);
+    const scenario = req.method==='POST' ? await readBody(req) : {};
+    const result = flowAgent.getCatchUp(lineId, scenario);
     if (!result) return json(res, { error: 'Line not found' }, 404);
     return json(res, result);
   }

@@ -7699,6 +7699,9 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [editingStage,setEditingStage]=useState(null);
   const [stageEdits,setStageEdits]=useState({});
   const [pushForm,setPushForm]=useState({line_id:"sv",qty:"",operator:"",note:""});
+  const [expiredRecs,setExpiredRecs]=useState([]);
+  const [showExpired,setShowExpired]=useState(false);
+  const [catchUpScenario,setCatchUpScenario]=useState({assemblers:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:""});
   const [lastRefresh,setLastRefresh]=useState(null);
 
   // Fetch snapshot + recs on mount and every 60s
@@ -7706,17 +7709,19 @@ function FlowAgentTab({ovenServerUrl,settings}){
     let mounted=true;
     const load=async()=>{
       try{
-        const [snapRes,recRes,histRes,healthRes]=await Promise.all([
+        const [snapRes,recRes,histRes,healthRes,expRes]=await Promise.all([
           fetch(`${base}/api/flow/snapshot`),
           fetch(`${base}/api/flow/recommendations?status=pending`),
           fetch(`${base}/api/flow/history?hours=24`),
           fetch(`${base}/api/flow/health`),
+          fetch(`${base}/api/flow/recommendations?status=expired`),
         ]);
         if(!mounted)return;
         if(snapRes.ok){const d=await snapRes.json();setSnapshot(d);}
         if(recRes.ok){const d=await recRes.json();setRecommendations(d);}
         if(histRes.ok){const d=await histRes.json();setPushHistory(d);}
         if(healthRes.ok){const d=await healthRes.json();setHealth(d);}
+        if(expRes.ok){const d=await expRes.json();setExpiredRecs(d);}
         setLoading(false);setError(null);
         setLastRefresh(new Date());
       }catch(e){if(mounted){setError(e.message);setLoading(false);}}
@@ -7733,11 +7738,23 @@ function FlowAgentTab({ovenServerUrl,settings}){
     fetch(`${base}/api/flow/config/lines`).then(r=>r.json()).then(setLineConfigs).catch(()=>{});
   },[showConfig,base]);
 
-  // Load catch-up when tab switches
-  useEffect(()=>{
+  // Load catch-up when tab switches or scenario changes
+  const loadCatchUp=useCallback(()=>{
     if(subTab!=="catchup")return;
-    fetch(`${base}/api/flow/catchup/${catchUpLine}`).then(r=>r.json()).then(setCatchUp).catch(()=>{});
-  },[subTab,catchUpLine,base]);
+    const body={};
+    if(catchUpScenario.assemblers)body.assemblers=parseInt(catchUpScenario.assemblers);
+    if(catchUpScenario.shiftHours)body.shiftHours=parseFloat(catchUpScenario.shiftHours);
+    if(catchUpScenario.shifts)body.shifts=parseInt(catchUpScenario.shifts);
+    if(catchUpScenario.incomingPerDay)body.incomingPerDay=parseInt(catchUpScenario.incomingPerDay);
+    if(catchUpScenario.targetDays)body.targetDays=parseFloat(catchUpScenario.targetDays);
+    const hasOverrides=Object.keys(body).length>0;
+    if(hasOverrides){
+      fetch(`${base}/api/flow/catchup/${catchUpLine}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json()).then(setCatchUp).catch(()=>{});
+    }else{
+      fetch(`${base}/api/flow/catchup/${catchUpLine}`).then(r=>r.json()).then(setCatchUp).catch(()=>{});
+    }
+  },[subTab,catchUpLine,base,catchUpScenario]);
+  useEffect(()=>{loadCatchUp();},[loadCatchUp]);
 
   // Load trend when tab switches
   useEffect(()=>{
@@ -8030,9 +8047,30 @@ function FlowAgentTab({ovenServerUrl,settings}){
               </div>
               <div style={{fontSize:12,color:"#9ca3af",fontFamily:mono,marginTop:4}}>{r.reason}</div>
               {r.constrained_by&&r.constrained_by!=="none"&&<div style={{fontSize:11,color:"#ef4444",fontFamily:mono,marginTop:2}}>Constraint: {r.constrained_by}</div>}
-              <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginTop:4}}>Created {r.created_at}</div>
+              <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginTop:4}}>Created {r.created_at}{r.expires_at&&` · Expires ${r.expires_at.split("T")[1]?.slice(0,5)||r.expires_at}`}</div>
             </div>
           ))}
+
+          {/* Expired (archived) recommendations */}
+          {expiredRecs.length>0&&(
+            <div style={{marginTop:20}}>
+              <button onClick={()=>setShowExpired(!showExpired)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontFamily:mono,fontSize:12,padding:0,marginBottom:8}}>
+                {showExpired?"▼":"▶"} EXPIRED / UNACKNOWLEDGED ({expiredRecs.length})
+              </button>
+              {showExpired&&expiredRecs.map(r=>(
+                <div key={r.id} style={{background:"rgba(107,114,128,0.06)",border:"1px solid rgba(107,114,128,0.15)",borderRadius:8,padding:12,marginBottom:6,opacity:0.6}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                    <div>
+                      <span style={{fontFamily:mono,fontSize:12,color:"#6b7280",textDecoration:"line-through"}}>{r.push_qty} {r.line_id.toUpperCase()} jobs — {r.push_by}</span>
+                    </div>
+                    <span style={{fontSize:10,fontFamily:mono,color:"#6b7280",background:"rgba(107,114,128,0.15)",borderRadius:4,padding:"2px 6px"}}>EXPIRED</span>
+                  </div>
+                  <div style={{fontSize:11,color:"#6b7280",fontFamily:mono,marginTop:2}}>{r.reason}</div>
+                  <div style={{fontSize:10,color:"#4b5563",fontFamily:mono,marginTop:2}}>Created {r.created_at?.split("T")[1]?.slice(0,5)||""} · Expired {r.expires_at?.split("T")[1]?.slice(0,5)||""}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -8041,27 +8079,84 @@ function FlowAgentTab({ovenServerUrl,settings}){
         <div>
           <div style={{display:"flex",gap:8,marginBottom:16}}>
             {["sv","surfacing","edits"].map(l=>(
-              <button key={l} onClick={()=>setCatchUpLine(l)} style={{background:catchUpLine===l?"rgba(59,130,246,0.15)":"transparent",border:catchUpLine===l?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:catchUpLine===l?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>{l.toUpperCase()}</button>
+              <button key={l} onClick={()=>{setCatchUpLine(l);setCatchUpScenario({assemblers:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:""});}} style={{background:catchUpLine===l?"rgba(59,130,246,0.15)":"transparent",border:catchUpLine===l?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:catchUpLine===l?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>{l.toUpperCase()}</button>
             ))}
           </div>
+
+          {/* Scenario controls */}
+          <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16,marginBottom:16}}>
+            <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",letterSpacing:1,marginBottom:10}}>WHAT-IF SCENARIO</div>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap",alignItems:"flex-end"}}>
+              {[
+                {key:"assemblers",label:"Assemblers",placeholder:catchUp?.measuredAssemblers||"5",width:80},
+                {key:"shiftHours",label:"Hrs/Shift",placeholder:catchUp?.shiftHours||"8",width:80},
+                {key:"shifts",label:"Shifts/Day",placeholder:catchUp?.shifts||"2",width:80},
+                {key:"incomingPerDay",label:"Incoming/Day",placeholder:catchUp?.incomingPerDay||"0",width:100},
+                {key:"targetDays",label:"Target Days",placeholder:catchUp?.slaDays||"2",width:90},
+              ].map(f=>(
+                <div key={f.key}>
+                  <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{f.label}</div>
+                  <input type="number" value={catchUpScenario[f.key]} onChange={e=>setCatchUpScenario(p=>({...p,[f.key]:e.target.value}))} placeholder={String(f.placeholder)} style={{background:"rgba(0,0,0,0.3)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"6px 8px",color:"#e5e7eb",fontFamily:mono,fontSize:12,width:f.width}}/>
+                </div>
+              ))}
+              <button onClick={loadCatchUp} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 14px",color:"#60a5fa",cursor:"pointer",fontFamily:mono,fontSize:12}}>RECALC</button>
+              <button onClick={()=>{setCatchUpScenario({assemblers:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:""});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>RESET</button>
+            </div>
+          </div>
+
           {catchUp?(
             <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:20}}>
               <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,color:"#e5e7eb",letterSpacing:1,marginBottom:16}}>{catchUp.label} CATCH-UP PROJECTION</div>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+
+              {/* Current state */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:20}}>
                 {[
                   {label:"Current WIP",value:catchUp.currentWip,color:"#e5e7eb"},
-                  {label:"Output/hr",value:catchUp.outputRate,color:"#22c55e"},
-                  {label:"Incoming/hr",value:catchUp.incomingRate,color:"#f59e0b"},
-                  {label:"Net/hr",value:catchUp.netRate,color:catchUp.netRate>0?"#22c55e":"#ef4444"},
-                  {label:"Net/day",value:catchUp.dailyNetRate,color:catchUp.dailyNetRate>0?"#22c55e":"#ef4444"},
-                  {label:"Days to Clear",value:catchUp.daysToClears||"∞",color:catchUp.daysToClears?"#60a5fa":"#ef4444"},
+                  {label:"Assemblers",value:catchUp.assemblers,color:"#60a5fa"},
+                  {label:"Output/hr",value:catchUp.outputPerHr,color:"#22c55e"},
+                  {label:"Output/day",value:catchUp.outputPerDay,color:"#22c55e"},
+                  {label:"Incoming/day",value:catchUp.incomingPerDay,color:"#f59e0b"},
+                  {label:"Net/day",value:catchUp.netPerDay,color:catchUp.netPerDay>0?"#22c55e":"#ef4444"},
+                  {label:"Days to Clear",value:catchUp.daysToClear||"Falling behind",color:catchUp.daysToClear?"#60a5fa":"#ef4444",small:!catchUp.daysToClear},
+                  {label:`Hrs/day (${catchUp.shifts} shifts)`,value:catchUp.hoursPerDay,color:"#a78bfa"},
                 ].map((m,i)=>(
-                  <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:12,textAlign:"center"}}>
+                  <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:10,textAlign:"center"}}>
                     <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{m.label}</div>
-                    <div style={{fontSize:20,fontWeight:700,color:m.color,fontFamily:mono}}>{m.value}</div>
+                    <div style={{fontSize:m.small?13:18,fontWeight:700,color:m.color,fontFamily:mono}}>{m.value}</div>
                   </div>
                 ))}
               </div>
+
+              {/* Required to hit target */}
+              <div style={{background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:8,padding:14,marginBottom:16}}>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:13,color:"#60a5fa",letterSpacing:1,marginBottom:8}}>TO CLEAR IN {catchUp.targetDays} DAYS</div>
+                <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Need/day</div>
+                    <div style={{fontSize:20,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerDay}</div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Need/hr</div>
+                    <div style={{fontSize:20,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerHr}</div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Assemblers needed</div>
+                    <div style={{fontSize:20,fontWeight:700,color:catchUp.requiredAssemblers>catchUp.assemblers?"#ef4444":"#22c55e",fontFamily:mono}}>{catchUp.requiredAssemblers}</div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Current</div>
+                    <div style={{fontSize:20,fontWeight:700,color:"#9ca3af",fontFamily:mono}}>{catchUp.assemblers}</div>
+                  </div>
+                  {catchUp.requiredAssemblers>catchUp.assemblers&&(
+                    <div style={{textAlign:"center"}}>
+                      <div style={{fontSize:10,color:"#ef4444",fontFamily:mono}}>Gap</div>
+                      <div style={{fontSize:20,fontWeight:700,color:"#ef4444",fontFamily:mono}}>+{catchUp.requiredAssemblers-catchUp.assemblers} needed</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Weekly milestones */}
               {catchUp.weeklyMilestones&&catchUp.weeklyMilestones.length>0&&(
                 <div>
                   <div style={{fontFamily:mono,fontSize:11,color:"#6b7280",marginBottom:8}}>WEEKLY MILESTONES</div>
