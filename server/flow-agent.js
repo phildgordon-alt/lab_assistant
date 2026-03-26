@@ -667,38 +667,39 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
     if (nextCoatingWave !== null) {
       bridgeHours = Math.max(0, (nextCoatingWave - Math.min(cuttingDrainMin, assemblyDrainMin)) / 60);
     }
-    const svPush = Math.ceil(bridgeHours * cuttingRate);
-    if (svPush > 0) {
-      const drainTime = new Date(now.getTime() + Math.min(cuttingDrainMin, assemblyDrainMin) * 60000);
-      const urgency = Math.min(cuttingDrainMin, assemblyDrainMin) < 30 ? 'now' : 'by_time';
-      const pushBy = urgency === 'now' ? 'NOW' :
-        drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const svPushRaw = Math.ceil(bridgeHours * cuttingRate);
+    // Round up to nearest 75 (full put wall), minimum 75
+    const svPush = Math.max(75, Math.ceil(svPushRaw / 75) * 75);
+    const walls = svPush / 75;
+    const drainTime = new Date(now.getTime() + Math.min(cuttingDrainMin, assemblyDrainMin) * 60000);
+    const urgency = Math.min(cuttingDrainMin, assemblyDrainMin) < 30 ? 'now' : 'by_time';
+    const pushBy = urgency === 'now' ? 'NOW' :
+      drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
-      const feedHours = Math.round((75 / assemblyRate) * 10) / 10;
-      let reason = '';
-      if (cuttingDrainMin < assemblyDrainMin) {
-        reason = `Cutting drains at ${drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-      } else {
-        reason = `Assembly drains at ${drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-      }
-      reason += ` — 75 SV keeps assembly busy ~${feedHours}h at ${Math.round(assemblyRate)}/hr`;
-      if (nextCoatingWave !== null) {
-        const waveTime = new Date(now.getTime() + nextCoatingWave * 60000);
-        reason += `, coating wave at ${waveTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-      }
-
-      const constraint = stockConstraints.constrained ? 'stock' : 'none';
-
-      recs.push({
-        line_id: 'sv',
-        push_qty: 75, // put wall = 75 positions, always push a full wall
-        urgency,
-        push_by: pushBy,
-        expires_at: computeExpiresAt(pushBy, urgency),
-        reason,
-        constrained_by: constraint,
-      });
+    const feedHours = Math.round((svPush / assemblyRate) * 10) / 10;
+    let reason = '';
+    if (cuttingDrainMin < assemblyDrainMin) {
+      reason = `Cutting drains at ${drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    } else {
+      reason = `Assembly drains at ${drainTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
     }
+    reason += ` — ${svPush} SV (${walls} wall${walls>1?'s':''}) keeps assembly busy ~${feedHours}h at ${Math.round(assemblyRate)}/hr`;
+    if (nextCoatingWave !== null) {
+      const waveTime = new Date(now.getTime() + nextCoatingWave * 60000);
+      reason += `, coating wave at ${waveTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+    }
+
+    const constraint = stockConstraints.constrained ? 'stock' : 'none';
+
+    recs.push({
+      line_id: 'sv',
+      push_qty: svPush,
+      urgency,
+      push_by: pushBy,
+      expires_at: computeExpiresAt(pushBy, urgency),
+      reason,
+      constrained_by: constraint,
+    });
   }
 
   // Surfacing push for tomorrow's coating feed
@@ -714,16 +715,18 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
   if (totalSurfPipeline < (surfPacing.dailyTarget || 40)) {
     const deficit = (surfPacing.dailyTarget || 40) - totalSurfPipeline;
     if (deficit > 5) {
-      // Push within the next hour — surfacing pipeline needs constant feed
+      // Size to deficit, rounded up to full walls, minimum 75
+      const surfPush = Math.max(75, Math.ceil(deficit / 75) * 75);
+      const surfWalls = surfPush / 75;
       const surfDeadline = new Date(now.getTime() + 60 * 60 * 1000);
       const surfPushBy = surfDeadline.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
       recs.push({
         line_id: 'surfacing',
-        push_qty: 75,
+        push_qty: surfPush,
         urgency: 'by_time',
         push_by: surfPushBy,
         expires_at: computeExpiresAt(surfPushBy, 'by_time'),
-        reason: `Surfacing pipeline thin (${totalSurfPipeline} jobs) — needs feed for tomorrow's coating`,
+        reason: `Surfacing pipeline thin (${totalSurfPipeline} jobs, need ${surfPacing.dailyTarget || 40}) — ${surfPush} jobs (${surfWalls} wall${surfWalls>1?'s':''}) for tomorrow's coating`,
         constrained_by: stockConstraints.constrained ? 'stock' : 'none',
       });
     }
