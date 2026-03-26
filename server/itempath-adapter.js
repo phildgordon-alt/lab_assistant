@@ -319,7 +319,7 @@ function normalizeOrder(o) {
     orderId:   o.id,
     reference: o.reference || o.name,
     status:    o.status,
-    warehouse: /kitchen|lens.kitchen|wh3|irvine.2|irv02/i.test(o.warehouseName || '') ? 'WH3' : /wh2|warehouse.2/i.test(o.warehouseName || '') ? 'WH2' : /wh1|warehouse.1/i.test(o.warehouseName || '') ? 'WH1' : (o.warehouseName || null),
+    warehouse: /^kitchen$/i.test(o.warehouseName || '') || /wh3/i.test(o.warehouseName || '') ? 'WH3' : /wh2/i.test(o.warehouseName || '') ? 'WH2' : /wh1/i.test(o.warehouseName || '') ? 'WH1' : (o.warehouseName || null),
     station:   o.stationName || null,  // Station/area where order is processed
     startedAt: o.modifiedDate || o.created_at || o.started_at,
     hasStock:  o.hasStock,
@@ -625,10 +625,10 @@ async function poll() {
     const seenPickJobs = { WH1: new Map(), WH2: new Map(), WH3: new Map() };
     for (const tx of pickTxList) {
       let wh = tx.warehouseName || 'Unknown';
-      // Normalize warehouse names — ItemPath may use full names instead of WH1/WH2/WH3
-      if (/kitchen|lens.kitchen|wh3|irvine.2|irv02/i.test(wh)) wh = 'WH3';
-      else if (/wh2|warehouse.2/i.test(wh)) wh = 'WH2';
-      else if (/wh1|warehouse.1/i.test(wh)) wh = 'WH1';
+      // Normalize warehouse names — ItemPath uses "Kitchen" for WH3
+      if (/^kitchen$/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
+      else if (/wh2/i.test(wh)) wh = 'WH2';
+      else if (/wh1/i.test(wh)) wh = 'WH1';
       const date = tx.creationDate || '';
       const orderName = tx.orderName || tx.order_name || '';
       if ((wh === 'WH1' || wh === 'WH2' || wh === 'WH3') && orderName) {
