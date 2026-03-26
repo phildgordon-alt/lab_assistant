@@ -7936,17 +7936,69 @@ function FlowAgentTab({ovenServerUrl,settings}){
           {expandedStage&&(()=>{
             const s=stages.find(s=>s.stage_id===expandedStage);
             if(!s)return null;
+            // Build flow chain: find what feeds this stage and what it feeds
+            const stageOrder=["blocking","surfacing","detray","dip_coat","oven","coating","cutting","assembly"];
+            const idx=stageOrder.indexOf(s.stage_id);
+            const upstream=idx>0?stages.find(x=>x.stage_id===stageOrder[idx-1]):null;
+            const downstream=idx<stageOrder.length-1?stages.find(x=>x.stage_id===stageOrder[idx+1]):null;
+            // For cutting: also gets fed by SV (not just coating)
+            const isCutting=s.stage_id==="cutting";
+            const isAssembly=s.stage_id==="assembly";
             return(
               <div style={{background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:10,padding:16,marginBottom:16}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                   <span style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:18,color:"#e5e7eb",letterSpacing:1}}>{s.label} DETAIL</span>
                   <button onClick={()=>setExpandedStage(null)} style={{background:"none",border:"none",color:"#6b7280",cursor:"pointer",fontSize:14}}>✕</button>
                 </div>
+
+                {/* Flow between stages */}
+                <div style={{background:"rgba(0,0,0,0.15)",borderRadius:8,padding:14,marginBottom:12}}>
+                  <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:8,letterSpacing:1}}>JOBS FLOWING BETWEEN STAGES</div>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:8,flexWrap:"wrap"}}>
+                    {upstream&&(
+                      <div style={{textAlign:"center",padding:"8px 14px",background:"rgba(167,139,250,0.08)",border:"1px solid rgba(167,139,250,0.2)",borderRadius:6}}>
+                        <div style={{fontSize:9,color:"#a78bfa",fontFamily:mono}}>{upstream.label}</div>
+                        <div style={{fontSize:20,fontWeight:700,color:"#a78bfa",fontFamily:mono}}>{upstream.current_count}</div>
+                        <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>{upstream.completion_rate}/hr out</div>
+                      </div>
+                    )}
+                    {upstream&&<div style={{fontSize:18,color:"#6b7280"}}>→</div>}
+                    <div style={{textAlign:"center",padding:"10px 18px",background:statusBg(s.status),border:`2px solid ${statusColor(s.status)}`,borderRadius:8}}>
+                      <div style={{fontSize:9,color:statusColor(s.status),fontFamily:mono,fontWeight:700}}>{s.label}</div>
+                      <div style={{fontSize:24,fontWeight:700,color:statusColor(s.status),fontFamily:mono}}>{s.current_count}</div>
+                      <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>{s.completion_rate}/hr through</div>
+                    </div>
+                    {downstream&&<div style={{fontSize:18,color:"#6b7280"}}>→</div>}
+                    {downstream&&(
+                      <div style={{textAlign:"center",padding:"8px 14px",background:"rgba(34,197,94,0.08)",border:"1px solid rgba(34,197,94,0.2)",borderRadius:6}}>
+                        <div style={{fontSize:9,color:"#22c55e",fontFamily:mono}}>{downstream.label}</div>
+                        <div style={{fontSize:20,fontWeight:700,color:"#22c55e",fontFamily:mono}}>{downstream.current_count}</div>
+                        <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>waiting</div>
+                      </div>
+                    )}
+                  </div>
+                  {/* Summary: how many need to move */}
+                  <div style={{display:"flex",gap:16,justifyContent:"center",marginTop:10,flexWrap:"wrap"}}>
+                    {upstream&&(
+                      <div style={{fontSize:11,fontFamily:mono,color:"#e5e7eb"}}>
+                        <span style={{color:"#a78bfa"}}>{upstream.current_count}</span> jobs in {upstream.label} → need to come out to {s.label}
+                      </div>
+                    )}
+                    {downstream&&s.current_count>0&&(
+                      <div style={{fontSize:11,fontFamily:mono,color:"#e5e7eb"}}>
+                        <span style={{color:statusColor(s.status)}}>{s.current_count}</span> jobs in {s.label} → need to move to {downstream.label}
+                      </div>
+                    )}
+                    {(isCutting||isAssembly)&&(
+                      <div style={{fontSize:11,fontFamily:mono,color:"#e5e7eb"}}>
+                        <span style={{color:"#60a5fa"}}>{s.by_line?.sv||0} SV</span> + <span style={{color:"#a78bfa"}}>{s.by_line?.surfacing||0} surfaced</span> = {s.current_count} total
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12}}>
                   {[
-                    {label:"Jobs",value:s.current_count,color:"#e5e7eb"},
-                    {label:"SV",value:s.by_line?.sv||0,color:"#60a5fa"},
-                    {label:"Surfacing",value:s.by_line?.surfacing||0,color:"#a78bfa"},
                     {label:"Rate",value:`${s.completion_rate}/hr`,color:"#22c55e"},
                     {label:"Drain",value:s.drain_time_minutes!=null?`${s.drain_time_minutes}m`:"—",color:statusColor(s.status)},
                     {label:"Next Wave",value:s.next_wave_eta_minutes!=null?`${s.next_wave_eta_minutes}m`:"—",color:"#06b6d4"},
