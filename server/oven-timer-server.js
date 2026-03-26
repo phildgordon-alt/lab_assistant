@@ -2296,7 +2296,7 @@ Respond with a structured batching plan in this format:
     return json(res, { ok: true });
   }
   if (req.method==='POST' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/compute')) {
-    const id = url.pathname.split('/')[3];
+    const id = url.pathname.split('/')[4];
     const result = npiEngine.computeCannibalization(labDb.db, id);
     return json(res, result || { error: 'Scenario not found' });
   }

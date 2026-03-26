@@ -2727,7 +2727,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <div key={s.id} onClick={async () => {
                           try {
                             const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}/compute`, { method: 'POST' });
-                            if (resp.ok) { setNpiSelected(await resp.json()); return; }
+                            if (resp.ok) {
+                              const data = await resp.json();
+                              if (data.scenario) { setNpiSelected(data); return; }
+                            }
                           } catch {}
                           // Fallback: just select the scenario without compute results
                           setNpiSelected({ scenario: s, cannibalization: [], newProductWeeklyJobs: 0, newProductWeeklyLenses: 0, totalLostWeekly: 0, initialOrderQty: 0 });
