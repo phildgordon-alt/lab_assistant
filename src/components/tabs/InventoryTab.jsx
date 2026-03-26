@@ -492,6 +492,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [pickCompare, setPickCompare] = useState(null);
   const [alerts, setAlerts] = useState({ alerts: [], critical: 0, high: 0, low: 0 });
   const [varianceData, setVarianceData] = useState(null);
+  const [varianceFrom, setVarianceFrom] = useState(`${new Date().getFullYear()}-01-01`);
+  const [varianceTo, setVarianceTo] = useState(new Date(Date.now() - 86400000).toISOString().slice(0, 10));
   const [vlms, setVlms] = useState({ vlmStats: {}, locations: [] });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1167,21 +1169,39 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
             {/* YTD Variance Analysis */}
             <Card style={{ marginTop: 24, padding: 0 }}>
-              <div style={{ padding: '14px 16px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 14, fontWeight: 800, color: T.text, fontFamily: mono }}>YTD Variance Analysis — Where Is the Gap?</span>
-                <button onClick={async () => {
-                  const resp = await fetch(`${ovenServerUrl}/api/inventory/variance-analysis`);
-                  if (resp.ok) setVarianceData(await resp.json());
-                }} style={{ background: T.blue, border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
-                  {varianceData ? '↻ Refresh' : 'Load Analysis'}
-                </button>
-                {varianceData && <ExportBtn onClick={() => {
-                  const rows = varianceData.skus || [];
-                  downloadCSV('variance_analysis_ytd.csv',
-                    ['sku','category','kardex','wh1','wh2','wh3','looker_netsuite','breakages','variance','explained_breakage','explained_kitchen','unexplained'],
-                    rows.map(s => ({ sku:s.sku, category:s.category, kardex:s.kardex, wh1:s.wh1, wh2:s.wh2, wh3:s.wh3, looker_netsuite:s.netsuite, breakages:s.breakages, variance:s.variance, explained_breakage:s.explainedByBreakage, explained_kitchen:s.explainedByKitchen, unexplained:s.unexplained }))
-                  );
-                }} label="Export CSV" />
+              <div style={{ padding: '14px 16px', borderBottom: `1px solid ${T.border}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: 14, fontWeight: 800, color: T.text, fontFamily: mono }}>Variance Analysis — Where Is the Gap?</span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button onClick={async () => {
+                      const resp = await fetch(`${ovenServerUrl}/api/inventory/variance-analysis?from=${varianceFrom}&to=${varianceTo}`);
+                      if (resp.ok) setVarianceData(await resp.json());
+                    }} style={{ background: T.blue, border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
+                      {varianceData ? '↻ Refresh' : 'Load Analysis'}
+                    </button>
+                    {varianceData && <ExportBtn onClick={() => {
+                      const rows = varianceData.skus || [];
+                      downloadCSV(`variance_analysis_${varianceFrom}_${varianceTo}.csv`,
+                        ['sku','category','kardex','wh1','wh2','wh3','looker_netsuite','breakages','variance','explained_breakage','explained_kitchen','unexplained'],
+                        rows.map(s => ({ sku:s.sku, category:s.category, kardex:s.kardex, wh1:s.wh1, wh2:s.wh2, wh3:s.wh3, looker_netsuite:s.netsuite, breakages:s.breakages, variance:s.variance, explained_breakage:s.explainedByBreakage, explained_kitchen:s.explainedByKitchen, unexplained:s.unexplained }))
+                      );
+                    }} label="Export CSV" />}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <input type="date" value={varianceFrom} onChange={e => setVarianceFrom(e.target.value)} style={{ padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                  <span style={{ color: T.textDim, fontSize: 11 }}>to</span>
+                  <input type="date" value={varianceTo} onChange={e => setVarianceTo(e.target.value)} style={{ padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                  {[
+                    { label: '7d', fn: () => { const d = new Date(); d.setDate(d.getDate()-8); setVarianceFrom(d.toISOString().slice(0,10)); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
+                    { label: '30d', fn: () => { const d = new Date(); d.setDate(d.getDate()-31); setVarianceFrom(d.toISOString().slice(0,10)); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
+                    { label: '90d', fn: () => { const d = new Date(); d.setDate(d.getDate()-91); setVarianceFrom(d.toISOString().slice(0,10)); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
+                    { label: 'YTD', fn: () => { setVarianceFrom(`${new Date().getFullYear()}-01-01`); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
+                    { label: 'Last Month', fn: () => { const d = new Date(); const y = d.getMonth() === 0 ? d.getFullYear()-1 : d.getFullYear(); const m = d.getMonth() === 0 ? 12 : d.getMonth(); setVarianceFrom(`${y}-${String(m).padStart(2,'0')}-01`); const last = new Date(y, m, 0); setVarianceTo(last.toISOString().slice(0,10)); }},
+                  ].map(p => (
+                    <button key={p.label} onClick={p.fn} style={{ padding: '4px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: 'pointer', background: 'transparent', color: T.textMuted, border: `1px solid ${T.border}` }}>{p.label}</button>
+                  ))}
+                </div>
               </div>
               {varianceData && (
                 <div style={{ padding: 16 }}>
