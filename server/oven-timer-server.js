@@ -5214,11 +5214,11 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       } catch {}
 
       // 5. Summary waterfall
-      // Kardex picked = Looker shipped + WIP (in pipeline) + Kitchen (may not be in Looker) + Unexplained
-      // Breakage is shown as a separate DVI vs Looker comparison — NOT subtracted from variance
-      // because Looker's shipped count already excludes broken lenses
+      // Kardex picked = Looker shipped + WIP + Breakage (remakes = double pick) + Kitchen + Unexplained
+      // Breakage remakes consume extra Kardex picks — broken lens was picked, replacement also picked,
+      // but only one shipped job in Looker. So breakage explains part of the variance.
       const totalVariance = totalKardex - totalNS;
-      const unexplained = totalVariance - currentWIP - totalWH3;
+      const unexplained = totalVariance - currentWIP - labBreakage - totalWH3;
       return json(res, {
         period: { from, to },
         summary: {

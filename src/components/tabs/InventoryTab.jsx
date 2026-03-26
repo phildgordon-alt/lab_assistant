@@ -1243,12 +1243,17 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </div>
                   {/* Waterfall — breakdown: what explains the variance */}
                   {/* Variance breakdown: where are the picked-but-not-shipped units? */}
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginBottom: 6, textAlign: 'center' }}>VARIANCE = WIP + KITCHEN + UNEXPLAINED</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginBottom: 6, textAlign: 'center' }}>VARIANCE = WIP + BREAKAGE + KITCHEN + UNEXPLAINED</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 20 }}>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.cyan || '#06b6d4'}08`, borderRadius: 6, border: `1px solid ${T.cyan || '#06b6d4'}20` }}>
                       <div style={{ fontSize: 8, color: T.cyan || '#06b6d4', fontFamily: mono, letterSpacing: 1 }}>CURRENT WIP</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.cyan || '#06b6d4', fontFamily: mono }}>{(varianceData.summary?.currentWIP || 0).toLocaleString()}</div>
                       <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units in pipeline (by SKU)</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6, border: `1px solid ${T.red}20` }}>
+                      <div style={{ fontSize: 8, color: T.red, fontFamily: mono, letterSpacing: 1 }}>BREAKAGE (DVI)</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.labBreakage || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>remake double-picks</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.amber}08`, borderRadius: 6, border: `1px solid ${T.amber}20` }}>
                       <div style={{ fontSize: 8, color: T.amber, fontFamily: mono, letterSpacing: 1 }}>KITCHEN (WH3)</div>
@@ -1258,36 +1263,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.purple || '#9b6ee0'}08`, borderRadius: 6, border: `1px solid ${Math.abs(varianceData.summary?.unexplained || 0) > 100 ? T.red : (T.purple || '#9b6ee0')}20` }}>
                       <div style={{ fontSize: 8, color: T.purple || '#9b6ee0', fontFamily: mono, letterSpacing: 1 }}>UNEXPLAINED</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: Math.abs(varianceData.summary?.unexplained || 0) > 100 ? T.red : (T.purple || '#9b6ee0'), fontFamily: mono }}>{(varianceData.summary?.unexplained || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>remakes / leakage / timing</div>
-                    </div>
-                  </div>
-
-                  {/* Breakage comparison — separate from variance, DVI vs Looker */}
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginBottom: 20 }}>
-                    <div style={{ padding: 12, background: `${T.red}06`, borderRadius: 6, border: `1px solid ${T.red}15` }}>
-                      <div style={{ fontSize: 9, color: T.red, fontFamily: mono, letterSpacing: 1, marginBottom: 6 }}>BREAKAGE COMPARISON (DVI vs Looker)</div>
-                      <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.labBreakage || 0).toLocaleString()}</div>
-                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>DVI (Lab Assistant)</div>
-                        </div>
-                        <div style={{ fontSize: 14, color: T.textDim }}>vs</div>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(varianceData.summary?.lookerBreakage || 0).toLocaleString()}</div>
-                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Looker (→ NetSuite)</div>
-                        </div>
-                        <div style={{ textAlign: 'center' }}>
-                          <div style={{ fontSize: 20, fontWeight: 800, color: varianceData.summary?.breakageDiff === 0 ? T.green : T.amber, fontFamily: mono }}>
-                            {(varianceData.summary?.breakageDiff || 0) > 0 ? '+' : ''}{(varianceData.summary?.breakageDiff || 0).toLocaleString()}
-                          </div>
-                          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>diff (DVI − Looker)</div>
-                        </div>
-                        {varianceData.summary?.breakageDiff > 0 && (
-                          <div style={{ fontSize: 9, color: T.amber, fontFamily: mono, flex: 1 }}>
-                            {varianceData.summary.breakageDiff} breaks recorded in DVI but not in Looker — NetSuite doesn't know about these
-                          </div>
-                        )}
-                      </div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>leakage / timing</div>
                     </div>
                   </div>
 
