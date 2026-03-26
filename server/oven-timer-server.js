@@ -1565,7 +1565,7 @@ Respond with a structured batching plan in this format:
     const rows = labDb.db.prepare(`
       SELECT date(completed_at) as date, warehouse, COUNT(*) as picks, SUM(qty) as total_qty
       FROM picks_history
-      WHERE completed_at > datetime('now', ?)
+      WHERE completed_at > datetime('now', ?) AND qty <= 10
       GROUP BY date(completed_at), warehouse
       ORDER BY date(completed_at) DESC
     `).all(`-${days} days`);
@@ -5086,11 +5086,11 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/compare') {
     const days = parseInt(url.searchParams.get('days') || '30');
 
-    // ItemPath: daily item count from picks_history (SUM qty = actual items picked)
+    // ItemPath: daily item count from picks_history (SUM qty = actual items picked, exclude puts qty>10)
     const ipRows = labDb.db.prepare(`
       SELECT date(completed_at) as date, SUM(qty) as items
       FROM picks_history
-      WHERE completed_at > datetime('now', ?)
+      WHERE completed_at > datetime('now', ?) AND qty <= 10
       GROUP BY date(completed_at)
       ORDER BY date(completed_at) DESC
     `).all(`-${days} days`);
