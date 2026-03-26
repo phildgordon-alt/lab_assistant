@@ -1678,8 +1678,10 @@ Respond with a structured batching plan in this format:
   // ── Consumption comparison — YTD by SKU across all sources ──
   if (req.method==='GET' && url.pathname==='/api/usage/consumption') {
     try {
+      // Default to yesterday — today only has ItemPath data, not Looker, which skews the comparison
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
       const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
-      const to = url.searchParams.get('to') || new Date().toISOString().slice(0, 10);
+      const to = url.searchParams.get('to') || yesterday;
       const skuCat = (sku) => netsuite.getSkuCategory(sku);
       const isLensOrFrame = (sku) => { const c = skuCat(sku); return c === 'Lenses' || c === 'Frames'; };
       const isLensSku = (sku) => skuCat(sku) === 'Lenses';
@@ -1841,7 +1843,9 @@ Respond with a structured batching plan in this format:
         ...Object.keys(lkJobsByDate),
         ...Object.keys(breakageByDate),
       ]);
-      const daily = [...allDates].sort((a, b) => b.localeCompare(a)).slice(0, days).map(d => ({
+      // Exclude today — only has partial data from one source, skews comparison
+      const today = new Date().toISOString().slice(0, 10);
+      const daily = [...allDates].filter(d => d < today).sort((a, b) => b.localeCompare(a)).slice(0, days).map(d => ({
         date: d,
         dvi: dviByDate[d] || 0,
         looker: lkJobsByDate[d] || 0,
@@ -5121,9 +5125,9 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       lkByDate[day.date].frames = day.frames || 0;
     }
 
-    // Merge into daily comparison
-    // ItemPath picks = Looker shipped + breakage (picks include lenses that broke)
-    const allDates = [...new Set([...Object.keys(ipByDate), ...Object.keys(lkByDate)])].sort().reverse();
+    // Merge into daily comparison — exclude today (only has ItemPath, not Looker)
+    const today = new Date().toISOString().slice(0, 10);
+    const allDates = [...new Set([...Object.keys(ipByDate), ...Object.keys(lkByDate)])].filter(d => d < today).sort().reverse();
     const daily = allDates.map(date => {
       const ip = ipByDate[date] || { transactions: 0, items: 0, wh1: 0, wh2: 0, wh3: 0 };
       const lk = lkByDate[date] || { lenses: 0, frames: 0, breakages: 0 };
