@@ -1260,15 +1260,15 @@ module.exports = {
     const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
     const stages = ['INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
 
-    // Query all transitions in range
+    // Query all transitions in range — include job_id to deduplicate
     const rows = db.prepare(`
-      SELECT to_stage, transition_at FROM stage_transitions
+      SELECT job_id, to_stage, transition_at FROM stage_transitions
       WHERE transition_at > ? ORDER BY transition_at
     `).all(cutoff);
 
-    // Bucket: { date: 'YYYY-MM-DD', hour: 0-23, stage: 'ASSEMBLY', count: N }
-    const buckets = {};  // key: "date|hour|stage" → count
-    const dailyTotals = {}; // key: "date|stage" → count
+    // Count UNIQUE JOBS per date|hour|stage (not duplicate scan events)
+    const bucketSets = {};  // key: "date|hour|stage" → Set of job_ids
+    const dailySets = {};   // key: "date|stage" → Set of job_ids
     const dates = new Set();
 
     for (const row of rows) {
@@ -1279,13 +1279,21 @@ module.exports = {
       if (!stages.includes(stage)) continue;
 
       const key = `${date}|${hour}|${stage}`;
-      buckets[key] = (buckets[key] || 0) + 1;
+      if (!bucketSets[key]) bucketSets[key] = new Set();
+      bucketSets[key].add(row.job_id);
 
       const dayKey = `${date}|${stage}`;
-      dailyTotals[dayKey] = (dailyTotals[dayKey] || 0) + 1;
+      if (!dailySets[dayKey]) dailySets[dayKey] = new Set();
+      dailySets[dayKey].add(row.job_id);
 
       dates.add(date);
     }
+
+    // Convert sets to counts
+    const buckets = {};
+    for (const [k, s] of Object.entries(bucketSets)) buckets[k] = s.size;
+    const dailyTotals = {};
+    for (const [k, s] of Object.entries(dailySets)) dailyTotals[k] = s.size;
 
     // Build structured output
     const sortedDates = [...dates].sort();
