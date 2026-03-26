@@ -3256,6 +3256,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   </div>
                 </div>
                 {(() => {
+                  if (longTailData?.error) return (
+                    <div style={{ padding: 16 }}>
+                      <div style={{ color: T.red, fontSize: 12, marginBottom: 12 }}>{longTailData.error}</div>
+                      <button onClick={async () => {
+                        setLongTailData({ _loading: true });
+                        const resp = await fetch(`${ovenServerUrl}/api/lens-intel/long-tail`, { method: 'POST' });
+                        setLongTailData(await resp.json());
+                      }} style={{ background: T.green, border: "none", borderRadius: 8, padding: "10px 28px", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer", fontFamily: mono }}>
+                        Retry Analysis
+                      </button>
+                    </div>
+                  );
                   const hasResults = longTailData?.results?.length > 0;
                   if (!hasResults) {
                     return (
@@ -3271,7 +3283,6 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       </div>
                     );
                   }
-                  if (longTailData.error) return <div style={{ padding: 16, color: T.red, fontSize: 12 }}>{longTailData.error}</div>;
 
                   const results = longTailData.results || [];
                   const summary = longTailData.summary || {};

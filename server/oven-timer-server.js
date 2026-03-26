@@ -2289,15 +2289,30 @@ Respond with a structured batching plan in this format:
   }
   if (req.method==='POST' && url.pathname==='/api/lens-intel/long-tail') {
     try {
+      // Ensure model_params table exists
+      labDb.db.exec("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
+      // Check data availability
+      let weeklyCount = 0;
+      try { weeklyCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM lens_consumption_weekly').get()?.cnt || 0; } catch {}
+      if (weeklyCount === 0) {
+        // Try rebuilding weekly consumption first
+        try { lensIntel.computeAll(labDb.db, itempath, netsuite); } catch (e) {
+          console.error('[LongTail] Lens intel refresh failed:', e.message);
+        }
+        try { weeklyCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM lens_consumption_weekly').get()?.cnt || 0; } catch {}
+      }
+      if (weeklyCount === 0) return json(res, { error: 'No consumption data — run Lens Intel refresh first (need ItemPath + Looker data)' }, 400);
+
       const analysis = longTail.runAnalysis(labDb.db);
       global._longTailCache = analysis;
       global._longTailLastRun = new Date().toISOString();
       // Persist to SQLite
       labDb.db.prepare("INSERT INTO model_params (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run('long_tail_cache', JSON.stringify(analysis));
       labDb.db.prepare("INSERT INTO model_params (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run('long_tail_last_run', global._longTailLastRun);
+      console.log(`[LongTail] Analysis complete: ${analysis.results?.length || 0} SKUs, ${analysis.summary?.surfaceCount || 0} surface, ${analysis.summary?.stockCount || 0} stock`);
       return json(res, { ...analysis, lastRun: global._longTailLastRun });
     } catch (e) {
-      console.error('[LongTail] Error:', e.message);
+      console.error('[LongTail] Error:', e.message, e.stack?.split('\n').slice(0, 3).join('\n'));
       return json(res, { error: e.message }, 500);
     }
   }
