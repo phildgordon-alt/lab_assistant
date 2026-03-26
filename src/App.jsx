@@ -8220,14 +8220,32 @@ function FlowAgentTab({ovenServerUrl,settings}){
               {/* What's needed to hit target */}
               <div style={{background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:8,padding:14,marginBottom:16}}>
                 <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:13,color:"#60a5fa",letterSpacing:1,marginBottom:8}}>BURN DOWN {catchUp.wipToClear||0} JOBS TO {catchUp.targetBacklog} IN {catchUp.targetDays} WORK DAYS</div>
-                <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
+                <div style={{display:"flex",gap:20,flexWrap:"wrap",alignItems:"flex-end"}}>
                   <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Ship/work day</div>
-                    <div style={{fontSize:22,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerWorkDay}</div>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Keep-up rate</div>
+                    <div style={{fontSize:18,fontWeight:700,color:"#f59e0b",fontFamily:mono}}>{catchUp.steadyStatePerWorkDay}</div>
+                    <div style={{fontSize:8,color:"#6b7280",fontFamily:mono}}>jobs/work day</div>
                   </div>
+                  <div style={{fontSize:14,color:"#6b7280",padding:"0 4px"}}>+</div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Burn-down rate</div>
+                    <div style={{fontSize:18,fontWeight:700,color:"#a78bfa",fontFamily:mono}}>{catchUp.burnDownPerWorkDay}</div>
+                    <div style={{fontSize:8,color:"#6b7280",fontFamily:mono}}>{catchUp.wipToClear} ÷ {catchUp.targetDays}d</div>
+                  </div>
+                  <div style={{fontSize:14,color:"#6b7280",padding:"0 4px"}}>=</div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#60a5fa",fontFamily:mono,fontWeight:700}}>REQUIRED</div>
+                    <div style={{fontSize:24,fontWeight:800,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerWorkDay}</div>
+                    <div style={{fontSize:8,color:"#6b7280",fontFamily:mono}}>jobs/work day</div>
+                  </div>
+                  <div style={{width:1,height:36,background:"rgba(255,255,255,0.1)",margin:"0 8px"}}/>
                   <div style={{textAlign:"center"}}>
                     <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Ship/hr</div>
-                    <div style={{fontSize:22,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerHr}</div>
+                    <div style={{fontSize:18,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerHr}</div>
+                  </div>
+                  <div style={{textAlign:"center"}}>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>People needed</div>
+                    <div style={{fontSize:18,fontWeight:700,color:catchUp.requiredAssemblers>catchUp.assemblers?"#ef4444":"#22c55e",fontFamily:mono}}>{catchUp.requiredAssemblers}</div>
                   </div>
                 </div>
               </div>

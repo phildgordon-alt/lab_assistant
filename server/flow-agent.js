@@ -849,12 +849,22 @@ function computeCatchUp(lineId, scenario = {}) {
     : netPerWeek > 0 ? 0 : null;
 
   // To clear in targetDays (WORK days): how much do we need to ship per work day?
-  // targetDays is work days. Total calendar days = targetDays * 7 / workDaysPerWeek
-  const calendarDaysForTarget = Math.max(1, targetDays * 7 / Math.max(1, workDaysPerWeek));
-  // During those calendar days, incoming accumulates every day
-  const totalIncomingDuringTarget = incomingPerDay * calendarDaysForTarget;
-  const totalToShip = wipToClear + totalIncomingDuringTarget;
-  const requiredPerWorkDay = Math.ceil(totalToShip / Math.max(1, targetDays));
+  //
+  // Steady-state: just to keep up with incoming (no burn-down)
+  //   steady = incomingPerDay * 7 / workDaysPerWeek  (incoming arrives 7 days, shipped on work days only)
+  // Burn-down: clear the backlog over targetDays work days
+  //   burn = wipToClear / targetDays
+  // Total required per work day = steady + burn
+  //
+  // This is equivalent to the old formula but makes the components visible:
+  //   calendarDays = targetDays * 7 / workDaysPerWeek
+  //   totalToShip = wipToClear + (incomingPerDay * calendarDays)
+  //   required = totalToShip / targetDays
+  //            = wipToClear/targetDays + incomingPerDay*7/workDaysPerWeek
+  //            = burn + steady
+  const steadyStatePerWorkDay = Math.round((incomingPerDay * 7 / Math.max(1, workDaysPerWeek)) * 10) / 10;
+  const burnDownPerWorkDay = targetDays > 0 ? Math.round((wipToClear / targetDays) * 10) / 10 : 0;
+  const requiredPerWorkDay = Math.ceil(steadyStatePerWorkDay + burnDownPerWorkDay);
   const requiredPerHr = Math.round((requiredPerWorkDay / Math.max(1, hoursPerDay)) * 10) / 10;
   const requiredAssemblers = Math.ceil(requiredPerHr / Math.max(1, jobsPerAssemblerHr));
 
@@ -914,7 +924,9 @@ function computeCatchUp(lineId, scenario = {}) {
     netPerWeek: Math.round(netPerWeek),
     daysToClear, // calendar days including weekends
     // What's needed to hit target (per WORK day)
-    requiredPerWorkDay: requiredPerWorkDay,
+    steadyStatePerWorkDay,  // just to keep up with incoming
+    burnDownPerWorkDay,     // extra on top to clear the backlog
+    requiredPerWorkDay,     // total = steady + burn
     requiredPerHr,
     requiredAssemblers,
     slaDays: line.sla_days,
