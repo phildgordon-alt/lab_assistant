@@ -2383,6 +2383,32 @@ Respond with a structured batching plan in this format:
     const result = npiEngine.computeCannibalization(labDb.db, id);
     return json(res, result || { error: 'Scenario not found' });
   }
+  // Activate NPI — inject new SKU into lens intelligence, apply cannibalization adjustments
+  if (req.method==='POST' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/activate')) {
+    const id = url.pathname.split('/')[4];
+    try {
+      const scenario = labDb.db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(id);
+      if (!scenario) return json(res, { error: 'Scenario not found' }, 404);
+      // Mark as received + activated
+      npiEngine.updateScenario(labDb.db, id, { status: 'received' });
+      // Recompute cannibalization
+      npiEngine.computeCannibalization(labDb.db, id);
+      // If new_sku_prefix is set, add the new SKU(s) to lens_sku_params so lens intelligence picks them up
+      if (scenario.new_sku_prefix) {
+        labDb.db.prepare(`INSERT OR IGNORE INTO lens_sku_params (sku, abc_class, manufacturing_weeks, transit_weeks, fda_hold_weeks, routing)
+          VALUES (?, 'B', ?, ?, ?, 'STOCK')`).run(
+          scenario.new_sku_prefix, scenario.manufacturing_weeks || 13, scenario.transit_weeks || 4, scenario.fda_hold_weeks || 2
+        );
+      }
+      // Refresh lens intelligence to pick up the new adjustments
+      const count = lensIntel.computeAll(labDb.db, itempath, netsuite);
+      console.log(`[NPI] Activated scenario "${scenario.name}" — lens intel refreshed (${count} SKUs)`);
+      return json(res, { ok: true, activated: scenario.name, lensIntelSkus: count });
+    } catch (e) {
+      console.error('[NPI] Activate error:', e.message);
+      return json(res, { error: e.message }, 500);
+    }
+  }
   if (req.method==='GET' && url.pathname==='/api/npi/adoption-rate') {
     // Calculate actual null OPC adoption rate from Looker data
     try {
