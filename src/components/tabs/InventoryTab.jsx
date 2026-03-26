@@ -1671,7 +1671,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <thead>
                     <tr style={{ background: T.bg }}>
                       <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, color: T.textDim, fontFamily: mono }}>DATE</th>
-                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.amber, fontFamily: mono }}>ITEMPATH</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.blue, fontFamily: mono }}>WH1</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.green, fontFamily: mono }}>WH2</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.amber, fontFamily: mono }}>WH3</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.amber, fontFamily: mono, fontWeight: 700 }}>IP TOTAL</th>
                       <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.blue, fontFamily: mono }}>LOOKER</th>
                       <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.red, fontFamily: mono }}>BREAKAGE</th>
                       <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.textDim, fontFamily: mono }}>VARIANCE</th>
@@ -1681,6 +1684,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     {pickCompare.daily.map(d => (
                       <tr key={d.date} style={{ borderBottom: `1px solid ${T.border}` }}>
                         <td style={{ padding: "5px 10px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{d.date}</td>
+                        <td style={{ padding: "5px 10px", fontFamily: mono, fontSize: 11, textAlign: "right", color: T.blue }}>{d.wh1 || 0}</td>
+                        <td style={{ padding: "5px 10px", fontFamily: mono, fontSize: 11, textAlign: "right", color: T.green }}>{d.wh2 || 0}</td>
+                        <td style={{ padding: "5px 10px", fontFamily: mono, fontSize: 11, textAlign: "right", color: d.wh3 ? T.amber : T.textDim }}>{d.wh3 || 0}</td>
                         <td style={{ padding: "5px 10px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.amber, fontWeight: 600 }}>{d.itempath}</td>
                         <td style={{ padding: "5px 10px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.blue, fontWeight: 600 }}>{d.lookerTotal}</td>
                         <td style={{ padding: "5px 10px", fontFamily: mono, fontSize: 11, textAlign: "right", color: d.breakages > 0 ? T.red : T.textDim }}>{d.breakages}</td>
