@@ -611,6 +611,21 @@ async function poll() {
     const alerts      = detectAlerts(materials);
     const warehouses  = (warehousesResp.warehouses || []).map(w => ({ id: w.id, name: w.name }));
 
+    // DEBUG: Log Kitchen/manual pick info from all data sources
+    const kitchenOrders = allOrders.filter(o => /kitchen/i.test(o.warehouseName || '') || /manual/i.test(o.reference || o.name || ''));
+    const kitchenTx = pickTxList.filter(tx => /kitchen/i.test(tx.warehouseName || '') || /manual/i.test(tx.orderName || ''));
+    const kitchenRecentTx = recentTx.filter(tx => /kitchen/i.test(tx.picker || '') || /manual/i.test(tx.orderId || ''));
+    if (kitchenOrders.length > 0 || kitchenTx.length > 0) {
+      console.log(`[ItemPath] KITCHEN DEBUG: ${kitchenOrders.length} active orders, ${kitchenTx.length} pick txns`);
+      if (kitchenOrders.length > 0) console.log(`[ItemPath] KITCHEN order sample: wh="${kitchenOrders[0].warehouseName}" ref="${kitchenOrders[0].reference || kitchenOrders[0].name}" status="${kitchenOrders[0].status}"`);
+      if (kitchenTx.length > 0) console.log(`[ItemPath] KITCHEN tx sample: wh="${kitchenTx[0].warehouseName}" order="${kitchenTx[0].orderName}" date="${kitchenTx[0].creationDate}"`);
+    } else {
+      // Check if ANY warehouse names contain kitchen-like strings in the full tx list
+      const allWhNames = [...new Set(pickTxList.map(tx => tx.warehouseName).filter(Boolean))];
+      const allOrderWhNames = [...new Set(allOrders.map(o => o.warehouseName).filter(Boolean))];
+      console.log(`[ItemPath] KITCHEN DEBUG: 0 kitchen orders, 0 kitchen txns. Order warehouses: [${allOrderWhNames.join(', ')}] Tx warehouses: [${allWhNames.join(', ')}]`);
+    }
+
     // Build hourly stats from transaction data (WH1, WH2, WH3/Lens Kitchen)
     const txHourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
     const txHourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly() };
