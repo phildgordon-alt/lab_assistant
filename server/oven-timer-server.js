@@ -1572,9 +1572,10 @@ Respond with a structured batching plan in this format:
     // Pivot into { date, WH1, WH2, total }
     const byDate = {};
     for (const r of rows) {
-      if (!byDate[r.date]) byDate[r.date] = { date: r.date, WH1: 0, WH2: 0, total: 0 };
+      if (!byDate[r.date]) byDate[r.date] = { date: r.date, WH1: 0, WH2: 0, WH3: 0, total: 0 };
       if (r.warehouse === 'WH1') byDate[r.date].WH1 = r.picks;
       else if (r.warehouse === 'WH2') byDate[r.date].WH2 = r.picks;
+      else if (r.warehouse === 'WH3') byDate[r.date].WH3 = r.picks;
       byDate[r.date].total += r.picks;
     }
     return json(res, { days: Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date)) });

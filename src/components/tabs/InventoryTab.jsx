@@ -1586,17 +1586,17 @@ function InventoryTab({ ovenServerUrl, settings }) {
             </Card>
 
             {/* Picks by hour chart */}
-            {(picks.hourlyStats?.WH1 || picks.hourlyStats?.WH2) && (
+            {(picks.hourlyStats?.WH1 || picks.hourlyStats?.WH2 || picks.hourlyStats?.WH3) && (
               <Card style={{ marginTop: 20 }}>
                 <SectionHeader>Picks by Hour — Today</SectionHeader>
                 <div style={{ display: "flex", gap: 20 }}>
-                  {['WH1', 'WH2'].map(wh => {
+                  {['WH1', 'WH2', 'WH3'].map(wh => {
                     const data = picks.hourlyStats?.[wh] || {};
                     const hours = Array.from({ length: 14 }, (_, i) => i + 6); // 6AM-7PM
                     const maxVal = Math.max(...hours.map(h => data[h] || 0), 1);
                     return (
                       <div key={wh} style={{ flex: 1 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: wh === 'WH1' ? T.blue : T.green, fontFamily: mono, marginBottom: 6 }}>{wh}</div>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: wh === 'WH1' ? T.blue : wh === 'WH2' ? T.green : T.amber, fontFamily: mono, marginBottom: 6 }}>{wh === 'WH3' ? 'WH3 (Lens Kitchen)' : wh}</div>
                         <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 80 }}>
                           {hours.map(h => {
                             const v = data[h] || 0;
@@ -1604,7 +1604,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             return (
                               <div key={h} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
                                 {v > 0 && <span style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>{v}</span>}
-                                <div style={{ width: "100%", height: barH, background: wh === 'WH1' ? T.blue : T.green, borderRadius: 2, opacity: v > 0 ? 0.7 : 0.1 }} />
+                                <div style={{ width: "100%", height: barH, background: wh === 'WH1' ? T.blue : wh === 'WH2' ? T.green : T.amber, borderRadius: 2, opacity: v > 0 ? 0.7 : 0.1 }} />
                                 <span style={{ fontSize: 7, color: T.textDim, fontFamily: mono }}>{h > 12 ? (h - 12) + 'p' : h + 'a'}</span>
                               </div>
                             );
@@ -1627,6 +1627,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
                       <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.blue, fontFamily: mono }}>WH1</th>
                       <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.green, fontFamily: mono }}>WH2</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.amber, fontFamily: mono }}>WH3 (Kitchen)</th>
                       <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.text, fontFamily: mono, fontWeight: 700 }}>TOTAL</th>
                     </tr>
                   </thead>
@@ -1636,6 +1637,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{d.date}</td>
                         <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.blue }}>{d.WH1}</td>
                         <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.green }}>{d.WH2}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.amber }}>{d.WH3 || 0}</td>
                         <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, textAlign: "right", color: T.text }}>{d.total}</td>
                       </tr>
                     ))}

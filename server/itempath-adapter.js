@@ -611,26 +611,30 @@ async function poll() {
     const alerts      = detectAlerts(materials);
     const warehouses  = (warehousesResp.warehouses || []).map(w => ({ id: w.id, name: w.name }));
 
-    // Build hourly stats from transaction data
-    const txHourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly() };
+    // Build hourly stats from transaction data (WH1, WH2, WH3/Lens Kitchen)
+    const txHourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
     const txHourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly() };
-    let txPicksTotal = { WH1: 0, WH2: 0 };
+    let txPicksTotal = { WH1: 0, WH2: 0, WH3: 0 };
     let txPutsTotal = { WH1: 0, WH2: 0 };
+    let txManualPicks = 0; // Manual picks from Lens Kitchen (order name ends with M)
 
     // Picks: count unique jobs (orderName), not individual lines
     // Each job has 2-3 lines (R lens, L lens, frame) — 1 job = 1 pick
+    // WH3 = Lens Kitchen / Kardex 3 — manual picks have "M" suffix on order name
     // API already filters to today via `after: todayStart` — no need to re-filter by date
-    const seenPickJobs = { WH1: new Map(), WH2: new Map() };
+    const seenPickJobs = { WH1: new Map(), WH2: new Map(), WH3: new Map() };
     for (const tx of pickTxList) {
       const wh = tx.warehouseName || 'Unknown';
       const date = tx.creationDate || '';
       const orderName = tx.orderName || tx.order_name || '';
-      if ((wh === 'WH1' || wh === 'WH2') && orderName) {
+      if ((wh === 'WH1' || wh === 'WH2' || wh === 'WH3') && orderName) {
         const hr = parseInt((date.substring(11, 13) || String(now.getHours()))) || 0;
         if (!seenPickJobs[wh].has(orderName)) {
           seenPickJobs[wh].set(orderName, hr);
           txHourlyPicks[wh][hr] += 1;
           txPicksTotal[wh] += 1;
+          // Track manual picks (order name ends with M before any suffix)
+          if (/\dM$/i.test(orderName.trim())) txManualPicks += 1;
         }
       }
     }
@@ -652,7 +656,7 @@ async function poll() {
 
     // Pick/put counting: use transaction data if it has results, else incremental
     resetDailyIfNeeded();
-    const txPickSum = txPicksTotal.WH1 + txPicksTotal.WH2;
+    const txPickSum = txPicksTotal.WH1 + txPicksTotal.WH2 + txPicksTotal.WH3;
     const incPickSum = dailyPickTotals.WH1 + dailyPickTotals.WH2;
     const txPutSum = txPutsTotal.WH1 + txPutsTotal.WH2;
     const incPutSum = dailyPutTotals.WH1 + dailyPutTotals.WH2;
@@ -664,12 +668,12 @@ async function poll() {
     }
 
     // Use transaction count if available, else incremental
-    const hourlyStats = txPickSum > 0 ? txHourlyPicks : { WH1: { ...hourlyPicks.WH1 }, WH2: { ...hourlyPicks.WH2 } };
+    const hourlyStats = txPickSum > 0 ? txHourlyPicks : { WH1: { ...hourlyPicks.WH1 }, WH2: { ...hourlyPicks.WH2 }, WH3: emptyHourly() };
     const hourlyPutStats = txPutSum > 0 ? txHourlyPuts : { WH1: { ...hourlyPuts.WH1 }, WH2: { ...hourlyPuts.WH2 } };
-    const finalPicks = txPickSum > 0 ? txPicksTotal : { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2 };
+    const finalPicks = txPickSum > 0 ? txPicksTotal : { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2, WH3: 0 };
     const finalPuts = txPutSum > 0 ? txPutsTotal : { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2 };
 
-    console.log(`[ItemPath] Picks: tx=${txPickSum}, inc=${incPickSum}, using ${txPickSum > 0 ? 'txn' : 'incremental'} (${pickTxList.length} tx lines)`);
+    console.log(`[ItemPath] Picks: tx=${txPickSum} (WH1:${txPicksTotal.WH1} WH2:${txPicksTotal.WH2} WH3/Kitchen:${txPicksTotal.WH3} manual:${txManualPicks}), inc=${incPickSum}, using ${txPickSum > 0 ? 'txn' : 'incremental'} (${pickTxList.length} tx lines)`);
     console.log(`[ItemPath] Puts: tx=${txPutSum}, inc=${incPutSum}, using ${txPutSum > 0 ? 'txn' : 'incremental'} (${putTxList.length} tx lines)`);
 
     // Calculate warehouse stats from orders (active/queued counts)
