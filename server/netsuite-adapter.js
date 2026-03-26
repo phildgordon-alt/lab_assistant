@@ -297,6 +297,52 @@ function reconcile(itempath, category = null, topsData = null) {
   // Sort by absolute difference descending
   discrepancies.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
 
+  // Check for discontinued SKUs (abc_class = 'X' in lens_sku_params)
+  let discontinuedSkus = new Set();
+  try {
+    const db = require('./db');
+    const discRows = db.db.prepare("SELECT sku FROM lens_sku_params WHERE abc_class = 'X'").all();
+    discontinuedSkus = new Set(discRows.map(r => r.sku));
+  } catch {}
+
+  // Mark discontinued on each discrepancy
+  for (const d of discrepancies) {
+    d.discontinued = discontinuedSkus.has(d.sku);
+  }
+
+  // Category-level totals (all SKUs, not just discrepancies)
+  const byCategory = {};
+  for (const sku of allSkus) {
+    const cat = inventory[sku]?.category || 'Unknown';
+    const nsQty = inventory[sku]?.qty || 0;
+    const ipQty = ipTotal[sku] || 0;
+    const disc = discontinuedSkus.has(sku);
+    if (!byCategory[cat]) byCategory[cat] = { category: cat, itempath: 0, netsuite: 0, diff: 0, skus: 0, itempath_disc: 0, netsuite_disc: 0 };
+    if (disc) {
+      byCategory[cat].itempath_disc += ipQty;
+      byCategory[cat].netsuite_disc += nsQty;
+    } else {
+      byCategory[cat].itempath += ipQty;
+      byCategory[cat].netsuite += nsQty;
+      byCategory[cat].diff += (ipQty - nsQty);
+    }
+    byCategory[cat].skus++;
+  }
+  // Round
+  for (const c of Object.values(byCategory)) {
+    c.itempath = Math.round(c.itempath);
+    c.netsuite = Math.round(c.netsuite);
+    c.diff = Math.round(c.diff);
+    c.itempath_disc = Math.round(c.itempath_disc);
+    c.netsuite_disc = Math.round(c.netsuite_disc);
+  }
+
+  // Active totals (excluding discontinued)
+  const activeDiscrepancies = discrepancies.filter(d => !d.discontinued);
+  const discDiscrepancies = discrepancies.filter(d => d.discontinued);
+  const activeTotalIP = Math.round(totalItemPath - [...discontinuedSkus].reduce((s, sku) => s + (ipTotal[sku] || 0), 0));
+  const activeTotalNS = Math.round(totalNetSuite - [...discontinuedSkus].reduce((s, sku) => s + (inventory[sku]?.qty || 0), 0));
+
   return {
     summary: {
       totalSkus: allSkus.size,
@@ -306,12 +352,18 @@ function reconcile(itempath, category = null, topsData = null) {
       totalNetSuite: Math.round(totalNetSuite),
       totalItemPath: Math.round(totalItemPath),
       totalDiff: Math.round(totalItemPath - totalNetSuite),
+      // Active (excluding discontinued)
+      activeItemPath: activeTotalIP,
+      activeNetSuite: activeTotalNS,
+      activeDiff: activeTotalIP - activeTotalNS,
+      discontinuedCount: discontinuedSkus.size,
       netsuiteSkus: Object.keys(inventory).length,
       itempathSkus: Object.keys(ipTotal).length,
       critical: discrepancies.filter(d => d.severity === 'critical').length,
       high: discrepancies.filter(d => d.severity === 'high').length,
       low: discrepancies.filter(d => d.severity === 'low').length,
     },
+    byCategory: Object.values(byCategory).sort((a, b) => b.itempath - a.itempath),
     discrepancies: discrepancies.slice(0, 200),
     lastSync,
   };

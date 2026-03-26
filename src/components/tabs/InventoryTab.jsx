@@ -954,28 +954,74 @@ function InventoryTab({ ovenServerUrl, settings }) {
             {/* Summary KPIs */}
             {reconData?.summary ? (
               <>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16, marginBottom: 24 }}>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>SKUS COMPARED</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{reconData.summary.totalSkus?.toLocaleString()}</div>
-                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>NS: {reconData.summary.netsuiteSkus} · IP: {reconData.summary.itempathSkus}</div>
+                {/* Total inventory comparison */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
+                  <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH (IRVINE)</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(reconData.summary.activeItemPath ?? reconData.summary.totalItemPath)?.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>total units (active)</div>
                   </Card>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>MATCHED</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{reconData.summary.matched?.toLocaleString()}</div>
-                    <div style={{ fontSize: 10, color: T.green, fontFamily: mono }}>{reconData.summary.matchRate}% match rate</div>
+                  <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.purple || '#9b6ee0'}` }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.purple || '#9b6ee0', fontFamily: mono }}>{(reconData.summary.activeNetSuite ?? reconData.summary.totalNetSuite)?.toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>total units (active)</div>
                   </Card>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DISCREPANCIES</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.discrepancies > 0 ? T.red : T.green, fontFamily: mono }}>{reconData.summary.discrepancies?.toLocaleString()}</div>
-                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>
-                      <span style={{ color: T.red }}>{reconData.summary.critical} critical</span> · <span style={{ color: T.amber }}>{reconData.summary.high} high</span> · {reconData.summary.low} low
+                  <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${reconData.summary.activeDiff === 0 ? T.green : T.red}` }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: (reconData.summary.activeDiff ?? reconData.summary.totalDiff) === 0 ? T.green : T.red, fontFamily: mono }}>
+                      {(reconData.summary.activeDiff ?? reconData.summary.totalDiff) > 0 ? '+' : ''}{(reconData.summary.activeDiff ?? reconData.summary.totalDiff)?.toLocaleString()}
                     </div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{reconData.summary.discontinuedCount || 0} discontinued SKUs excluded</div>
                   </Card>
-                  <Card style={{ padding: 16, textAlign: "center" }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NET VARIANCE</div>
-                    <div style={{ fontSize: 28, fontWeight: 800, color: reconData.summary.totalDiff === 0 ? T.green : T.amber, fontFamily: mono }}>{reconData.summary.totalDiff > 0 ? '+' : ''}{reconData.summary.totalDiff?.toLocaleString()}</div>
-                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>IP: {reconData.summary.totalItemPath?.toLocaleString()} · NS: {reconData.summary.totalNetSuite?.toLocaleString()}</div>
+                </div>
+
+                {/* Category breakdown */}
+                {reconData.byCategory?.length > 0 && (
+                  <Card style={{ padding: 0, marginBottom: 16 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: mono, fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: T.bg }}>
+                          <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 10, color: T.textDim }}>CATEGORY</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.amber }}>ITEMPATH</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.purple || '#9b6ee0' }}>NETSUITE</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.textDim }}>VARIANCE</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.textDim }}>SKUS</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.red }}>DISCONTINUED</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {reconData.byCategory.map(c => (
+                          <tr key={c.category} style={{ borderBottom: `1px solid ${T.border}` }}>
+                            <td style={{ padding: "8px 14px", fontWeight: 700, color: T.text }}>{c.category}</td>
+                            <td style={{ padding: "8px 14px", textAlign: "right", color: T.amber, fontWeight: 600 }}>{c.itempath.toLocaleString()}</td>
+                            <td style={{ padding: "8px 14px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{c.netsuite.toLocaleString()}</td>
+                            <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 700, color: c.diff === 0 ? T.green : T.red }}>{c.diff > 0 ? '+' : ''}{c.diff.toLocaleString()}</td>
+                            <td style={{ padding: "8px 14px", textAlign: "right", color: T.textMuted }}>{c.skus}</td>
+                            <td style={{ padding: "8px 14px", textAlign: "right", color: (c.itempath_disc + c.netsuite_disc) > 0 ? T.red : T.textDim }}>{c.itempath_disc > 0 ? `IP:${c.itempath_disc}` : ''}{c.itempath_disc > 0 && c.netsuite_disc > 0 ? ' · ' : ''}{c.netsuite_disc > 0 ? `NS:${c.netsuite_disc}` : ''}{(c.itempath_disc + c.netsuite_disc) === 0 ? '—' : ''}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </Card>
+                )}
+
+                {/* Stats row */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12, marginBottom: 16 }}>
+                  <Card style={{ padding: 12, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>SKUS COMPARED</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{reconData.summary.totalSkus?.toLocaleString()}</div>
+                  </Card>
+                  <Card style={{ padding: 12, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>MATCHED</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: T.green, fontFamily: mono }}>{reconData.summary.matched?.toLocaleString()}</div>
+                  </Card>
+                  <Card style={{ padding: 12, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>DISCREPANCIES</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: reconData.summary.discrepancies > 0 ? T.red : T.green, fontFamily: mono }}>{reconData.summary.discrepancies?.toLocaleString()}</div>
+                  </Card>
+                  <Card style={{ padding: 12, textAlign: "center" }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>MATCH RATE</div>
+                    <div style={{ fontSize: 20, fontWeight: 800, color: reconData.summary.matchRate > 90 ? T.green : T.amber, fontFamily: mono }}>{reconData.summary.matchRate}%</div>
                   </Card>
                 </div>
 
@@ -1012,6 +1058,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     { id: 'matches', label: 'Matches', color: T.green },
                     { id: 'ns_only', label: 'NS Only', color: T.purple },
                     { id: 'ip_only', label: 'IP Only', color: T.blue },
+                    { id: 'discontinued', label: 'Discontinued', color: T.red },
                   ].map(f => (
                     <button key={f.id} onClick={() => setReconFilter(f.id)} style={{
                       padding: "8px 14px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
@@ -1046,8 +1093,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 {(() => {
                   let rows = reconData.discrepancies || [];
                   if (reconFilter === 'matches') rows = [];
-                  if (reconFilter === 'ns_only') rows = rows.filter(d => d.netsuite > 0 && d.itempath === 0);
-                  if (reconFilter === 'ip_only') rows = rows.filter(d => d.itempath > 0 && d.netsuite === 0);
+                  else if (reconFilter === 'discontinued') rows = rows.filter(d => d.discontinued);
+                  else if (reconFilter === 'ns_only') rows = rows.filter(d => d.netsuite > 0 && d.itempath === 0 && !d.discontinued);
+                  else if (reconFilter === 'ip_only') rows = rows.filter(d => d.itempath > 0 && d.netsuite === 0 && !d.discontinued);
+                  else rows = rows.filter(d => !d.discontinued); // default: exclude discontinued
                   if (reconCategory !== 'all') rows = rows.filter(d => d.category === reconCategory);
                   if (reconSearch) {
                     const q = reconSearch.toLowerCase();
