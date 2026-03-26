@@ -5176,7 +5176,9 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         currentWIP = active.length * 2;
       } catch {}
 
-      // 5. Summary waterfall: Kardex = Shipped + WIP + Breakage + Kitchen + Unexplained
+      // 5. Summary waterfall: Variance = WIP + Breakage + Kitchen + Unexplained
+      // WIP IS part of the variance — those lenses were picked (ItemPath counted them)
+      // but haven't shipped yet (Looker hasn't counted them). That's explained.
       const totalVariance = totalKardex - totalNS;
       const unexplained = totalVariance - currentWIP - totalBreakage - totalWH3;
       return json(res, {

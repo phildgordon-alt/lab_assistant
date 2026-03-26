@@ -1241,12 +1241,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     </div>
                   </div>
                   {/* Waterfall — breakdown: what explains the variance */}
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginBottom: 6, textAlign: 'center' }}>VARIANCE BREAKDOWN: Picked but not shipped → where are they?</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginBottom: 6, textAlign: 'center' }}>VARIANCE BREAKDOWN: Picked but not yet in Looker → where are they?</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 20 }}>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.cyan || '#06b6d4'}08`, borderRadius: 6, border: `1px solid ${T.cyan || '#06b6d4'}20` }}>
                       <div style={{ fontSize: 8, color: T.cyan || '#06b6d4', fontFamily: mono, letterSpacing: 1 }}>CURRENT WIP</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.cyan || '#06b6d4', fontFamily: mono }}>{(varianceData.summary?.currentWIP || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>in pipeline now (~2 lenses/job)</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>picked, not yet shipped</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6, border: `1px solid ${T.red}20` }}>
                       <div style={{ fontSize: 8, color: T.red, fontFamily: mono, letterSpacing: 1 }}>BREAKAGE</div>
