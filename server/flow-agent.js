@@ -940,19 +940,22 @@ function poll() {
       console.log(`[Flow] Expired ${expired.changes} unacknowledged recommendation(s)`);
     }
 
-    // Generate recommendations (throttled: only if last rec is >30 min old)
-    const lastRecTime = db.prepare(`SELECT MAX(created_at) as t FROM flow_recommendations`).get()?.t;
-    const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-    let recs = [];
-    if (!lastRecTime || lastRecTime < thirtyMinAgo) {
-      recs = generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, slaPacing, stockConstraints, stageConfigs);
-      for (const r of recs) {
-        stmts.insertRec.run(
-          r.line_id, r.push_qty, r.urgency, r.push_by,
-          r.reason, r.available_in_queue || null, r.constrained_by || 'none',
-          r.priority_jobs ? JSON.stringify(r.priority_jobs) : null,
-          r.expires_at || null
-        );
+    // Generate recommendations ONLY if there are zero pending recs
+    // Don't regenerate what was just expired — that was the point of expiring them
+    const pendingCount = stmts.getPendingRecs.all().length;
+    if (pendingCount === 0) {
+      // Also throttle: don't create if we expired recs in this cycle
+      // (give a full cycle gap so the UI clears)
+      if (expired.changes === 0) {
+        const recs = generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, slaPacing, stockConstraints, stageConfigs);
+        for (const r of recs) {
+          stmts.insertRec.run(
+            r.line_id, r.push_qty, r.urgency, r.push_by,
+            r.reason, r.available_in_queue || null, r.constrained_by || 'none',
+            r.priority_jobs ? JSON.stringify(r.priority_jobs) : null,
+            r.expires_at || null
+          );
+        }
       }
     }
 
