@@ -5086,52 +5086,58 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/compare') {
     const days = parseInt(url.searchParams.get('days') || '30');
 
-    // ItemPath: daily pick transactions from picks_history (line-level)
+    // ItemPath: daily item count from picks_history (SUM qty = actual items picked)
     const ipRows = labDb.db.prepare(`
-      SELECT date(completed_at) as date, COUNT(*) as transactions, SUM(qty) as items
+      SELECT date(completed_at) as date, SUM(qty) as items
       FROM picks_history
       WHERE completed_at > datetime('now', ?)
       GROUP BY date(completed_at)
       ORDER BY date(completed_at) DESC
     `).all(`-${days} days`);
     const ipByDate = {};
-    for (const r of ipRows) ipByDate[r.date] = { transactions: r.transactions, items: r.items };
+    for (const r of ipRows) ipByDate[r.date] = { items: r.items || 0 };
 
-    // Looker: daily lens + frame consumption
+    // Looker: daily lens + frame consumption + breakage
     const lkData = looker.getUsage(days);
     const frameData = looker.getFrameUsage();
     const lkByDate = {};
     for (const day of (lkData.daily || [])) {
-      if (!lkByDate[day.date]) lkByDate[day.date] = { lenses: 0, frames: 0 };
+      if (!lkByDate[day.date]) lkByDate[day.date] = { lenses: 0, frames: 0, breakages: 0 };
       lkByDate[day.date].lenses = day.lenses || 0;
+      lkByDate[day.date].breakages = day.breakages || 0;
     }
     for (const day of (frameData.daily || [])) {
-      if (!lkByDate[day.date]) lkByDate[day.date] = { lenses: 0, frames: 0 };
+      if (!lkByDate[day.date]) lkByDate[day.date] = { lenses: 0, frames: 0, breakages: 0 };
       lkByDate[day.date].frames = day.frames || 0;
     }
 
     // Merge into daily comparison
+    // ItemPath picks = Looker shipped + breakage (picks include lenses that broke)
     const allDates = [...new Set([...Object.keys(ipByDate), ...Object.keys(lkByDate)])].sort().reverse();
     const daily = allDates.map(date => {
-      const ip = ipByDate[date] || { transactions: 0, items: 0 };
-      const lk = lkByDate[date] || { lenses: 0, frames: 0 };
+      const ip = ipByDate[date] || { items: 0 };
+      const lk = lkByDate[date] || { lenses: 0, frames: 0, breakages: 0 };
       const lkTotal = lk.lenses + lk.frames;
+      const lkPlusBreakage = lkTotal + lk.breakages;
       return {
         date,
-        itempath: ip.transactions,
-        itempathItems: ip.items,
+        itempath: ip.items,
         lookerLenses: lk.lenses,
         lookerFrames: lk.frames,
         lookerTotal: lkTotal,
-        variance: ip.transactions - lkTotal,
+        breakages: lk.breakages,
+        lookerPlusBreakage: lkPlusBreakage,
+        variance: ip.items - lkPlusBreakage,
       };
     });
 
     const totals = daily.reduce((s, d) => ({
       itempath: s.itempath + d.itempath,
       lookerTotal: s.lookerTotal + d.lookerTotal,
+      breakages: s.breakages + d.breakages,
+      lookerPlusBreakage: s.lookerPlusBreakage + d.lookerPlusBreakage,
       variance: s.variance + d.variance,
-    }), { itempath: 0, lookerTotal: 0, variance: 0 });
+    }), { itempath: 0, lookerTotal: 0, breakages: 0, lookerPlusBreakage: 0, variance: 0 });
 
     return json(res, { daily, totals, days: daily.length });
   }
