@@ -319,7 +319,7 @@ function normalizeOrder(o) {
     orderId:   o.id,
     reference: o.reference || o.name,
     status:    o.status,
-    warehouse: o.warehouseName || null,
+    warehouse: /kitchen|lens.kitchen|wh3|irvine.2|irv02/i.test(o.warehouseName || '') ? 'WH3' : /wh2|warehouse.2/i.test(o.warehouseName || '') ? 'WH2' : /wh1|warehouse.1/i.test(o.warehouseName || '') ? 'WH1' : (o.warehouseName || null),
     station:   o.stationName || null,  // Station/area where order is processed
     startedAt: o.modifiedDate || o.created_at || o.started_at,
     hasStock:  o.hasStock,
@@ -624,7 +624,11 @@ async function poll() {
     // API already filters to today via `after: todayStart` — no need to re-filter by date
     const seenPickJobs = { WH1: new Map(), WH2: new Map(), WH3: new Map() };
     for (const tx of pickTxList) {
-      const wh = tx.warehouseName || 'Unknown';
+      let wh = tx.warehouseName || 'Unknown';
+      // Normalize warehouse names — ItemPath may use full names instead of WH1/WH2/WH3
+      if (/kitchen|lens.kitchen|wh3|irvine.2|irv02/i.test(wh)) wh = 'WH3';
+      else if (/wh2|warehouse.2/i.test(wh)) wh = 'WH2';
+      else if (/wh1|warehouse.1/i.test(wh)) wh = 'WH1';
       const date = tx.creationDate || '';
       const orderName = tx.orderName || tx.order_name || '';
       if ((wh === 'WH1' || wh === 'WH2' || wh === 'WH3') && orderName) {
@@ -673,7 +677,9 @@ async function poll() {
     const finalPicks = txPickSum > 0 ? txPicksTotal : { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2, WH3: 0 };
     const finalPuts = txPutSum > 0 ? txPutsTotal : { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2 };
 
-    console.log(`[ItemPath] Picks: tx=${txPickSum} (WH1:${txPicksTotal.WH1} WH2:${txPicksTotal.WH2} WH3/Kitchen:${txPicksTotal.WH3} manual:${txManualPicks}), inc=${incPickSum}, using ${txPickSum > 0 ? 'txn' : 'incremental'} (${pickTxList.length} tx lines)`);
+    // Log unique warehouse names for debugging
+    const whNames = new Set(pickTxList.map(tx => tx.warehouseName).filter(Boolean));
+    console.log(`[ItemPath] Picks: tx=${txPickSum} (WH1:${txPicksTotal.WH1} WH2:${txPicksTotal.WH2} WH3/Kitchen:${txPicksTotal.WH3} manual:${txManualPicks}), inc=${incPickSum}, using ${txPickSum > 0 ? 'txn' : 'incremental'} (${pickTxList.length} tx lines, warehouses: ${[...whNames].join(', ')})`);
     console.log(`[ItemPath] Puts: tx=${txPutSum}, inc=${incPutSum}, using ${txPutSum > 0 ? 'txn' : 'incremental'} (${putTxList.length} tx lines)`);
 
     // Calculate warehouse stats from orders (active/queued counts)
