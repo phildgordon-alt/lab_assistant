@@ -1208,6 +1208,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginBottom: 12 }}>
                     {varianceData.period?.from} to {varianceData.period?.to} · {varianceData.skuCount} SKUs with variance
                   </div>
+                  <div style={{ padding: '8px 12px', background: `${T.blue}08`, border: `1px solid ${T.blue}15`, borderRadius: 6, marginBottom: 12, fontSize: 10, color: T.textMuted, fontFamily: mono, lineHeight: 1.5 }}>
+                    <strong style={{ color: T.amber }}>Kardex</strong> = items picked from Kardex (pick date).{' '}
+                    <strong style={{ color: T.blue }}>Looker</strong> = items shipped from lab (ship date).{' '}
+                    There is a <strong style={{ color: T.text }}>1–3 day pipeline lag</strong> between pick and ship.{' '}
+                    The variance represents everything that left the Kardex but didn't make it to a shipped job — breakage, remakes, Kitchen picks not in Looker, and timing.
+                  </div>
 
                   {/* Waterfall */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8, marginBottom: 20 }}>
