@@ -8079,11 +8079,6 @@ function FlowAgentTab({ovenServerUrl,settings}){
       {/* ═══════ CATCH-UP VIEW ═══════ */}
       {subTab==="catchup"&&(
         <div>
-          <div style={{display:"flex",gap:8,marginBottom:16}}>
-            {[{id:"all",label:"All Jobs"},{id:"edits",label:"Edits"}].map(l=>(
-              <button key={l.id} onClick={()=>{setCatchUpLine(l.id);setCatchUpScenario({assemblers:"",jobsPerAssemblerHr:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",targetBacklog:""});}} style={{background:catchUpLine===l.id?"rgba(59,130,246,0.15)":"transparent",border:catchUpLine===l.id?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:catchUpLine===l.id?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>{l.label}</button>
-            ))}
-          </div>
 
           {/* Live data banner */}
           {catchUp&&(
