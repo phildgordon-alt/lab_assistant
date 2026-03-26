@@ -1228,31 +1228,31 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   {/* Waterfall */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8, marginBottom: 20 }}>
                     <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6 }}>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX PICKS</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX PICKED (units)</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(varianceData.summary?.kardex || 0).toLocaleString()}</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6 }}>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER (NS)</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER SHIPPED (units)</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(varianceData.summary?.netsuite || 0).toLocaleString()}</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.red}` }}>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL VARIANCE</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE (units)</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.variance || 0).toLocaleString()}</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6 }}>
                       <div style={{ fontSize: 8, color: T.red, fontFamily: mono, letterSpacing: 1 }}>BREAKAGE</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.breakages || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>explains {(varianceData.summary?.explainedByBreakage || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units broken</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.amber}08`, borderRadius: 6 }}>
                       <div style={{ fontSize: 8, color: T.amber, fontFamily: mono, letterSpacing: 1 }}>KITCHEN (WH3)</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(varianceData.summary?.kitchenPicks || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>may not be in NS</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units from Kitchen</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.purple || '#9b6ee0'}08`, borderRadius: 6 }}>
                       <div style={{ fontSize: 8, color: T.purple || '#9b6ee0', fontFamily: mono, letterSpacing: 1 }}>UNEXPLAINED</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.purple || '#9b6ee0', fontFamily: mono }}>{(varianceData.summary?.unexplained || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>remakes / sync gap</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units unexplained</div>
                     </div>
                   </div>
 
@@ -1262,7 +1262,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <div key={w.label} style={{ flex: 1, padding: 8, background: T.bg, borderRadius: 6, textAlign: 'center' }}>
                         <div style={{ fontSize: 9, color: w.color, fontFamily: mono }}>{w.label}</div>
                         <div style={{ fontSize: 16, fontWeight: 700, color: w.color, fontFamily: mono }}>{w.val.toLocaleString()}</div>
-                        <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>items picked</div>
+                        <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units picked</div>
                       </div>
                     ))}
                   </div>
