@@ -1188,20 +1188,30 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     }} label="Export CSV" />}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <input type="date" value={varianceFrom} onChange={e => setVarianceFrom(e.target.value)} style={{ padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
-                  <span style={{ color: T.textDim, fontSize: 11 }}>to</span>
-                  <input type="date" value={varianceTo} onChange={e => setVarianceTo(e.target.value)} style={{ padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
-                  {[
-                    { label: '7d', fn: () => { const d = new Date(); d.setDate(d.getDate()-8); setVarianceFrom(d.toISOString().slice(0,10)); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
-                    { label: '30d', fn: () => { const d = new Date(); d.setDate(d.getDate()-31); setVarianceFrom(d.toISOString().slice(0,10)); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
-                    { label: '90d', fn: () => { const d = new Date(); d.setDate(d.getDate()-91); setVarianceFrom(d.toISOString().slice(0,10)); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
-                    { label: 'YTD', fn: () => { setVarianceFrom(`${new Date().getFullYear()}-01-01`); setVarianceTo(new Date(Date.now()-86400000).toISOString().slice(0,10)); }},
-                    { label: 'Last Month', fn: () => { const d = new Date(); const y = d.getMonth() === 0 ? d.getFullYear()-1 : d.getFullYear(); const m = d.getMonth() === 0 ? 12 : d.getMonth(); setVarianceFrom(`${y}-${String(m).padStart(2,'0')}-01`); const last = new Date(y, m, 0); setVarianceTo(last.toISOString().slice(0,10)); }},
-                  ].map(p => (
-                    <button key={p.label} onClick={p.fn} style={{ padding: '4px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: 'pointer', background: 'transparent', color: T.textMuted, border: `1px solid ${T.border}` }}>{p.label}</button>
-                  ))}
-                </div>
+                {(() => {
+                  const loadVariance = async (f, t) => {
+                    setVarianceFrom(f); setVarianceTo(t);
+                    const resp = await fetch(`${ovenServerUrl}/api/inventory/variance-analysis?from=${f}&to=${t}`);
+                    if (resp.ok) setVarianceData(await resp.json());
+                  };
+                  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+                  return (
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <input type="date" value={varianceFrom} onChange={e => setVarianceFrom(e.target.value)} style={{ padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                      <span style={{ color: T.textDim, fontSize: 11 }}>to</span>
+                      <input type="date" value={varianceTo} onChange={e => setVarianceTo(e.target.value)} style={{ padding: '5px 8px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 4, color: T.text, fontSize: 11, fontFamily: mono }} />
+                      {[
+                        { label: '7d', fn: () => { const d = new Date(); d.setDate(d.getDate()-8); loadVariance(d.toISOString().slice(0,10), yesterday); }},
+                        { label: '30d', fn: () => { const d = new Date(); d.setDate(d.getDate()-31); loadVariance(d.toISOString().slice(0,10), yesterday); }},
+                        { label: '90d', fn: () => { const d = new Date(); d.setDate(d.getDate()-91); loadVariance(d.toISOString().slice(0,10), yesterday); }},
+                        { label: 'YTD', fn: () => { loadVariance(`${new Date().getFullYear()}-01-01`, yesterday); }},
+                        { label: 'Last Month', fn: () => { const d = new Date(); const y = d.getMonth()===0?d.getFullYear()-1:d.getFullYear(); const m = d.getMonth()===0?12:d.getMonth(); const last = new Date(y,m,0); loadVariance(`${y}-${String(m).padStart(2,'0')}-01`, last.toISOString().slice(0,10)); }},
+                      ].map(p => (
+                        <button key={p.label} onClick={p.fn} style={{ padding: '4px 10px', borderRadius: 4, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: 'pointer', background: 'transparent', color: T.textMuted, border: `1px solid ${T.border}` }}>{p.label}</button>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
               {varianceData && (
                 <div style={{ padding: 16 }}>
