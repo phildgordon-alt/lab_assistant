@@ -832,37 +832,30 @@ function computeCatchUp(lineId, scenario = {}) {
   const workDaysPerWeek = workDays.length;
   const offDaysPerWeek = 7 - workDaysPerWeek;
 
-  // Net per work day: we ship outputPerDay but incoming arrives every day
-  // On work days: net = output - incoming
-  // On off days: net = 0 - incoming (jobs pile up, no output)
-  // Net per week = (workDays * (output - incoming)) + (offDays * (-incoming))
-  //              = (workDays * output) - (7 * incoming)
-  const netPerWeek = (workDaysPerWeek * outputPerDay) - (7 * incomingPerDay);
-  const netPerCalendarDay = netPerWeek / 7; // average across all days
+  // Incoming only arrives on work days (DVI doesn't send orders on weekends)
+  // Net per work day = output - incoming
+  // Off days: nothing in, nothing out (lab is closed)
+  // Net per week = workDays × (output - incoming)
+  const netPerWorkDay = outputPerDay - incomingPerDay;
+  const netPerWeek = workDaysPerWeek * netPerWorkDay;
+  const netPerCalendarDay = netPerWeek / 7; // average for calendar projection
 
   // How much WIP needs to be burned down to reach target backlog
   const wipToClear = Math.max(0, totalWip - targetBacklog);
 
   // Days to clear in calendar days (includes weekends)
-  const daysToClear = netPerWeek > 0 && wipToClear > 0
+  const daysToClear = netPerWorkDay > 0 && wipToClear > 0
     ? Math.round((wipToClear / netPerCalendarDay) * 10) / 10
-    : netPerWeek > 0 ? 0 : null;
+    : netPerWorkDay > 0 ? 0 : null;
 
-  // To clear in targetDays (WORK days): how much do we need to ship per work day?
+  // To clear in targetDays WORK days: how much do we need to ship per work day?
   //
-  // Steady-state: just to keep up with incoming (no burn-down)
-  //   steady = incomingPerDay * 7 / workDaysPerWeek  (incoming arrives 7 days, shipped on work days only)
+  // Steady-state: just to keep up with incoming on work days
+  //   steady = incomingPerDay
   // Burn-down: clear the backlog over targetDays work days
   //   burn = wipToClear / targetDays
   // Total required per work day = steady + burn
-  //
-  // This is equivalent to the old formula but makes the components visible:
-  //   calendarDays = targetDays * 7 / workDaysPerWeek
-  //   totalToShip = wipToClear + (incomingPerDay * calendarDays)
-  //   required = totalToShip / targetDays
-  //            = wipToClear/targetDays + incomingPerDay*7/workDaysPerWeek
-  //            = burn + steady
-  const steadyStatePerWorkDay = Math.round((incomingPerDay * 7 / Math.max(1, workDaysPerWeek)) * 10) / 10;
+  const steadyStatePerWorkDay = Math.round(incomingPerDay * 10) / 10;
   const burnDownPerWorkDay = targetDays > 0 ? Math.round((wipToClear / targetDays) * 10) / 10 : 0;
   const requiredPerWorkDay = Math.ceil(steadyStatePerWorkDay + burnDownPerWorkDay);
   const requiredPerHr = Math.round((requiredPerWorkDay / Math.max(1, hoursPerDay)) * 10) / 10;
@@ -883,10 +876,8 @@ function computeCatchUp(lineId, scenario = {}) {
       if (workDays.includes(dow)) {
         // Work day: ship output, receive incoming
         projWip = projWip - outputPerDay + incomingPerDay;
-      } else {
-        // Off day: no output, incoming accumulates
-        projWip = projWip + incomingPerDay;
       }
+      // Off day: lab closed, no output, no incoming
       projWip = Math.max(0, projWip);
     }
     milestones.push({
