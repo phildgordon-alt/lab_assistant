@@ -5085,6 +5085,110 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, { ok: true, health: network.getHealth() });
   }
 
+  // GET /api/inventory/variance-analysis — YTD variance breakdown by cause
+  if (req.method==='GET' && url.pathname==='/api/inventory/variance-analysis') {
+    try {
+      const from = url.searchParams.get('from') || `${new Date().getFullYear()}-01-01`;
+      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const to = url.searchParams.get('to') || yesterday;
+      const skuCat = (sku) => netsuite.getSkuCategory(sku);
+      const isLensOrFrame = (sku) => { const c = skuCat(sku); return c === 'Lenses' || c === 'Frames'; };
+
+      // 1. Kardex picks by warehouse (ItemPath picks_history)
+      const ipRows = labDb.db.prepare(`
+        SELECT sku, warehouse, SUM(qty) as qty, COUNT(*) as txns
+        FROM picks_history
+        WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? AND qty <= 10
+        GROUP BY sku, warehouse
+      `).all(from, to);
+
+      const kardexBySku = {};
+      let totalKardex = 0, totalWH1 = 0, totalWH2 = 0, totalWH3 = 0;
+      for (const r of ipRows) {
+        if (!isLensOrFrame(r.sku)) continue;
+        if (!kardexBySku[r.sku]) kardexBySku[r.sku] = { qty: 0, wh1: 0, wh2: 0, wh3: 0 };
+        kardexBySku[r.sku].qty += r.qty;
+        if (r.warehouse === 'WH1') { kardexBySku[r.sku].wh1 += r.qty; totalWH1 += r.qty; }
+        else if (r.warehouse === 'WH2') { kardexBySku[r.sku].wh2 += r.qty; totalWH2 += r.qty; }
+        else if (r.warehouse === 'WH3') { kardexBySku[r.sku].wh3 += r.qty; totalWH3 += r.qty; }
+        totalKardex += r.qty;
+      }
+
+      // 2. Looker shipped + breakage (what NetSuite sees)
+      const lkData = looker.getUsage(9999);
+      const frameData = looker.getFrameUsage();
+      const nsBySku = {};
+      let totalNS = 0, totalBreakage = 0;
+      for (const day of (lkData.daily || [])) {
+        if (day.date < from || day.date > to) continue;
+        for (const [opc, v] of Object.entries(day.byOpc || {})) {
+          if (!isLensOrFrame(opc)) continue;
+          if (!nsBySku[opc]) nsBySku[opc] = { qty: 0, breakages: 0 };
+          nsBySku[opc].qty += v.lenses;
+          nsBySku[opc].breakages += v.breakages;
+          totalNS += v.lenses;
+          totalBreakage += v.breakages;
+        }
+      }
+      for (const day of (frameData.daily || [])) {
+        if (day.date < from || day.date > to) continue;
+        for (const [upc, count] of Object.entries(day.byUpc || {})) {
+          if (!isLensOrFrame(upc)) continue;
+          if (!nsBySku[upc]) nsBySku[upc] = { qty: 0, breakages: 0 };
+          nsBySku[upc].qty += count;
+          totalNS += count;
+        }
+      }
+
+      // 3. Merge per-SKU: Kardex vs NetSuite with cause breakdown
+      const allSkus = new Set([...Object.keys(kardexBySku), ...Object.keys(nsBySku)]);
+      const skus = [];
+      for (const sku of allSkus) {
+        const k = kardexBySku[sku] || { qty: 0, wh1: 0, wh2: 0, wh3: 0 };
+        const ns = nsBySku[sku] || { qty: 0, breakages: 0 };
+        const variance = k.qty - ns.qty;
+        if (Math.abs(variance) < 1 && k.wh3 === 0 && ns.breakages === 0) continue; // skip perfect matches with no interesting data
+        skus.push({
+          sku,
+          category: skuCat(sku) || 'Unknown',
+          kardex: k.qty,
+          wh1: k.wh1, wh2: k.wh2, wh3: k.wh3,
+          netsuite: ns.qty,
+          breakages: ns.breakages,
+          variance,
+          // Cause attribution: variance = breakage + kitchen + unexplained
+          explainedByBreakage: Math.min(ns.breakages, Math.max(0, variance)),
+          explainedByKitchen: k.wh3, // Kitchen picks may not be in NetSuite
+          unexplained: variance - Math.min(ns.breakages, Math.max(0, variance)),
+        });
+      }
+      skus.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
+
+      // 4. Summary waterfall
+      const totalVariance = totalKardex - totalNS;
+      return json(res, {
+        period: { from, to },
+        summary: {
+          kardex: totalKardex,
+          netsuite: totalNS,
+          variance: totalVariance,
+          breakages: totalBreakage,
+          kitchenPicks: totalWH3,
+          // Waterfall: Kardex - NetSuite = breakage + kitchen + unexplained
+          explainedByBreakage: Math.min(totalBreakage, Math.max(0, totalVariance)),
+          explainedByKitchen: totalWH3,
+          unexplained: totalVariance - Math.min(totalBreakage, Math.max(0, totalVariance)) - totalWH3,
+          byWarehouse: { WH1: totalWH1, WH2: totalWH2, WH3: totalWH3 },
+        },
+        skus: skus.slice(0, 200),
+        skuCount: skus.length,
+      });
+    } catch (e) {
+      console.error('[Variance] Error:', e.message);
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
   // ── Flow Agent (Work Release Control) ───────────────────────
 
   // GET /api/inventory/picks/compare?days=30 — ItemPath picks vs Looker consumption daily

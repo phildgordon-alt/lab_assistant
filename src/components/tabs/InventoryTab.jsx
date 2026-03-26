@@ -491,6 +491,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [pickHistory, setPickHistory] = useState([]);
   const [pickCompare, setPickCompare] = useState(null);
   const [alerts, setAlerts] = useState({ alerts: [], critical: 0, high: 0, low: 0 });
+  const [varianceData, setVarianceData] = useState(null);
   const [vlms, setVlms] = useState({ vlmStats: {}, locations: [] });
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -1163,6 +1164,103 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <div style={{ color: T.textMuted }}>NetSuite reconciliation loading... If this persists, check Settings → Connections for NetSuite status.</div>
               </Card>
             )}
+
+            {/* YTD Variance Analysis */}
+            <Card style={{ marginTop: 24, padding: 0 }}>
+              <div style={{ padding: '14px 16px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: T.text, fontFamily: mono }}>YTD Variance Analysis — Where Is the Gap?</span>
+                <button onClick={async () => {
+                  const resp = await fetch(`${ovenServerUrl}/api/inventory/variance-analysis`);
+                  if (resp.ok) setVarianceData(await resp.json());
+                }} style={{ background: T.blue, border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
+                  {varianceData ? '↻ Refresh' : 'Load Analysis'}
+                </button>
+              </div>
+              {varianceData && (
+                <div style={{ padding: 16 }}>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginBottom: 12 }}>
+                    {varianceData.period?.from} to {varianceData.period?.to} · {varianceData.skuCount} SKUs with variance
+                  </div>
+
+                  {/* Waterfall */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8, marginBottom: 20 }}>
+                    <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6 }}>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX PICKS</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(varianceData.summary?.kardex || 0).toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6 }}>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER (NS)</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(varianceData.summary?.netsuite || 0).toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.red}` }}>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL VARIANCE</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.variance || 0).toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6 }}>
+                      <div style={{ fontSize: 8, color: T.red, fontFamily: mono, letterSpacing: 1 }}>BREAKAGE</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.breakages || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>explains {(varianceData.summary?.explainedByBreakage || 0).toLocaleString()}</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.amber}08`, borderRadius: 6 }}>
+                      <div style={{ fontSize: 8, color: T.amber, fontFamily: mono, letterSpacing: 1 }}>KITCHEN (WH3)</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(varianceData.summary?.kitchenPicks || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>may not be in NS</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.purple || '#9b6ee0'}08`, borderRadius: 6 }}>
+                      <div style={{ fontSize: 8, color: T.purple || '#9b6ee0', fontFamily: mono, letterSpacing: 1 }}>UNEXPLAINED</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.purple || '#9b6ee0', fontFamily: mono }}>{(varianceData.summary?.unexplained || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>remakes / sync gap</div>
+                    </div>
+                  </div>
+
+                  {/* Warehouse breakdown */}
+                  <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+                    {[{label:'WH1',val:varianceData.summary?.byWarehouse?.WH1||0,color:T.blue},{label:'WH2',val:varianceData.summary?.byWarehouse?.WH2||0,color:T.green},{label:'WH3 (Kitchen)',val:varianceData.summary?.byWarehouse?.WH3||0,color:T.amber}].map(w=>(
+                      <div key={w.label} style={{ flex: 1, padding: 8, background: T.bg, borderRadius: 6, textAlign: 'center' }}>
+                        <div style={{ fontSize: 9, color: w.color, fontFamily: mono }}>{w.label}</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: w.color, fontFamily: mono }}>{w.val.toLocaleString()}</div>
+                        <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>items picked</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Top SKUs driving variance */}
+                  <div style={{ fontSize: 11, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 6 }}>TOP SKUs DRIVING VARIANCE</div>
+                  <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
+                      <thead>
+                        <tr style={{ background: T.bg, position: 'sticky', top: 0 }}>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 9, color: T.textDim }}>SKU</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 9, color: T.textDim }}>CAT</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.amber }}>KARDEX</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.blue }}>WH1</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.green }}>WH2</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.amber }}>WH3</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.blue }}>LOOKER</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.red }}>BREAK</th>
+                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 9, color: T.red, fontWeight: 700 }}>VARIANCE</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(varianceData.skus || []).slice(0, 100).map((s, i) => (
+                          <tr key={i} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                            <td style={{ padding: '5px 8px', color: T.text }}>{s.sku}</td>
+                            <td style={{ padding: '5px 8px', color: T.cyan, fontSize: 9 }}>{s.category}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.amber, fontWeight: 600 }}>{s.kardex}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.blue }}>{s.wh1 || ''}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.green }}>{s.wh2 || ''}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: s.wh3 ? T.amber : T.textDim }}>{s.wh3 || ''}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.blue, fontWeight: 600 }}>{s.netsuite}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: s.breakages > 0 ? T.red : T.textDim }}>{s.breakages || ''}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: s.variance > 0 ? T.red : s.variance < 0 ? T.blue : T.green }}>{s.variance > 0 ? '+' : ''}{s.variance}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </Card>
           </div>
         )}
 
