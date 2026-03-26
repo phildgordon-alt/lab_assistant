@@ -566,16 +566,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
     const fetchFor = async (tab) => {
       try {
         if (tab === 'warehouses' || tab === 'picks') {
-          // Activity + Picks: need picks data
+          // Activity + Picks: need picks data + inventory (for hourlyStats)
           if (!fetchedRef.current.picks) {
-            const [picksResp, alertsResp, histResp] = await Promise.all([
+            const [picksResp, alertsResp, histResp, invResp] = await Promise.all([
               fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/picks/history?days=30`).then(r => r.json()).catch(() => ({ days: [] })),
+              fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()).catch(() => null),
             ]);
             setPicks(picksResp);
             setAlerts(alertsResp);
             setPickHistory(histResp.days || []);
+            if (invResp) { setInventory(invResp); fetchedRef.current.inventory = true; }
             fetchedRef.current.picks = true;
           }
         }
