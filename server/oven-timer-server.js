@@ -5082,6 +5082,60 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
 
   // ── Flow Agent (Work Release Control) ───────────────────────
 
+  // GET /api/inventory/picks/compare?days=30 — ItemPath picks vs Looker consumption daily
+  if (req.method==='GET' && url.pathname==='/api/inventory/picks/compare') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+
+    // ItemPath: daily pick transactions from picks_history (line-level)
+    const ipRows = labDb.db.prepare(`
+      SELECT date(completed_at) as date, COUNT(*) as transactions, SUM(qty) as items
+      FROM picks_history
+      WHERE completed_at > datetime('now', ?)
+      GROUP BY date(completed_at)
+      ORDER BY date(completed_at) DESC
+    `).all(`-${days} days`);
+    const ipByDate = {};
+    for (const r of ipRows) ipByDate[r.date] = { transactions: r.transactions, items: r.items };
+
+    // Looker: daily lens + frame consumption
+    const lkData = looker.getUsage(days);
+    const frameData = looker.getFrameUsage();
+    const lkByDate = {};
+    for (const day of (lkData.daily || [])) {
+      if (!lkByDate[day.date]) lkByDate[day.date] = { lenses: 0, frames: 0 };
+      lkByDate[day.date].lenses = day.lenses || 0;
+    }
+    for (const day of (frameData.daily || [])) {
+      if (!lkByDate[day.date]) lkByDate[day.date] = { lenses: 0, frames: 0 };
+      lkByDate[day.date].frames = day.frames || 0;
+    }
+
+    // Merge into daily comparison
+    const allDates = [...new Set([...Object.keys(ipByDate), ...Object.keys(lkByDate)])].sort().reverse();
+    const daily = allDates.map(date => {
+      const ip = ipByDate[date] || { transactions: 0, items: 0 };
+      const lk = lkByDate[date] || { lenses: 0, frames: 0 };
+      const lkTotal = lk.lenses + lk.frames;
+      return {
+        date,
+        itempath: ip.transactions,
+        itempathItems: ip.items,
+        lookerLenses: lk.lenses,
+        lookerFrames: lk.frames,
+        lookerTotal: lkTotal,
+        variance: ip.transactions - lkTotal,
+      };
+    });
+
+    const totals = daily.reduce((s, d) => ({
+      itempath: s.itempath + d.itempath,
+      lookerTotal: s.lookerTotal + d.lookerTotal,
+      variance: s.variance + d.variance,
+    }), { itempath: 0, lookerTotal: 0, variance: 0 });
+
+    return json(res, { daily, totals, days: daily.length });
+  }
+
   // GET /api/flow/snapshot — all stages + lines + gap predictions
   if (req.method==='GET' && url.pathname==='/api/flow/snapshot') {
     return json(res, flowAgent.getSnapshot());

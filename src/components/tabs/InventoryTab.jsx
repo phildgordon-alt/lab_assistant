@@ -489,6 +489,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [inventory, setInventory] = useState({ materials: [], lastSync: null, status: 'pending', alertCount: 0, warehouses: [], warehouseStats: {}, vlmStats: {} });
   const [picks, setPicks] = useState({ picks: [], recent: [], count: 0, byWarehouse: {}, hourlyStats: {}, hourlyPutStats: {} });
   const [pickHistory, setPickHistory] = useState([]);
+  const [pickCompare, setPickCompare] = useState(null);
   const [alerts, setAlerts] = useState({ alerts: [], critical: 0, high: 0, low: 0 });
   const [vlms, setVlms] = useState({ vlmStats: {}, locations: [] });
   const [loading, setLoading] = useState(true);
@@ -568,16 +569,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
         if (tab === 'warehouses' || tab === 'picks') {
           // Activity + Picks: need picks data + inventory (for hourlyStats)
           if (!fetchedRef.current.picks) {
-            const [picksResp, alertsResp, histResp, invResp] = await Promise.all([
+            const [picksResp, alertsResp, histResp, invResp, compResp] = await Promise.all([
               fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/picks/history?days=30`).then(r => r.json()).catch(() => ({ days: [] })),
               fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()).catch(() => null),
+              fetch(`${ovenServerUrl}/api/inventory/picks/compare?days=30`).then(r => r.json()).catch(() => null),
             ]);
             setPicks(picksResp);
             setAlerts(alertsResp);
             setPickHistory(histResp.days || []);
             if (invResp) { setInventory(invResp); fetchedRef.current.inventory = true; }
+            if (compResp) setPickCompare(compResp);
             fetchedRef.current.picks = true;
           }
         }
@@ -1586,6 +1589,59 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.blue }}>{d.WH1}</td>
                         <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.green }}>{d.WH2}</td>
                         <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, textAlign: "right", color: T.text }}>{d.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            )}
+
+            {/* ItemPath vs Looker daily comparison */}
+            {pickCompare && pickCompare.daily?.length > 0 && (
+              <Card style={{ marginTop: 20 }}>
+                <SectionHeader right={`${pickCompare.days} days`}>ItemPath vs Looker — Daily Transactions</SectionHeader>
+                {/* Totals */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+                  <div style={{ textAlign: "center", padding: 10, background: T.bg, borderRadius: 6 }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(pickCompare.totals?.itempath || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>pick transactions</div>
+                  </div>
+                  <div style={{ textAlign: "center", padding: 10, background: T.bg, borderRadius: 6 }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(pickCompare.totals?.lookerTotal || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>lenses + frames</div>
+                  </div>
+                  <div style={{ textAlign: "center", padding: 10, background: T.bg, borderRadius: 6 }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE</div>
+                    <div style={{ fontSize: 22, fontWeight: 800, color: Math.abs(pickCompare.totals?.variance || 0) < 50 ? T.green : T.red, fontFamily: mono }}>
+                      {(pickCompare.totals?.variance || 0) > 0 ? '+' : ''}{(pickCompare.totals?.variance || 0).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>IP - Looker</div>
+                  </div>
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: T.bg }}>
+                      <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.amber, fontFamily: mono }}>ITEMPATH</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.blue, fontFamily: mono }}>LENSES</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.green, fontFamily: mono }}>FRAMES</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.blue, fontFamily: mono }}>LK TOTAL</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.textDim, fontFamily: mono }}>VARIANCE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pickCompare.daily.map(d => (
+                      <tr key={d.date} style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{d.date}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.amber }}>{d.itempath}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.blue }}>{d.lookerLenses}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.green }}>{d.lookerFrames}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.blue, fontWeight: 600 }}>{d.lookerTotal}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, textAlign: "right", color: Math.abs(d.variance) < 5 ? T.green : T.red }}>
+                          {d.variance > 0 ? '+' : ''}{d.variance}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
