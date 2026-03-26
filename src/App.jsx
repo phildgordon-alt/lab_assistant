@@ -7759,6 +7759,15 @@ function FlowAgentTab({ovenServerUrl,settings}){
   },[subTab,catchUpLine,base,catchUpScenario]);
   useEffect(()=>{loadCatchUp();},[loadCatchUp]);
 
+  // History analysis
+  const [historyData,setHistoryData]=useState(null);
+  const [historyDays,setHistoryDays]=useState(7);
+  const [historyStage,setHistoryStage]=useState("ASSEMBLY");
+  useEffect(()=>{
+    if(subTab!=="history-analysis")return;
+    fetch(`${base}/api/flow/history-analysis?days=${historyDays}`).then(r=>r.json()).then(setHistoryData).catch(()=>{});
+  },[subTab,historyDays,base]);
+
   // Load trend when tab switches
   useEffect(()=>{
     if(subTab!=="trend")return;
@@ -7798,6 +7807,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
     {id:"recommendations",label:"Recommendations",icon:"📋"},
     {id:"catchup",label:"Catch-Up",icon:"📈"},
     {id:"trend",label:"8hr Trend",icon:"📊"},
+    {id:"history-analysis",label:"Flow History",icon:"🔥"},
     {id:"history",label:"Push History",icon:"📜"},
   ];
 
@@ -8227,6 +8237,99 @@ function FlowAgentTab({ovenServerUrl,settings}){
             </div>
           ):(
             <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading trend data...</div>
+          )}
+        </div>
+      )}
+
+      {/* ═══════ FLOW HISTORY ANALYSIS ═══════ */}
+      {subTab==="history-analysis"&&(
+        <div>
+          {/* Controls */}
+          <div style={{display:"flex",gap:12,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
+            <div style={{display:"flex",gap:4}}>
+              {[7,14,30].map(d=>(
+                <button key={d} onClick={()=>setHistoryDays(d)} style={{background:historyDays===d?"rgba(59,130,246,0.15)":"transparent",border:historyDays===d?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"5px 12px",color:historyDays===d?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:11}}>{d}d</button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:4}}>
+              {(historyData?.stages||["INCOMING","SURFACING","COATING","CUTTING","ASSEMBLY","SHIPPING"]).map(s=>(
+                <button key={s} onClick={()=>setHistoryStage(s)} style={{background:historyStage===s?"rgba(59,130,246,0.15)":"transparent",border:historyStage===s?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"5px 10px",color:historyStage===s?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:10}}>{s}</button>
+              ))}
+            </div>
+            {historyData&&<span style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>{historyData.totalTransitions.toLocaleString()} transitions across {historyData.days} days</span>}
+          </div>
+
+          {historyData&&historyData.heatmap[historyStage]?(
+            <div>
+              {/* Average hourly pattern */}
+              <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16,marginBottom:16}}>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#e5e7eb",letterSpacing:1,marginBottom:12}}>TYPICAL DAILY PATTERN — {historyStage}</div>
+                <div style={{display:"flex",alignItems:"flex-end",gap:2,height:120,padding:"0 4px"}}>
+                  {(historyData.hourlyAvg[historyStage]||[]).map(h=>{
+                    const maxAvg=Math.max(...(historyData.hourlyAvg[historyStage]||[]).map(x=>x.avg),1);
+                    const barH=Math.max(2,(h.avg/maxAvg)*100);
+                    const intensity=h.avg/maxAvg;
+                    const color=intensity<0.3?"#ef4444":intensity<0.6?"#f59e0b":"#22c55e";
+                    return(
+                      <div key={h.hour} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+                        <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>{Math.round(h.avg)}</div>
+                        <div style={{width:"100%",height:barH,background:color,borderRadius:2,opacity:0.8,position:"relative"}} title={`${h.hour}:00 — avg ${h.avg}, min ${h.min}, max ${h.max}`}>
+                          {/* Range indicator */}
+                          <div style={{position:"absolute",top:-(h.max/maxAvg)*100+barH,left:"50%",width:1,height:(h.max-h.min)/maxAvg*100,background:"rgba(255,255,255,0.2)",transform:"translateX(-50%)"}}/>
+                        </div>
+                        <div style={{fontSize:8,color:"#6b7280",fontFamily:mono}}>{h.hour>12?h.hour-12+"p":h.hour+"a"}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",marginTop:8}}>
+                  <span style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>🔴 Low activity (drying out)</span>
+                  <span style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>🟡 Moderate</span>
+                  <span style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>🟢 High activity</span>
+                </div>
+              </div>
+
+              {/* Day-by-day heatmap */}
+              <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16}}>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#e5e7eb",letterSpacing:1,marginBottom:12}}>DAILY HEATMAP — {historyStage}</div>
+                <div style={{overflowX:"auto"}}>
+                  {/* Hour headers */}
+                  <div style={{display:"flex",gap:2,marginBottom:4,paddingLeft:80}}>
+                    {(historyData.hours||[]).map(h=>(
+                      <div key={h} style={{width:32,textAlign:"center",fontSize:8,color:"#6b7280",fontFamily:mono}}>{h>12?h-12+"p":h+"a"}</div>
+                    ))}
+                    <div style={{width:50,textAlign:"center",fontSize:8,color:"#6b7280",fontFamily:mono,fontWeight:700}}>TOTAL</div>
+                  </div>
+                  {/* Day rows */}
+                  {(historyData.heatmap[historyStage]||[]).map(day=>{
+                    const maxCount=Math.max(...day.hours.map(h=>h.count),1);
+                    const globalMax=Math.max(...(historyData.heatmap[historyStage]||[]).flatMap(d=>d.hours.map(h=>h.count)),1);
+                    return(
+                      <div key={day.date} style={{display:"flex",gap:2,marginBottom:2,alignItems:"center"}}>
+                        <div style={{width:80,fontSize:10,fontFamily:mono,color:"#9ca3af",flexShrink:0}}>
+                          {day.dayOfWeek} {day.date.slice(5)}
+                        </div>
+                        {day.hours.map(h=>{
+                          const intensity=h.count/globalMax;
+                          const bg=h.count===0?"rgba(255,255,255,0.02)":
+                            intensity<0.25?`rgba(239,68,68,${0.15+intensity*0.4})`:
+                            intensity<0.5?`rgba(245,158,11,${0.15+intensity*0.4})`:
+                            `rgba(34,197,94,${0.15+intensity*0.4})`;
+                          return(
+                            <div key={h.hour} style={{width:32,height:24,borderRadius:3,background:bg,display:"flex",alignItems:"center",justifyContent:"center"}} title={`${day.date} ${h.hour}:00 — ${h.count} jobs`}>
+                              <span style={{fontSize:9,fontFamily:mono,color:h.count>0?"#e5e7eb":"#333",fontWeight:h.count>0?600:400}}>{h.count||""}</span>
+                            </div>
+                          );
+                        })}
+                        <div style={{width:50,textAlign:"center",fontSize:11,fontFamily:mono,color:"#e5e7eb",fontWeight:700}}>{day.total}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          ):(
+            <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading historical data...</div>
           )}
         </div>
       )}

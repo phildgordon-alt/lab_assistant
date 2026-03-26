@@ -5168,6 +5168,12 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, flowAgent.getAIContext());
   }
 
+  // GET /api/flow/history?days=7 — historical flow analysis
+  if (req.method==='GET' && url.pathname==='/api/flow/history-analysis') {
+    const days = parseInt(url.searchParams.get('days') || '7');
+    return json(res, flowAgent.getHistory(days));
+  }
+
   // ── EWS (Early Warning System) ──────────────────────────────
 
   // GET /api/ews/alerts — active alerts (or ?filter=all for all)

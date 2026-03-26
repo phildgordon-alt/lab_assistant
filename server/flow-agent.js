@@ -1248,4 +1248,86 @@ module.exports = {
       stockConstraints: snap.stockConstraints,
     };
   },
+
+  // ── Historical Flow Analysis ──
+
+  /**
+   * Aggregate stage transitions into hourly buckets per stage per day.
+   * Returns data for heatmaps and daily timelines.
+   * @param {number} days — how many days back (default 7)
+   */
+  getHistory(days = 7) {
+    const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
+    const stages = ['INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
+
+    // Query all transitions in range
+    const rows = db.prepare(`
+      SELECT to_stage, transition_at FROM stage_transitions
+      WHERE transition_at > ? ORDER BY transition_at
+    `).all(cutoff);
+
+    // Bucket: { date: 'YYYY-MM-DD', hour: 0-23, stage: 'ASSEMBLY', count: N }
+    const buckets = {};  // key: "date|hour|stage" → count
+    const dailyTotals = {}; // key: "date|stage" → count
+    const dates = new Set();
+
+    for (const row of rows) {
+      const d = new Date(row.transition_at);
+      const date = d.toISOString().split('T')[0];
+      const hour = d.getHours();
+      const stage = (row.to_stage || '').toUpperCase();
+      if (!stages.includes(stage)) continue;
+
+      const key = `${date}|${hour}|${stage}`;
+      buckets[key] = (buckets[key] || 0) + 1;
+
+      const dayKey = `${date}|${stage}`;
+      dailyTotals[dayKey] = (dailyTotals[dayKey] || 0) + 1;
+
+      dates.add(date);
+    }
+
+    // Build structured output
+    const sortedDates = [...dates].sort();
+    const hours = Array.from({ length: 17 }, (_, i) => i + 6); // 6 AM to 10 PM
+
+    // Heatmap: per stage, grid of date × hour
+    const heatmap = {};
+    for (const stage of stages) {
+      heatmap[stage] = sortedDates.map(date => ({
+        date,
+        dayOfWeek: new Date(date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
+        hours: hours.map(h => ({
+          hour: h,
+          count: buckets[`${date}|${h}|${stage}`] || 0,
+        })),
+        total: dailyTotals[`${date}|${stage}`] || 0,
+      }));
+    }
+
+    // Hourly averages per stage (across all days — shows the typical pattern)
+    const hourlyAvg = {};
+    for (const stage of stages) {
+      hourlyAvg[stage] = hours.map(h => {
+        const counts = sortedDates.map(d => buckets[`${d}|${h}|${stage}`] || 0);
+        const sum = counts.reduce((a, b) => a + b, 0);
+        return {
+          hour: h,
+          avg: Math.round((sum / Math.max(1, sortedDates.length)) * 10) / 10,
+          max: Math.max(...counts),
+          min: Math.min(...counts),
+        };
+      });
+    }
+
+    return {
+      days: sortedDates.length,
+      dates: sortedDates,
+      stages,
+      hours,
+      heatmap,
+      hourlyAvg,
+      totalTransitions: rows.length,
+    };
+  },
 };
