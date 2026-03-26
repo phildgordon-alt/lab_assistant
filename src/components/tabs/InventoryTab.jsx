@@ -1250,8 +1250,21 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6, border: `1px solid ${T.red}20` }}>
                       <div style={{ fontSize: 8, color: T.red, fontFamily: mono, letterSpacing: 1 }}>BREAKAGE</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.breakages || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>broke, never shipped</div>
+                      <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 2 }}>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.labBreakage || 0).toLocaleString()}</div>
+                          <div style={{ fontSize: 7, color: T.textDim, fontFamily: mono }}>Lab Assistant</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(varianceData.summary?.lookerBreakage || 0).toLocaleString()}</div>
+                          <div style={{ fontSize: 7, color: T.textDim, fontFamily: mono }}>Looker</div>
+                        </div>
+                      </div>
+                      {varianceData.summary?.breakageDiff !== 0 && (
+                        <div style={{ fontSize: 8, color: T.amber, fontFamily: mono, marginTop: 2 }}>
+                          diff: {varianceData.summary?.breakageDiff > 0 ? '+' : ''}{(varianceData.summary?.breakageDiff || 0).toLocaleString()}
+                        </div>
+                      )}
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.amber}08`, borderRadius: 6, border: `1px solid ${T.amber}20` }}>
                       <div style={{ fontSize: 8, color: T.amber, fontFamily: mono, letterSpacing: 1 }}>KITCHEN (WH3)</div>

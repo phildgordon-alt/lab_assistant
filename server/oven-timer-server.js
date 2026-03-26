@@ -5194,6 +5194,16 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         }
       } catch {}
 
+      // 4b. Lab Assistant breakage (DVI trace / breakage_events in SQLite)
+      let labBreakage = 0;
+      try {
+        const brk = labDb.db.prepare(`
+          SELECT COUNT(*) as cnt FROM breakage_events
+          WHERE occurred_at IS NOT NULL AND date(occurred_at) >= ? AND date(occurred_at) <= ?
+        `).get(from, to);
+        labBreakage = brk?.cnt || 0;
+      } catch {}
+
       // 5. Summary waterfall: Variance = WIP + Breakage + Kitchen + Unexplained
       // WIP IS part of the variance — those lenses were picked (ItemPath counted them)
       // but haven't shipped yet (Looker hasn't counted them). That's explained.
@@ -5206,7 +5216,9 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
           netsuite: totalNS,
           variance: totalVariance,
           currentWIP,
-          breakages: totalBreakage,
+          lookerBreakage: totalBreakage,
+          labBreakage,
+          breakageDiff: labBreakage - totalBreakage,
           kitchenPicks: totalWH3,
           unexplained,
           byWarehouse: { WH1: totalWH1, WH2: totalWH2, WH3: totalWH3 },
