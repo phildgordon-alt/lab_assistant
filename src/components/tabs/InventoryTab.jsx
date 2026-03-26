@@ -1599,15 +1599,15 @@ function InventoryTab({ ovenServerUrl, settings }) {
             {/* ItemPath vs Looker daily comparison */}
             {pickCompare && pickCompare.daily?.length > 0 && (
               <Card style={{ marginTop: 20 }}>
-                <SectionHeader right={`${pickCompare.days} days`}>ItemPath vs Looker — Daily Transactions</SectionHeader>
+                <SectionHeader right={`${pickCompare.days} days`}>Daily Transactions — ItemPath vs Looker</SectionHeader>
                 {/* Totals */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH PICKS</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH</div>
                     <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(pickCompare.totals?.itempath || 0).toLocaleString()}</div>
                   </div>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER SHIPPED + BREAKAGE</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER + BREAKAGE</div>
                     <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(pickCompare.totals?.lookerPlusBreakage || 0).toLocaleString()}</div>
                   </div>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
@@ -1621,8 +1621,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <thead>
                     <tr style={{ background: T.bg }}>
                       <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 9, color: T.textDim, fontFamily: mono }}>DATE</th>
-                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.amber, fontFamily: mono }}>ITEMPATH PICKS</th>
-                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.blue, fontFamily: mono }}>LOOKER SHIPPED</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.amber, fontFamily: mono }}>ITEMPATH</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.blue, fontFamily: mono }}>LOOKER</th>
                       <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.red, fontFamily: mono }}>BREAKAGE</th>
                       <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 9, color: T.textDim, fontFamily: mono }}>VARIANCE</th>
                     </tr>
