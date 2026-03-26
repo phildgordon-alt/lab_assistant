@@ -7749,6 +7749,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
     if(catchUpScenario.incomingPerDay)body.incomingPerDay=parseInt(catchUpScenario.incomingPerDay);
     if(catchUpScenario.targetDays)body.targetDays=parseFloat(catchUpScenario.targetDays);
     if(catchUpScenario.targetBacklog)body.targetBacklog=parseInt(catchUpScenario.targetBacklog);
+    if(catchUpScenario.workDays)body.workDays=catchUpScenario.workDays;
     const hasOverrides=Object.keys(body).length>0;
     if(hasOverrides){
       fetch(`${base}/api/flow/catchup/${catchUpLine}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json()).then(setCatchUp).catch(()=>{});
@@ -8115,7 +8116,20 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 </div>
               ))}
               <button onClick={loadCatchUp} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 14px",color:"#60a5fa",cursor:"pointer",fontFamily:mono,fontSize:12}}>RECALC</button>
-              <button onClick={()=>{setCatchUpScenario({assemblers:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",jobsPerAssemblerHr:"",targetBacklog:""});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>RESET</button>
+              <button onClick={()=>{setCatchUpScenario({assemblers:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",jobsPerAssemblerHr:"",targetBacklog:"",workDays:null});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>RESET</button>
+            </div>
+            {/* Work days toggle */}
+            <div style={{display:"flex",alignItems:"center",gap:8,marginTop:12}}>
+              <span style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>WORK DAYS:</span>
+              {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d,i)=>{
+                const active=(catchUpScenario.workDays||catchUp?.workDays||[1,2,3,4,5]).includes(i);
+                return <button key={i} onClick={()=>{
+                  const current=catchUpScenario.workDays||catchUp?.workDays||[1,2,3,4,5];
+                  const next=active?current.filter(x=>x!==i):[...current,i].sort();
+                  setCatchUpScenario(p=>({...p,workDays:next}));
+                }} style={{background:active?"rgba(59,130,246,0.2)":"rgba(255,255,255,0.03)",border:`1px solid ${active?"rgba(59,130,246,0.4)":"rgba(255,255,255,0.08)"}`,borderRadius:4,padding:"4px 8px",color:active?"#60a5fa":"#6b7280",cursor:"pointer",fontFamily:mono,fontSize:11,fontWeight:active?700:400,minWidth:36,textAlign:"center"}}>{d}</button>;
+              })}
+              <span style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginLeft:4}}>({(catchUpScenario.workDays||catchUp?.workDays||[1,2,3,4,5]).length} days/wk)</span>
             </div>
           </div>
 
@@ -8127,11 +8141,12 @@ function FlowAgentTab({ovenServerUrl,settings}){
               <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:20}}>
                 {[
                   {label:"Ship/hr",value:catchUp.outputPerHr,color:"#22c55e"},
-                  {label:"Ship/day",value:catchUp.outputPerDay,color:"#22c55e"},
-                  {label:"Incoming/day",value:catchUp.incomingPerDay,color:"#f59e0b"},
-                  {label:"Net/day",value:catchUp.netPerDay,color:catchUp.netPerDay>0?"#22c55e":"#ef4444"},
+                  {label:"Ship/work day",value:catchUp.outputPerDay,color:"#22c55e"},
+                  {label:"Incoming/day (7d)",value:catchUp.incomingPerDay,color:"#f59e0b"},
+                  {label:"Net/week",value:catchUp.netPerWeek,color:catchUp.netPerWeek>0?"#22c55e":"#ef4444"},
                   {label:`Hrs/day (${catchUp.shifts}×${catchUp.shiftHours}h)`,value:catchUp.hoursPerDay,color:"#a78bfa"},
-                  {label:"Days to Clear",value:catchUp.daysToClear!=null?catchUp.daysToClear:"Falling behind",color:catchUp.daysToClear!=null?"#60a5fa":"#ef4444",small:catchUp.daysToClear==null},
+                  {label:`Work days/wk`,value:catchUp.workDaysPerWeek,color:"#60a5fa"},
+                  {label:"Calendar days",value:catchUp.daysToClear!=null?catchUp.daysToClear:"Falling behind",color:catchUp.daysToClear!=null?"#60a5fa":"#ef4444",small:catchUp.daysToClear==null},
                 ].map((m,i)=>(
                   <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:10,textAlign:"center"}}>
                     <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{m.label}</div>
@@ -8142,11 +8157,11 @@ function FlowAgentTab({ovenServerUrl,settings}){
 
               {/* What's needed to hit target */}
               <div style={{background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:8,padding:14,marginBottom:16}}>
-                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:13,color:"#60a5fa",letterSpacing:1,marginBottom:8}}>BURN DOWN {catchUp.wipToClear||0} JOBS TO {catchUp.targetBacklog} IN {catchUp.targetDays} DAYS</div>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:13,color:"#60a5fa",letterSpacing:1,marginBottom:8}}>BURN DOWN {catchUp.wipToClear||0} JOBS TO {catchUp.targetBacklog} IN {catchUp.targetDays} WORK DAYS</div>
                 <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
                   <div style={{textAlign:"center"}}>
-                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Ship/day</div>
-                    <div style={{fontSize:22,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerDay}</div>
+                    <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Ship/work day</div>
+                    <div style={{fontSize:22,fontWeight:700,color:"#60a5fa",fontFamily:mono}}>{catchUp.requiredPerWorkDay}</div>
                   </div>
                   <div style={{textAlign:"center"}}>
                     <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Ship/hr</div>

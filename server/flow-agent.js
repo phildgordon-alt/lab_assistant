@@ -119,6 +119,7 @@ db.exec(`
   );
 `);
 try { db.exec('ALTER TABLE flow_catchup_scenario ADD COLUMN target_backlog INTEGER'); } catch {}
+try { db.exec("ALTER TABLE flow_catchup_scenario ADD COLUMN work_days TEXT DEFAULT '[1,2,3,4,5]'"); } catch {}
 
 // Safe migration: add expires_at column to existing databases
 try { db.exec('ALTER TABLE flow_recommendations ADD COLUMN expires_at TEXT'); } catch {}
@@ -198,8 +199,8 @@ const stmts = {
   ackRec:       db.prepare(`UPDATE flow_recommendations SET status='acknowledged', acknowledged_at=datetime('now'), operator=? WHERE id=?`),
   completeRec:  db.prepare(`UPDATE flow_recommendations SET status='completed', completed_at=datetime('now'), operator=coalesce(?,operator), note=? WHERE id=?`),
   saveCatchUpScenario: db.prepare(`INSERT OR REPLACE INTO flow_catchup_scenario
-    (line_id, assemblers, jobs_per_assembler_hr, shift_hours, shifts, incoming_per_day, target_days, target_backlog, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`),
+    (line_id, assemblers, jobs_per_assembler_hr, shift_hours, shifts, incoming_per_day, target_days, target_backlog, work_days, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`),
   getCatchUpScenario: db.prepare(`SELECT * FROM flow_catchup_scenario WHERE line_id=?`),
   insertPush:   db.prepare(`INSERT INTO flow_push_history (line_id, push_qty, operator, note) VALUES (?, ?, ?, ?)`),
   getPushHistory: db.prepare(`SELECT * FROM flow_push_history WHERE ts > datetime('now', ?) ORDER BY ts DESC`),
@@ -767,6 +768,9 @@ function computeCatchUp(lineId, scenario = {}) {
     if (scenario.incomingPerDay == null && saved.incoming_per_day != null) scenario.incomingPerDay = saved.incoming_per_day;
     if (scenario.targetDays == null && saved.target_days != null) scenario.targetDays = saved.target_days;
     if (scenario.targetBacklog == null && saved.target_backlog != null) scenario.targetBacklog = saved.target_backlog;
+    if (scenario.workDays == null && saved.work_days != null) {
+      try { scenario.workDays = JSON.parse(saved.work_days); } catch {}
+    }
   }
 
   // ── LIVE DATA: Current WIP from DVI trace ──
@@ -815,36 +819,72 @@ function computeCatchUp(lineId, scenario = {}) {
   const incomingPerDay = scenario.incomingPerDay ?? liveIncomingPerDay;
   const targetDays = scenario.targetDays ?? (line.sla_days || 2);
   const targetBacklog = scenario.targetBacklog ?? 500;
+  // Work days: 0=Sun, 1=Mon, ..., 6=Sat. Default Mon-Fri
+  const workDays = scenario.workDays ?? [1, 2, 3, 4, 5];
 
   // ── CALCULATIONS ──
   const hoursPerDay = shiftHours * shifts;
   const outputPerHr = assemblers * jobsPerAssemblerHr;
-  const outputPerDay = outputPerHr * hoursPerDay;
-  const netPerDay = outputPerDay - incomingPerDay;
+  const outputPerDay = outputPerHr * hoursPerDay; // output on a WORK day
+  const workDaysPerWeek = workDays.length;
+  const offDaysPerWeek = 7 - workDaysPerWeek;
+
+  // Net per work day: we ship outputPerDay but incoming arrives every day
+  // On work days: net = output - incoming
+  // On off days: net = 0 - incoming (jobs pile up, no output)
+  // Net per week = (workDays * (output - incoming)) + (offDays * (-incoming))
+  //              = (workDays * output) - (7 * incoming)
+  const netPerWeek = (workDaysPerWeek * outputPerDay) - (7 * incomingPerDay);
+  const netPerCalendarDay = netPerWeek / 7; // average across all days
+
   // How much WIP needs to be burned down to reach target backlog
   const wipToClear = Math.max(0, totalWip - targetBacklog);
-  const daysToClear = netPerDay > 0 && wipToClear > 0 ? Math.round((wipToClear / netPerDay) * 10) / 10 : netPerDay > 0 ? 0 : null;
 
-  // To clear in targetDays: how much do we need to ship per day?
-  const requiredPerDay = Math.ceil((wipToClear / Math.max(1, targetDays)) + incomingPerDay);
-  const requiredPerHr = Math.round((requiredPerDay / Math.max(1, hoursPerDay)) * 10) / 10;
+  // Days to clear in calendar days (includes weekends)
+  const daysToClear = netPerWeek > 0 && wipToClear > 0
+    ? Math.round((wipToClear / netPerCalendarDay) * 10) / 10
+    : netPerWeek > 0 ? 0 : null;
+
+  // To clear in targetDays (WORK days): how much do we need to ship per work day?
+  // targetDays is work days. Total calendar days = targetDays * 7 / workDaysPerWeek
+  const calendarDaysForTarget = Math.max(1, targetDays * 7 / Math.max(1, workDaysPerWeek));
+  // During those calendar days, incoming accumulates every day
+  const totalIncomingDuringTarget = incomingPerDay * calendarDaysForTarget;
+  const totalToShip = wipToClear + totalIncomingDuringTarget;
+  const requiredPerWorkDay = Math.ceil(totalToShip / Math.max(1, targetDays));
+  const requiredPerHr = Math.round((requiredPerWorkDay / Math.max(1, hoursPerDay)) * 10) / 10;
   const requiredAssemblers = Math.ceil(requiredPerHr / Math.max(1, jobsPerAssemblerHr));
 
-  // Weekly milestones — show projected WIP at end of each week
-  // Also show daily ship target for that week
-  const milestones = [1, 2, 3, 4, 5].map(w => {
-    const projWip = Math.max(0, Math.round(totalWip - (netPerDay * 5 * w)));
-    const atTarget = projWip <= targetBacklog;
-    return {
+  // Weekly milestones — day-by-day projection for 5 weeks
+  // Track actual calendar days, applying work/off logic
+  const milestones = [];
+  const today = new Date();
+  let projWip = totalWip;
+  for (let w = 1; w <= 5; w++) {
+    // Simulate 7 days for this week
+    for (let d = 0; d < 7; d++) {
+      const calDay = (w - 1) * 7 + d;
+      const date = new Date(today);
+      date.setDate(date.getDate() + calDay);
+      const dow = date.getDay(); // 0=Sun ... 6=Sat
+      if (workDays.includes(dow)) {
+        // Work day: ship output, receive incoming
+        projWip = projWip - outputPerDay + incomingPerDay;
+      } else {
+        // Off day: no output, incoming accumulates
+        projWip = projWip + incomingPerDay;
+      }
+      projWip = Math.max(0, projWip);
+    }
+    milestones.push({
       week: w,
-      projectedWip: projWip,
-      shipPerDay: Math.round(outputPerDay),
-      atTarget,
-    };
-  });
+      projectedWip: Math.round(projWip),
+      atTarget: projWip <= targetBacklog,
+    });
+  }
 
   // Persist scenario inputs for next load
-  stmts.saveCatchUpScenario.run(lineId, assemblers, jobsPerAssemblerHr, shiftHours, shifts, incomingPerDay, targetDays, targetBacklog);
+  stmts.saveCatchUpScenario.run(lineId, assemblers, jobsPerAssemblerHr, shiftHours, shifts, incomingPerDay, targetDays, targetBacklog, JSON.stringify(workDays));
 
   return {
     line_id: lineId,
@@ -860,15 +900,18 @@ function computeCatchUp(lineId, scenario = {}) {
     incomingPerDay: Math.round(incomingPerDay),
     targetDays,
     targetBacklog,
+    workDays,
     wipToClear,
     // Calculated
     hoursPerDay,
+    workDaysPerWeek,
+    offDaysPerWeek,
     outputPerHr: Math.round(outputPerHr * 10) / 10,
     outputPerDay: Math.round(outputPerDay),
-    netPerDay: Math.round(netPerDay),
-    daysToClear,
-    // What's needed to hit target
-    requiredPerDay,
+    netPerWeek: Math.round(netPerWeek),
+    daysToClear, // calendar days including weekends
+    // What's needed to hit target (per WORK day)
+    requiredPerWorkDay: requiredPerWorkDay,
     requiredPerHr,
     requiredAssemblers,
     slaDays: line.sla_days,
