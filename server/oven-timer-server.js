@@ -1874,8 +1874,24 @@ Respond with a structured batching plan in this format:
         if (day.breakages > 0) lkBreakageByDate[day.date] = day.breakages;
       }
 
-      // DVI breakages per day from live trace + persisted history
-      const dviBreakageByDate = getDviBreakageByDate();
+      // DVI breakages per day — same source as /api/breakage (QC tab)
+      const dviBreakageByDate = {};
+      try {
+        const traceJobs = dviTrace.getJobs();
+        let brkCount = 0;
+        for (const j of traceJobs) {
+          if (!j.hasBreakage) continue;
+          brkCount++;
+          const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+          const events = detail?.events || [];
+          const brkEvent = events.find(e => e.stage === 'BREAKAGE');
+          const ts = brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen);
+          if (isNaN(ts.getTime())) continue;
+          const d = ts.toISOString().slice(0, 10);
+          dviBreakageByDate[d] = (dviBreakageByDate[d] || 0) + 1;
+        }
+        if (brkCount === 0) console.log('[Pipeline] DVI trace has', traceJobs.length, 'jobs but 0 with hasBreakage');
+      } catch (e) { console.error('[Pipeline] DVI breakage error:', e.message); }
 
       // Merge dates
       const allDates = new Set([
@@ -5327,9 +5343,22 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         }
       } catch {}
 
-      // 4b. DVI breakage from live trace + persisted history
+      // 4b. DVI breakage — same source as /api/breakage (QC tab)
       let labBreakage = 0;
-      const dviBreakByDate = getDviBreakageByDate();
+      const dviBreakByDate = {};
+      try {
+        const traceJobs = dviTrace.getJobs();
+        for (const j of traceJobs) {
+          if (!j.hasBreakage) continue;
+          const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+          const events = detail?.events || [];
+          const brkEvent = events.find(e => e.stage === 'BREAKAGE');
+          const ts = brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen);
+          if (isNaN(ts.getTime())) continue;
+          const d = ts.toISOString().slice(0, 10);
+          dviBreakByDate[d] = (dviBreakByDate[d] || 0) + 1;
+        }
+      } catch (e) { console.error('[Variance] DVI breakage error:', e.message); }
       for (const [date, count] of Object.entries(dviBreakByDate)) {
         if (date >= from && date <= to) labBreakage += count;
       }
