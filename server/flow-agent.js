@@ -934,29 +934,22 @@ function poll() {
       );
     }
 
-    // Expire stale pending recommendations whose push_by time has passed
-    const expired = stmts.expirePending.run();
+    // Expire ALL pending recs — each cycle generates fresh ones with current times
+    const expireAll = db.prepare(`UPDATE flow_recommendations SET status='expired' WHERE status='pending'`);
+    const expired = expireAll.run();
     if (expired.changes > 0) {
-      console.log(`[Flow] Expired ${expired.changes} unacknowledged recommendation(s)`);
+      console.log(`[Flow] Expired ${expired.changes} stale recommendation(s)`);
     }
 
-    // Generate recommendations ONLY if there are zero pending recs
-    // Don't regenerate what was just expired — that was the point of expiring them
-    const pendingCount = stmts.getPendingRecs.all().length;
-    if (pendingCount === 0) {
-      // Also throttle: don't create if we expired recs in this cycle
-      // (give a full cycle gap so the UI clears)
-      if (expired.changes === 0) {
-        const recs = generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, slaPacing, stockConstraints, stageConfigs);
-        for (const r of recs) {
-          stmts.insertRec.run(
-            r.line_id, r.push_qty, r.urgency, r.push_by,
-            r.reason, r.available_in_queue || null, r.constrained_by || 'none',
-            r.priority_jobs ? JSON.stringify(r.priority_jobs) : null,
-            r.expires_at || null
-          );
-        }
-      }
+    // Generate fresh recommendations every cycle with current timestamps
+    const recs = generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, slaPacing, stockConstraints, stageConfigs);
+    for (const r of recs) {
+      stmts.insertRec.run(
+        r.line_id, r.push_qty, r.urgency, r.push_by,
+        r.reason, r.available_in_queue || null, r.constrained_by || 'none',
+        r.priority_jobs ? JSON.stringify(r.priority_jobs) : null,
+        r.expires_at || null
+      );
     }
 
     // Build last snapshot
