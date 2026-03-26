@@ -1650,6 +1650,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
             {pickCompare && pickCompare.daily?.length > 0 && (
               <Card style={{ marginTop: 20 }}>
                 <SectionHeader right={`${pickCompare.days} days`}>Daily Transactions — ItemPath vs Looker</SectionHeader>
+                <div style={{ padding: '8px 12px', background: `${T.blue}08`, border: `1px solid ${T.blue}15`, borderRadius: 6, marginBottom: 12, fontSize: 10, color: T.textMuted, fontFamily: mono, lineHeight: 1.5 }}>
+                  <strong style={{ color: T.amber }}>ItemPath</strong> = lenses picked from Kardex (pick date).{' '}
+                  <strong style={{ color: T.blue }}>Looker</strong> = lenses shipped from lab (ship date).{' '}
+                  There is a <strong style={{ color: T.text }}>1–3 day pipeline lag</strong> between pick and ship.{' '}
+                  Short windows will show ItemPath higher (recent picks not yet shipped). Over 30+ days they should converge.{' '}
+                  Persistent variance may indicate breakage not captured, remakes consuming extra lenses, or NetSuite sync gaps.
+                </div>
                 {/* Totals */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
