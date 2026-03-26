@@ -713,12 +713,15 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
   if (totalSurfPipeline < (surfPacing.dailyTarget || 40)) {
     const deficit = (surfPacing.dailyTarget || 40) - totalSurfPipeline;
     if (deficit > 5) {
+      // Push within the next hour — surfacing pipeline needs constant feed
+      const surfDeadline = new Date(now.getTime() + 60 * 60 * 1000);
+      const surfPushBy = surfDeadline.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
       recs.push({
         line_id: 'surfacing',
-        push_qty: 75, // put wall = 75 positions, always push a full wall
+        push_qty: 75,
         urgency: 'by_time',
-        push_by: '2:00 PM',
-        expires_at: computeExpiresAt('2:00 PM', 'by_time'),
+        push_by: surfPushBy,
+        expires_at: computeExpiresAt(surfPushBy, 'by_time'),
         reason: `Surfacing pipeline thin (${totalSurfPipeline} jobs) — needs feed for tomorrow's coating`,
         constrained_by: stockConstraints.constrained ? 'stock' : 'none',
       });
