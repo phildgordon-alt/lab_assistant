@@ -1271,14 +1271,17 @@ module.exports = {
     `).all(cutoff);
 
     // Add picking data from picks_history (Kardex lens blank picks)
+    // completed_at is SQLite datetime format: 'YYYY-MM-DD HH:MM:SS'
+    const cutoffSqlite = new Date(cutoff).toISOString().replace('T', ' ').slice(0, 19);
     const pickRows = db.prepare(`
-      SELECT pick_id, completed_at FROM picks_history
+      SELECT id, pick_id, completed_at FROM picks_history
       WHERE completed_at > ? ORDER BY completed_at
-    `).all(cutoffISO);
+    `).all(cutoffSqlite);
     for (const p of pickRows) {
       if (!p.completed_at) continue;
-      const ts = new Date(p.completed_at).getTime();
-      if (ts > cutoff) {
+      // Parse 'YYYY-MM-DD HH:MM:SS' — add T and Z for reliable parsing
+      const ts = new Date(p.completed_at.replace(' ', 'T') + 'Z').getTime();
+      if (!isNaN(ts) && ts > cutoff) {
         rows.push({ job_id: p.pick_id || `pick-${p.id}`, to_stage: 'PICKING', transition_at: ts });
       }
     }
