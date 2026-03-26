@@ -1826,22 +1826,29 @@ Respond with a structured batching plan in this format:
         lkJobsByDate[row.date] = row.jobs;
       }
 
-      // Breakages per day from cache
+      // Looker breakages per day (what NetSuite sees)
       const lkData = looker.getUsage(9999);
-      const breakageByDate = {};
-      let totalBreakage = 0;
+      const lkBreakageByDate = {};
       for (const day of (lkData.daily || [])) {
-        if (day.breakages > 0) {
-          breakageByDate[day.date] = day.breakages;
-          totalBreakage += day.breakages;
-        }
+        if (day.breakages > 0) lkBreakageByDate[day.date] = day.breakages;
       }
+
+      // DVI breakages per day from SQLite breakage_events (our direct count)
+      const dviBreakageByDate = {};
+      try {
+        const rows = labDb.db.prepare(`
+          SELECT date(occurred_at) as d, COUNT(*) as cnt FROM breakage_events
+          WHERE occurred_at IS NOT NULL GROUP BY date(occurred_at)
+        `).all();
+        for (const r of rows) if (r.d) dviBreakageByDate[r.d] = r.cnt;
+      } catch {}
 
       // Merge dates
       const allDates = new Set([
         ...Object.keys(dviByDate),
         ...Object.keys(lkJobsByDate),
-        ...Object.keys(breakageByDate),
+        ...Object.keys(lkBreakageByDate),
+        ...Object.keys(dviBreakageByDate),
       ]);
       // Exclude today — only has partial data from one source, skews comparison
       const today = new Date().toISOString().slice(0, 10);
@@ -1849,13 +1856,15 @@ Respond with a structured batching plan in this format:
         date: d,
         dvi: dviByDate[d] || 0,
         looker: lkJobsByDate[d] || 0,
-        breakage: breakageByDate[d] || 0,
+        dviBreakage: dviBreakageByDate[d] || 0,
+        lookerBreakage: lkBreakageByDate[d] || 0,
       }));
 
       const totals = {
         dvi: daily.reduce((s, d) => s + d.dvi, 0),
         looker: daily.reduce((s, d) => s + d.looker, 0),
-        breakage: daily.reduce((s, d) => s + d.breakage, 0),
+        dviBreakage: daily.reduce((s, d) => s + d.dviBreakage, 0),
+        lookerBreakage: daily.reduce((s, d) => s + d.lookerBreakage, 0),
       };
 
       return json(res, { daily, totals, days: daily.length });
@@ -5204,11 +5213,12 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         labBreakage = brk?.cnt || 0;
       } catch {}
 
-      // 5. Summary waterfall: Variance = WIP + Breakage + Kitchen + Unexplained
-      // WIP IS part of the variance — those lenses were picked (ItemPath counted them)
-      // but haven't shipped yet (Looker hasn't counted them). That's explained.
+      // 5. Summary waterfall
+      // Kardex picked = Looker shipped + WIP (in pipeline) + Kitchen (may not be in Looker) + Unexplained
+      // Breakage is shown as a separate DVI vs Looker comparison — NOT subtracted from variance
+      // because Looker's shipped count already excludes broken lenses
       const totalVariance = totalKardex - totalNS;
-      const unexplained = totalVariance - currentWIP - totalBreakage - totalWH3;
+      const unexplained = totalVariance - currentWIP - totalWH3;
       return json(res, {
         period: { from, to },
         summary: {
