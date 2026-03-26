@@ -1804,6 +1804,34 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Helper: get DVI breakage by date from live trace + persisted history ──
+  function getDviBreakageByDate() {
+    // 1. Aggregate from live DVI trace (current window — most accurate)
+    const byDate = {};
+    const allJobs = dviTrace.getJobs();
+    for (const j of allJobs) {
+      if (!j.hasBreakage) continue;
+      const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+      const events = detail?.events || [];
+      const brkEvent = events.find(e => e.stage === 'BREAKAGE');
+      const ts = brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen);
+      if (isNaN(ts.getTime())) continue;
+      const d = ts.toISOString().slice(0, 10);
+      byDate[d] = (byDate[d] || 0) + 1;
+    }
+    // 2. Fill in older dates from persisted history (dates not covered by live trace)
+    const histPath = path.join(__dirname, 'data', 'breakage-history.json');
+    try {
+      if (fs.existsSync(histPath)) {
+        const saved = JSON.parse(fs.readFileSync(histPath, 'utf8'));
+        for (const [date, data] of Object.entries(saved)) {
+          if (!byDate[date]) byDate[date] = data.total || 0;
+        }
+      }
+    } catch {}
+    return byDate;
+  }
+
   // ── Pipeline comparison — shipped jobs per day: DVI vs Looker→NetSuite ──
   if (req.method==='GET' && url.pathname==='/api/usage/pipeline') {
     try {
@@ -1833,15 +1861,8 @@ Respond with a structured batching plan in this format:
         if (day.breakages > 0) lkBreakageByDate[day.date] = day.breakages;
       }
 
-      // DVI breakages per day from SQLite breakage_events (our direct count)
-      const dviBreakageByDate = {};
-      try {
-        const rows = labDb.db.prepare(`
-          SELECT date(occurred_at) as d, COUNT(*) as cnt FROM breakage_events
-          WHERE occurred_at IS NOT NULL GROUP BY date(occurred_at)
-        `).all();
-        for (const r of rows) if (r.d) dviBreakageByDate[r.d] = r.cnt;
-      } catch {}
+      // DVI breakages per day from live trace + persisted history
+      const dviBreakageByDate = getDviBreakageByDate();
 
       // Merge dates
       const allDates = new Set([
@@ -5203,15 +5224,12 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         }
       } catch {}
 
-      // 4b. Lab Assistant breakage (DVI trace / breakage_events in SQLite)
+      // 4b. DVI breakage from live trace + persisted history
       let labBreakage = 0;
-      try {
-        const brk = labDb.db.prepare(`
-          SELECT COUNT(*) as cnt FROM breakage_events
-          WHERE occurred_at IS NOT NULL AND date(occurred_at) >= ? AND date(occurred_at) <= ?
-        `).get(from, to);
-        labBreakage = brk?.cnt || 0;
-      } catch {}
+      const dviBreakByDate = getDviBreakageByDate();
+      for (const [date, count] of Object.entries(dviBreakByDate)) {
+        if (date >= from && date <= to) labBreakage += count;
+      }
 
       // 5. Summary waterfall
       // Kardex picked = Looker shipped + WIP + Breakage (remakes = double pick) + Kitchen + Unexplained
