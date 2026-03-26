@@ -260,6 +260,7 @@ function reconcile(itempath, category = null, topsData = null) {
   }
   console.log(`[NetSuite] Reconcile: ${allSkus.size} SKUs${category ? ` (category: ${category})` : ''}`);
   const discrepancies = [];
+  const allItems = [];
   let matchCount = 0;
   let totalNetSuite = 0;
   let totalItemPath = 0;
@@ -274,21 +275,25 @@ function reconcile(itempath, category = null, topsData = null) {
     totalItemPath += ipQty;
     const diff = ipQty - nsQty;
 
+    const item = {
+      sku,
+      name: inventory[sku]?.name || '',
+      category: inventory[sku]?.category || 'Unknown',
+      className: inventory[sku]?.className || '',
+      wh1: wh1Qty,
+      wh2: wh2Qty,
+      wh3: wh3Qty,
+      netsuite: nsQty,
+      itempath: ipQty,
+      diff,
+      pctDiff: nsQty > 0 ? Math.round((diff / nsQty) * 100) : (ipQty > 0 ? 100 : 0),
+      severity: Math.abs(diff) > 50 ? 'critical' : Math.abs(diff) > 10 ? 'high' : Math.abs(diff) > 0.5 ? 'low' : 'match',
+      isMatch: Math.abs(diff) <= 0.5,
+    };
+
+    allItems.push(item);
     if (Math.abs(diff) > 0.5) {
-      discrepancies.push({
-        sku,
-        name: inventory[sku]?.name || '',
-        category: inventory[sku]?.category || 'Unknown',
-        className: inventory[sku]?.className || '',
-        wh1: wh1Qty,
-        wh2: wh2Qty,
-        wh3: wh3Qty,
-        netsuite: nsQty,
-        itempath: ipQty,
-        diff,
-        pctDiff: nsQty > 0 ? Math.round((diff / nsQty) * 100) : (ipQty > 0 ? 100 : 0),
-        severity: Math.abs(diff) > 50 ? 'critical' : Math.abs(diff) > 10 ? 'high' : 'low',
-      });
+      discrepancies.push(item);
     } else {
       matchCount++;
     }
@@ -365,6 +370,7 @@ function reconcile(itempath, category = null, topsData = null) {
     },
     byCategory: Object.values(byCategory).sort((a, b) => b.itempath - a.itempath),
     discrepancies: discrepancies.slice(0, 200),
+    allItems,
     lastSync,
   };
 }

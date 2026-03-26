@@ -1091,12 +1091,14 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
                 {/* Discrepancy table */}
                 {(() => {
-                  let rows = reconData.discrepancies || [];
-                  if (reconFilter === 'matches') rows = [];
-                  else if (reconFilter === 'discontinued') rows = rows.filter(d => d.discontinued);
-                  else if (reconFilter === 'ns_only') rows = rows.filter(d => d.netsuite > 0 && d.itempath === 0 && !d.discontinued);
-                  else if (reconFilter === 'ip_only') rows = rows.filter(d => d.itempath > 0 && d.netsuite === 0 && !d.discontinued);
-                  else rows = rows.filter(d => !d.discontinued); // default: exclude discontinued
+                  const all = reconData.allItems || reconData.discrepancies || [];
+                  let rows;
+                  if (reconFilter === 'matches') rows = all.filter(d => d.isMatch && !d.discontinued);
+                  else if (reconFilter === 'discontinued') rows = all.filter(d => d.discontinued);
+                  else if (reconFilter === 'ns_only') rows = all.filter(d => d.netsuite > 0 && d.itempath === 0 && !d.discontinued);
+                  else if (reconFilter === 'ip_only') rows = all.filter(d => d.itempath > 0 && d.netsuite === 0 && !d.discontinued);
+                  else if (reconFilter === 'discrepancies') rows = all.filter(d => !d.isMatch && !d.discontinued);
+                  else rows = all.filter(d => !d.discontinued); // 'all' = everything except discontinued
                   if (reconCategory !== 'all') rows = rows.filter(d => d.category === reconCategory);
                   if (reconSearch) {
                     const q = reconSearch.toLowerCase();
@@ -1124,7 +1126,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             </tr>
                           </thead>
                           <tbody>
-                            {rows.slice(0, 200).map((d, i) => {
+                            {rows.slice(0, 500).map((d, i) => {
                               const statusColor = d.diff === 0 ? T.green : d.netsuite === 0 ? T.blue : d.itempath === 0 ? (T.purple || '#9b6ee0') : d.diff > 0 ? T.amber : T.red;
                               const statusLabel = d.diff === 0 ? 'MATCH' : d.netsuite === 0 ? 'IP ONLY' : d.itempath === 0 ? 'NS ONLY' : d.diff > 0 ? 'OVER' : 'SHORT';
                               const sevColor = d.severity === 'critical' ? T.red : d.severity === 'high' ? T.amber : T.textDim;
@@ -1147,11 +1149,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             })}
                           </tbody>
                         </table>
-                        {rows.length === 0 && reconFilter === 'matches' && (
-                          <div style={{ padding: 32, textAlign: "center", color: T.green }}>All {reconData.summary.matched} SKUs match between ItemPath and NetSuite.</div>
-                        )}
-                        {rows.length === 0 && reconFilter !== 'matches' && (
-                          <div style={{ padding: 32, textAlign: "center", color: T.textMuted }}>No discrepancies found.</div>
+                        {rows.length === 0 && (
+                          <div style={{ padding: 32, textAlign: "center", color: T.textMuted }}>No items found for this filter.</div>
                         )}
                       </div>
                     </Card>
