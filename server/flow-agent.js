@@ -1261,13 +1261,27 @@ module.exports = {
    */
   getHistory(days = 7) {
     const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
-    const stages = ['INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
+    const cutoffISO = new Date(cutoff).toISOString();
+    const stages = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
 
-    // Query all transitions in range — include job_id to deduplicate
+    // Query stage transitions + picks_history (Kardex picks)
     const rows = db.prepare(`
       SELECT job_id, to_stage, transition_at FROM stage_transitions
       WHERE transition_at > ? ORDER BY transition_at
     `).all(cutoff);
+
+    // Add picking data from picks_history (Kardex lens blank picks)
+    const pickRows = db.prepare(`
+      SELECT pick_id, completed_at FROM picks_history
+      WHERE completed_at > ? ORDER BY completed_at
+    `).all(cutoffISO);
+    for (const p of pickRows) {
+      if (!p.completed_at) continue;
+      const ts = new Date(p.completed_at).getTime();
+      if (ts > cutoff) {
+        rows.push({ job_id: p.pick_id || `pick-${p.id}`, to_stage: 'PICKING', transition_at: ts });
+      }
+    }
 
     // Count UNIQUE JOBS per date|hour|stage (not duplicate scan events)
     const bucketSets = {};  // key: "date|hour|stage" → Set of job_ids
