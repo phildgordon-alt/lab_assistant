@@ -1804,31 +1804,44 @@ Respond with a structured batching plan in this format:
     }
   }
 
-  // ── Helper: get DVI breakage by date from live trace + persisted history ──
+  // ── Helper: get DVI breakage by date ──
+  // Same logic as /api/breakage endpoint: live trace → aggregate by day → merge with persisted history
   function getDviBreakageByDate() {
-    // 1. Aggregate from live DVI trace (current window — most accurate)
     const byDate = {};
-    const allJobs = dviTrace.getJobs();
-    for (const j of allJobs) {
-      if (!j.hasBreakage) continue;
-      const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
-      const events = detail?.events || [];
-      const brkEvent = events.find(e => e.stage === 'BREAKAGE');
-      const ts = brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen);
-      if (isNaN(ts.getTime())) continue;
-      const d = ts.toISOString().slice(0, 10);
-      byDate[d] = (byDate[d] || 0) + 1;
-    }
-    // 2. Fill in older dates from persisted history (dates not covered by live trace)
+
+    // 1. Read persisted history (written by /api/breakage polling every 30s from Overview tab)
     const histPath = path.join(__dirname, 'data', 'breakage-history.json');
     try {
       if (fs.existsSync(histPath)) {
         const saved = JSON.parse(fs.readFileSync(histPath, 'utf8'));
         for (const [date, data] of Object.entries(saved)) {
-          if (!byDate[date]) byDate[date] = data.total || 0;
+          byDate[date] = data.total || 0;
         }
       }
     } catch {}
+
+    // 2. Also aggregate live trace (in case history file hasn't been updated yet)
+    const liveByDate = {};
+    try {
+      const allJobs = dviTrace.getJobs();
+      for (const j of allJobs) {
+        if (!j.hasBreakage) continue;
+        const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+        const events = detail?.events || [];
+        const brkEvent = events.find(e => e.stage === 'BREAKAGE');
+        const ts = brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen);
+        if (isNaN(ts.getTime())) continue;
+        const d = ts.toISOString().slice(0, 10);
+        liveByDate[d] = (liveByDate[d] || 0) + 1;
+      }
+    } catch {}
+
+    // Use whichever is higher per date (history may have data from before trace window,
+    // live may have data not yet persisted)
+    for (const [date, count] of Object.entries(liveByDate)) {
+      byDate[date] = Math.max(byDate[date] || 0, count);
+    }
+
     return byDate;
   }
 
@@ -3623,6 +3636,55 @@ Respond with a structured batching plan in this format:
     try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch(e) {}
     const days = Object.entries(saved).map(([date, data]) => ({ date, ...data })).sort((a, b) => b.date.localeCompare(a.date));
     return json(res, { history: days, totalDays: days.length });
+  }
+
+  // Breakage diagnostic — shows what data each source has
+  if (req.method==='GET' && url.pathname==='/api/breakage/diagnostic') {
+    // 1. Live trace
+    let traceBreakageCount = 0;
+    let traceJobCount = 0;
+    const traceDates = {};
+    try {
+      const allJobs = dviTrace.getJobs();
+      traceJobCount = allJobs.length;
+      for (const j of allJobs) {
+        if (!j.hasBreakage) continue;
+        traceBreakageCount++;
+        const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+        const events = detail?.events || [];
+        const brkEvent = events.find(e => e.stage === 'BREAKAGE');
+        const ts = brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen);
+        if (!isNaN(ts.getTime())) {
+          const d = ts.toISOString().slice(0, 10);
+          traceDates[d] = (traceDates[d] || 0) + 1;
+        }
+      }
+    } catch (e) { /* */ }
+
+    // 2. History file
+    const histPath = path.join(__dirname, 'data', 'breakage-history.json');
+    let histData = {};
+    let histExists = false;
+    try {
+      if (fs.existsSync(histPath)) {
+        histExists = true;
+        histData = JSON.parse(fs.readFileSync(histPath, 'utf8'));
+      }
+    } catch {}
+
+    // 3. SQLite breakage_events
+    let sqliteCount = 0;
+    try { sqliteCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM breakage_events').get()?.cnt || 0; } catch {}
+
+    // 4. getDviBreakageByDate result
+    const combined = getDviBreakageByDate();
+
+    return json(res, {
+      liveTrace: { totalJobs: traceJobCount, breakageJobs: traceBreakageCount, byDate: traceDates },
+      historyFile: { exists: histExists, path: histPath, days: Object.keys(histData).length, sample: Object.entries(histData).slice(0, 5).map(([d, v]) => ({ date: d, total: v.total })) },
+      sqliteBreakageEvents: sqliteCount,
+      combined: { days: Object.keys(combined).length, total: Object.values(combined).reduce((s, v) => s + v, 0), sample: Object.entries(combined).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 10) },
+    });
   }
 
   // ── SQLite Backup & Restore ──────────────────────────────────
@@ -5884,6 +5946,38 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     POST /api/knowledge/generate-csv← Generate CSV report`);
   console.log(`     POST /api/ai/query             ← AI query with lab context`);
   console.log(`     POST /api/slack/ai-respond     ← Process Slack AI query`);
+
+  // Persist breakage history on startup (after trace loads, give it 15s)
+  setTimeout(() => {
+    try {
+      const allJobs = dviTrace.getJobs();
+      const breakageJobs = allJobs.filter(j => j.hasBreakage);
+      if (breakageJobs.length > 0) {
+        const byDay = {};
+        for (const j of breakageJobs) {
+          const detail = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
+          const events = detail?.events || [];
+          const brkEvent = events.find(e => e.stage === 'BREAKAGE');
+          const ts = brkEvent?.timestamp ? new Date(brkEvent.timestamp) : new Date(j.lastSeen || j.firstSeen);
+          if (isNaN(ts.getTime())) continue;
+          const key = ts.toISOString().slice(0, 10);
+          if (!byDay[key]) byDay[key] = { total: 0 };
+          byDay[key].total++;
+        }
+        const histPath = path.join(__dirname, 'data', 'breakage-history.json');
+        let saved = {};
+        try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch {}
+        for (const [date, data] of Object.entries(byDay)) {
+          if (!saved[date] || (data.total > (saved[date].total || 0))) saved[date] = data;
+        }
+        fs.mkdirSync(path.dirname(histPath), { recursive: true });
+        fs.writeFileSync(histPath, JSON.stringify(saved, null, 2));
+        console.log(`[Breakage] Persisted ${breakageJobs.length} DVI breakage events across ${Object.keys(byDay).length} days`);
+      } else {
+        console.log('[Breakage] No DVI breakage events in trace — check if trace watcher is connected');
+      }
+    } catch (e) { console.error('[Breakage] Startup persist error:', e.message); }
+  }, 15000);
 
   // Start Slack AI auto-responder polling
   startSlackAIPolling();
