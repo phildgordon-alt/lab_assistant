@@ -70,12 +70,12 @@ const CONFIG = {
 // ─────────────────────────────────────────────────────────────────────────────
 const DAILY_FILE = path.join(__dirname, 'data', 'daily-picks.json');
 let previousOrderMap = new Map();  // orderId → { warehouse, lineCount, reference, isPut }
-let dailyPickTotals = { WH1: 0, WH2: 0, date: null };
-let dailyPutTotals = { WH1: 0, WH2: 0, date: null };
-// Hourly breakdown — { WH1: { 0:0, 1:0, ... 23:0 }, WH2: { ... } }
+let dailyPickTotals = { WH1: 0, WH2: 0, WH3: 0, date: null };
+let dailyPutTotals = { WH1: 0, WH2: 0, WH3: 0, date: null };
+// Hourly breakdown — { WH1: { 0:0, 1:0, ... 23:0 }, WH2: { ... }, WH3: { ... } }
 function emptyHourly() { const h = {}; for (let i = 0; i < 24; i++) h[i] = 0; return h; }
-let hourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly() };
-let hourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly() };
+let hourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
+let hourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
 
 // Load persisted daily totals from disk
 function loadDailyTotals() {
@@ -84,12 +84,12 @@ function loadDailyTotals() {
       const saved = JSON.parse(fs.readFileSync(DAILY_FILE, 'utf8'));
       const today = new Date().toISOString().substring(0, 10);
       if (saved.date === today) {
-        dailyPickTotals = { WH1: saved.picks?.WH1 || 0, WH2: saved.picks?.WH2 || 0, date: today };
-        dailyPutTotals = { WH1: saved.puts?.WH1 || 0, WH2: saved.puts?.WH2 || 0, date: today };
-        if (saved.hourlyPicks) { hourlyPicks.WH1 = { ...emptyHourly(), ...saved.hourlyPicks.WH1 }; hourlyPicks.WH2 = { ...emptyHourly(), ...saved.hourlyPicks.WH2 }; }
-        if (saved.hourlyPuts) { hourlyPuts.WH1 = { ...emptyHourly(), ...saved.hourlyPuts.WH1 }; hourlyPuts.WH2 = { ...emptyHourly(), ...saved.hourlyPuts.WH2 }; }
-        const totalPickH = Object.values(hourlyPicks.WH1).reduce((a,b)=>a+b,0) + Object.values(hourlyPicks.WH2).reduce((a,b)=>a+b,0);
-        console.log(`[ItemPath] Loaded daily totals from disk: picks WH1=${dailyPickTotals.WH1} WH2=${dailyPickTotals.WH2}, puts WH1=${dailyPutTotals.WH1} WH2=${dailyPutTotals.WH2}, hourly entries=${totalPickH}`);
+        dailyPickTotals = { WH1: saved.picks?.WH1 || 0, WH2: saved.picks?.WH2 || 0, WH3: saved.picks?.WH3 || 0, date: today };
+        dailyPutTotals = { WH1: saved.puts?.WH1 || 0, WH2: saved.puts?.WH2 || 0, WH3: saved.puts?.WH3 || 0, date: today };
+        if (saved.hourlyPicks) { hourlyPicks.WH1 = { ...emptyHourly(), ...saved.hourlyPicks.WH1 }; hourlyPicks.WH2 = { ...emptyHourly(), ...saved.hourlyPicks.WH2 }; hourlyPicks.WH3 = { ...emptyHourly(), ...saved.hourlyPicks?.WH3 }; }
+        if (saved.hourlyPuts) { hourlyPuts.WH1 = { ...emptyHourly(), ...saved.hourlyPuts.WH1 }; hourlyPuts.WH2 = { ...emptyHourly(), ...saved.hourlyPuts.WH2 }; hourlyPuts.WH3 = { ...emptyHourly(), ...saved.hourlyPuts?.WH3 }; }
+        const totalPickH = Object.values(hourlyPicks.WH1).reduce((a,b)=>a+b,0) + Object.values(hourlyPicks.WH2).reduce((a,b)=>a+b,0) + Object.values(hourlyPicks.WH3).reduce((a,b)=>a+b,0);
+        console.log(`[ItemPath] Loaded daily totals from disk: picks WH1=${dailyPickTotals.WH1} WH2=${dailyPickTotals.WH2} WH3=${dailyPickTotals.WH3}, puts WH1=${dailyPutTotals.WH1} WH2=${dailyPutTotals.WH2}, hourly entries=${totalPickH}`);
       } else {
         console.log(`[ItemPath] Saved totals are from ${saved.date}, today is ${today} — starting fresh`);
       }
@@ -106,8 +106,8 @@ function saveDailyTotals() {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(DAILY_FILE, JSON.stringify({
       date: dailyPickTotals.date,
-      picks: { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2 },
-      puts: { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2 },
+      picks: { WH1: dailyPickTotals.WH1, WH2: dailyPickTotals.WH2, WH3: dailyPickTotals.WH3 },
+      puts: { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2, WH3: dailyPutTotals.WH3 },
       hourlyPicks,
       hourlyPuts,
       savedAt: new Date().toISOString(),
@@ -118,10 +118,10 @@ function saveDailyTotals() {
 function resetDailyIfNeeded() {
   const today = new Date().toISOString().substring(0, 10);
   if (dailyPickTotals.date !== today) {
-    dailyPickTotals = { WH1: 0, WH2: 0, date: today };
-    dailyPutTotals = { WH1: 0, WH2: 0, date: today };
-    hourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly() };
-    hourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly() };
+    dailyPickTotals = { WH1: 0, WH2: 0, WH3: 0, date: today };
+    dailyPutTotals = { WH1: 0, WH2: 0, WH3: 0, date: today };
+    hourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
+    hourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
     previousOrderMap.clear();
     saveDailyTotals();
     console.log(`[ItemPath] Daily pick/put counters reset for ${today}`);
@@ -145,14 +145,12 @@ function trackCompletedOrders(currentOrders) {
     for (const [orderId, info] of previousOrderMap) {
       if (!currentIds.has(orderId)) {
         const wh = info.warehouse;
-        if (wh === 'WH1' || wh === 'WH2') {
+        if (wh === 'WH1' || wh === 'WH2' || wh === 'WH3') {
           if (info.isPut) {
-            // Puts: count quantity of lenses/frames put away
             dailyPutTotals[wh] += info.lineCount;
             hourlyPuts[wh][hour] = (hourlyPuts[wh][hour] || 0) + info.lineCount;
             completedPuts += info.lineCount;
           } else {
-            // Picks: count 1 per job (order), not per line
             dailyPickTotals[wh] += 1;
             hourlyPicks[wh][hour] = (hourlyPicks[wh][hour] || 0) + 1;
             completedPicks += 1;
@@ -163,10 +161,10 @@ function trackCompletedOrders(currentOrders) {
   }
 
   if (completedPicks > 0) {
-    console.log(`[ItemPath] +${completedPicks} completed picks (WH1: ${dailyPickTotals.WH1}, WH2: ${dailyPickTotals.WH2})`);
+    console.log(`[ItemPath] +${completedPicks} completed picks (WH1: ${dailyPickTotals.WH1}, WH2: ${dailyPickTotals.WH2}, WH3: ${dailyPickTotals.WH3})`);
   }
   if (completedPuts > 0) {
-    console.log(`[ItemPath] +${completedPuts} completed puts (WH1: ${dailyPutTotals.WH1}, WH2: ${dailyPutTotals.WH2})`);
+    console.log(`[ItemPath] +${completedPuts} completed puts (WH1: ${dailyPutTotals.WH1}, WH2: ${dailyPutTotals.WH2}, WH3: ${dailyPutTotals.WH3})`);
   }
   if (completedPicks > 0 || completedPuts > 0) {
     saveDailyTotals();
@@ -176,8 +174,10 @@ function trackCompletedOrders(currentOrders) {
   previousOrderMap.clear();
   for (const o of currentOrders) {
     const id = o.orderId || o.id;
+    const rawWh = o.warehouseName || o.warehouse || 'Unknown';
+    const normWh = /^kitchen$/i.test(rawWh) || /wh3/i.test(rawWh) ? 'WH3' : /wh2/i.test(rawWh) ? 'WH2' : /wh1/i.test(rawWh) ? 'WH1' : rawWh;
     previousOrderMap.set(id, {
-      warehouse: o.warehouseName || o.warehouse || 'Unknown',
+      warehouse: normWh,
       lineCount: (o.order_lines || []).reduce((sum, l) => sum + (parseFloat(l.quantity) || 0), 0) || (o.lines || []).length || 3,
       reference: o.reference || o.name,
       isPut: isPutOrder(o),

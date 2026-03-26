@@ -1312,7 +1312,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: T.text, fontFamily: mono }}>TODAY'S PICKS BY HOUR</div>
                 <div style={{ display: "flex", gap: 24 }}>
-                  {['WH1', 'WH2'].map(wh => {
+                  {['WH1', 'WH2', 'WH3'].map(wh => {
                     const total = Object.values(inventory.hourlyStats?.[wh] || {}).reduce((s, v) => s + v, 0);
                     const color = wh === 'WH1' ? T.blue : T.green;
                     return (
@@ -1327,10 +1327,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
               </div>
               {/* Horizontal bar chart */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {['WH1', 'WH2'].map(wh => {
+                {['WH1', 'WH2', 'WH3'].map(wh => {
                   const hourData = inventory.hourlyStats?.[wh] || {};
                   const maxVal = Math.max(1, ...Object.values(hourData));
-                  const color = wh === 'WH1' ? T.blue : T.green;
+                  const color = wh === 'WH1' ? T.blue : wh === 'WH2' ? T.green : T.amber;
                   const currentHour = new Date().getHours();
                   return (
                     <div key={wh}>
