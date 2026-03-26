@@ -191,7 +191,10 @@ const stmts = {
   getPendingRecs: db.prepare(`SELECT * FROM flow_recommendations WHERE status='pending' ORDER BY created_at DESC`),
   getRecentRecs:  db.prepare(`SELECT * FROM flow_recommendations WHERE created_at > datetime('now', ?) ORDER BY created_at DESC`),
   getExpiredRecs: db.prepare(`SELECT * FROM flow_recommendations WHERE status='expired' AND created_at > datetime('now', ?) ORDER BY created_at DESC`),
-  expirePending:  db.prepare(`UPDATE flow_recommendations SET status='expired' WHERE status='pending' AND expires_at IS NOT NULL AND expires_at < datetime('now')`),
+  expirePending:  db.prepare(`UPDATE flow_recommendations SET status='expired' WHERE status='pending' AND (
+    (expires_at IS NOT NULL AND expires_at < datetime('now')) OR
+    (expires_at IS NULL AND created_at < datetime('now', '-60 minutes'))
+  )`),
   ackRec:       db.prepare(`UPDATE flow_recommendations SET status='acknowledged', acknowledged_at=datetime('now'), operator=? WHERE id=?`),
   completeRec:  db.prepare(`UPDATE flow_recommendations SET status='completed', completed_at=datetime('now'), operator=coalesce(?,operator), note=? WHERE id=?`),
   saveCatchUpScenario: db.prepare(`INSERT OR REPLACE INTO flow_catchup_scenario
