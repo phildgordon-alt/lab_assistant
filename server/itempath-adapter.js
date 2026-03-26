@@ -665,10 +665,24 @@ async function poll() {
     const txPutSum = txPutsTotal.WH1 + txPutsTotal.WH2;
     const incPutSum = dailyPutTotals.WH1 + dailyPutTotals.WH2;
 
-    // Log transaction debug info on first poll
-    if (pickTxList.length > 0 && txPickSum === 0) {
-      const sample = pickTxList[0];
-      console.log(`[ItemPath] DEBUG pick tx sample: date="${sample.creationDate}" wh="${sample.warehouseName}" order="${sample.orderName}" todayPrefix="${todayPrefix}"`);
+    // Log warehouse names from transactions for debugging
+    if (pickTxList.length > 0) {
+      const whCounts = {};
+      for (const tx of pickTxList) {
+        const rawWh = tx.warehouseName || 'NULL';
+        whCounts[rawWh] = (whCounts[rawWh] || 0) + 1;
+      }
+      console.log(`[ItemPath] Pick tx warehouse breakdown: ${Object.entries(whCounts).map(([k,v]) => `${k}=${v}`).join(', ')} (${pickTxList.length} total)`);
+      // Log any that didn't match WH1/WH2/WH3
+      const unmapped = pickTxList.filter(tx => {
+        const wh = tx.warehouseName || '';
+        return wh !== 'WH1' && wh !== 'WH2' && !/kitchen|lens.kitchen|wh3|irvine.2|irv02/i.test(wh) && !/wh2|warehouse.2/i.test(wh) && !/wh1|warehouse.1/i.test(wh);
+      });
+      if (unmapped.length > 0) {
+        console.log(`[ItemPath] UNMAPPED warehouses (${unmapped.length}): ${[...new Set(unmapped.map(t => t.warehouseName))].join(', ')}`);
+        const sample = unmapped[0];
+        console.log(`[ItemPath] Sample unmapped: wh="${sample.warehouseName}" order="${sample.orderName}" date="${sample.creationDate}"`);
+      }
     }
 
     // Use transaction count if available, else incremental
