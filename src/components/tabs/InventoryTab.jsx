@@ -1246,7 +1246,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.cyan || '#06b6d4'}08`, borderRadius: 6, border: `1px solid ${T.cyan || '#06b6d4'}20` }}>
                       <div style={{ fontSize: 8, color: T.cyan || '#06b6d4', fontFamily: mono, letterSpacing: 1 }}>CURRENT WIP</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.cyan || '#06b6d4', fontFamily: mono }}>{(varianceData.summary?.currentWIP || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>picked, not yet shipped</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units in pipeline (by SKU)</div>
                     </div>
                     <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6, border: `1px solid ${T.red}20` }}>
                       <div style={{ fontSize: 8, color: T.red, fontFamily: mono, letterSpacing: 1 }}>BREAKAGE</div>

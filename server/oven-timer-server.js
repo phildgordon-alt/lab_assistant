@@ -5164,16 +5164,34 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       }
       skus.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
 
-      // 4. Get current WIP from DVI trace (lenses in the pipeline right now)
+      // 4. Get current WIP units from DVI trace — actual SKUs, not job count × multiplier
       let currentWIP = 0;
+      const wipBySku = {};
       try {
         const allJobs = dviTrace.getJobs();
         const active = allJobs.filter(j =>
           j.status !== 'SHIPPED' && j.stage !== 'CANCELED' &&
           j.stage !== 'SHIPPED' && j.status !== 'CANCELED'
         );
-        // Each job has ~2 lenses in the pipeline
-        currentWIP = active.length * 2;
+        for (const job of active) {
+          const xml = dviJobIndex.get(job.job_id);
+          if (xml) {
+            // Count lens OPCs (each eye = 1 lens unit)
+            if (xml.lensStyle) {
+              const opc = xml.lensStyle;
+              wipBySku[opc] = (wipBySku[opc] || 0) + 2; // R + L lens
+              currentWIP += 2;
+            }
+            // Count frame
+            if (xml.frameSku) {
+              wipBySku[xml.frameSku] = (wipBySku[xml.frameSku] || 0) + 1;
+              currentWIP += 1;
+            }
+          } else {
+            // No XML data — estimate 2 lenses + 1 frame
+            currentWIP += 3;
+          }
+        }
       } catch {}
 
       // 5. Summary waterfall: Variance = WIP + Breakage + Kitchen + Unexplained
