@@ -487,7 +487,8 @@ function BinningDetailView({ view, serverUrl }) {
 function InventoryTab({ ovenServerUrl, settings }) {
   const [sub, setSub] = useState("warehouses");
   const [inventory, setInventory] = useState({ materials: [], lastSync: null, status: 'pending', alertCount: 0, warehouses: [], warehouseStats: {}, vlmStats: {} });
-  const [picks, setPicks] = useState({ picks: [], recent: [], count: 0, byWarehouse: {} });
+  const [picks, setPicks] = useState({ picks: [], recent: [], count: 0, byWarehouse: {}, hourlyStats: {}, hourlyPutStats: {} });
+  const [pickHistory, setPickHistory] = useState([]);
   const [alerts, setAlerts] = useState({ alerts: [], critical: 0, high: 0, low: 0 });
   const [vlms, setVlms] = useState({ vlmStats: {}, locations: [] });
   const [loading, setLoading] = useState(true);
@@ -567,12 +568,14 @@ function InventoryTab({ ovenServerUrl, settings }) {
         if (tab === 'warehouses' || tab === 'picks') {
           // Activity + Picks: need picks data
           if (!fetchedRef.current.picks) {
-            const [picksResp, alertsResp] = await Promise.all([
+            const [picksResp, alertsResp, histResp] = await Promise.all([
               fetch(`${ovenServerUrl}/api/inventory/picks`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
+              fetch(`${ovenServerUrl}/api/inventory/picks/history?days=30`).then(r => r.json()).catch(() => ({ days: [] })),
             ]);
             setPicks(picksResp);
             setAlerts(alertsResp);
+            setPickHistory(histResp.days || []);
             fetchedRef.current.picks = true;
           }
         }
@@ -1528,6 +1531,65 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No recent picks</div>
               )}
             </Card>
+
+            {/* Picks by hour chart */}
+            {(picks.hourlyStats?.WH1 || picks.hourlyStats?.WH2) && (
+              <Card style={{ marginTop: 20 }}>
+                <SectionHeader>Picks by Hour — Today</SectionHeader>
+                <div style={{ display: "flex", gap: 20 }}>
+                  {['WH1', 'WH2'].map(wh => {
+                    const data = picks.hourlyStats?.[wh] || {};
+                    const hours = Array.from({ length: 14 }, (_, i) => i + 6); // 6AM-7PM
+                    const maxVal = Math.max(...hours.map(h => data[h] || 0), 1);
+                    return (
+                      <div key={wh} style={{ flex: 1 }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: wh === 'WH1' ? T.blue : T.green, fontFamily: mono, marginBottom: 6 }}>{wh}</div>
+                        <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 80 }}>
+                          {hours.map(h => {
+                            const v = data[h] || 0;
+                            const barH = Math.max(2, (v / maxVal) * 70);
+                            return (
+                              <div key={h} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 1 }}>
+                                {v > 0 && <span style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>{v}</span>}
+                                <div style={{ width: "100%", height: barH, background: wh === 'WH1' ? T.blue : T.green, borderRadius: 2, opacity: v > 0 ? 0.7 : 0.1 }} />
+                                <span style={{ fontSize: 7, color: T.textDim, fontFamily: mono }}>{h > 12 ? (h - 12) + 'p' : h + 'a'}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
+
+            {/* Daily pick history */}
+            {pickHistory.length > 0 && (
+              <Card style={{ marginTop: 20 }}>
+                <SectionHeader right={`${pickHistory.length} days`}>Daily Pick History</SectionHeader>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: T.bg }}>
+                      <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 10, color: T.textDim, fontFamily: mono }}>DATE</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.blue, fontFamily: mono }}>WH1</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.green, fontFamily: mono }}>WH2</th>
+                      <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 10, color: T.text, fontFamily: mono, fontWeight: 700 }}>TOTAL</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pickHistory.map(d => (
+                      <tr key={d.date} style={{ borderBottom: `1px solid ${T.border}` }}>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 11, color: T.textMuted }}>{d.date}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.blue }}>{d.WH1}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, textAlign: "right", color: T.green }}>{d.WH2}</td>
+                        <td style={{ padding: "6px 12px", fontFamily: mono, fontSize: 12, fontWeight: 700, textAlign: "right", color: T.text }}>{d.total}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </Card>
+            )}
           </div>
         )}
 

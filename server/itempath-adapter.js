@@ -349,7 +349,7 @@ function normalizeTransaction(t) {
     name:        t.material_name || t.name,
     qty:         Math.abs(parseFloat(t.quantity) || 0),
     type:        t.type || (parseFloat(t.quantity) < 0 ? 'PICK' : 'REPLENISH'),
-    completedAt: t.completed_at || t.created_at,
+    completedAt: t.completed_at || t.created_at || t.creationDate || t.creation_date,
     picker:      t.user || t.operator || null,
     orderId:     t.order_id || null,
   };
@@ -873,6 +873,8 @@ function getPicks() {
     byWarehouse: byWarehouse,
     lastSync:    cache.lastSync,
     recent:      cache.recentTransactions.slice(0, 20),
+    hourlyStats: cache.hourlyStats || {},
+    hourlyPutStats: cache.hourlyPutStats || {},
   };
 }
 

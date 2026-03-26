@@ -1559,6 +1559,26 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/daily') {
     return json(res, itempath.getDailyPicks());
   }
+  // GET /api/inventory/picks/history?days=30 — daily pick totals from picks_history
+  if (req.method==='GET' && url.pathname==='/api/inventory/picks/history') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const rows = labDb.db.prepare(`
+      SELECT date(completed_at) as date, warehouse, COUNT(*) as picks, SUM(qty) as total_qty
+      FROM picks_history
+      WHERE completed_at > datetime('now', ?)
+      GROUP BY date(completed_at), warehouse
+      ORDER BY date(completed_at) DESC
+    `).all(`-${days} days`);
+    // Pivot into { date, WH1, WH2, total }
+    const byDate = {};
+    for (const r of rows) {
+      if (!byDate[r.date]) byDate[r.date] = { date: r.date, WH1: 0, WH2: 0, total: 0 };
+      if (r.warehouse === 'WH1') byDate[r.date].WH1 = r.picks;
+      else if (r.warehouse === 'WH2') byDate[r.date].WH2 = r.picks;
+      byDate[r.date].total += r.picks;
+    }
+    return json(res, { days: Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date)) });
+  }
   if (req.method==='GET' && url.pathname==='/api/inventory/warehouse-stock') {
     const ws = itempath.getWarehouseStock();
     // Include TOPS manual count as a separate "warehouse"
