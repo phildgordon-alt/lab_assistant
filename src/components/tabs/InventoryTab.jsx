@@ -1175,6 +1175,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 }} style={{ background: T.blue, border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
                   {varianceData ? '↻ Refresh' : 'Load Analysis'}
                 </button>
+                {varianceData && <ExportBtn onClick={() => {
+                  const rows = varianceData.skus || [];
+                  downloadCSV('variance_analysis_ytd.csv',
+                    ['sku','category','kardex','wh1','wh2','wh3','looker_netsuite','breakages','variance','explained_breakage','explained_kitchen','unexplained'],
+                    rows.map(s => ({ sku:s.sku, category:s.category, kardex:s.kardex, wh1:s.wh1, wh2:s.wh2, wh3:s.wh3, looker_netsuite:s.netsuite, breakages:s.breakages, variance:s.variance, explained_breakage:s.explainedByBreakage, explained_kitchen:s.explainedByKitchen, unexplained:s.unexplained }))
+                  );
+                }} label="Export CSV" />
               </div>
               {varianceData && (
                 <div style={{ padding: 16 }}>
