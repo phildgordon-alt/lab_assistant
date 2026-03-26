@@ -1225,34 +1225,43 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     The variance represents everything that left the Kardex but didn't make it to a shipped job — breakage, remakes, Kitchen picks not in Looker, and timing.
                   </div>
 
-                  {/* Waterfall */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 8, marginBottom: 20 }}>
-                    <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6 }}>
+                  {/* Waterfall — top row: the equation */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 8 }}>
+                    <div style={{ textAlign: 'center', padding: 12, background: T.bg, borderRadius: 6 }}>
                       <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX PICKED (units)</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(varianceData.summary?.kardex || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(varianceData.summary?.kardex || 0).toLocaleString()}</div>
                     </div>
-                    <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6 }}>
+                    <div style={{ textAlign: 'center', padding: 12, background: T.bg, borderRadius: 6 }}>
                       <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER SHIPPED (units)</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(varianceData.summary?.netsuite || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(varianceData.summary?.netsuite || 0).toLocaleString()}</div>
                     </div>
-                    <div style={{ textAlign: 'center', padding: 10, background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.red}` }}>
+                    <div style={{ textAlign: 'center', padding: 12, background: T.bg, borderRadius: 6, borderLeft: `3px solid ${T.red}` }}>
                       <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE (units)</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.variance || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 22, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.variance || 0).toLocaleString()}</div>
                     </div>
-                    <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6 }}>
+                  </div>
+                  {/* Waterfall — breakdown: what explains the variance */}
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginBottom: 6, textAlign: 'center' }}>VARIANCE BREAKDOWN: Picked but not shipped → where are they?</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 20 }}>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.cyan || '#06b6d4'}08`, borderRadius: 6, border: `1px solid ${T.cyan || '#06b6d4'}20` }}>
+                      <div style={{ fontSize: 8, color: T.cyan || '#06b6d4', fontFamily: mono, letterSpacing: 1 }}>CURRENT WIP</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: T.cyan || '#06b6d4', fontFamily: mono }}>{(varianceData.summary?.currentWIP || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>in pipeline now (~2 lenses/job)</div>
+                    </div>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.red}08`, borderRadius: 6, border: `1px solid ${T.red}20` }}>
                       <div style={{ fontSize: 8, color: T.red, fontFamily: mono, letterSpacing: 1 }}>BREAKAGE</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{(varianceData.summary?.breakages || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units broken</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>broke, never shipped</div>
                     </div>
-                    <div style={{ textAlign: 'center', padding: 10, background: `${T.amber}08`, borderRadius: 6 }}>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.amber}08`, borderRadius: 6, border: `1px solid ${T.amber}20` }}>
                       <div style={{ fontSize: 8, color: T.amber, fontFamily: mono, letterSpacing: 1 }}>KITCHEN (WH3)</div>
                       <div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(varianceData.summary?.kitchenPicks || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units from Kitchen</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>may not be in Looker</div>
                     </div>
-                    <div style={{ textAlign: 'center', padding: 10, background: `${T.purple || '#9b6ee0'}08`, borderRadius: 6 }}>
+                    <div style={{ textAlign: 'center', padding: 10, background: `${T.purple || '#9b6ee0'}08`, borderRadius: 6, border: `1px solid ${Math.abs(varianceData.summary?.unexplained || 0) > 100 ? T.red : (T.purple || '#9b6ee0')}20` }}>
                       <div style={{ fontSize: 8, color: T.purple || '#9b6ee0', fontFamily: mono, letterSpacing: 1 }}>UNEXPLAINED</div>
-                      <div style={{ fontSize: 18, fontWeight: 800, color: T.purple || '#9b6ee0', fontFamily: mono }}>{(varianceData.summary?.unexplained || 0).toLocaleString()}</div>
-                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>units unexplained</div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: Math.abs(varianceData.summary?.unexplained || 0) > 100 ? T.red : (T.purple || '#9b6ee0'), fontFamily: mono }}>{(varianceData.summary?.unexplained || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>remakes / leakage / sync</div>
                     </div>
                   </div>
 

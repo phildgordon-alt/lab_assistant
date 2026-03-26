@@ -5164,20 +5164,31 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       }
       skus.sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance));
 
-      // 4. Summary waterfall
+      // 4. Get current WIP from DVI trace (lenses in the pipeline right now)
+      let currentWIP = 0;
+      try {
+        const allJobs = dviTrace.getJobs();
+        const active = allJobs.filter(j =>
+          j.status !== 'SHIPPED' && j.stage !== 'CANCELED' &&
+          j.stage !== 'SHIPPED' && j.status !== 'CANCELED'
+        );
+        // Each job has ~2 lenses in the pipeline
+        currentWIP = active.length * 2;
+      } catch {}
+
+      // 5. Summary waterfall: Kardex = Shipped + WIP + Breakage + Kitchen + Unexplained
       const totalVariance = totalKardex - totalNS;
+      const unexplained = totalVariance - currentWIP - totalBreakage - totalWH3;
       return json(res, {
         period: { from, to },
         summary: {
           kardex: totalKardex,
           netsuite: totalNS,
           variance: totalVariance,
+          currentWIP,
           breakages: totalBreakage,
           kitchenPicks: totalWH3,
-          // Waterfall: Kardex - NetSuite = breakage + kitchen + unexplained
-          explainedByBreakage: Math.min(totalBreakage, Math.max(0, totalVariance)),
-          explainedByKitchen: totalWH3,
-          unexplained: totalVariance - Math.min(totalBreakage, Math.max(0, totalVariance)) - totalWH3,
+          unexplained,
           byWarehouse: { WH1: totalWH1, WH2: totalWH2, WH3: totalWH3 },
         },
         skus: skus.slice(0, 200),
