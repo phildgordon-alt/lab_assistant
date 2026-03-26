@@ -7691,7 +7691,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [stageConfigs,setStageConfigs]=useState([]);
   const [lineConfigs,setLineConfigs]=useState([]);
   const [catchUp,setCatchUp]=useState(null);
-  const [catchUpLine,setCatchUpLine]=useState("sv");
+  const [catchUpLine,setCatchUpLine]=useState("all");
   const [trendData,setTrendData]=useState(null);
   const [trendLine,setTrendLine]=useState("sv");
   const [health,setHealth]=useState(null);
@@ -7701,7 +7701,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [pushForm,setPushForm]=useState({line_id:"sv",qty:"",operator:"",note:""});
   const [expiredRecs,setExpiredRecs]=useState([]);
   const [showExpired,setShowExpired]=useState(false);
-  const [catchUpScenario,setCatchUpScenario]=useState({assemblers:"",jobsPerAssemblerHr:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:""});
+  const [catchUpScenario,setCatchUpScenario]=useState({assemblers:"",jobsPerAssemblerHr:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",targetBacklog:""});
   const [lastRefresh,setLastRefresh]=useState(null);
 
   // Fetch snapshot + recs on mount and every 60s
@@ -7748,6 +7748,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
     if(catchUpScenario.shifts)body.shifts=parseInt(catchUpScenario.shifts);
     if(catchUpScenario.incomingPerDay)body.incomingPerDay=parseInt(catchUpScenario.incomingPerDay);
     if(catchUpScenario.targetDays)body.targetDays=parseFloat(catchUpScenario.targetDays);
+    if(catchUpScenario.targetBacklog)body.targetBacklog=parseInt(catchUpScenario.targetBacklog);
     const hasOverrides=Object.keys(body).length>0;
     if(hasOverrides){
       fetch(`${base}/api/flow/catchup/${catchUpLine}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json()).then(setCatchUp).catch(()=>{});
@@ -8079,8 +8080,8 @@ function FlowAgentTab({ovenServerUrl,settings}){
       {subTab==="catchup"&&(
         <div>
           <div style={{display:"flex",gap:8,marginBottom:16}}>
-            {["sv","surfacing","edits"].map(l=>(
-              <button key={l} onClick={()=>{setCatchUpLine(l);setCatchUpScenario({assemblers:"",jobsPerAssemblerHr:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:""});}} style={{background:catchUpLine===l?"rgba(59,130,246,0.15)":"transparent",border:catchUpLine===l?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:catchUpLine===l?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>{l.toUpperCase()}</button>
+            {[{id:"all",label:"All Jobs"},{id:"edits",label:"Edits"}].map(l=>(
+              <button key={l.id} onClick={()=>{setCatchUpLine(l.id);setCatchUpScenario({assemblers:"",jobsPerAssemblerHr:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",targetBacklog:""});}} style={{background:catchUpLine===l.id?"rgba(59,130,246,0.15)":"transparent",border:catchUpLine===l.id?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:catchUpLine===l.id?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>{l.label}</button>
             ))}
           </div>
 
@@ -8110,6 +8111,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 {key:"shiftHours",label:"Hrs/Shift",placeholder:String(catchUp?.shiftHours??8),width:80},
                 {key:"shifts",label:"Shifts/Day",placeholder:String(catchUp?.shifts??2),width:80},
                 {key:"incomingPerDay",label:"Incoming/Day",placeholder:String(catchUp?.incomingPerDay??0),width:100},
+                {key:"targetBacklog",label:"Target Backlog",placeholder:String(catchUp?.targetBacklog??500),width:110},
                 {key:"targetDays",label:"Clear in Days",placeholder:String(catchUp?.targetDays??2),width:100},
               ].map(f=>(
                 <div key={f.key}>
@@ -8118,7 +8120,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 </div>
               ))}
               <button onClick={loadCatchUp} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 14px",color:"#60a5fa",cursor:"pointer",fontFamily:mono,fontSize:12}}>RECALC</button>
-              <button onClick={()=>{setCatchUpScenario({assemblers:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",jobsPerAssemblerHr:""});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>RESET</button>
+              <button onClick={()=>{setCatchUpScenario({assemblers:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",jobsPerAssemblerHr:"",targetBacklog:""});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"6px 14px",color:"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:12}}>RESET</button>
             </div>
           </div>
 
@@ -8145,7 +8147,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
 
               {/* What's needed to hit target */}
               <div style={{background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.2)",borderRadius:8,padding:14,marginBottom:16}}>
-                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:13,color:"#60a5fa",letterSpacing:1,marginBottom:8}}>TO CLEAR {catchUp.currentWip} JOBS IN {catchUp.targetDays} DAYS</div>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:13,color:"#60a5fa",letterSpacing:1,marginBottom:8}}>BURN DOWN {catchUp.wipToClear||0} JOBS TO {catchUp.targetBacklog} IN {catchUp.targetDays} DAYS</div>
                 <div style={{display:"flex",gap:20,flexWrap:"wrap"}}>
                   <div style={{textAlign:"center"}}>
                     <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Ship/day</div>
@@ -8164,10 +8166,10 @@ function FlowAgentTab({ovenServerUrl,settings}){
                   <div style={{fontFamily:mono,fontSize:11,color:"#6b7280",marginBottom:8}}>WEEKLY MILESTONES</div>
                   <div style={{display:"flex",gap:8}}>
                     {catchUp.weeklyMilestones.map(w=>(
-                      <div key={w.week} style={{background:w.cleared?"rgba(34,197,94,0.08)":"rgba(0,0,0,0.2)",border:w.cleared?"1px solid rgba(34,197,94,0.2)":"1px solid transparent",borderRadius:6,padding:"8px 14px",textAlign:"center",flex:1}}>
+                      <div key={w.week} style={{background:w.atTarget?"rgba(34,197,94,0.08)":"rgba(0,0,0,0.2)",border:w.atTarget?"1px solid rgba(34,197,94,0.2)":"1px solid transparent",borderRadius:6,padding:"8px 14px",textAlign:"center",flex:1}}>
                         <div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>Week {w.week}</div>
-                        <div style={{fontSize:18,fontWeight:700,color:w.cleared?"#22c55e":"#e5e7eb",fontFamily:mono}}>{w.cleared?"CLEAR":w.projectedWip.toLocaleString()}</div>
-                        <div style={{fontSize:9,color:"#6b7280",fontFamily:mono,marginTop:2}}>{w.cleared?"":"remaining"}</div>
+                        <div style={{fontSize:18,fontWeight:700,color:w.atTarget?"#22c55e":"#e5e7eb",fontFamily:mono}}>{w.projectedWip.toLocaleString()}</div>
+                        <div style={{fontSize:9,color:w.atTarget?"#22c55e":"#6b7280",fontFamily:mono,marginTop:2}}>{w.atTarget?"AT TARGET":"remaining"}</div>
                       </div>
                     ))}
                   </div>

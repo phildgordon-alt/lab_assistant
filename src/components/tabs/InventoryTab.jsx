@@ -2725,8 +2725,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       {/* Scenario cards */}
                       {(npiScenarios || []).map(s => (
                         <div key={s.id} onClick={async () => {
-                          const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}/compute`, { method: 'POST' });
-                          setNpiSelected(await resp.json());
+                          try {
+                            const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${s.id}/compute`, { method: 'POST' });
+                            if (resp.ok) { setNpiSelected(await resp.json()); return; }
+                          } catch {}
+                          // Fallback: just select the scenario without compute results
+                          setNpiSelected({ scenario: s, cannibalization: [], newProductWeeklyJobs: 0, newProductWeeklyLenses: 0, totalLostWeekly: 0, initialOrderQty: 0 });
                         }} style={{ padding: '10px 12px', marginBottom: 6, borderRadius: 6, cursor: 'pointer', border: `1px solid ${npiSelected?.scenario?.id === s.id ? T.blue : T.border}`, background: npiSelected?.scenario?.id === s.id ? `${T.blue}08` : T.bg }}>
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
