@@ -431,17 +431,33 @@ async function fetchOpenPOs() {
     }
 
     // Get line items for open POs
-    const lines = await suiteql(`
-      SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
-             item.class AS classId, tl.quantity, tl.quantityreceived, tl.quantitybilled,
-             tl.rate, tl.amount
-      FROM transactionLine tl
-      JOIN transaction t ON t.id = tl.transaction
-      JOIN item ON item.id = tl.item
-      WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
-        AND tl.quantity > 0
-      ORDER BY t.tranDate DESC
-    `);
+    // Try with quantityreceived first, fall back to without if field doesn't exist
+    let lines;
+    try {
+      lines = await suiteql(`
+        SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
+               item.class AS classId, tl.quantity, tl.quantityreceived, tl.quantitybilled,
+               tl.rate, tl.amount
+        FROM transactionLine tl
+        JOIN transaction t ON t.id = tl.transaction
+        JOIN item ON item.id = tl.item
+        WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+          AND tl.quantity > 0
+        ORDER BY t.tranDate DESC
+      `);
+    } catch (e) {
+      console.log('[NetSuite] quantityreceived not available, falling back:', e.message);
+      lines = await suiteql(`
+        SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
+               item.class AS classId, tl.quantity, tl.rate, tl.amount
+        FROM transactionLine tl
+        JOIN transaction t ON t.id = tl.transaction
+        JOIN item ON item.id = tl.item
+        WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+          AND tl.quantity > 0
+        ORDER BY t.tranDate DESC
+      `);
+    }
 
     const CLASS_MAP = { '1': 'Frames', '2': 'Frames', '3': 'Lenses', '4': 'Lenses', '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops' };
     const STATUS_MAP = { 'A': 'Pending Approval', 'B': 'Pending Receipt', 'C': 'Partially Received', 'D': 'Pending Bill', 'E': 'Partially Approved', 'F': 'Pending Billing' };
