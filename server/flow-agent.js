@@ -1691,6 +1691,25 @@ module.exports = {
       const totalWip = active.length;
       const processableNow = inProcess.length + readyToProcess.length;
 
+      // SV vs Surfacing breakdown
+      const svAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return (x?.lensType || 'S') === 'S'; });
+      const surfAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return (x?.lensType || 'S') !== 'S'; });
+
+      const buildLineBreakdown = (label, jobs) => {
+        const ip = jobs.filter(j => pastKardexStages.includes(j.stage)).length;
+        const ready = readyToProcess.filter(j => label === 'sv' ? !j.isSurfacing : j.isSurfacing).length;
+        const alt = needAlternative.filter(j => label === 'sv' ? !j.isSurfacing : j.isSurfacing).length;
+        const oos = trueOutOfStock.filter(j => label === 'sv' ? !j.isSurfacing : j.isSurfacing).length;
+        const nel = nelJobs.filter(j => label === 'sv' ? !j.isSurfacing : j.isSurfacing).length;
+        const processable = ip + ready;
+        return {
+          total: jobs.length, inProcess: ip, readyToProcess: ready,
+          needAlternative: alt, trueOutOfStock: oos, nelCount: nel,
+          processable, processablePct: jobs.length > 0 ? Math.round((processable / jobs.length) * 100) : 100,
+          rushBlocked: [...needAlternative, ...trueOutOfStock].filter(j => (label === 'sv' ? !j.isSurfacing : j.isSurfacing) && j.rush).length,
+        };
+      };
+
       return {
         totalWip,
         inProcess: inProcess.length,
@@ -1701,6 +1720,9 @@ module.exports = {
         processableNow,
         processablePct: totalWip > 0 ? Math.round((processableNow / totalWip) * 100) : 100,
         blockedTotal: needAlternative.length + trueOutOfStock.length,
+        // Per-line breakdown
+        sv: buildLineBreakdown('sv', svAll),
+        surfacing: buildLineBreakdown('surfacing', surfAll),
         // Breakdown for display
         readyJobs: { sv: readyToProcess.filter(j => !j.isSurfacing).length, surf: readyToProcess.filter(j => j.isSurfacing).length },
         alternativeJobs: needAlternative.slice(0, 50),

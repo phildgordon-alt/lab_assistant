@@ -8147,6 +8147,36 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 <span style={{fontSize:11,color:"#9ca3af",marginLeft:12}}>({r.processableNow.toLocaleString()} of {r.totalWip.toLocaleString()} jobs can move)</span>
                 {r.needAlternative>0&&<span style={{fontSize:11,color:"#f59e0b",marginLeft:12}}>+{r.needAlternative} if bases changed</span>}
               </div>
+              {/* SV vs Surfacing breakdown */}
+              {r.sv&&r.surfacing&&(
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginTop:12}}>
+                  {[{label:"SINGLE VISION",data:r.sv,color:"#3b82f6"},{label:"SURFACING",data:r.surfacing,color:"#a855f7"}].map(line=>{
+                    const d=line.data;
+                    const greenPct=d.total>0?Math.round(((d.inProcess+d.readyToProcess)/d.total)*100):0;
+                    const amberPct=d.total>0?Math.round((d.needAlternative/d.total)*100):0;
+                    const redPct=d.total>0?Math.round((d.trueOutOfStock/d.total)*100):0;
+                    return(
+                    <div key={line.label} style={{background:"rgba(0,0,0,0.15)",borderRadius:8,padding:12,borderLeft:`3px solid ${line.color}`}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:6}}>
+                        <span style={{fontSize:11,fontWeight:700,color:line.color,fontFamily:mono}}>{line.label}</span>
+                        <span style={{fontSize:11,fontWeight:700,color:"#e5e7eb",fontFamily:mono}}>{d.total.toLocaleString()} jobs</span>
+                      </div>
+                      <div style={{height:6,background:"rgba(255,255,255,0.06)",borderRadius:3,overflow:"hidden",display:"flex",marginBottom:8}}>
+                        <div style={{width:`${greenPct}%`,background:"#22c55e"}}/>
+                        <div style={{width:`${amberPct}%`,background:"#f59e0b"}}/>
+                        <div style={{width:`${redPct}%`,background:"#ef4444"}}/>
+                      </div>
+                      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:4,fontSize:10,fontFamily:mono}}>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:14,fontWeight:700,color:"#22c55e"}}>{d.inProcess}</div><div style={{fontSize:7,color:"#6b7280"}}>IN PROC</div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:14,fontWeight:700,color:"#22c55e"}}>{d.readyToProcess}</div><div style={{fontSize:7,color:"#6b7280"}}>READY</div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:14,fontWeight:700,color:"#f59e0b"}}>{d.needAlternative}</div><div style={{fontSize:7,color:"#6b7280"}}>ALT BASE</div></div>
+                        <div style={{textAlign:"center"}}><div style={{fontSize:14,fontWeight:700,color:"#ef4444"}}>{d.trueOutOfStock}</div><div style={{fontSize:7,color:"#6b7280"}}>OOS</div></div>
+                      </div>
+                      <div style={{marginTop:6,textAlign:"center",fontSize:10,color:line.color,fontFamily:mono,fontWeight:700}}>{d.processablePct}% processable{d.rushBlocked>0?` — ${d.rushBlocked} rush blocked`:''}</div>
+                    </div>);
+                  })}
+                </div>
+              )}
             </div>);
           })()}
 
