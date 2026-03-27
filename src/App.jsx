@@ -7706,6 +7706,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [putList,setPutList]=useState(null);
   const [putListExpanded,setPutListExpanded]=useState(null);
   const [nelData,setNelData]=useState(null);
+  const [readiness,setReadiness]=useState(null);
 
   // Fetch snapshot + recs on mount and every 60s
   useEffect(()=>{
@@ -8094,6 +8095,61 @@ function FlowAgentTab({ovenServerUrl,settings}){
       {/* ═══════ PIPELINE VIEW ═══════ */}
       {subTab==="pipeline"&&(
         <div>
+          {/* Readiness dashboard — what can we process NOW */}
+          {(()=>{
+            if(!readiness) fetch(`${base}/api/flow/readiness`).then(r=>r.ok?r.json():null).then(setReadiness).catch(()=>{});
+            const r=readiness;
+            if(!r||!r.totalWip)return null;
+            const greenPct=r.totalWip>0?Math.round(((r.inProcess+r.readyToProcess)/r.totalWip)*100):0;
+            const amberPct=r.totalWip>0?Math.round((r.needAlternative/r.totalWip)*100):0;
+            const redPct=r.totalWip>0?Math.round((r.trueOutOfStock/r.totalWip)*100):0;
+            return(
+            <div style={{background:"rgba(0,0,0,0.2)",borderRadius:10,padding:16,marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,color:"#e5e7eb",letterSpacing:1}}>WIP READINESS — {r.totalWip.toLocaleString()} JOBS</div>
+                <button onClick={()=>{setReadiness(null);fetch(`${base}/api/flow/readiness`).then(x=>x.json()).then(setReadiness).catch(()=>{});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,padding:"3px 10px",color:"#6b7280",fontSize:9,cursor:"pointer",fontFamily:mono}}>Refresh</button>
+              </div>
+              {/* Stacked bar */}
+              <div style={{height:12,background:"rgba(255,255,255,0.06)",borderRadius:6,overflow:"hidden",display:"flex",marginBottom:10}}>
+                <div style={{width:`${greenPct}%`,background:"#22c55e",transition:"width 0.3s"}} title={`In process + ready: ${r.inProcess+r.readyToProcess}`}/>
+                <div style={{width:`${amberPct}%`,background:"#f59e0b",transition:"width 0.3s"}} title={`Need alternative: ${r.needAlternative}`}/>
+                <div style={{width:`${redPct}%`,background:"#ef4444",transition:"width 0.3s"}} title={`True out of stock: ${r.trueOutOfStock}`}/>
+              </div>
+              {/* Numbers */}
+              <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8}}>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:20,fontWeight:800,color:"#22c55e",fontFamily:mono}}>{(r.inProcess||0).toLocaleString()}</div>
+                  <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>IN PROCESS</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:20,fontWeight:800,color:"#22c55e",fontFamily:mono}}>{(r.readyToProcess||0).toLocaleString()}</div>
+                  <div style={{fontSize:9,color:"#6b7280",fontFamily:mono}}>READY TO PUSH</div>
+                  <div style={{fontSize:8,color:"#6b7280",fontFamily:mono}}>SV:{r.readyJobs?.sv||0} Surf:{r.readyJobs?.surf||0}</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:20,fontWeight:800,color:"#f59e0b",fontFamily:mono}}>{(r.needAlternative||0).toLocaleString()}</div>
+                  <div style={{fontSize:9,color:"#f59e0b",fontFamily:mono}}>NEED ALT BASE</div>
+                  <div style={{fontSize:8,color:"#6b7280",fontFamily:mono}}>change base → go</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:20,fontWeight:800,color:"#ef4444",fontFamily:mono}}>{(r.trueOutOfStock||0).toLocaleString()}</div>
+                  <div style={{fontSize:9,color:"#ef4444",fontFamily:mono}}>OUT OF STOCK</div>
+                  <div style={{fontSize:8,color:"#6b7280",fontFamily:mono}}>{r.reorderList?.length||0} OPCs need reorder</div>
+                </div>
+                <div style={{textAlign:"center"}}>
+                  <div style={{fontSize:20,fontWeight:800,color:r.rushBlocked>0?"#ef4444":"#6b7280",fontFamily:mono}}>{r.rushBlocked||0}</div>
+                  <div style={{fontSize:9,color:r.rushBlocked>0?"#ef4444":"#6b7280",fontFamily:mono}}>RUSH BLOCKED</div>
+                </div>
+              </div>
+              {/* Processable summary */}
+              <div style={{marginTop:10,padding:"8px 12px",background:"rgba(34,197,94,0.08)",borderRadius:6,border:"1px solid rgba(34,197,94,0.15)",textAlign:"center",fontFamily:mono}}>
+                <span style={{fontSize:12,color:"#22c55e",fontWeight:700}}>{r.processablePct}% PROCESSABLE NOW</span>
+                <span style={{fontSize:11,color:"#9ca3af",marginLeft:12}}>({r.processableNow.toLocaleString()} of {r.totalWip.toLocaleString()} jobs can move)</span>
+                {r.needAlternative>0&&<span style={{fontSize:11,color:"#f59e0b",marginLeft:12}}>+{r.needAlternative} if bases changed</span>}
+              </div>
+            </div>);
+          })()}
+
           {/* Recommendation banner */}
           {recommendations.length>0&&(
             <div style={{background:"rgba(245,158,11,0.08)",border:"1px solid rgba(245,158,11,0.25)",borderRadius:10,padding:16,marginBottom:16}}>

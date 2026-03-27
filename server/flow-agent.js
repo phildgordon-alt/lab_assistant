@@ -1577,6 +1577,153 @@ module.exports = {
     }
   },
 
+  // ── Readiness Dashboard — what can we process NOW vs what's blocked ──
+
+  getReadiness() {
+    try {
+      const { dviTrace, dviJobIndex, itempath } = adapters;
+      if (!dviTrace || !dviJobIndex) return null;
+
+      const allJobs = dviTrace.getJobs();
+      const active = allJobs.filter(j =>
+        j.status !== 'SHIPPED' && j.status !== 'CANCELED' &&
+        j.stage !== 'SHIPPED' && j.stage !== 'SHIPPING' && j.stage !== 'CANCELED'
+      );
+
+      // Get stock by OPC across all warehouses
+      let whStock = { WH1: {}, WH2: {}, WH3: {} };
+      try { if (itempath?.getWarehouseStock) whStock = itempath.getWarehouseStock(); } catch {}
+      const totalStock = {}; // opc → total qty
+      for (const wh of ['WH1', 'WH2', 'WH3']) {
+        for (const [sku, qty] of Object.entries(whStock[wh] || {})) {
+          totalStock[sku] = (totalStock[sku] || 0) + qty;
+        }
+      }
+
+      // Get materials for alternative suggestions
+      const inv = itempath ? itempath.getInventory() : { materials: [] };
+      const stockByMaterial = {};
+      for (const m of (inv.materials || [])) {
+        if (!m.sku || m.qty <= 0) continue;
+        const matKeys = ['PLY', 'BLY', 'H67', 'B67', 'CR39', 'TRV', 'S67'];
+        for (const mat of matKeys) {
+          if ((m.coatingType || '').toUpperCase().includes(mat) || (m.name || '').toUpperCase().includes(mat)) {
+            if (!stockByMaterial[mat]) stockByMaterial[mat] = [];
+            stockByMaterial[mat].push({ sku: m.sku, qty: m.qty, warehouse: m.warehouse });
+          }
+        }
+      }
+      for (const arr of Object.values(stockByMaterial)) arr.sort((a, b) => b.qty - a.qty);
+
+      // Classify every active job
+      const inProcess = [];     // already past Kardex — in production
+      const readyToProcess = []; // at INCOMING/AT_KARDEX and we have lenses
+      const needAlternative = []; // out of stock but surfacing — can substitute
+      const trueOutOfStock = []; // out of stock, SV or no alternatives
+      const nelJobs = [];        // currently stuck at NEL
+
+      const pastKardexStages = ['SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'QC', 'HOLD', 'BREAKAGE'];
+      const prePickStages = ['INCOMING', 'AT_KARDEX', 'NEL'];
+
+      for (const j of active) {
+        const xml = dviJobIndex.get(j.job_id);
+        const opc = xml?.lensOpc || null;
+        const coating = xml?.coating || 'Unknown';
+        const material = xml?.lensMat || 'Unknown';
+        const lensType = xml?.lensType || 'S';
+        const isSurfacing = lensType !== 'S';
+        const rush = j.rush === 'Y' || xml?.rush === 'Y';
+
+        const jobInfo = {
+          jobId: j.job_id, stage: j.stage, opc, coating, material, lensType,
+          isSurfacing, rush, daysInLab: j.daysInLab || 0,
+        };
+
+        // Already in production — past the Kardex
+        if (pastKardexStages.includes(j.stage)) {
+          inProcess.push(jobInfo);
+          continue;
+        }
+
+        // NEL — stuck
+        if (j.stage === 'NEL') {
+          nelJobs.push(jobInfo);
+          // Check if we can suggest alternatives
+          const matKey = material.toUpperCase();
+          if (isSurfacing && stockByMaterial[matKey]?.length > 0) {
+            const alt = stockByMaterial[matKey].find(a => a.sku !== opc);
+            if (alt) {
+              jobInfo.alternative = { sku: alt.sku, qty: alt.qty, warehouse: alt.warehouse };
+              needAlternative.push(jobInfo);
+            } else {
+              trueOutOfStock.push(jobInfo);
+            }
+          } else {
+            trueOutOfStock.push(jobInfo);
+          }
+          continue;
+        }
+
+        // Pre-pick (INCOMING, AT_KARDEX) — check if we have stock
+        if (prePickStages.includes(j.stage)) {
+          const stockQty = opc ? (totalStock[opc] || 0) : 0;
+          if (stockQty >= 2) {
+            readyToProcess.push(jobInfo);
+          } else if (isSurfacing) {
+            const matKey = material.toUpperCase();
+            const alt = stockByMaterial[matKey]?.find(a => a.sku !== opc && a.qty >= 2);
+            if (alt) {
+              jobInfo.alternative = { sku: alt.sku, qty: alt.qty, warehouse: alt.warehouse };
+              needAlternative.push(jobInfo);
+            } else {
+              trueOutOfStock.push(jobInfo);
+            }
+          } else {
+            trueOutOfStock.push(jobInfo);
+          }
+          continue;
+        }
+
+        // Everything else
+        inProcess.push(jobInfo);
+      }
+
+      const totalWip = active.length;
+      const processableNow = inProcess.length + readyToProcess.length;
+
+      return {
+        totalWip,
+        inProcess: inProcess.length,
+        readyToProcess: readyToProcess.length,
+        needAlternative: needAlternative.length,
+        trueOutOfStock: trueOutOfStock.length,
+        nelCount: nelJobs.length,
+        processableNow,
+        processablePct: totalWip > 0 ? Math.round((processableNow / totalWip) * 100) : 100,
+        blockedTotal: needAlternative.length + trueOutOfStock.length,
+        // Breakdown for display
+        readyJobs: { sv: readyToProcess.filter(j => !j.isSurfacing).length, surf: readyToProcess.filter(j => j.isSurfacing).length },
+        alternativeJobs: needAlternative.slice(0, 50),
+        outOfStockJobs: trueOutOfStock.slice(0, 50),
+        rushBlocked: [...needAlternative, ...trueOutOfStock].filter(j => j.rush).length,
+        // Top out-of-stock OPCs for reorder
+        reorderList: (() => {
+          const byOpc = {};
+          for (const j of trueOutOfStock) {
+            if (!j.opc) continue;
+            if (!byOpc[j.opc]) byOpc[j.opc] = { opc: j.opc, coating: j.coating, material: j.material, jobs: 0, rush: 0 };
+            byOpc[j.opc].jobs++;
+            if (j.rush) byOpc[j.opc].rush++;
+          }
+          return Object.values(byOpc).sort((a, b) => b.jobs - a.jobs).slice(0, 30);
+        })(),
+      };
+    } catch (e) {
+      console.error('[Readiness] Error:', e.message);
+      return null;
+    }
+  },
+
   // ── NEL (Not Enough Lenses) — stuck jobs with alternative suggestions ──
 
   getNelAnalysis() {

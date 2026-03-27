@@ -5558,6 +5558,15 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, flowAgent.logPush(body.line_id, body.qty, body.operator, body.note));
   }
 
+  // GET /api/flow/readiness — what can we process NOW vs what's blocked
+  if (req.method==='GET' && url.pathname==='/api/flow/readiness') {
+    try {
+      const r = flowAgent.getReadiness();
+      if (!r) return json(res, { error: 'Flow agent not ready', totalWip: 0 });
+      return json(res, r);
+    } catch (e) { return json(res, { error: e.message, totalWip: 0 }, 500); }
+  }
+
   // GET /api/flow/nel — NEL analysis with alternative base suggestions
   if (req.method==='GET' && url.pathname==='/api/flow/nel') {
     try {
