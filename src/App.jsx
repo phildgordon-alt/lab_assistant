@@ -7861,6 +7861,20 @@ function FlowAgentTab({ovenServerUrl,settings}){
         const whColors={WH1:"#3b82f6",WH2:"#a855f7"};
         return(
         <div>
+          {/* DVI sending discontinued OPCs alert */}
+          {(putList.dviDiscontinuedAlerts||[]).length>0&&(
+            <div style={{background:"rgba(239,68,68,0.08)",border:"1px solid rgba(239,68,68,0.3)",borderRadius:8,padding:"10px 14px",marginBottom:16,fontFamily:mono}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#ef4444",marginBottom:6}}>DVI ROUTING TO DISCONTINUED OPCs — UPDATE DVI LENS TABLE</div>
+              {putList.dviDiscontinuedAlerts.map((a,i)=>(
+                <div key={i} style={{fontSize:10,color:"#d1d5db",padding:"2px 0"}}>
+                  <span style={{color:"#ef4444",fontWeight:700}}>{a.opc}</span>
+                  <span style={{color:"#6b7280"}}> — {a.coating} {a.material} — </span>
+                  <span style={{color:"#f59e0b"}}>{a.jobCount} active jobs using this OPC</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Summary KPIs */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
             {[

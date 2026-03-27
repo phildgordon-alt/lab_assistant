@@ -692,17 +692,21 @@ function computePutList() {
   let totalLensesNeeded = 0, totalInStock = 0, totalShortfall = 0;
 
   let skippedDiscontinued = 0;
+  const dviDiscontinuedAlerts = {}; // OPCs DVI is sending that we've marked discontinued
   for (const j of demandJobs) {
     const xml = dviJobIndex.get(j.job_id);
     if (!xml) continue;
 
     let opc = xml.lensOpc || null;
 
-    // If OPC is discontinued, find a current replacement with same material/coating
+    // If OPC is discontinued on our side but DVI is still routing to it — flag it
     let replacedFrom = null;
     if (opc && discontinuedSkus.has(opc)) {
       replacedFrom = opc;
       skippedDiscontinued++;
+      // Track for alert
+      if (!dviDiscontinuedAlerts[opc]) dviDiscontinuedAlerts[opc] = { opc, coating: xml.coating, material: xml.lensMat, jobCount: 0, firstSeen: j.job_id };
+      dviDiscontinuedAlerts[opc].jobCount++;
       // Search for active SKU with same material in stock
       const mat = (xml.lensMat || '').toUpperCase();
       let bestAlt = null, bestQty = 0;
@@ -956,9 +960,11 @@ function computePutList() {
       outOfStockCount: outOfStockList.length,
       outOfStockJobs: outOfStockList.reduce((s, o) => s + o.jobCount, 0),
       discontinuedReplaced: skippedDiscontinued,
+      dviDiscontinuedAlerts: Object.values(dviDiscontinuedAlerts).length,
     },
     warehouses: [wh1Plan, wh2Plan],
     outOfStock: outOfStockList.slice(0, 50),
+    dviDiscontinuedAlerts: Object.values(dviDiscontinuedAlerts).sort((a, b) => b.jobCount - a.jobCount),
     totalEstimatedMinutes: wh1Plan.totalMinutes + wh2Plan.totalMinutes,
     totalEstimatedHours: Math.round((wh1Plan.totalMinutes + wh2Plan.totalMinutes) / 60 * 10) / 10,
   };
