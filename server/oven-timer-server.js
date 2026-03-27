@@ -5541,15 +5541,31 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, putList);
   }
 
-  // GET /api/flow/put-list/report — downloadable CSV put list
+  // GET /api/flow/put-list/report — downloadable CSV put list with warehouse + out of stock
   if (req.method==='GET' && url.pathname==='/api/flow/put-list/report') {
     const putList = flowAgent.getPutList();
     if (!putList) { res.writeHead(503); res.end('Not ready'); return; }
-    const headers = ['Priority','Coating','Material','Style','OPC','Lenses Needed','In Stock','Shortfall','Line','Rush'];
-    const rows = (putList.putItems || []).map((p, i) => [
-      i + 1, p.coating, p.material, p.style, p.opc || '', p.lensesNeeded, p.inStock, p.shortfall,
-      p.lensType === 'S' ? 'SV' : 'Surfacing', p.hasRush ? 'YES' : '',
-    ].join(','));
+    const rows = [];
+    // Per-warehouse put items
+    for (const wh of (putList.warehouses || [])) {
+      for (const p of (wh.putItems || [])) {
+        rows.push([wh.warehouse, 'PUT', p.coating, p.opc || '', p.name || '', p.putQty, '', '', ''].join(','));
+      }
+      // Per-warehouse demand by coating
+      for (const c of (wh.byCoating || [])) {
+        rows.push([wh.warehouse, 'PICK', c.coating, '', c.material, '', c.jobs, c.lenses, c.rush > 0 ? 'YES' : ''].join(','));
+      }
+    }
+    // Out of stock items
+    for (const oos of (putList.outOfStock || [])) {
+      const alt = oos.alternatives?.[0];
+      rows.push([
+        'ALL', 'OUT OF STOCK', oos.coating, oos.opc, oos.material,
+        oos.lensesNeeded, oos.jobCount, oos.rushCount > 0 ? 'RUSH' : '',
+        oos.canSubstitute ? (alt ? `USE ${alt.sku} (${alt.qty} avail)` : 'FIND ALT BASE') : 'REORDER'
+      ].join(','));
+    }
+    const headers = ['Warehouse','Action','Coating','OPC','Material','Qty','Jobs','Lenses','Notes'];
     const csv = [headers.join(','), ...rows].join('\n');
     res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': `attachment; filename="put_list_${new Date().toISOString().slice(0,10)}.csv"` });
     res.end(csv);
