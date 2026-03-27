@@ -431,12 +431,14 @@ async function fetchOpenPOs() {
     }
 
     // Get line items for open POs
-    // Try with quantityreceived first, fall back to without if field doesn't exist
+    // Try multiple field names for received quantity
     let lines;
+    let receivedFieldAvailable = false;
+    // Try quantityshiprecv first (NetSuite's actual PO line received field)
     try {
       lines = await suiteql(`
         SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
-               item.class AS classId, tl.quantity, tl.quantityreceived, tl.quantitybilled,
+               item.class AS classId, tl.quantity, tl.quantityshiprecv AS qtyReceived,
                tl.rate, tl.amount
         FROM transactionLine tl
         JOIN transaction t ON t.id = tl.transaction
@@ -445,22 +447,48 @@ async function fetchOpenPOs() {
           AND tl.quantity > 0
         ORDER BY t.tranDate DESC
       `);
-    } catch (e) {
-      console.log('[NetSuite] quantityreceived not available, falling back:', e.message);
-      lines = await suiteql(`
-        SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
-               item.class AS classId, tl.quantity, tl.rate, tl.amount
-        FROM transactionLine tl
-        JOIN transaction t ON t.id = tl.transaction
-        JOIN item ON item.id = tl.item
-        WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
-          AND tl.quantity > 0
-        ORDER BY t.tranDate DESC
-      `);
+      receivedFieldAvailable = true;
+      console.log('[NetSuite] PO lines: using quantityshiprecv for received qty');
+    } catch (e1) {
+      // Try quantityreceived
+      try {
+        lines = await suiteql(`
+          SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
+                 item.class AS classId, tl.quantity, tl.quantityreceived AS qtyReceived,
+                 tl.rate, tl.amount
+          FROM transactionLine tl
+          JOIN transaction t ON t.id = tl.transaction
+          JOIN item ON item.id = tl.item
+          WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+            AND tl.quantity > 0
+          ORDER BY t.tranDate DESC
+        `);
+        receivedFieldAvailable = true;
+        console.log('[NetSuite] PO lines: using quantityreceived for received qty');
+      } catch (e2) {
+        // Fall back to no received field
+        console.log('[NetSuite] No received qty field available, inferring from status. Errors:', e1.message, e2.message);
+        lines = await suiteql(`
+          SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
+                 item.class AS classId, tl.quantity, tl.rate, tl.amount
+          FROM transactionLine tl
+          JOIN transaction t ON t.id = tl.transaction
+          JOIN item ON item.id = tl.item
+          WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+            AND tl.quantity > 0
+          ORDER BY t.tranDate DESC
+        `);
+      }
     }
+    // Log first line keys to see what's available
+    if (lines.length > 0) console.log('[NetSuite] PO line keys:', Object.keys(lines[0]).join(', '));
 
     const CLASS_MAP = { '1': 'Frames', '2': 'Frames', '3': 'Lenses', '4': 'Lenses', '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops' };
     const STATUS_MAP = { 'A': 'Pending Approval', 'B': 'Pending Receipt', 'C': 'Partially Received', 'D': 'Pending Bill', 'E': 'Partially Approved', 'F': 'Pending Billing' };
+
+    // Build status lookup for POs (to infer received from status)
+    const poStatusMap = {};
+    for (const h of headers) poStatusMap[h.id] = h.status;
 
     // Group lines by PO
     const linesByPO = {};
@@ -468,7 +496,15 @@ async function fetchOpenPOs() {
       const poId = line.poid;
       if (!linesByPO[poId]) linesByPO[poId] = [];
       const ordered = parseFloat(line.quantity) || 0;
-      const received = parseFloat(line.quantityreceived) || 0;
+      // Use received field if available, otherwise infer from PO status
+      let received = parseFloat(line.qtyreceived) || 0;
+      if (!receivedFieldAvailable || received === 0) {
+        const poStatus = poStatusMap[poId];
+        // D=Pending Bill, F=Pending Billing → fully received (waiting on invoice)
+        if (poStatus === 'D' || poStatus === 'F') received = ordered;
+        // C=Partially Received → we don't know exact amount without the field
+        // B=Pending Receipt → 0 received (correct)
+      }
       linesByPO[poId].push({
         sku: line.sku,
         name: line.name,
