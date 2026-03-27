@@ -433,7 +433,8 @@ async function fetchOpenPOs() {
     // Get line items for open POs
     const lines = await suiteql(`
       SELECT tl.transaction AS poId, item.itemId AS sku, item.displayName AS name,
-             item.class AS classId, tl.quantity, tl.rate, tl.amount
+             item.class AS classId, tl.quantity, tl.quantityreceived, tl.quantitybilled,
+             tl.rate, tl.amount
       FROM transactionLine tl
       JOIN transaction t ON t.id = tl.transaction
       JOIN item ON item.id = tl.item
@@ -450,13 +451,18 @@ async function fetchOpenPOs() {
     for (const line of lines) {
       const poId = line.poid;
       if (!linesByPO[poId]) linesByPO[poId] = [];
+      const ordered = parseFloat(line.quantity) || 0;
+      const received = parseFloat(line.quantityreceived) || 0;
       linesByPO[poId].push({
         sku: line.sku,
         name: line.name,
         category: CLASS_MAP[line.classid] || 'Other',
-        qty: parseFloat(line.quantity) || 0,
+        qty: ordered,
+        received,
+        remaining: ordered - received,
         rate: parseFloat(line.rate) || 0,
         amount: parseFloat(line.amount) || 0,
+        fulfillPct: ordered > 0 ? Math.round((received / ordered) * 100) : 0,
       });
     }
 
@@ -478,6 +484,8 @@ async function fetchOpenPOs() {
         lines: linesByPO[h.id] || [],
         lineCount: (linesByPO[h.id] || []).length,
         totalQty: (linesByPO[h.id] || []).reduce((s, l) => s + l.qty, 0),
+        totalReceived: (linesByPO[h.id] || []).reduce((s, l) => s + l.received, 0),
+        totalRemaining: (linesByPO[h.id] || []).reduce((s, l) => s + l.remaining, 0),
         totalAmount: (linesByPO[h.id] || []).reduce((s, l) => s + l.amount, 0),
       };
     });
@@ -488,11 +496,11 @@ async function fetchOpenPOs() {
     // Save to SQLite
     try {
       const db = require('./db');
-      const upsert = db.db.prepare(`INSERT OR REPLACE INTO purchase_orders (id, po_number, date, status, status_code, vendor, memo, line_count, total_qty, total_amount, lines_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const upsert = db.db.prepare(`INSERT OR REPLACE INTO purchase_orders (id, po_number, date, status, status_code, vendor, memo, line_count, total_qty, total_received, total_remaining, total_amount, lines_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
       const hist = db.db.prepare(`INSERT INTO purchase_orders_history (po_id, po_number, status, total_qty, vendor) VALUES (?, ?, ?, ?, ?)`);
       const save = db.db.transaction(() => {
         for (const o of orders) {
-          upsert.run(o.id, o.poNumber, o.date, o.status, o.statusCode, o.vendor, o.memo, o.lineCount, o.totalQty, o.totalAmount, JSON.stringify(o.lines));
+          upsert.run(o.id, o.poNumber, o.date, o.status, o.statusCode, o.vendor, o.memo, o.lineCount, o.totalQty, o.totalReceived, o.totalRemaining, o.totalAmount, JSON.stringify(o.lines));
           hist.run(o.id, o.poNumber, o.status, o.totalQty, o.vendor);
         }
       });
@@ -516,15 +524,19 @@ function getOpenPOs(category = null) {
     totalPOs: orders.length,
     totalLines: orders.reduce((s, o) => s + o.lines.length, 0),
     totalQty: orders.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + l.qty, 0), 0),
+    totalReceived: orders.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + (l.received || 0), 0), 0),
+    totalRemaining: orders.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + (l.remaining || 0), 0), 0),
     totalAmount: orders.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + l.amount, 0), 0),
     byStatus: {},
     byCategory: {},
+    byCategoryReceived: {},
   };
 
   for (const o of orders) {
     summary.byStatus[o.status] = (summary.byStatus[o.status] || 0) + 1;
     for (const l of o.lines) {
       summary.byCategory[l.category] = (summary.byCategory[l.category] || 0) + l.qty;
+      summary.byCategoryReceived[l.category] = (summary.byCategoryReceived[l.category] || 0) + (l.received || 0);
     }
   }
 

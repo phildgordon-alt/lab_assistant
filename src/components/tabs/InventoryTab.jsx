@@ -4039,16 +4039,25 @@ function InventoryTab({ ovenServerUrl, settings }) {
             fetch(`${ovenServerUrl}/api/netsuite/pos`).then(r => r.json()).then(setPoData).catch(() => {});
           }
           const orders = poData?.orders || [];
+          const sm = poData?.summary || {};
           let filtered = orders;
+          // Category filter: Lenses, Frames, or All
+          const poCat = poSearch.startsWith('cat:') ? poSearch.slice(4) : null;
+          if (poCat) {
+            filtered = filtered.map(o => ({ ...o, lines: o.lines.filter(l => l.category === poCat) })).filter(o => o.lines.length > 0);
+          }
           if (poFilter !== 'all') filtered = filtered.filter(o => o.status === poFilter);
-          if (poSearch) {
+          if (poSearch && !poCat) {
             const q = poSearch.toLowerCase();
-            filtered = filtered.filter(o => o.poNumber?.toLowerCase().includes(q) || o.vendor?.toLowerCase().includes(q) || o.lines?.some(l => l.sku?.toLowerCase().includes(q)));
+            filtered = filtered.filter(o => o.poNumber?.toLowerCase().includes(q) || o.vendor?.toLowerCase().includes(q) || o.lines?.some(l => l.sku?.toLowerCase().includes(q) || l.name?.toLowerCase().includes(q)));
           }
 
           const statuses = {};
           for (const o of orders) statuses[o.status] = (statuses[o.status] || 0) + 1;
-          const totalQty = filtered.reduce((s, o) => s + o.totalQty, 0);
+          const totalOrdered = filtered.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + (l.qty || 0), 0), 0);
+          const totalReceived = filtered.reduce((s, o) => s + o.lines.reduce((s2, l) => s2 + (l.received || 0), 0), 0);
+          const totalRemaining = totalOrdered - totalReceived;
+          const fulfillPct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0;
           const totalAmount = filtered.reduce((s, o) => s + o.totalAmount, 0);
 
           return (
@@ -4058,23 +4067,59 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono }}>Last sync: {poData?.lastSync ? new Date(poData.lastSync).toLocaleString() : '—'}</div>
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+              {/* Ordered vs Received dashboard */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 16 }}>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>OPEN POs</div>
                   <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{filtered.length}</div>
                 </Card>
                 <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL QTY ORDERED</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{totalQty.toLocaleString()}</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ORDERED</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{totalOrdered.toLocaleString()}</div>
                 </Card>
-                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.textDim}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>TOTAL AMOUNT</div>
-                  <div style={{ fontSize: 24, fontWeight: 800, color: T.text, fontFamily: mono }}>${Math.round(totalAmount).toLocaleString()}</div>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>RECEIVED</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: T.green, fontFamily: mono }}>{totalReceived.toLocaleString()}</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${totalRemaining > 0 ? T.red : T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>REMAINING</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: totalRemaining > 0 ? T.red : T.green, fontFamily: mono }}>{totalRemaining.toLocaleString()}</div>
+                </Card>
+                <Card style={{ padding: 12, textAlign: "center", borderLeft: `4px solid ${fulfillPct >= 90 ? T.green : fulfillPct >= 50 ? T.amber : T.red}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>FULFILLMENT</div>
+                  <div style={{ fontSize: 24, fontWeight: 800, color: fulfillPct >= 90 ? T.green : fulfillPct >= 50 ? T.amber : T.red, fontFamily: mono }}>{fulfillPct}%</div>
                 </Card>
               </div>
 
+              {/* Category breakdown: Lenses vs Frames */}
+              {sm.byCategory && (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
+                  {['Lenses', 'Frames', 'Tops'].filter(c => sm.byCategory[c] > 0).map(cat => {
+                    const ordered = sm.byCategory[cat] || 0;
+                    const received = sm.byCategoryReceived?.[cat] || 0;
+                    const remaining = ordered - received;
+                    const pct = ordered > 0 ? Math.round((received / ordered) * 100) : 0;
+                    const isActive = poCat === cat;
+                    return (
+                      <Card key={cat} onClick={() => setPoSearch(isActive ? '' : `cat:${cat}`)} style={{
+                        padding: 14, cursor: 'pointer', borderLeft: `4px solid ${cat === 'Lenses' ? T.cyan : cat === 'Frames' ? T.purple : T.amber}`,
+                        background: isActive ? `${T.blue}10` : T.surface, border: isActive ? `1px solid ${T.blue}` : undefined
+                      }}>
+                        <div style={{ fontSize: 11, fontWeight: 700, color: T.text, marginBottom: 6 }}>{cat}</div>
+                        <div style={{ display: "flex", gap: 12 }}>
+                          <div><div style={{ fontSize: 16, fontWeight: 800, color: T.amber, fontFamily: mono }}>{ordered.toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>ordered</div></div>
+                          <div><div style={{ fontSize: 16, fontWeight: 800, color: T.green, fontFamily: mono }}>{received.toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>received</div></div>
+                          <div><div style={{ fontSize: 16, fontWeight: 800, color: remaining > 0 ? T.red : T.green, fontFamily: mono }}>{remaining.toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>remaining</div></div>
+                          <div><div style={{ fontSize: 16, fontWeight: 800, color: pct >= 90 ? T.green : pct >= 50 ? T.amber : T.red, fontFamily: mono }}>{pct}%</div><div style={{ fontSize: 8, color: T.textDim }}>received</div></div>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+
               <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
-                <input type="text" placeholder="Search PO#, vendor, SKU..." value={poSearch} onChange={e => setPoSearch(e.target.value)}
+                <input type="text" placeholder="Search PO#, vendor, SKU... or click a category above" value={poSearch} onChange={e => setPoSearch(e.target.value)}
                   style={{ flex: 1, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
                 {['all', ...Object.keys(statuses)].map(s => (
                   <button key={s} onClick={() => setPoFilter(s)} style={{
@@ -4087,26 +4132,30 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
               <Card>
                 <div style={{ maxHeight: 600, overflowY: 'auto' }}>
-                  {filtered.map(o => (
+                  {filtered.map(o => {
+                    const oReceived = o.lines.reduce((s, l) => s + (l.received || 0), 0);
+                    const oRemaining = o.totalQty - oReceived;
+                    const oPct = o.totalQty > 0 ? Math.round((oReceived / o.totalQty) * 100) : 0;
+                    return (
                     <div key={o.id} style={{ borderBottom: `1px solid ${T.border}` }}>
                       <div onClick={() => setPoExpanded(poExpanded === o.id ? null : o.id)} style={{
                         display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', cursor: 'pointer',
                         background: poExpanded === o.id ? `${T.blue}08` : 'transparent'
                       }}>
-                        <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                           <div style={{ fontFamily: mono, fontSize: 13, fontWeight: 700, color: T.text }}>{o.poNumber}</div>
                           <div style={{ fontSize: 11, color: T.textMuted }}>{o.vendor}</div>
                           <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 600, fontFamily: mono,
-                            background: o.statusCode === 'B' ? `${T.amber}20` : o.statusCode === 'C' ? `${T.green}20` : `${T.blue}20`,
-                            color: o.statusCode === 'B' ? T.amber : o.statusCode === 'C' ? T.green : T.blue
+                            background: o.statusCode === 'B' ? `${T.amber}20` : o.statusCode === 'C' ? `${T.green}20` : o.statusCode === 'D' ? `${T.green}20` : `${T.blue}20`,
+                            color: o.statusCode === 'B' ? T.amber : o.statusCode === 'C' || o.statusCode === 'D' ? T.green : T.blue
                           }}>{o.status}</span>
-                          {(o.statusCode === 'B' || o.statusCode === 'C') && <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, fontFamily: mono, background: `${T.blue}20`, color: T.blue }}>ON THE WATER</span>}
                         </div>
-                        <div style={{ display: 'flex', gap: 20, alignItems: 'center', fontFamily: mono, fontSize: 11 }}>
+                        <div style={{ display: 'flex', gap: 16, alignItems: 'center', fontFamily: mono, fontSize: 11 }}>
                           <span style={{ color: T.textMuted }}>{o.date}</span>
-                          <span style={{ color: T.text }}>{o.lineCount} items</span>
-                          <span style={{ color: T.amber }}>Qty: {o.totalQty}</span>
-                          <span style={{ color: T.textDim }}>${Math.round(o.totalAmount).toLocaleString()}</span>
+                          <span style={{ color: T.amber }}>Ord: {o.totalQty}</span>
+                          <span style={{ color: T.green }}>Rcv: {oReceived}</span>
+                          {oRemaining > 0 && <span style={{ color: T.red }}>Rem: {oRemaining}</span>}
+                          <span style={{ fontSize: 10, fontWeight: 700, color: oPct >= 100 ? T.green : oPct >= 50 ? T.amber : T.red }}>{oPct}%</span>
                           <span style={{ fontSize: 12, color: T.textDim }}>{poExpanded === o.id ? '▲' : '▼'}</span>
                         </div>
                       </div>
@@ -4118,19 +4167,23 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>SKU</th>
                                 <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>NAME</th>
                                 <th style={{ padding: '6px 8px', textAlign: 'left', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>CAT</th>
-                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>QTY</th>
-                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>RATE</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.amber, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>ORDERED</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.green, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>RECEIVED</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.red, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>REMAINING</th>
+                                <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>%</th>
                                 <th style={{ padding: '6px 8px', textAlign: 'right', color: T.textDim, fontSize: 9, borderBottom: `1px solid ${T.border}` }}>AMOUNT</th>
                               </tr>
                             </thead>
                             <tbody>
                               {o.lines.map((l, i) => (
-                                <tr key={i} style={{ borderBottom: `1px solid ${T.border}22` }}>
+                                <tr key={i} style={{ borderBottom: `1px solid ${T.border}22`, background: (l.remaining || 0) > 0 ? `${T.red}05` : 'transparent' }}>
                                   <td style={{ padding: '5px 8px', color: T.text, fontWeight: 600 }}>{l.sku}</td>
-                                  <td style={{ padding: '5px 8px', color: T.textMuted, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.name}</td>
+                                  <td style={{ padding: '5px 8px', color: T.textMuted, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{l.name}</td>
                                   <td style={{ padding: '5px 8px', color: T.cyan, fontSize: 9 }}>{l.category}</td>
                                   <td style={{ padding: '5px 8px', textAlign: 'right', color: T.amber }}>{l.qty}</td>
-                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textMuted }}>${l.rate?.toFixed(2) || '—'}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', color: T.green }}>{l.received || 0}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: (l.remaining || 0) > 0 ? T.red : T.textDim }}>{(l.remaining || 0) > 0 ? l.remaining : '—'}</td>
+                                  <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 600, color: (l.fulfillPct || 0) >= 100 ? T.green : (l.fulfillPct || 0) >= 50 ? T.amber : T.red }}>{l.fulfillPct || 0}%</td>
                                   <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textDim }}>${Math.round(l.amount).toLocaleString()}</td>
                                 </tr>
                               ))}
@@ -4138,8 +4191,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           </table>
                         </div>
                       )}
-                    </div>
-                  ))}
+                    </div>);
+                  })}
                   {filtered.length === 0 && <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No purchase orders found</div>}
                 </div>
               </Card>
