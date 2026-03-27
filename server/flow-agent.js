@@ -680,11 +680,18 @@ function computePutList() {
     for (const r of dep) discontinuedSkus.add(r.opc);
   } catch {}
 
-  // Get demand jobs — INCOMING, AT_KARDEX, NEL
-  const demandStages = ['INCOMING', 'AT_KARDEX', 'NEL'];
-  const demandJobs = allJobs.filter(j =>
-    demandStages.includes(j.stage) && j.status !== 'SHIPPED' && j.status !== 'CANCELED'
-  );
+  // Get demand jobs — INCOMING + DVI production queues only
+  // NOT AT_KARDEX (already reserved) and NOT NEL (handled elsewhere)
+  // These are jobs we need to PUT lenses for before they reach the Kardex
+  const demandStages = ['INCOMING'];
+  // Also include jobs in DVI surfacing/SV queues that haven't been picked yet
+  const queueStages = ['SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY'];
+  const demandJobs = allJobs.filter(j => {
+    if (j.status === 'SHIPPED' || j.status === 'CANCELED') return false;
+    if (j.stage === 'AT_KARDEX' || j.stage === 'NEL') return false; // already reserved / handled elsewhere
+    if (j.stage === 'SHIPPED' || j.stage === 'SHIPPING') return false;
+    return demandStages.includes(j.stage);
+  });
 
   // 2. For each job, check stock per warehouse and assign to the best one
   const assignments = { WH1: [], WH2: [] };
