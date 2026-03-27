@@ -1007,16 +1007,23 @@ function generateRecommendations(stageCounts, rates, ovenETAs, machineStatus, sl
     ? (nextCoatingWave - cuttingDrainMin)
     : null;
 
-  // SV push to bridge gaps
+  // SV push to bridge gaps — sized for TODAY only, not multi-day
   if (cuttingDrainMin < 60 || assemblyDrainMin < 60) {
-    // How many SV jobs to push to bridge until coating wave?
-    let bridgeHours = 2; // default: keep 2 hours of buffer
+    // How many hours left in today's shift?
+    const shiftEndHour = 17; // 5 PM
+    const hoursLeftInShift = Math.max(1, shiftEndHour - now.getHours() - now.getMinutes() / 60);
+
+    // Bridge until next coating wave or end of shift, whichever is sooner
+    let bridgeHours = Math.min(hoursLeftInShift, 4); // max 4 hours at a time
     if (nextCoatingWave !== null) {
-      bridgeHours = Math.max(0, (nextCoatingWave - Math.min(cuttingDrainMin, assemblyDrainMin)) / 60);
+      const gapHours = Math.max(0, (nextCoatingWave - Math.min(cuttingDrainMin, assemblyDrainMin)) / 60);
+      bridgeHours = Math.min(bridgeHours, gapHours);
     }
-    const svPushRaw = Math.ceil(bridgeHours * cuttingRate);
-    // Round up to nearest 75 (full put wall), minimum 75
-    const svPush = Math.max(75, Math.ceil(svPushRaw / 75) * 75);
+    bridgeHours = Math.max(1, bridgeHours); // at least 1 hour
+
+    const svPushRaw = Math.ceil(bridgeHours * assemblyRate);
+    // Round up to nearest 75 (full put wall), minimum 75, max 3 walls (225) per push
+    const svPush = Math.min(225, Math.max(75, Math.ceil(svPushRaw / 75) * 75));
     const walls = svPush / 75;
     const drainTime = new Date(now.getTime() + Math.min(cuttingDrainMin, assemblyDrainMin) * 60000);
     const urgency = Math.min(cuttingDrainMin, assemblyDrainMin) < 30 ? 'now' : 'by_time';
