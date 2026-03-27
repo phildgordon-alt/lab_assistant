@@ -663,8 +663,9 @@ function computePutList() {
 
   // Also get full materials list for metadata (name, coatingType)
   const inv = itempath ? itempath.getInventory() : { materials: [] };
+  const allMaterials = inv.materials || [];
   const matMeta = {};
-  for (const m of (inv.materials || [])) {
+  for (const m of allMaterials) {
     if (m.sku) matMeta[m.sku] = { name: m.name, coatingType: m.coatingType, warehouse: m.warehouse };
   }
 
@@ -804,7 +805,6 @@ function computePutList() {
   }
 
   // For substitutable OPCs (surfacing), find same-material alternatives in stock
-  const allMaterials = inv.materials || [];
   for (const oos of Object.values(outOfStock)) {
     if (!oos.canSubstitute) continue;
     const mat = oos.material.toUpperCase();
