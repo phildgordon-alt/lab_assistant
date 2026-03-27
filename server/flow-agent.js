@@ -1635,7 +1635,7 @@ module.exports = {
           station: j.station || '',
           alternatives,
           action: !isSurfacing ? 'REORDER (SV — no substitution)'
-            : alternatives.length > 0 ? `CHANGE BASE: ${alternatives[0].sku} (${alternatives[0].qty} in ${alternatives[0].warehouse})`
+            : alternatives.length > 0 ? `CHANGE BASE: ${alternatives[0].sku} (${alternatives[0].qty} avail${alternatives[0].warehouse ? ' in ' + alternatives[0].warehouse : ''})`
             : 'NO ALTERNATIVES FOUND — REORDER',
         });
       }

@@ -486,6 +486,36 @@ async function fetchOpenPOs() {
     const CLASS_MAP = { '1': 'Frames', '2': 'Frames', '3': 'Lenses', '4': 'Lenses', '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops' };
     const STATUS_MAP = { 'A': 'Pending Approval', 'B': 'Pending Receipt', 'C': 'Partially Received', 'D': 'Pending Bill', 'E': 'Partially Approved', 'F': 'Pending Billing' };
 
+    // Query Item Receipts linked to these POs — shows shipment splits
+    const receiptsByPO = {};
+    try {
+      const poIds = headers.map(h => h.id);
+      // Item Receipts reference PO via createdFrom
+      const receipts = await suiteql(`
+        SELECT t.id, t.tranId AS receiptNumber, t.tranDate AS receiptDate,
+               t.createdFrom AS poId, t.status,
+               SUM(tl.quantity) AS totalQty
+        FROM transaction t
+        JOIN transactionLine tl ON tl.transaction = t.id
+        WHERE t.type = 'ItemRcpt' AND t.createdFrom IN (${poIds.join(',') || '0'})
+          AND tl.quantity > 0
+        GROUP BY t.id, t.tranId, t.tranDate, t.createdFrom, t.status
+        ORDER BY t.tranDate
+      `);
+      for (const r of receipts) {
+        const poId = r.poid;
+        if (!receiptsByPO[poId]) receiptsByPO[poId] = [];
+        receiptsByPO[poId].push({
+          receiptNumber: r.receiptnumber,
+          date: r.receiptdate,
+          qty: parseFloat(r.totalqty) || 0,
+        });
+      }
+      console.log(`[NetSuite] Item Receipts: ${receipts.length} receipts across ${Object.keys(receiptsByPO).length} POs`);
+    } catch (e) {
+      console.log('[NetSuite] Item receipt query failed (non-critical):', e.message);
+    }
+
     // Build status lookup for POs (to infer received from status)
     const poStatusMap = {};
     for (const h of headers) poStatusMap[h.id] = h.status;
@@ -535,6 +565,8 @@ async function fetchOpenPOs() {
         memo: h.memo || '',
         lines: linesByPO[h.id] || [],
         lineCount: (linesByPO[h.id] || []).length,
+        receipts: receiptsByPO[h.id] || [],
+        receiptCount: (receiptsByPO[h.id] || []).length,
         totalQty: (linesByPO[h.id] || []).reduce((s, l) => s + l.qty, 0),
         totalReceived: (linesByPO[h.id] || []).reduce((s, l) => s + l.received, 0),
         totalRemaining: (linesByPO[h.id] || []).reduce((s, l) => s + l.remaining, 0),

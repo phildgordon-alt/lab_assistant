@@ -4155,12 +4155,29 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           <span style={{ color: T.amber }}>Ord: {o.totalQty}</span>
                           <span style={{ color: T.green }}>Rcv: {oReceived}</span>
                           {oRemaining > 0 && <span style={{ color: T.red }}>Rem: {oRemaining}</span>}
+                          {o.receiptCount > 0 && <span style={{ color: T.cyan, fontSize: 9 }}>{o.receiptCount} shipment{o.receiptCount > 1 ? 's' : ''}</span>}
                           <span style={{ fontSize: 10, fontWeight: 700, color: oPct >= 100 ? T.green : oPct >= 50 ? T.amber : T.red }}>{oPct}%</span>
                           <span style={{ fontSize: 12, color: T.textDim }}>{poExpanded === o.id ? '▲' : '▼'}</span>
                         </div>
                       </div>
                       {poExpanded === o.id && o.lines?.length > 0 && (
                         <div style={{ padding: '0 16px 12px 32px', background: `${T.blue}05` }}>
+                          {/* Shipment receipts */}
+                          {o.receipts?.length > 0 && (
+                            <div style={{ marginBottom: 10, padding: '8px 10px', background: `${T.green}08`, borderRadius: 6, border: `1px solid ${T.green}15` }}>
+                              <div style={{ fontSize: 9, color: T.green, fontFamily: mono, fontWeight: 700, marginBottom: 4 }}>SHIPMENTS RECEIVED ({o.receipts.length})</div>
+                              {o.receipts.map((r, ri) => (
+                                <div key={ri} style={{ display: 'flex', gap: 16, fontSize: 10, fontFamily: mono, padding: '2px 0' }}>
+                                  <span style={{ color: T.text, fontWeight: 600 }}>{r.receiptNumber}</span>
+                                  <span style={{ color: T.textMuted }}>{r.date}</span>
+                                  <span style={{ color: T.green }}>{r.qty} units</span>
+                                </div>
+                              ))}
+                              <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginTop: 4, borderTop: `1px solid ${T.border}`, paddingTop: 4 }}>
+                                Total received across {o.receipts.length} shipment{o.receipts.length > 1 ? 's' : ''}: {o.receipts.reduce((s, r) => s + r.qty, 0)} units of {o.totalQty} ordered
+                              </div>
+                            </div>
+                          )}
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
                             <thead>
                               <tr>
