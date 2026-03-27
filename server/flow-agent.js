@@ -1570,6 +1570,104 @@ module.exports = {
     }
   },
 
+  // ── NEL (Not Enough Lenses) — stuck jobs with alternative suggestions ──
+
+  getNelAnalysis() {
+    try {
+      const { dviTrace, dviJobIndex, itempath } = adapters;
+      if (!dviTrace || !dviJobIndex) return null;
+
+      const allJobs = dviTrace.getJobs();
+      const nelJobs = allJobs.filter(j => j.stage === 'NEL' && j.status !== 'SHIPPED' && j.status !== 'CANCELED');
+
+      const inv = itempath ? itempath.getInventory() : { materials: [] };
+      const materials = inv.materials || [];
+
+      // Build stock lookup by material type
+      const stockByMaterial = {}; // material → [{ sku, qty, name, warehouse, coatingType }]
+      for (const m of materials) {
+        if (!m.sku || m.qty <= 0) continue;
+        const ct = (m.coatingType || '').toUpperCase();
+        // Group by broad material category
+        for (const mat of ['PLY', 'BLY', 'H67', 'B67', 'CR39', 'TRV', 'S67']) {
+          if (ct.includes(mat) || (m.name || '').toUpperCase().includes(mat)) {
+            if (!stockByMaterial[mat]) stockByMaterial[mat] = [];
+            stockByMaterial[mat].push({ sku: m.sku, qty: m.qty, name: m.name, warehouse: m.warehouse, coatingType: m.coatingType });
+          }
+        }
+      }
+      // Sort each material group by qty descending
+      for (const arr of Object.values(stockByMaterial)) arr.sort((a, b) => b.qty - a.qty);
+
+      const results = [];
+      for (const j of nelJobs) {
+        const xml = dviJobIndex.get(j.job_id);
+        if (!xml) continue;
+
+        const opc = xml.lensOpc || null;
+        const coating = xml.coating || 'Unknown';
+        const material = xml.lensMat || 'Unknown';
+        const style = xml.lensStyle || '';
+        const lensType = xml.lensType || 'S';
+        const isSurfacing = lensType !== 'S';
+        const rush = j.rush === 'Y' || xml.rush === 'Y';
+
+        // Find alternatives — same material blanks in stock
+        const matKey = material.toUpperCase();
+        const alternatives = [];
+        if (isSurfacing && stockByMaterial[matKey]) {
+          for (const alt of stockByMaterial[matKey].slice(0, 5)) {
+            if (alt.sku === opc) continue; // same SKU, skip
+            alternatives.push(alt);
+          }
+        }
+
+        results.push({
+          jobId: j.job_id,
+          opc,
+          coating,
+          material,
+          style,
+          lensType,
+          isSurfacing,
+          rush,
+          daysInLab: j.daysInLab || 0,
+          station: j.station || '',
+          alternatives,
+          action: !isSurfacing ? 'REORDER (SV — no substitution)'
+            : alternatives.length > 0 ? `CHANGE BASE: ${alternatives[0].sku} (${alternatives[0].qty} in ${alternatives[0].warehouse})`
+            : 'NO ALTERNATIVES FOUND — REORDER',
+        });
+      }
+
+      // Sort: rush first, then surfacing (actionable), then SV, then by daysInLab
+      results.sort((a, b) => {
+        if (a.rush && !b.rush) return -1;
+        if (!a.rush && b.rush) return 1;
+        if (a.isSurfacing && !b.isSurfacing) return -1;
+        if (!a.isSurfacing && b.isSurfacing) return 1;
+        return b.daysInLab - a.daysInLab;
+      });
+
+      const svCount = results.filter(r => !r.isSurfacing).length;
+      const surfCount = results.filter(r => r.isSurfacing).length;
+      const withAlts = results.filter(r => r.alternatives.length > 0).length;
+
+      return {
+        total: results.length,
+        svCount,
+        surfCount,
+        withAlternatives: withAlts,
+        noAlternatives: results.length - withAlts - svCount,
+        rushCount: results.filter(r => r.rush).length,
+        jobs: results,
+      };
+    } catch (e) {
+      console.error('[NEL] Analysis error:', e.message);
+      return null;
+    }
+  },
+
   // ── Catch-up ──
 
   getCatchUp(lineId, scenario) {

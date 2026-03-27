@@ -7705,6 +7705,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [lastRefresh,setLastRefresh]=useState(null);
   const [putList,setPutList]=useState(null);
   const [putListExpanded,setPutListExpanded]=useState(null);
+  const [nelData,setNelData]=useState(null);
 
   // Fetch snapshot + recs on mount and every 60s
   useEffect(()=>{
@@ -7806,6 +7807,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
   // Sub-tab buttons
   const subTabs=[
     {id:"put-list",label:"Put List",icon:"📥"},
+    {id:"nel",label:"NEL",icon:"🚫"},
     {id:"pipeline",label:"Pipeline",icon:"🌊"},
     {id:"recommendations",label:"Recommendations",icon:"📋"},
     {id:"catchup",label:"Catch-Up",icon:"📈"},
@@ -8019,6 +8021,72 @@ function FlowAgentTab({ovenServerUrl,settings}){
           <div style={{display:"flex",justifyContent:"center",gap:12}}>
             <button onClick={()=>window.open(`${base}/api/flow/put-list/report`,'_blank')} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 16px",color:"#60a5fa",fontSize:11,cursor:"pointer",fontFamily:mono}}>Export CSV</button>
             <button onClick={()=>{setPutList(null);fetch(`${base}/api/flow/put-list`).then(r=>r.json()).then(setPutList).catch(()=>{});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,padding:"6px 16px",color:"#9ca3af",fontSize:11,cursor:"pointer",fontFamily:mono}}>Refresh</button>
+          </div>
+        </div>);
+      })()}
+
+      {/* ═══════ NEL VIEW ═══════ */}
+      {subTab==="nel"&&(()=>{
+        if(!nelData){
+          fetch(`${base}/api/flow/nel`).then(r=>r.json()).then(d=>setNelData(d&&!d.error?d:{error:d?.error,total:0,jobs:[]})).catch(()=>setNelData({error:'Failed to load',total:0,jobs:[]}));
+          return <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading NEL analysis...</div>;
+        }
+        if(nelData.error)return <div style={{textAlign:"center",padding:40}}><div style={{color:"#ef4444",fontSize:13,fontFamily:mono,marginBottom:12}}>{nelData.error}</div><button onClick={()=>setNelData(null)} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 16px",color:"#60a5fa",fontSize:11,cursor:"pointer",fontFamily:mono}}>Retry</button></div>;
+        const jobs=nelData.jobs||[];
+        return(
+        <div>
+          {/* KPIs */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+            {[
+              {label:"Total NEL",value:nelData.total,color:"#ef4444"},
+              {label:"Surfacing (can change)",value:nelData.surfCount,color:"#a855f7"},
+              {label:"SV (must reorder)",value:nelData.svCount,color:"#3b82f6"},
+              {label:"With Alternatives",value:nelData.withAlternatives,color:"#22c55e"},
+              {label:"Rush",value:nelData.rushCount,color:nelData.rushCount>0?"#ef4444":"#6b7280"},
+            ].map((k,i)=>(
+              <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:10,textAlign:"center"}}>
+                <div style={{fontSize:9,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{k.label}</div>
+                <div style={{fontSize:20,fontWeight:700,color:k.color,fontFamily:mono}}>{(k.value||0).toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{display:"flex",gap:8,marginBottom:16}}>
+            <button onClick={()=>window.open(`${base}/api/flow/nel/export`,'_blank')} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 16px",color:"#60a5fa",fontSize:11,cursor:"pointer",fontFamily:mono}}>Export CSV for DVI Changes</button>
+            <button onClick={()=>setNelData(null)} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,padding:"6px 16px",color:"#9ca3af",fontSize:11,cursor:"pointer",fontFamily:mono}}>Refresh</button>
+          </div>
+
+          {/* Job list */}
+          <div style={{background:"rgba(0,0,0,0.15)",borderRadius:10,overflow:"hidden"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:mono}}>
+              <thead>
+                <tr style={{background:"rgba(0,0,0,0.3)"}}>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"#6b7280",fontSize:9}}>JOB</th>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"#6b7280",fontSize:9}}>OPC</th>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"#6b7280",fontSize:9}}>COATING</th>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"#6b7280",fontSize:9}}>MATERIAL</th>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"#6b7280",fontSize:9}}>TYPE</th>
+                  <th style={{padding:"8px 10px",textAlign:"right",color:"#6b7280",fontSize:9}}>DAYS</th>
+                  <th style={{padding:"8px 10px",textAlign:"left",color:"#22c55e",fontSize:9}}>ACTION</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.slice(0,200).map((j,i)=>(
+                  <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:j.rush?"rgba(239,68,68,0.06)":j.isSurfacing&&j.alternatives?.length>0?"rgba(34,197,94,0.04)":"transparent"}}>
+                    <td style={{padding:"6px 10px",color:"#e5e7eb",fontWeight:600}}>{j.jobId}{j.rush&&<span style={{color:"#ef4444",marginLeft:6,fontSize:9,fontWeight:700}}>RUSH</span>}</td>
+                    <td style={{padding:"6px 10px",color:"#9ca3af"}}>{j.opc||'—'}</td>
+                    <td style={{padding:"6px 10px",color:"#f59e0b"}}>{j.coating}</td>
+                    <td style={{padding:"6px 10px",color:"#9ca3af"}}>{j.material}</td>
+                    <td style={{padding:"6px 10px",color:j.isSurfacing?"#a855f7":"#3b82f6"}}>{j.isSurfacing?'SURF':'SV'}</td>
+                    <td style={{padding:"6px 10px",textAlign:"right",color:j.daysInLab>3?"#ef4444":j.daysInLab>1?"#f59e0b":"#6b7280"}}>{Math.round(j.daysInLab*10)/10}d</td>
+                    <td style={{padding:"6px 10px",fontSize:10,fontWeight:600,color:j.alternatives?.length>0?"#22c55e":j.isSurfacing?"#f59e0b":"#6b7280"}}>{j.action}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {jobs.length===0&&<div style={{padding:20,textAlign:"center",color:"#6b7280",fontFamily:mono}}>No NEL jobs</div>}
+            {jobs.length>200&&<div style={{padding:10,textAlign:"center",color:"#6b7280",fontFamily:mono,fontSize:10}}>Showing 200 of {jobs.length} — export CSV for full list</div>}
           </div>
         </div>);
       })()}

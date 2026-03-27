@@ -5558,6 +5558,35 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     return json(res, flowAgent.logPush(body.line_id, body.qty, body.operator, body.note));
   }
 
+  // GET /api/flow/nel — NEL analysis with alternative base suggestions
+  if (req.method==='GET' && url.pathname==='/api/flow/nel') {
+    try {
+      const nel = flowAgent.getNelAnalysis();
+      if (!nel) return json(res, { error: 'Flow agent not ready', total: 0, jobs: [] });
+      return json(res, nel);
+    } catch (e) {
+      return json(res, { error: e.message, total: 0, jobs: [] }, 500);
+    }
+  }
+
+  // GET /api/flow/nel/export — CSV export for NEL changes
+  if (req.method==='GET' && url.pathname==='/api/flow/nel/export') {
+    try {
+      const nel = flowAgent.getNelAnalysis();
+      if (!nel) { res.writeHead(503); res.end('Not ready'); return; }
+      const headers = ['Job ID','OPC','Coating','Material','Style','Type','Rush','Days In Lab','Action','Alt SKU','Alt Qty','Alt Warehouse'];
+      const rows = nel.jobs.map(j => [
+        j.jobId, j.opc || '', j.coating, j.material, j.style, j.isSurfacing ? 'SURF' : 'SV',
+        j.rush ? 'YES' : '', Math.round(j.daysInLab * 10) / 10, `"${j.action}"`,
+        j.alternatives[0]?.sku || '', j.alternatives[0]?.qty || '', j.alternatives[0]?.warehouse || ''
+      ].join(','));
+      const csv = [headers.join(','), ...rows].join('\n');
+      res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': `attachment; filename="nel_changes_${new Date().toISOString().slice(0,10)}.csv"` });
+      res.end(csv);
+      return;
+    } catch (e) { res.writeHead(500); res.end(e.message); return; }
+  }
+
   // GET /api/flow/put-list — put-then-pick plan for incoming demand
   if (req.method==='GET' && url.pathname==='/api/flow/put-list') {
     try {
