@@ -653,9 +653,13 @@ function computePutList() {
   const allJobs = dviTrace.getJobs();
 
   // Get per-warehouse stock: { WH1: { sku: qty }, WH2: { sku: qty } }
-  const whStock = itempath ? itempath.getWarehouseStock() : { WH1: {}, WH2: {}, WH3: {} };
+  let whStock = { WH1: {}, WH2: {}, WH3: {} };
+  try {
+    if (itempath?.getWarehouseStock) whStock = itempath.getWarehouseStock();
+  } catch (e) { console.error('[PutList] getWarehouseStock error:', e.message); }
   const wh1Stock = whStock.WH1 || {};
   const wh2Stock = whStock.WH2 || {};
+  console.log(`[PutList] WH stock: WH1=${Object.keys(wh1Stock).length} SKUs, WH2=${Object.keys(wh2Stock).length} SKUs`);
 
   // Also get full materials list for metadata (name, coatingType)
   const inv = itempath ? itempath.getInventory() : { materials: [] };
@@ -845,6 +849,7 @@ function computePutList() {
     };
   }
 
+  console.log(`[PutList] Assigned: WH1=${assignments.WH1.length} jobs, WH2=${assignments.WH2.length} jobs, demandJobs=${demandJobs.length}`);
   const wh1Plan = buildWarehousePlan('WH1', assignments.WH1, putNeeded.WH1);
   const wh2Plan = buildWarehousePlan('WH2', assignments.WH2, putNeeded.WH2);
 
