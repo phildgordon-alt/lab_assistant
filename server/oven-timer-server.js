@@ -5560,15 +5560,18 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
 
   // GET /api/flow/put-list — put-then-pick plan for incoming demand
   if (req.method==='GET' && url.pathname==='/api/flow/put-list') {
-    const putList = flowAgent.getPutList();
-    if (!putList) return json(res, {
-      error: 'Flow agent not ready — waiting for DVI trace + ItemPath',
-      summary: { totalDemandJobs: 0, totalLensesNeeded: 0, totalInStock: 0, totalShortfall: 0, nelCount: 0, fulfillablePct: 0 },
-      svDemand: { jobs: 0, lenses: 0, shortfall: 0, items: [] },
-      surfacingDemand: { jobs: 0, lenses: 0, shortfall: 0, items: [] },
-      putItems: [], cycles: [], totalEstimatedHours: 0,
-    });
-    return json(res, putList);
+    try {
+      const putList = flowAgent.getPutList();
+      if (!putList) return json(res, {
+        error: 'Flow agent not ready — waiting for DVI trace + ItemPath',
+        summary: { totalDemandJobs: 0, totalLensesNeeded: 0, totalInStock: 0, totalShortfall: 0, nelCount: 0, fulfillablePct: 0 },
+        warehouses: [], outOfStock: [], dviDiscontinuedAlerts: [], totalEstimatedHours: 0,
+      });
+      return json(res, putList);
+    } catch (e) {
+      console.error('[PutList] Error:', e.message, e.stack?.split('\n').slice(0,3).join('\n'));
+      return json(res, { error: e.message, summary: { totalDemandJobs: 0, totalLensesNeeded: 0, totalInStock: 0, totalShortfall: 0, fulfillablePct: 0 }, warehouses: [], outOfStock: [], totalEstimatedHours: 0 }, 500);
+    }
   }
 
   // GET /api/flow/put-list/report — downloadable CSV put list with warehouse + out of stock

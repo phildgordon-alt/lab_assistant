@@ -1562,7 +1562,12 @@ module.exports = {
   // ── Put List ──
 
   getPutList() {
-    return computePutList();
+    try {
+      return computePutList();
+    } catch (e) {
+      console.error('[PutList] computePutList crashed:', e.message, e.stack?.split('\n').slice(0,3).join('\n'));
+      return null;
+    }
   },
 
   // ── Catch-up ──
