@@ -7889,6 +7889,37 @@ function FlowAgentTab({ovenServerUrl,settings}){
             </div>
           </div>
 
+          {/* Out of stock alert */}
+          {(putList.outOfStock||[]).length>0&&(
+            <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:10,padding:16,marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#ef4444",letterSpacing:1}}>OUT OF STOCK — {putList.outOfStock.length} OPCs ({sm.outOfStockJobs||0} jobs blocked)</div>
+                <button onClick={()=>setPutListExpanded(putListExpanded==='oos'?null:'oos')} style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:4,padding:"4px 10px",color:"#ef4444",fontSize:10,cursor:"pointer",fontFamily:mono}}>
+                  {putListExpanded==='oos'?'Hide':'Show detail'} {putListExpanded==='oos'?'▲':'▼'}
+                </button>
+              </div>
+              {/* Always show top 5 */}
+              {putList.outOfStock.slice(0, putListExpanded==='oos'?50:5).map((oos,i)=>(
+                <div key={i} style={{display:"flex",gap:12,alignItems:"center",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.04)",fontSize:11,fontFamily:mono}}>
+                  <div style={{minWidth:100,color:"#e5e7eb",fontWeight:600}}>{oos.opc}</div>
+                  <div style={{minWidth:60,color:"#9ca3af"}}>{oos.coating}</div>
+                  <div style={{minWidth:50,color:"#9ca3af"}}>{oos.material}</div>
+                  <div style={{minWidth:60,color:"#f59e0b"}}>{oos.jobCount} jobs</div>
+                  <div style={{minWidth:60,color:"#ef4444"}}>{oos.lensesNeeded} lenses</div>
+                  {oos.rushCount>0&&<div style={{color:"#ef4444",fontWeight:700}}>RUSH x{oos.rushCount}</div>}
+                  <div style={{flex:1,color:oos.canSubstitute?"#22c55e":"#f59e0b",fontWeight:600,fontSize:10}}>
+                    {oos.action}
+                  </div>
+                  {oos.alternatives?.length>0&&(
+                    <div style={{fontSize:9,color:"#6b7280"}}>
+                      Alt: {oos.alternatives[0].sku} ({oos.alternatives[0].qty} avail)
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Per-warehouse plans side by side */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
             {whs.map(wh=>{

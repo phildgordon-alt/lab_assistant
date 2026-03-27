@@ -731,7 +731,59 @@ function computePutList() {
     });
   }
 
-  // 3. Build per-warehouse put list and pick batches
+  // 3. Identify out-of-stock OPCs — zero across ALL warehouses
+  const outOfStock = {};  // opc → { opc, coating, material, style, lensType, jobCount, lensesNeeded, rushCount }
+  for (const j of demandJobs) {
+    const xml = dviJobIndex.get(j.job_id);
+    if (!xml) continue;
+    const opc = xml.lensOpc || null;
+    if (!opc) continue;
+    const totalAcrossWh = (wh1Stock[opc] || 0) + (wh2Stock[opc] || 0) + ((whStock.WH3 || {})[opc] || 0);
+    if (totalAcrossWh <= 0) {
+      if (!outOfStock[opc]) {
+        outOfStock[opc] = {
+          opc, coating: xml.coating || 'Unknown', material: xml.lensMat || 'Unknown',
+          style: xml.lensStyle || '', lensType: xml.lensType || 'S',
+          jobCount: 0, lensesNeeded: 0, rushCount: 0,
+          // For surfacing jobs, suggest looking for same-material alternatives
+          canSubstitute: xml.lensType !== 'S', // surfacing can use different base
+          action: xml.lensType === 'S' ? 'REORDER' : 'FIND ALTERNATIVE OR REORDER',
+        };
+      }
+      outOfStock[opc].jobCount++;
+      outOfStock[opc].lensesNeeded += 2;
+      if (j.rush === 'Y' || xml.rush === 'Y') outOfStock[opc].rushCount++;
+    }
+  }
+
+  // For substitutable OPCs (surfacing), find same-material alternatives in stock
+  const allMaterials = inv.materials || [];
+  for (const oos of Object.values(outOfStock)) {
+    if (!oos.canSubstitute) continue;
+    const mat = oos.material.toUpperCase();
+    const alts = [];
+    for (const m of allMaterials) {
+      if (m.qty <= 0 || m.sku === oos.opc) continue;
+      const mMat = (m.coatingType || '').toUpperCase();
+      // Same material family match
+      if (mat && (m.name || '').toUpperCase().includes(mat)) {
+        alts.push({ sku: m.sku, name: m.name, qty: m.qty, warehouse: m.warehouse });
+      }
+    }
+    if (alts.length > 0) {
+      alts.sort((a, b) => b.qty - a.qty);
+      oos.alternatives = alts.slice(0, 5);
+      oos.action = `SUBSTITUTE: ${alts[0].sku} (${alts[0].qty} in ${alts[0].warehouse})`;
+    }
+  }
+
+  const outOfStockList = Object.values(outOfStock).sort((a, b) => {
+    if (a.rushCount > 0 && b.rushCount === 0) return -1;
+    if (a.rushCount === 0 && b.rushCount > 0) return 1;
+    return b.jobCount - a.jobCount;
+  });
+
+  // 4. Build per-warehouse put list and pick batches
   function buildWarehousePlan(wh, jobs, puts) {
     // Sort jobs: rush first, then NEL, then by daysInLab desc
     jobs.sort((a, b) => {
@@ -865,8 +917,11 @@ function computePutList() {
       fulfillablePct: totalLensesNeeded > 0 ? Math.round((totalInStock / totalLensesNeeded) * 100) : 100,
       wh1Jobs: wh1Plan.totalJobs,
       wh2Jobs: wh2Plan.totalJobs,
+      outOfStockCount: outOfStockList.length,
+      outOfStockJobs: outOfStockList.reduce((s, o) => s + o.jobCount, 0),
     },
     warehouses: [wh1Plan, wh2Plan],
+    outOfStock: outOfStockList.slice(0, 50),
     totalEstimatedMinutes: wh1Plan.totalMinutes + wh2Plan.totalMinutes,
     totalEstimatedHours: Math.round((wh1Plan.totalMinutes + wh2Plan.totalMinutes) / 60 * 10) / 10,
   };
