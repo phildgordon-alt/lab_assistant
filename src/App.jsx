@@ -7703,6 +7703,8 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [showExpired,setShowExpired]=useState(false);
   const [catchUpScenario,setCatchUpScenario]=useState({assemblers:"",jobsPerAssemblerHr:"",shiftHours:"",shifts:"",incomingPerDay:"",targetDays:"",targetBacklog:""});
   const [lastRefresh,setLastRefresh]=useState(null);
+  const [putList,setPutList]=useState(null);
+  const [putListExpanded,setPutListExpanded]=useState(null);
 
   // Fetch snapshot + recs on mount and every 60s
   useEffect(()=>{
@@ -7803,6 +7805,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
 
   // Sub-tab buttons
   const subTabs=[
+    {id:"put-list",label:"Put List",icon:"📥"},
     {id:"pipeline",label:"Pipeline",icon:"🌊"},
     {id:"recommendations",label:"Recommendations",icon:"📋"},
     {id:"catchup",label:"Catch-Up",icon:"📈"},
@@ -7843,6 +7846,128 @@ function FlowAgentTab({ovenServerUrl,settings}){
           </button>
         ))}
       </div>
+
+      {/* ═══════ PUT LIST VIEW ═══════ */}
+      {subTab==="put-list"&&(()=>{
+        if(!putList){
+          fetch(`${base}/api/flow/put-list`).then(r=>r.ok?r.json():null).then(setPutList).catch(()=>{});
+          return <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading put list...</div>;
+        }
+        const sm=putList.summary||{};
+        const cycles=putList.cycles||[];
+        return(
+        <div>
+          {/* Summary KPIs */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:10,marginBottom:16}}>
+            {[
+              {label:"Demand Jobs",value:sm.totalDemandJobs||0,color:"#e5e7eb"},
+              {label:"Lenses Needed",value:sm.totalLensesNeeded||0,color:"#f59e0b"},
+              {label:"In Stock",value:sm.totalInStock||0,color:"#22c55e"},
+              {label:"Shortfall (PUT)",value:sm.totalShortfall||0,color:sm.totalShortfall>0?"#ef4444":"#22c55e"},
+              {label:"NEL Jobs",value:sm.nelCount||0,color:sm.nelCount>0?"#ef4444":"#6b7280"},
+            ].map((k,i)=>(
+              <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:12,textAlign:"center"}}>
+                <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{k.label}</div>
+                <div style={{fontSize:22,fontWeight:700,color:k.color,fontFamily:mono}}>{k.value.toLocaleString()}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Fulfillment bar */}
+          <div style={{background:"rgba(0,0,0,0.2)",borderRadius:8,padding:12,marginBottom:16}}>
+            <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"#6b7280",fontFamily:mono,marginBottom:4}}>
+              <span>Fulfillment: {sm.fulfillablePct||0}% of demand in stock</span>
+              <span>Est. {putList.totalEstimatedHours||0}h total put+pick time</span>
+            </div>
+            <div style={{height:8,background:"rgba(255,255,255,0.06)",borderRadius:4,overflow:"hidden"}}>
+              <div style={{height:"100%",width:`${sm.fulfillablePct||0}%`,background:sm.fulfillablePct>=90?"#22c55e":sm.fulfillablePct>=70?"#f59e0b":"#ef4444",borderRadius:4,transition:"width 0.3s"}}/>
+            </div>
+          </div>
+
+          {/* SV vs Surfacing split */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            {[{label:"Single Vision",data:putList.svDemand,color:"#3b82f6"},{label:"Surfacing",data:putList.surfacingDemand,color:"#a855f7"}].map(line=>(
+              <div key={line.label} style={{background:"rgba(0,0,0,0.2)",borderRadius:8,padding:14,borderLeft:`4px solid ${line.color}`}}>
+                <div style={{fontSize:12,fontWeight:700,color:line.color,fontFamily:mono,marginBottom:8}}>{line.label}</div>
+                <div style={{display:"flex",gap:16}}>
+                  <div><div style={{fontSize:18,fontWeight:700,color:"#e5e7eb",fontFamily:mono}}>{line.data?.jobs||0}</div><div style={{fontSize:9,color:"#6b7280"}}>jobs</div></div>
+                  <div><div style={{fontSize:18,fontWeight:700,color:"#f59e0b",fontFamily:mono}}>{line.data?.lenses||0}</div><div style={{fontSize:9,color:"#6b7280"}}>lenses</div></div>
+                  <div><div style={{fontSize:18,fontWeight:700,color:line.data?.shortfall>0?"#ef4444":"#22c55e",fontFamily:mono}}>{line.data?.shortfall||0}</div><div style={{fontSize:9,color:"#6b7280"}}>shortfall</div></div>
+                </div>
+                {/* Expandable lens list */}
+                <button onClick={()=>setPutListExpanded(putListExpanded===line.label?null:line.label)} style={{marginTop:8,background:"rgba(255,255,255,0.05)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:4,padding:"4px 10px",color:"#9ca3af",fontSize:10,cursor:"pointer",fontFamily:mono}}>
+                  {putListExpanded===line.label?"Hide":"Show"} lens detail ({line.data?.items?.length||0} types) {putListExpanded===line.label?"▲":"▼"}
+                </button>
+                {putListExpanded===line.label&&(
+                  <div style={{marginTop:8,maxHeight:300,overflowY:"auto"}}>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,fontFamily:mono}}>
+                      <thead><tr style={{background:"rgba(0,0,0,0.3)"}}>
+                        <th style={{padding:"4px 6px",textAlign:"left",color:"#6b7280",fontSize:9}}>COATING</th>
+                        <th style={{padding:"4px 6px",textAlign:"left",color:"#6b7280",fontSize:9}}>MATERIAL</th>
+                        <th style={{padding:"4px 6px",textAlign:"right",color:"#6b7280",fontSize:9}}>NEED</th>
+                        <th style={{padding:"4px 6px",textAlign:"right",color:"#6b7280",fontSize:9}}>STOCK</th>
+                        <th style={{padding:"4px 6px",textAlign:"right",color:"#ef4444",fontSize:9}}>PUT</th>
+                        <th style={{padding:"4px 6px",textAlign:"center",color:"#6b7280",fontSize:9}}>RUSH</th>
+                      </tr></thead>
+                      <tbody>{(line.data?.items||[]).map((p,i)=>(
+                        <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.04)",background:p.shortfall>0?"rgba(239,68,68,0.05)":"transparent"}}>
+                          <td style={{padding:"4px 6px",color:"#e5e7eb"}}>{p.coating}</td>
+                          <td style={{padding:"4px 6px",color:"#9ca3af"}}>{p.material}</td>
+                          <td style={{padding:"4px 6px",textAlign:"right",color:"#f59e0b"}}>{p.lensesNeeded}</td>
+                          <td style={{padding:"4px 6px",textAlign:"right",color:"#22c55e"}}>{p.inStock}</td>
+                          <td style={{padding:"4px 6px",textAlign:"right",fontWeight:700,color:p.shortfall>0?"#ef4444":"#6b7280"}}>{p.shortfall>0?p.shortfall:"—"}</td>
+                          <td style={{padding:"4px 6px",textAlign:"center",color:p.hasRush?"#ef4444":"#6b7280"}}>{p.hasRush?"RUSH":""}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Put-Then-Pick Cycles */}
+          {cycles.length>0&&(
+            <div style={{background:"rgba(59,130,246,0.06)",border:"1px solid rgba(59,130,246,0.15)",borderRadius:10,padding:16,marginBottom:16}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,color:"#60a5fa",letterSpacing:1}}>PUT-THEN-PICK SCHEDULE</div>
+                <button onClick={()=>window.open(`${base}/api/flow/put-list/report`,'_blank')} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:4,padding:"4px 12px",color:"#60a5fa",fontSize:10,cursor:"pointer",fontFamily:mono}}>EXPORT CSV</button>
+              </div>
+              {cycles.map(c=>(
+                <div key={c.cycle} style={{display:"grid",gridTemplateColumns:"auto 1fr 1fr",gap:12,alignItems:"stretch",marginBottom:8}}>
+                  <div style={{background:"rgba(59,130,246,0.15)",borderRadius:6,padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"center",minWidth:50}}>
+                    <div style={{fontFamily:mono,fontSize:14,fontWeight:800,color:"#60a5fa"}}>#{c.cycle}</div>
+                  </div>
+                  {/* PUT phase */}
+                  <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.15)",borderRadius:6,padding:10}}>
+                    <div style={{fontSize:10,color:"#ef4444",fontFamily:mono,fontWeight:700,marginBottom:4}}>PUT {c.putPhase.totalLenses} lenses ({c.putPhase.estimatedMinutes} min)</div>
+                    {c.putPhase.items.map((p,i)=>(
+                      <div key={i} style={{fontSize:10,color:"#d1d5db",fontFamily:mono}}>{p.putQty}× {p.coating} {p.material}</div>
+                    ))}
+                    {c.putPhase.items.length===0&&<div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>No puts needed</div>}
+                  </div>
+                  {/* PICK phase */}
+                  <div style={{background:"rgba(34,197,94,0.06)",border:"1px solid rgba(34,197,94,0.15)",borderRadius:6,padding:10}}>
+                    <div style={{fontSize:10,color:"#22c55e",fontFamily:mono,fontWeight:700,marginBottom:4}}>PICK {c.pickPhase.totalJobs} jobs ({c.pickPhase.estimatedMinutes} min)</div>
+                    {c.pickPhase.items.map((p,i)=>(
+                      <div key={i} style={{fontSize:10,color:"#d1d5db",fontFamily:mono}}>{p.pickJobs}× {p.coating} {p.material}</div>
+                    ))}
+                    {c.pickPhase.items.length===0&&<div style={{fontSize:10,color:"#6b7280",fontFamily:mono}}>No picks this cycle</div>}
+                  </div>
+                </div>
+              ))}
+              <div style={{fontSize:10,color:"#6b7280",fontFamily:mono,marginTop:8,textAlign:"center"}}>
+                {cycles.length} cycles — {putList.totalEstimatedHours}h total — alternating ~{Math.round((cycles[0]?.totalMinutes||60)/60*10)/10}h cycles
+              </div>
+            </div>
+          )}
+
+          {/* Refresh */}
+          <div style={{textAlign:"center"}}>
+            <button onClick={()=>{setPutList(null);fetch(`${base}/api/flow/put-list`).then(r=>r.json()).then(setPutList).catch(()=>{});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,padding:"6px 16px",color:"#9ca3af",fontSize:11,cursor:"pointer",fontFamily:mono}}>Refresh Put List</button>
+          </div>
+        </div>);
+      })()}
 
       {/* ═══════ PIPELINE VIEW ═══════ */}
       {subTab==="pipeline"&&(

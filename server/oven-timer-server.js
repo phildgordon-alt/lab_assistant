@@ -270,6 +270,7 @@ function parseDviXml(xml) {
     coatType: getAttr('Coat', 'Type'), // "Lab", "House", etc.
     lensType: getAttr('Lens', 'Type'), // P=progressive, S=SV, B=bifocal
     lensStyle: getLens('Style'),
+    lensOpc: getLens('OPC'),  // Optical Product Code — maps to Kardex SKU
     lensMat: getLens('Mat'),
     lensThick: getLens('Thick'),
     lensColor: getLens('Color'),
@@ -5525,6 +5526,28 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     const body = await readBody(req);
     if (!body.line_id || !body.qty) return json(res, { error: 'line_id and qty required' }, 400);
     return json(res, flowAgent.logPush(body.line_id, body.qty, body.operator, body.note));
+  }
+
+  // GET /api/flow/put-list — put-then-pick plan for incoming demand
+  if (req.method==='GET' && url.pathname==='/api/flow/put-list') {
+    const putList = flowAgent.getPutList();
+    if (!putList) return json(res, { error: 'Flow agent not ready — waiting for DVI trace + ItemPath' }, 503);
+    return json(res, putList);
+  }
+
+  // GET /api/flow/put-list/report — downloadable CSV put list
+  if (req.method==='GET' && url.pathname==='/api/flow/put-list/report') {
+    const putList = flowAgent.getPutList();
+    if (!putList) { res.writeHead(503); res.end('Not ready'); return; }
+    const headers = ['Priority','Coating','Material','Style','OPC','Lenses Needed','In Stock','Shortfall','Line','Rush'];
+    const rows = (putList.putItems || []).map((p, i) => [
+      i + 1, p.coating, p.material, p.style, p.opc || '', p.lensesNeeded, p.inStock, p.shortfall,
+      p.lensType === 'S' ? 'SV' : 'Surfacing', p.hasRush ? 'YES' : '',
+    ].join(','));
+    const csv = [headers.join(','), ...rows].join('\n');
+    res.writeHead(200, { 'Content-Type': 'text/csv', 'Content-Disposition': `attachment; filename="put_list_${new Date().toISOString().slice(0,10)}.csv"` });
+    res.end(csv);
+    return;
   }
 
   // GET /api/flow/history — push history
