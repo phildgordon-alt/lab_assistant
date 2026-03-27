@@ -7876,18 +7876,20 @@ function FlowAgentTab({ovenServerUrl,settings}){
           )}
 
           {/* Summary KPIs */}
-          <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10,marginBottom:16}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:8,marginBottom:16}}>
             {[
               {label:"Demand Jobs",value:sm.totalDemandJobs||0,color:"#e5e7eb"},
               {label:"Lenses Needed",value:sm.totalLensesNeeded||0,color:"#f59e0b"},
               {label:"In Stock",value:sm.totalInStock||0,color:"#22c55e"},
               {label:"Shortfall (PUT)",value:sm.totalShortfall||0,color:sm.totalShortfall>0?"#ef4444":"#22c55e"},
+              {label:"Out of Stock",value:sm.outOfStockJobs||0,color:(sm.outOfStockJobs||0)>0?"#ef4444":"#22c55e",sub:`${sm.outOfStockCount||0} OPCs — reorder`},
               {label:"WH1 Jobs",value:sm.wh1Jobs||0,color:"#3b82f6"},
               {label:"WH2 Jobs",value:sm.wh2Jobs||0,color:"#a855f7"},
             ].map((k,i)=>(
               <div key={i} style={{background:"rgba(0,0,0,0.2)",borderRadius:6,padding:10,textAlign:"center"}}>
                 <div style={{fontSize:9,color:"#6b7280",fontFamily:mono,marginBottom:2}}>{k.label}</div>
                 <div style={{fontSize:20,fontWeight:700,color:k.color,fontFamily:mono}}>{(k.value||0).toLocaleString()}</div>
+                {k.sub&&<div style={{fontSize:8,color:"#6b7280",fontFamily:mono,marginTop:1}}>{k.sub}</div>}
               </div>
             ))}
           </div>
