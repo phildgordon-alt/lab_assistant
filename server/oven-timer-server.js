@@ -218,35 +218,65 @@ function parseDviXml(xml) {
   const get = (tag) => { const m = xml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
   const getAttr = (tag, attr) => { const m = xml.match(new RegExp(`<${tag}[^>]*\\s${attr}="([^"]*)"`)); return m ? m[1] : null; };
 
-  // Extract lens-scoped fields from within <Lens> block
+  // Extract lens-scoped fields — DVI XML uses <RightEye> and <LeftEye> blocks
+  // with attributes (Style, Material, Type, OPC, etc.) and child elements (<Coat>)
+  const rightEyeBlock = xml.match(/<RightEye[^>]*(?:\/>|>[\s\S]*?<\/RightEye>)/);
+  const leftEyeBlock = xml.match(/<LeftEye[^>]*(?:\/>|>[\s\S]*?<\/LeftEye>)/);
+  // Also try legacy <Lens> block format
   const lensBlock = xml.match(/<Lens[^>]*>([\s\S]*?)<\/Lens>/);
+  // Use RightEye as primary (both eyes have same OPC/style/material for a job)
+  const eyeXml = rightEyeBlock ? rightEyeBlock[0] : (leftEyeBlock ? leftEyeBlock[0] : '');
   const lensXml = lensBlock ? lensBlock[0] : '';
-  const getLens = (tag) => { const m = lensXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
+  // Get attribute from eye block, fall back to lens block child element
+  const getEyeAttr = (attr) => { const m = eyeXml.match(new RegExp(`\\s${attr}="([^"]*)"`)); return m ? m[1] : null; };
+  const getLens = (tag) => {
+    // First try as attribute on RightEye/LeftEye
+    const attrVal = getEyeAttr(tag);
+    if (attrVal) return attrVal;
+    // Then try as child element in eye block
+    const eyeChild = eyeXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`));
+    if (eyeChild) return eyeChild[1].trim();
+    // Fall back to legacy <Lens> block
+    const lensChild = lensXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`));
+    return lensChild ? lensChild[1].trim() : null;
+  };
 
   // Extract frame-scoped fields
   const frameBlock = xml.match(/<Frame[^>]*>([\s\S]*?)<\/Frame>/);
   const frameXml = frameBlock ? frameBlock[0] : '';
   const getFrame = (tag) => { const m = frameXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
 
-  // Extract Rx data for each eye
-  const rxBlocks = xml.match(/<Rx\s+Eye="([RL])">([\s\S]*?)<\/Rx>/g) || [];
+  // Extract Rx data for each eye — from <RightEye>/<LeftEye> attributes or legacy <Rx> blocks
   const rx = {};
-  for (const block of rxBlocks) {
-    const eyeMatch = block.match(/Eye="([RL])"/);
-    if (!eyeMatch) continue;
-    const eye = eyeMatch[1]; // R or L
-    const sph = block.match(/<Sphere>([^<]*)<\/Sphere>/);
-    const cyl = block.match(/<Cylinder[^>]*>([^<]*)<\/Cylinder>/);
-    const axis = block.match(/<Cylinder\s+Axis="([^"]*)"/);
-    const pd = block.match(/<PD>([^<]*)<\/PD>/);
-    const addPow = block.match(/<Power>([^<]*)<\/Power>/);
+  const eyeBlocks = [
+    { eye: 'R', block: rightEyeBlock ? rightEyeBlock[0] : null },
+    { eye: 'L', block: leftEyeBlock ? leftEyeBlock[0] : null },
+  ];
+  for (const { eye, block } of eyeBlocks) {
+    if (!block) continue;
+    const attr = (name) => { const m = block.match(new RegExp(`\\s${name}="([^"]*)"`)); return m ? m[1] : null; };
     rx[eye] = {
-      sphere: sph ? sph[1] : null,
-      cylinder: cyl ? cyl[1] : null,
-      axis: axis ? axis[1] : null,
-      pd: pd ? pd[1] : null,
-      add: addPow ? addPow[1] : null,
+      sphere: attr('Sphere'),
+      cylinder: attr('Cylinder'),
+      axis: attr('CylAxis') || attr('Axis'),
+      pd: attr('DistancePD') || attr('PD'),
+      add: attr('Add'),
     };
+  }
+  // Fall back to legacy <Rx Eye="R/L"> blocks if no RightEye/LeftEye found
+  if (!rx.R && !rx.L) {
+    const rxBlocks = xml.match(/<Rx\s+Eye="([RL])">([\s\S]*?)<\/Rx>/g) || [];
+    for (const block of rxBlocks) {
+      const eyeMatch = block.match(/Eye="([RL])"/);
+      if (!eyeMatch) continue;
+      const eye = eyeMatch[1];
+      const sph = block.match(/<Sphere>([^<]*)<\/Sphere>/);
+      const cyl = block.match(/<Cylinder[^>]*>([^<]*)<\/Cylinder>/);
+      const axis = block.match(/<Cylinder\s+Axis="([^"]*)"/);
+      const pd = block.match(/<PD>([^<]*)<\/PD>/);
+      const addPow = block.match(/<Power>([^<]*)<\/Power>/);
+      rx[eye] = { sphere: sph?sph[1]:null, cylinder: cyl?cyl[1]:null, axis: axis?axis[1]:null, pd: pd?pd[1]:null, add: addPow?addPow[1]:null };
+    }
   }
 
   // Extract OrderData attributes (ship date, entry date, etc.)
@@ -268,10 +298,10 @@ function parseDviXml(xml) {
     origin: get('Origin'),
     coating: getLens('Coat') || get('Coat'),
     coatType: getAttr('Coat', 'Type'), // "Lab", "House", etc.
-    lensType: getAttr('Lens', 'Type'), // P=progressive, S=SV, B=bifocal
+    lensType: getEyeAttr('Type') || getAttr('Lens', 'Type'), // P=progressive, S=SV, B=bifocal
     lensStyle: getLens('Style'),
-    lensOpc: getLens('OPC'),  // Optical Product Code — maps to Kardex SKU
-    lensMat: getLens('Mat'),
+    lensOpc: getEyeAttr('OPC') || getLens('OPC'),  // Optical Product Code — maps to Kardex SKU
+    lensMat: getEyeAttr('Material') || getLens('Mat'),
     lensThick: getLens('Thick'),
     lensColor: getLens('Color'),
     frameStyle: getFrame('Style'),
