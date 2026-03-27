@@ -1600,11 +1600,20 @@ module.exports = {
         }
       }
 
-      // Get materials for alternative suggestions
+      // Get semi-finished materials for alternative suggestions (not SV/plano)
       const inv = itempath ? itempath.getInventory() : { materials: [] };
+      const isSF = (sku, name, ct) => {
+        const s = (sku || '').toUpperCase(), n = (name || '').toUpperCase(), c = (ct || '').toUpperCase();
+        if (c.includes(' SV') || c === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
+        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
+        if (n.includes('SEMI') || n.includes('SF ') || c.includes('SF ')) return true;
+        if (s.startsWith('4800') && (n.includes('ENDLESS') || n.includes('PROG') || n.includes('DIGITAL'))) return true;
+        return !c.includes('SV');
+      };
       const stockByMaterial = {};
       for (const m of (inv.materials || [])) {
         if (!m.sku || m.qty <= 0) continue;
+        if (!isSF(m.sku, m.name, m.coatingType)) continue;
         const matKeys = ['PLY', 'BLY', 'H67', 'B67', 'CR39', 'TRV', 'S67'];
         for (const mat of matKeys) {
           if ((m.coatingType || '').toUpperCase().includes(mat) || (m.name || '').toUpperCase().includes(mat)) {
@@ -1759,20 +1768,38 @@ module.exports = {
       const inv = itempath ? itempath.getInventory() : { materials: [] };
       const materials = inv.materials || [];
 
-      // Build stock lookup by material type
+      // Build stock lookup — ONLY semi-finished blanks, grouped by material
+      // Semi-finished SKUs: typically start with 062, 026, 001, or have "SF" in name/coating
+      // Single vision / plano: typically start with 4800, 8820, or have "SV" in coating type
+      const isSemiFinished = (sku, name, coatingType) => {
+        const s = (sku || '').toUpperCase();
+        const n = (name || '').toUpperCase();
+        const ct = (coatingType || '').toUpperCase();
+        // Exclude if clearly SV/plano/finished
+        if (ct.includes(' SV') || ct === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
+        // Include if SKU matches semi-finished prefixes or has SF marker
+        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
+        if (n.includes('SEMI') || n.includes('SF ') || ct.includes('SF ')) return true;
+        // 4800 prefix with progressive/digital style = semi-finished
+        if (s.startsWith('4800') && (n.includes('ENDLESS') || n.includes('PROG') || n.includes('DIGITAL'))) return true;
+        // Default: if not clearly SV, treat as potential semi-finished
+        return !ct.includes('SV');
+      };
+
       const stockByMaterial = {}; // material → [{ sku, qty, name, warehouse, coatingType }]
       for (const m of materials) {
-        if (!m.sku || m.qty <= 0) continue;
+        if (!m.sku || m.qty <= 0) continue; // must be in stock
+        if (!isSemiFinished(m.sku, m.name, m.coatingType)) continue; // semi-finished only
         const ct = (m.coatingType || '').toUpperCase();
-        // Group by broad material category
+        const n = (m.name || '').toUpperCase();
         for (const mat of ['PLY', 'BLY', 'H67', 'B67', 'CR39', 'TRV', 'S67']) {
-          if (ct.includes(mat) || (m.name || '').toUpperCase().includes(mat)) {
+          if (ct.includes(mat) || n.includes(mat)) {
             if (!stockByMaterial[mat]) stockByMaterial[mat] = [];
             stockByMaterial[mat].push({ sku: m.sku, qty: m.qty, name: m.name, warehouse: m.warehouse, coatingType: m.coatingType });
           }
         }
       }
-      // Sort each material group by qty descending
+      // Sort each material group by qty descending (highest stock first)
       for (const arr of Object.values(stockByMaterial)) arr.sort((a, b) => b.qty - a.qty);
 
       const results = [];
