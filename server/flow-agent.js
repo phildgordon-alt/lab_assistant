@@ -631,188 +631,223 @@ function computeExpiresAt(pushBy, urgency) {
 }
 
 /**
- * Generate the put-then-pick plan.
+ * Generate the put-then-pick plan — WAREHOUSE AWARE.
  *
- * Looks at incoming DVI jobs, extracts the lens OPCs/types they need,
- * checks Kardex inventory, and builds a cycle plan:
- *   PUT batch → PICK batch → PUT batch → PICK batch
+ * WH1 = Carousels 1,2,3 + Put Wall 1 (75 positions)
+ * WH2 = Carousels 4,5,6 + Put Wall 2 (75 positions)
  *
- * Each cycle is time-boxed so operators alternate between stocking
- * and picking instead of doing all of one then all of the other.
+ * No mirroring — each job is assigned to ONE warehouse.
+ * The put list tells operators which warehouse to stock,
+ * and jobs are routed to the warehouse with the best stock match.
+ *
+ * Put-then-pick cycles are per-warehouse, sized to put wall capacity (75).
  */
 function computePutList() {
   const { dviTrace, dviJobIndex, itempath } = adapters;
   if (!dviTrace || !dviJobIndex) return null;
 
-  const allJobs = dviTrace.getJobs();
-  const inv = itempath ? itempath.getInventory() : { materials: [] };
-  const materials = inv.materials || [];
+  const PUT_WALL_SIZE = 75;
+  const PUT_MINUTES_PER_LENS = 2;
+  const PICK_MINUTES_PER_JOB = 1.5; // 3 picks × 0.5 min
 
-  // Build a lookup: sku → { qty, name, warehouse, coatingType }
-  const skuStock = {};
-  for (const m of materials) {
-    if (m.sku && m.qty > 0) {
-      skuStock[m.sku] = { qty: m.qty, name: m.name, warehouse: m.warehouse, coatingType: m.coatingType };
-    }
+  const allJobs = dviTrace.getJobs();
+
+  // Get per-warehouse stock: { WH1: { sku: qty }, WH2: { sku: qty } }
+  const whStock = itempath ? itempath.getWarehouseStock() : { WH1: {}, WH2: {}, WH3: {} };
+  const wh1Stock = whStock.WH1 || {};
+  const wh2Stock = whStock.WH2 || {};
+
+  // Also get full materials list for metadata (name, coatingType)
+  const inv = itempath ? itempath.getInventory() : { materials: [] };
+  const matMeta = {};
+  for (const m of (inv.materials || [])) {
+    if (m.sku) matMeta[m.sku] = { name: m.name, coatingType: m.coatingType, warehouse: m.warehouse };
   }
 
-  // 1. Get all jobs that need lenses — INCOMING, AT_KARDEX, and NEL
+  // 1. Get demand jobs — INCOMING, AT_KARDEX, NEL
   const demandStages = ['INCOMING', 'AT_KARDEX', 'NEL'];
   const demandJobs = allJobs.filter(j =>
     demandStages.includes(j.stage) && j.status !== 'SHIPPED' && j.status !== 'CANCELED'
   );
 
-  // 2. Extract lens demand per job
-  const lensDemand = {};  // opc/coating+mat → { count, jobs[], opc, coating, material, style }
-  const jobDetails = [];
+  // 2. For each job, check stock per warehouse and assign to the best one
+  const assignments = { WH1: [], WH2: [] };
+  const putNeeded = { WH1: {}, WH2: {} }; // sku → qty to put
+  let totalLensesNeeded = 0, totalInStock = 0, totalShortfall = 0;
+
   for (const j of demandJobs) {
     const xml = dviJobIndex.get(j.job_id);
     if (!xml) continue;
 
-    // Build a lens identifier — prefer OPC, fall back to coating+material
     const opc = xml.lensOpc || null;
     const coating = xml.coating || 'Unknown';
     const material = xml.lensMat || 'Unknown';
     const style = xml.lensStyle || '';
     const lensType = xml.lensType || 'S';
-    const key = opc || `${coating}|${material}`;
-
-    if (!lensDemand[key]) {
-      lensDemand[key] = { count: 0, jobs: [], opc, coating, material, style, lensType };
-    }
-    lensDemand[key].count += 2; // 2 lenses per job (R + L)
-    lensDemand[key].jobs.push(j.job_id);
-
     const line = lensType === 'S' ? 'sv' : 'surfacing';
-    jobDetails.push({
-      jobId: j.job_id, stage: j.stage, line, coating, material, style, opc,
-      rush: j.rush === 'Y' || xml.rush === 'Y',
-      daysInLab: j.daysInLab || 0,
-    });
-  }
+    const rush = j.rush === 'Y' || xml.rush === 'Y';
+    const lensesNeeded = 2; // R + L
+    totalLensesNeeded += lensesNeeded;
 
-  // 3. Check stock for each demand — find shortfalls
-  const putItems = [];
-  let totalLensesNeeded = 0;
-  let totalInStock = 0;
-  let totalShortfall = 0;
+    // Check stock in each warehouse for this OPC
+    const wh1Qty = opc ? (wh1Stock[opc] || 0) : 0;
+    const wh2Qty = opc ? (wh2Stock[opc] || 0) : 0;
+    const totalQty = wh1Qty + wh2Qty;
 
-  for (const [key, demand] of Object.entries(lensDemand)) {
-    totalLensesNeeded += demand.count;
+    if (totalQty >= lensesNeeded) totalInStock += lensesNeeded;
+    else { totalInStock += totalQty; totalShortfall += (lensesNeeded - totalQty); }
 
-    // Find matching stock — by OPC first, then by coating type
-    let stockQty = 0;
-    let matchedSku = null;
-    if (demand.opc && skuStock[demand.opc]) {
-      stockQty = skuStock[demand.opc].qty;
-      matchedSku = demand.opc;
+    // Assign to warehouse: prefer the one with more stock of this OPC,
+    // break ties by balancing job count between warehouses
+    let assignedWh;
+    if (wh1Qty >= lensesNeeded && wh2Qty < lensesNeeded) {
+      assignedWh = 'WH1';
+    } else if (wh2Qty >= lensesNeeded && wh1Qty < lensesNeeded) {
+      assignedWh = 'WH2';
+    } else if (wh1Qty >= lensesNeeded && wh2Qty >= lensesNeeded) {
+      // Both have stock — balance by current assignment count
+      assignedWh = assignments.WH1.length <= assignments.WH2.length ? 'WH1' : 'WH2';
     } else {
-      // Search by coating type match
-      for (const m of materials) {
-        if (m.qty <= 0) continue;
-        const ct = (m.coatingType || '').toUpperCase();
-        const dc = (demand.coating || '').toUpperCase();
-        if (ct.includes(dc) || dc.includes(ct)) {
-          stockQty += m.qty;
-          if (!matchedSku) matchedSku = m.sku;
+      // Neither has enough — assign to the one with fewer jobs (balance load)
+      assignedWh = assignments.WH1.length <= assignments.WH2.length ? 'WH1' : 'WH2';
+      // Track what needs to be put
+      if (opc) {
+        const whQty = assignedWh === 'WH1' ? wh1Qty : wh2Qty;
+        const deficit = Math.max(0, lensesNeeded - whQty);
+        if (deficit > 0) {
+          putNeeded[assignedWh][opc] = (putNeeded[assignedWh][opc] || 0) + deficit;
         }
       }
     }
 
-    const shortfall = Math.max(0, demand.count - stockQty);
-    if (stockQty >= demand.count) {
-      totalInStock += demand.count;
-    } else {
-      totalInStock += stockQty;
-      totalShortfall += shortfall;
-    }
-
-    putItems.push({
-      key, opc: demand.opc, coating: demand.coating, material: demand.material,
-      style: demand.style, lensType: demand.lensType,
-      lensesNeeded: demand.count, jobCount: demand.jobs.length,
-      inStock: Math.min(stockQty, demand.count), shortfall,
-      matchedSku, hasRush: demand.jobs.some(id => jobDetails.find(j => j.jobId === id)?.rush),
+    assignments[assignedWh].push({
+      jobId: j.job_id, stage: j.stage, line, coating, material, style, opc,
+      lensesNeeded, rush, daysInLab: j.daysInLab || 0,
+      stockInWh: assignedWh === 'WH1' ? wh1Qty : wh2Qty,
     });
   }
 
-  // Sort: shortfalls first (need puts), then rush, then by count
-  putItems.sort((a, b) => {
-    if (a.shortfall > 0 && b.shortfall === 0) return -1;
-    if (a.shortfall === 0 && b.shortfall > 0) return 1;
-    if (a.hasRush && !b.hasRush) return -1;
-    if (!a.hasRush && b.hasRush) return 1;
-    return b.lensesNeeded - a.lensesNeeded;
-  });
-
-  // 4. Build put-then-pick cycles
-  // Estimate: ~2 min per put (manual stocking), ~1 min per pick (Kardex auto)
-  const PUT_MINUTES_PER_LENS = 2;
-  const PICK_MINUTES_PER_JOB = 1.5; // 3 picks × 0.5 min each
-  const CYCLE_TARGET_MINUTES = 60; // 1-hour cycles
-
-  const cycles = [];
-  let remainingPuts = putItems.filter(p => p.shortfall > 0);
-  let remainingPicks = putItems.filter(p => p.inStock > 0);
-
-  // Split into alternating put/pick cycles
-  let cycleNum = 1;
-  while (remainingPuts.length > 0 || remainingPicks.length > 0) {
-    // PUT phase — stock enough to satisfy next batch
-    let putMinutes = 0;
-    const putBatch = [];
-    const putPhaseTarget = CYCLE_TARGET_MINUTES / 2; // half cycle for puts
-    for (let i = 0; i < remainingPuts.length && putMinutes < putPhaseTarget; i++) {
-      const item = remainingPuts[i];
-      const lenses = Math.min(item.shortfall, Math.floor((putPhaseTarget - putMinutes) / PUT_MINUTES_PER_LENS));
-      if (lenses <= 0) continue;
-      putBatch.push({ ...item, putQty: lenses });
-      putMinutes += lenses * PUT_MINUTES_PER_LENS;
-      item.shortfall -= lenses;
-    }
-    remainingPuts = remainingPuts.filter(p => p.shortfall > 0);
-
-    // PICK phase — pick jobs that now have stock
-    let pickMinutes = 0;
-    const pickBatch = [];
-    const pickPhaseTarget = CYCLE_TARGET_MINUTES / 2;
-    for (let i = 0; i < remainingPicks.length && pickMinutes < pickPhaseTarget; i++) {
-      const item = remainingPicks[i];
-      const jobs = Math.min(item.jobCount, Math.floor((pickPhaseTarget - pickMinutes) / PICK_MINUTES_PER_JOB));
-      if (jobs <= 0) continue;
-      pickBatch.push({ ...item, pickJobs: jobs, pickLenses: jobs * 2 });
-      pickMinutes += jobs * PICK_MINUTES_PER_JOB;
-      item.jobCount -= jobs;
-      item.inStock -= jobs * 2;
-    }
-    remainingPicks = remainingPicks.filter(p => p.jobCount > 0 && p.inStock > 0);
-
-    if (putBatch.length === 0 && pickBatch.length === 0) break;
-
-    cycles.push({
-      cycle: cycleNum++,
-      putPhase: {
-        items: putBatch,
-        totalLenses: putBatch.reduce((s, p) => s + p.putQty, 0),
-        estimatedMinutes: Math.round(putMinutes),
-      },
-      pickPhase: {
-        items: pickBatch,
-        totalJobs: pickBatch.reduce((s, p) => s + p.pickJobs, 0),
-        totalLenses: pickBatch.reduce((s, p) => s + p.pickLenses, 0),
-        estimatedMinutes: Math.round(pickMinutes),
-      },
-      totalMinutes: Math.round(putMinutes + pickMinutes),
+  // 3. Build per-warehouse put list and pick batches
+  function buildWarehousePlan(wh, jobs, puts) {
+    // Sort jobs: rush first, then NEL, then by daysInLab desc
+    jobs.sort((a, b) => {
+      if (a.rush && !b.rush) return -1;
+      if (!a.rush && b.rush) return 1;
+      if (a.stage === 'NEL' && b.stage !== 'NEL') return -1;
+      if (a.stage !== 'NEL' && b.stage === 'NEL') return 1;
+      return b.daysInLab - a.daysInLab;
     });
 
-    if (cycleNum > 10) break; // safety limit
+    // Build put items list
+    const putItems = [];
+    for (const [sku, qty] of Object.entries(puts)) {
+      const meta = matMeta[sku] || {};
+      putItems.push({
+        opc: sku, coating: meta.coatingType || 'Unknown', name: meta.name || sku,
+        putQty: qty, warehouse: wh,
+      });
+    }
+    putItems.sort((a, b) => b.putQty - a.putQty);
+
+    const totalPutLenses = putItems.reduce((s, p) => s + p.putQty, 0);
+    const totalJobs = jobs.length;
+
+    // Build put-then-pick cycles, sized to put wall (75 jobs per wall)
+    const cycles = [];
+    let jobIdx = 0;
+    let putIdx = 0;
+    let putRemaining = putItems.map(p => ({ ...p })); // clone
+    let cycleNum = 1;
+
+    while (jobIdx < jobs.length || putRemaining.some(p => p.putQty > 0)) {
+      // PUT phase — enough to fill next batch of picks
+      let putMinutes = 0;
+      const putBatch = [];
+      const putTarget = 30; // 30 min put phase
+      for (let i = 0; i < putRemaining.length && putMinutes < putTarget; i++) {
+        const p = putRemaining[i];
+        if (p.putQty <= 0) continue;
+        const qty = Math.min(p.putQty, Math.floor((putTarget - putMinutes) / PUT_MINUTES_PER_LENS));
+        if (qty <= 0) continue;
+        putBatch.push({ opc: p.opc, coating: p.coating, name: p.name, putQty: qty });
+        putMinutes += qty * PUT_MINUTES_PER_LENS;
+        p.putQty -= qty;
+      }
+      putRemaining = putRemaining.filter(p => p.putQty > 0);
+
+      // PICK phase — up to put wall size (75 jobs)
+      const pickBatch = [];
+      let pickMinutes = 0;
+      const pickLimit = PUT_WALL_SIZE;
+      while (jobIdx < jobs.length && pickBatch.length < pickLimit) {
+        pickBatch.push(jobs[jobIdx]);
+        pickMinutes += PICK_MINUTES_PER_JOB;
+        jobIdx++;
+      }
+
+      if (putBatch.length === 0 && pickBatch.length === 0) break;
+
+      // Aggregate pick batch by coating for display
+      const pickByCoating = {};
+      for (const j of pickBatch) {
+        const k = j.coating || 'Unknown';
+        if (!pickByCoating[k]) pickByCoating[k] = { coating: k, jobs: 0, rush: 0 };
+        pickByCoating[k].jobs++;
+        if (j.rush) pickByCoating[k].rush++;
+      }
+
+      cycles.push({
+        cycle: cycleNum++,
+        putPhase: {
+          items: putBatch,
+          totalLenses: putBatch.reduce((s, p) => s + p.putQty, 0),
+          estimatedMinutes: Math.round(putMinutes),
+        },
+        pickPhase: {
+          jobs: pickBatch.length,
+          byCoating: Object.values(pickByCoating),
+          rushCount: pickBatch.filter(j => j.rush).length,
+          estimatedMinutes: Math.round(pickMinutes),
+        },
+        totalMinutes: Math.round(putMinutes + pickMinutes),
+      });
+
+      if (cycleNum > 20) break;
+    }
+
+    // Aggregate by coating + material for summary
+    const byCoating = {};
+    for (const j of jobs) {
+      const k = `${j.coating}|${j.material}`;
+      if (!byCoating[k]) byCoating[k] = { coating: j.coating, material: j.material, jobs: 0, lenses: 0, rush: 0 };
+      byCoating[k].jobs++;
+      byCoating[k].lenses += 2;
+      if (j.rush) byCoating[k].rush++;
+    }
+
+    return {
+      warehouse: wh,
+      carousels: wh === 'WH1' ? '1, 2, 3' : '4, 5, 6',
+      putWall: wh === 'WH1' ? 'Put Wall 1' : 'Put Wall 2',
+      putWallSize: PUT_WALL_SIZE,
+      totalJobs: jobs.length,
+      totalLenses: jobs.length * 2,
+      svJobs: jobs.filter(j => j.line === 'sv').length,
+      surfJobs: jobs.filter(j => j.line === 'surfacing').length,
+      rushJobs: jobs.filter(j => j.rush).length,
+      nelJobs: jobs.filter(j => j.stage === 'NEL').length,
+      putItems,
+      totalPutLenses,
+      byCoating: Object.values(byCoating).sort((a, b) => b.jobs - a.jobs),
+      cycles,
+      totalMinutes: cycles.reduce((s, c) => s + c.totalMinutes, 0),
+      wallLoads: Math.ceil(jobs.length / PUT_WALL_SIZE),
+    };
   }
 
-  // 5. Split by production line
-  const svItems = putItems.filter(p => p.lensType === 'S');
-  const surfItems = putItems.filter(p => p.lensType !== 'S');
+  const wh1Plan = buildWarehousePlan('WH1', assignments.WH1, putNeeded.WH1);
+  const wh2Plan = buildWarehousePlan('WH2', assignments.WH2, putNeeded.WH2);
 
-  // NEL breakdown
   const nelJobs = demandJobs.filter(j => j.stage === 'NEL');
 
   return {
@@ -823,23 +858,12 @@ function computePutList() {
       totalShortfall,
       nelCount: nelJobs.length,
       fulfillablePct: totalLensesNeeded > 0 ? Math.round((totalInStock / totalLensesNeeded) * 100) : 100,
+      wh1Jobs: wh1Plan.totalJobs,
+      wh2Jobs: wh2Plan.totalJobs,
     },
-    svDemand: {
-      jobs: svItems.reduce((s, p) => s + p.jobCount, 0),
-      lenses: svItems.reduce((s, p) => s + p.lensesNeeded, 0),
-      shortfall: svItems.reduce((s, p) => s + p.shortfall, 0),
-      items: svItems.slice(0, 50),
-    },
-    surfacingDemand: {
-      jobs: surfItems.reduce((s, p) => s + p.jobCount, 0),
-      lenses: surfItems.reduce((s, p) => s + p.lensesNeeded, 0),
-      shortfall: surfItems.reduce((s, p) => s + p.shortfall, 0),
-      items: surfItems.slice(0, 50),
-    },
-    putItems: putItems.slice(0, 100),
-    cycles,
-    totalEstimatedMinutes: cycles.reduce((s, c) => s + c.totalMinutes, 0),
-    totalEstimatedHours: Math.round(cycles.reduce((s, c) => s + c.totalMinutes, 0) / 60 * 10) / 10,
+    warehouses: [wh1Plan, wh2Plan],
+    totalEstimatedMinutes: wh1Plan.totalMinutes + wh2Plan.totalMinutes,
+    totalEstimatedHours: Math.round((wh1Plan.totalMinutes + wh2Plan.totalMinutes) / 60 * 10) / 10,
   };
 }
 
