@@ -1605,10 +1605,11 @@ module.exports = {
       const isSF = (sku, name, ct) => {
         const s = (sku || '').toUpperCase(), n = (name || '').toUpperCase(), c = (ct || '').toUpperCase();
         if (c.includes(' SV') || c === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
+        if (n.includes('ASPHERIC-SV') || n.includes('ASPHERIC SV')) return false;
         if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
         if (n.includes('SEMI') || n.includes('SF ') || c.includes('SF ')) return true;
-        if (s.startsWith('4800') && (n.includes('ENDLESS') || n.includes('PROG') || n.includes('DIGITAL'))) return true;
-        return !c.includes('SV');
+        if (s.startsWith('4800') || s.startsWith('8820')) return false;
+        return false;
       };
       const stockByMaterial = {};
       for (const m of (inv.materials || [])) {
@@ -1777,13 +1778,15 @@ module.exports = {
         const ct = (coatingType || '').toUpperCase();
         // Exclude if clearly SV/plano/finished
         if (ct.includes(' SV') || ct === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
-        // Include if SKU matches semi-finished prefixes or has SF marker
+        if (n.includes('ASPHERIC-SV') || n.includes('ASPHERIC SV')) return false;
+        // Include if SKU matches semi-finished prefixes
         if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
+        // Include if name/coating explicitly says semi-finished
         if (n.includes('SEMI') || n.includes('SF ') || ct.includes('SF ')) return true;
-        // 4800 prefix with progressive/digital style = semi-finished
-        if (s.startsWith('4800') && (n.includes('ENDLESS') || n.includes('PROG') || n.includes('DIGITAL'))) return true;
-        // Default: if not clearly SV, treat as potential semi-finished
-        return !ct.includes('SV');
+        // Exclude finished lens prefixes (4800=finished, 8820=finished)
+        if (s.startsWith('4800') || s.startsWith('8820')) return false;
+        // Default: unknown — exclude to be safe
+        return false;
       };
 
       const stockByMaterial = {}; // material → [{ sku, qty, name, warehouse, coatingType }]
