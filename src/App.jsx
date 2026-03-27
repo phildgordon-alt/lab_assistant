@@ -7942,10 +7942,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
                     ))}
                     {/* Out of stock items that can't be put */}
                     {(()=>{
-                      const whOos=(putList.outOfStock||[]).filter(o=>{
-                        const whJobs=wh.warehouse==='WH1'?assignments:null;
-                        return true;
-                      });
+                      const whOos=putList.outOfStock||[];
                       if(whOos.length===0)return null;
                       return(<>
                         <div style={{fontSize:9,color:"#ef4444",fontFamily:mono,fontWeight:700,letterSpacing:1,marginTop:8,marginBottom:4}}>OUT OF STOCK — CANNOT PUT</div>
