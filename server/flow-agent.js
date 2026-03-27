@@ -718,7 +718,7 @@ function computePutList() {
       // Search for active SKU with same material in stock
       const mat = (xml.lensMat || '').toUpperCase();
       let bestAlt = null, bestQty = 0;
-      for (const m of allMaterials) {
+      for (const m of (inv.materials || [])) {
         if (m.qty <= 0 || !m.sku || discontinuedSkus.has(m.sku)) continue;
         if (mat && (m.name || '').toUpperCase().includes(mat)) {
           if (m.qty > bestQty) { bestAlt = m.sku; bestQty = m.qty; }
