@@ -7889,37 +7889,6 @@ function FlowAgentTab({ovenServerUrl,settings}){
             </div>
           </div>
 
-          {/* Out of stock alert */}
-          {(putList.outOfStock||[]).length>0&&(
-            <div style={{background:"rgba(239,68,68,0.06)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:10,padding:16,marginBottom:16}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-                <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#ef4444",letterSpacing:1}}>OUT OF STOCK — {putList.outOfStock.length} OPCs ({sm.outOfStockJobs||0} jobs blocked)</div>
-                <button onClick={()=>setPutListExpanded(putListExpanded==='oos'?null:'oos')} style={{background:"rgba(239,68,68,0.1)",border:"1px solid rgba(239,68,68,0.2)",borderRadius:4,padding:"4px 10px",color:"#ef4444",fontSize:10,cursor:"pointer",fontFamily:mono}}>
-                  {putListExpanded==='oos'?'Hide':'Show detail'} {putListExpanded==='oos'?'▲':'▼'}
-                </button>
-              </div>
-              {/* Always show top 5 */}
-              {putList.outOfStock.slice(0, putListExpanded==='oos'?50:5).map((oos,i)=>(
-                <div key={i} style={{display:"flex",gap:12,alignItems:"center",padding:"6px 0",borderBottom:"1px solid rgba(255,255,255,0.04)",fontSize:11,fontFamily:mono}}>
-                  <div style={{minWidth:100,color:"#e5e7eb",fontWeight:600}}>{oos.opc}</div>
-                  <div style={{minWidth:60,color:"#9ca3af"}}>{oos.coating}</div>
-                  <div style={{minWidth:50,color:"#9ca3af"}}>{oos.material}</div>
-                  <div style={{minWidth:60,color:"#f59e0b"}}>{oos.jobCount} jobs</div>
-                  <div style={{minWidth:60,color:"#ef4444"}}>{oos.lensesNeeded} lenses</div>
-                  {oos.rushCount>0&&<div style={{color:"#ef4444",fontWeight:700}}>RUSH x{oos.rushCount}</div>}
-                  <div style={{flex:1,color:oos.canSubstitute?"#22c55e":"#f59e0b",fontWeight:600,fontSize:10}}>
-                    {oos.action}
-                  </div>
-                  {oos.alternatives?.length>0&&(
-                    <div style={{fontSize:9,color:"#6b7280"}}>
-                      Alt: {oos.alternatives[0].sku} ({oos.alternatives[0].qty} avail)
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
           {/* Per-warehouse plans side by side */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16,marginBottom:16}}>
             {whs.map(wh=>{
@@ -7947,16 +7916,39 @@ function FlowAgentTab({ovenServerUrl,settings}){
                   </div>
                 </div>
 
-                {/* Put items (shortfalls for this warehouse) */}
-                {wh.putItems.length>0&&(
+                {/* Put items + out of stock for this warehouse */}
+                {(wh.putItems.length>0||(putList.outOfStock||[]).length>0)&&(
                   <div style={{padding:"8px 14px",borderBottom:"1px solid rgba(255,255,255,0.05)"}}>
-                    <div style={{fontSize:9,color:"#ef4444",fontFamily:mono,fontWeight:700,letterSpacing:1,marginBottom:4}}>LENSES TO PUT AWAY</div>
-                    {wh.putItems.slice(0,10).map((p,i)=>(
-                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,fontFamily:mono,padding:"2px 0",color:"#d1d5db"}}>
+                    {wh.putItems.length>0&&<div style={{fontSize:9,color:"#ef4444",fontFamily:mono,fontWeight:700,letterSpacing:1,marginBottom:4}}>LENSES TO PUT AWAY</div>}
+                    {wh.putItems.slice(0,15).map((p,i)=>(
+                      <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10,fontFamily:mono,padding:"3px 0",color:"#d1d5db",borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
                         <span>{p.coating} — {p.opc}</span>
                         <span style={{color:"#ef4444",fontWeight:700}}>{p.putQty} lenses</span>
                       </div>
                     ))}
+                    {/* Out of stock items that can't be put */}
+                    {(()=>{
+                      const whOos=(putList.outOfStock||[]).filter(o=>{
+                        const whJobs=wh.warehouse==='WH1'?assignments:null;
+                        return true;
+                      });
+                      if(whOos.length===0)return null;
+                      return(<>
+                        <div style={{fontSize:9,color:"#ef4444",fontFamily:mono,fontWeight:700,letterSpacing:1,marginTop:8,marginBottom:4}}>OUT OF STOCK — CANNOT PUT</div>
+                        {whOos.slice(0,10).map((oos,i)=>(
+                          <div key={`oos-${i}`} style={{display:"flex",gap:8,alignItems:"center",fontSize:10,fontFamily:mono,padding:"4px 0",borderBottom:"1px solid rgba(239,68,68,0.1)",background:"rgba(239,68,68,0.04)",borderRadius:3,paddingLeft:4,marginBottom:2}}>
+                            <span style={{color:"#ef4444",fontWeight:700,minWidth:14}}>!</span>
+                            <span style={{color:"#e5e7eb",minWidth:90}}>{oos.opc}</span>
+                            <span style={{color:"#9ca3af"}}>{oos.coating} {oos.material}</span>
+                            <span style={{color:"#f59e0b"}}>{oos.jobCount}j / {oos.lensesNeeded}L</span>
+                            {oos.rushCount>0&&<span style={{color:"#ef4444",fontWeight:700}}>RUSH</span>}
+                            <span style={{flex:1,textAlign:"right",fontSize:9,fontWeight:600,color:oos.canSubstitute?"#22c55e":"#f59e0b"}}>
+                              {oos.canSubstitute&&oos.alternatives?.length>0?`USE ${oos.alternatives[0].sku} (${oos.alternatives[0].qty})`:oos.canSubstitute?'FIND ALT BASE':'REORDER'}
+                            </span>
+                          </div>
+                        ))}
+                      </>);
+                    })()}
                   </div>
                 )}
 
