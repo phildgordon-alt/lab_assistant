@@ -330,8 +330,24 @@ function computeAll(db, itempath, netsuite) {
       const nextPoDate = po?.nextDate || null;
       const wosWithPo = useRate > 0 ? Math.round(((onHand + openPoQty) / useRate) * 10) / 10 : 999;
 
-      // Dynamic reorder point = total lead time × adjusted weekly consumption
-      const reorderPoint = Math.ceil(totalLeadTime * useRate);
+      // Safety stock: Z × σ × √LeadTime (in weeks)
+      const weeklyQtysForSS = weeks.map(w => w.qty);
+      const weeklyStdDev = weeklyQtysForSS.length >= 2
+        ? Math.sqrt(weeklyQtysForSS.reduce((s, v) => s + (v - avgWeekly) ** 2, 0) / (weeklyQtysForSS.length - 1))
+        : 0;
+      const Z_SCORES = { A: 2.33, B: 1.65, C: 1.28 };
+      let safetyStockUnits;
+      if (MODEL_PARAMS.use_woc_override) {
+        // Weeks of Cover method: target weeks × weekly rate / weeks_per_period
+        safetyStockUnits = Math.ceil(MODEL_PARAMS.woc_target_weeks * useRate);
+      } else {
+        // Z-score method: Z × σ × √LeadTime
+        const zScore = Z_SCORES[params.abc_class] || Z_SCORES.B;
+        safetyStockUnits = Math.ceil(zScore * weeklyStdDev * Math.sqrt(totalLeadTime));
+      }
+
+      // Dynamic reorder point = (lead time × weekly consumption) + safety stock
+      const reorderPoint = Math.ceil(totalLeadTime * useRate) + safetyStockUnits;
 
       // Runout dates
       const runoutDays = useRate > 0 ? Math.round((onHand / useRate) * 7) : 9999;
@@ -369,10 +385,11 @@ function computeAll(db, itempath, netsuite) {
         status = 'SURFACE';
       } else if (onHand <= reorderPoint || status === 'CRITICAL') {
         orderRecommended = 1;
-        const targetQty = Math.ceil((totalLeadTime + safetyWeeks) * useRate);
-        orderQty = Math.max(params.min_order_qty || 0, targetQty - onHand - openPoQty);
-        // Demand-adjusted qty (includes stock-out compensation already in useRate)
-        demandAdjQty = orderQty;
+        // Correct formula: Order Qty = Reorder Point - Current Inventory
+        // (ROP already includes lead time demand + safety stock)
+        orderQty = Math.max(params.min_order_qty || 0, reorderPoint - onHand);
+        // Demand-adjusted qty accounts for open POs
+        demandAdjQty = Math.max(0, reorderPoint - onHand - openPoQty);
       }
 
       // ABC class (auto if not set)
