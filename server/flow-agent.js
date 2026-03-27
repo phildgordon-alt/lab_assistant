@@ -696,10 +696,24 @@ function computePutList() {
     const xml = dviJobIndex.get(j.job_id);
     if (!xml) continue;
 
-    const opc = xml.lensOpc || null;
+    let opc = xml.lensOpc || null;
 
-    // Skip discontinued/deprecated SKUs — don't put or pick these
-    if (opc && discontinuedSkus.has(opc)) { skippedDiscontinued++; continue; }
+    // If OPC is discontinued, find a current replacement with same material/coating
+    let replacedFrom = null;
+    if (opc && discontinuedSkus.has(opc)) {
+      replacedFrom = opc;
+      skippedDiscontinued++;
+      // Search for active SKU with same material in stock
+      const mat = (xml.lensMat || '').toUpperCase();
+      let bestAlt = null, bestQty = 0;
+      for (const m of allMaterials) {
+        if (m.qty <= 0 || !m.sku || discontinuedSkus.has(m.sku)) continue;
+        if (mat && (m.name || '').toUpperCase().includes(mat)) {
+          if (m.qty > bestQty) { bestAlt = m.sku; bestQty = m.qty; }
+        }
+      }
+      opc = bestAlt; // use the replacement, or null if nothing found
+    }
 
     const coating = xml.coating || 'Unknown';
     const material = xml.lensMat || 'Unknown';
@@ -745,6 +759,7 @@ function computePutList() {
       jobId: j.job_id, stage: j.stage, line, coating, material, style, opc,
       lensesNeeded, rush, daysInLab: j.daysInLab || 0,
       stockInWh: assignedWh === 'WH1' ? wh1Qty : wh2Qty,
+      replacedFrom, // original discontinued OPC, null if no replacement needed
     });
   }
 
@@ -753,9 +768,12 @@ function computePutList() {
   for (const j of demandJobs) {
     const xml = dviJobIndex.get(j.job_id);
     if (!xml) continue;
-    const opc = xml.lensOpc || null;
+    let opc = xml.lensOpc || null;
     if (!opc) continue;
-    if (discontinuedSkus.has(opc)) continue; // skip deprecated
+    // For discontinued OPCs, check stock of the original — if 0, it's truly out of stock
+    // (replacement would have been handled in the assignment loop above)
+    if (discontinuedSkus.has(opc)) opc = null; // don't check stock for deprecated OPC
+    if (!opc) continue;
     const totalAcrossWh = (wh1Stock[opc] || 0) + (wh2Stock[opc] || 0) + ((whStock.WH3 || {})[opc] || 0);
     if (totalAcrossWh <= 0) {
       if (!outOfStock[opc]) {
@@ -937,7 +955,7 @@ function computePutList() {
       wh2Jobs: wh2Plan.totalJobs,
       outOfStockCount: outOfStockList.length,
       outOfStockJobs: outOfStockList.reduce((s, o) => s + o.jobCount, 0),
-      discontinuedSkipped: skippedDiscontinued,
+      discontinuedReplaced: skippedDiscontinued,
     },
     warehouses: [wh1Plan, wh2Plan],
     outOfStock: outOfStockList.slice(0, 50),
