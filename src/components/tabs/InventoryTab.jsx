@@ -4043,11 +4043,15 @@ function InventoryTab({ ovenServerUrl, settings }) {
           let filtered = orders;
           // Category filter: Lenses, Frames, or All
           const poCat = poSearch.startsWith('cat:') ? poSearch.slice(4) : null;
+          const poVendor = poSearch.startsWith('vendor:') ? poSearch.slice(7) : null;
           if (poCat) {
             filtered = filtered.map(o => ({ ...o, lines: o.lines.filter(l => l.category === poCat) })).filter(o => o.lines.length > 0);
           }
+          if (poVendor) {
+            filtered = filtered.filter(o => o.vendor === poVendor);
+          }
           if (poFilter !== 'all') filtered = filtered.filter(o => o.status === poFilter);
-          if (poSearch && !poCat) {
+          if (poSearch && !poCat && !poVendor) {
             const q = poSearch.toLowerCase();
             filtered = filtered.filter(o => o.poNumber?.toLowerCase().includes(q) || o.vendor?.toLowerCase().includes(q) || o.lines?.some(l => l.sku?.toLowerCase().includes(q) || l.name?.toLowerCase().includes(q)));
           }
@@ -4118,8 +4122,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
-                <input type="text" placeholder="Search PO#, vendor, SKU... or click a category above" value={poSearch} onChange={e => setPoSearch(e.target.value)}
+              <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center" }}>
+                <input type="text" placeholder="Search PO#, vendor, SKU..." value={poSearch} onChange={e => setPoSearch(e.target.value)}
                   style={{ flex: 1, padding: "10px 14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }} />
                 {['all', ...Object.keys(statuses)].map(s => (
                   <button key={s} onClick={() => setPoFilter(s)} style={{
@@ -4129,6 +4133,27 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   }}>{s === 'all' ? `All (${orders.length})` : `${s} (${statuses[s]})`}</button>
                 ))}
               </div>
+              {/* Vendor filter */}
+              {(() => {
+                const vendors = {};
+                for (const o of orders) if (o.vendor) vendors[o.vendor] = (vendors[o.vendor] || 0) + 1;
+                const sorted = Object.entries(vendors).sort((a, b) => b[1] - a[1]);
+                if (sorted.length <= 1) return null;
+                const activeVendor = poSearch.startsWith('vendor:') ? poSearch.slice(7) : null;
+                return (
+                  <div style={{ display: "flex", gap: 6, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>VENDOR:</span>
+                    {activeVendor && <button onClick={() => setPoSearch('')} style={{ padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: "pointer", background: T.red, color: "#fff", border: "none" }}>Clear</button>}
+                    {sorted.map(([v, count]) => (
+                      <button key={v} onClick={() => setPoSearch(activeVendor === v ? '' : `vendor:${v}`)} style={{
+                        padding: "4px 10px", borderRadius: 4, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+                        background: activeVendor === v ? `${T.purple}30` : 'transparent', color: activeVendor === v ? T.purple : T.textMuted,
+                        border: `1px solid ${activeVendor === v ? T.purple : T.border}`
+                      }}>{v} ({count})</button>
+                    ))}
+                  </div>
+                );
+              })()}
 
               <Card>
                 <div style={{ maxHeight: 600, overflowY: 'auto' }}>
