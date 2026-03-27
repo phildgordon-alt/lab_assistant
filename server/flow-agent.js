@@ -1932,6 +1932,14 @@ module.exports = {
    * @param {number} days — how many days back (default 7)
    */
   getHistory(days = 7) {
+    // Check SQLite cache first — persists across restarts
+    try {
+      const cached = db.prepare("SELECT value FROM model_params WHERE key = ?").get(`flow_history_${days}`);
+      if (cached?.value) {
+        const parsed = JSON.parse(cached.value);
+        if (parsed._ts && (Date.now() - parsed._ts) < 300000) return parsed; // 5 min cache
+      }
+    } catch {}
     const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
     const cutoffISO = new Date(cutoff).toISOString();
     const stages = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
@@ -2020,7 +2028,7 @@ module.exports = {
       });
     }
 
-    return {
+    const result = {
       days: sortedDates.length,
       dates: sortedDates,
       stages,
@@ -2028,6 +2036,14 @@ module.exports = {
       heatmap,
       hourlyAvg,
       totalTransitions: rows.length,
+      _ts: Date.now(),
     };
+    // Save to SQLite for fast reload
+    try {
+      db.prepare("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
+      db.prepare("INSERT INTO model_params (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value")
+        .run(`flow_history_${days}`, JSON.stringify(result));
+    } catch {}
+    return result;
   },
 };
