@@ -668,7 +668,19 @@ function computePutList() {
     if (m.sku) matMeta[m.sku] = { name: m.name, coatingType: m.coatingType, warehouse: m.warehouse };
   }
 
-  // 1. Get demand jobs — INCOMING, AT_KARDEX, NEL
+  // 1. Load discontinued/deprecated SKUs — skip these entirely
+  const discontinuedSkus = new Set();
+  try {
+    const disc = db.prepare("SELECT sku FROM lens_sku_params WHERE abc_class = 'X'").all();
+    for (const r of disc) discontinuedSkus.add(r.sku);
+  } catch {}
+  // Also check lens_catalog for deprecated OPCs
+  try {
+    const dep = db.prepare("SELECT opc FROM lens_catalog WHERE valid_to IS NOT NULL").all();
+    for (const r of dep) discontinuedSkus.add(r.opc);
+  } catch {}
+
+  // Get demand jobs — INCOMING, AT_KARDEX, NEL
   const demandStages = ['INCOMING', 'AT_KARDEX', 'NEL'];
   const demandJobs = allJobs.filter(j =>
     demandStages.includes(j.stage) && j.status !== 'SHIPPED' && j.status !== 'CANCELED'
@@ -679,11 +691,16 @@ function computePutList() {
   const putNeeded = { WH1: {}, WH2: {} }; // sku → qty to put
   let totalLensesNeeded = 0, totalInStock = 0, totalShortfall = 0;
 
+  let skippedDiscontinued = 0;
   for (const j of demandJobs) {
     const xml = dviJobIndex.get(j.job_id);
     if (!xml) continue;
 
     const opc = xml.lensOpc || null;
+
+    // Skip discontinued/deprecated SKUs — don't put or pick these
+    if (opc && discontinuedSkus.has(opc)) { skippedDiscontinued++; continue; }
+
     const coating = xml.coating || 'Unknown';
     const material = xml.lensMat || 'Unknown';
     const style = xml.lensStyle || '';
@@ -738,6 +755,7 @@ function computePutList() {
     if (!xml) continue;
     const opc = xml.lensOpc || null;
     if (!opc) continue;
+    if (discontinuedSkus.has(opc)) continue; // skip deprecated
     const totalAcrossWh = (wh1Stock[opc] || 0) + (wh2Stock[opc] || 0) + ((whStock.WH3 || {})[opc] || 0);
     if (totalAcrossWh <= 0) {
       if (!outOfStock[opc]) {
@@ -919,6 +937,7 @@ function computePutList() {
       wh2Jobs: wh2Plan.totalJobs,
       outOfStockCount: outOfStockList.length,
       outOfStockJobs: outOfStockList.reduce((s, o) => s + o.jobCount, 0),
+      discontinuedSkipped: skippedDiscontinued,
     },
     warehouses: [wh1Plan, wh2Plan],
     outOfStock: outOfStockList.slice(0, 50),
