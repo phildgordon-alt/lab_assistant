@@ -5531,7 +5531,13 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   // GET /api/flow/put-list — put-then-pick plan for incoming demand
   if (req.method==='GET' && url.pathname==='/api/flow/put-list') {
     const putList = flowAgent.getPutList();
-    if (!putList) return json(res, { error: 'Flow agent not ready — waiting for DVI trace + ItemPath' }, 503);
+    if (!putList) return json(res, {
+      error: 'Flow agent not ready — waiting for DVI trace + ItemPath',
+      summary: { totalDemandJobs: 0, totalLensesNeeded: 0, totalInStock: 0, totalShortfall: 0, nelCount: 0, fulfillablePct: 0 },
+      svDemand: { jobs: 0, lenses: 0, shortfall: 0, items: [] },
+      surfacingDemand: { jobs: 0, lenses: 0, shortfall: 0, items: [] },
+      putItems: [], cycles: [], totalEstimatedHours: 0,
+    });
     return json(res, putList);
   }
 

@@ -7850,8 +7850,14 @@ function FlowAgentTab({ovenServerUrl,settings}){
       {/* ═══════ PUT LIST VIEW ═══════ */}
       {subTab==="put-list"&&(()=>{
         if(!putList){
-          fetch(`${base}/api/flow/put-list`).then(r=>r.ok?r.json():null).then(setPutList).catch(()=>{});
+          fetch(`${base}/api/flow/put-list`).then(r=>r.json()).then(d=>{
+            if(d&&!d.error)setPutList(d);
+            else setPutList({error:d?.error||'No data',summary:{totalDemandJobs:0,totalLensesNeeded:0,totalInStock:0,totalShortfall:0,nelCount:0,fulfillablePct:0},svDemand:{jobs:0,lenses:0,shortfall:0,items:[]},surfacingDemand:{jobs:0,lenses:0,shortfall:0,items:[]},putItems:[],cycles:[],totalEstimatedHours:0});
+          }).catch(()=>setPutList({error:'Server not responding',summary:{totalDemandJobs:0,totalLensesNeeded:0,totalInStock:0,totalShortfall:0,nelCount:0,fulfillablePct:0},svDemand:{jobs:0,lenses:0,shortfall:0,items:[]},surfacingDemand:{jobs:0,lenses:0,shortfall:0,items:[]},putItems:[],cycles:[],totalEstimatedHours:0}));
           return <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading put list...</div>;
+        }
+        if(putList.error) {
+          return <div style={{textAlign:"center",padding:40}}><div style={{color:"#ef4444",fontSize:13,fontFamily:mono,marginBottom:12}}>{putList.error}</div><button onClick={()=>setPutList(null)} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 16px",color:"#60a5fa",fontSize:11,cursor:"pointer",fontFamily:mono}}>Retry</button></div>;
         }
         const sm=putList.summary||{};
         const cycles=putList.cycles||[];

@@ -642,10 +642,10 @@ function computeExpiresAt(pushBy, urgency) {
  */
 function computePutList() {
   const { dviTrace, dviJobIndex, itempath } = adapters;
-  if (!dviTrace || !dviJobIndex || !itempath) return null;
+  if (!dviTrace || !dviJobIndex) return null;
 
   const allJobs = dviTrace.getJobs();
-  const inv = itempath.getInventory();
+  const inv = itempath ? itempath.getInventory() : { materials: [] };
   const materials = inv.materials || [];
 
   // Build a lookup: sku → { qty, name, warehouse, coatingType }
