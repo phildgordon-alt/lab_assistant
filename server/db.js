@@ -912,6 +912,17 @@ function upsertAlerts(alerts) {
 }
 
 function upsertPicks(picks) {
+  // SAFETY: Filter out put orders (receiving INTO Kardex) — only track consumption (picks)
+  // Put references contain "put" (e.g., "ManualPut-LAPTOP-...")
+  const filteredPicks = picks.filter(o => {
+    const ref = (o.reference || '').toLowerCase();
+    return !ref.includes('put');
+  });
+  if (filteredPicks.length < picks.length) {
+    console.log(`[DB] upsertPicks: filtered ${picks.length - filteredPicks.length} put orders, processing ${filteredPicks.length} picks`);
+  }
+  picks = filteredPicks;
+
   // Build set of current pick IDs
   const currentIds = new Set();
   for (const order of picks) {

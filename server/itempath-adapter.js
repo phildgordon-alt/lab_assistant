@@ -315,9 +315,11 @@ function normalizeMaterial(m) {
 function normalizeOrder(o) {
   // ItemPath uses order_lines (not lines)
   const lines = o.order_lines || o.lines || [];
+  const ref = (o.reference || o.name || '').toLowerCase();
   return {
     orderId:   o.id,
     reference: o.reference || o.name,
+    isPut:     ref.includes('put'),  // true = receiving INTO Kardex, false = consumption OUT
     status:    o.status,
     warehouse: /kitchen/i.test(o.warehouseName || '') || /wh3/i.test(o.warehouseName || '') ? 'WH3' : /wh2/i.test(o.warehouseName || '') ? 'WH2' : /wh1/i.test(o.warehouseName || '') ? 'WH1' : (o.warehouseName || null),
     station:   o.stationName || null,  // Station/area where order is processed
@@ -846,7 +848,14 @@ async function poll() {
       const db = require('./db');
       db.upsertInventory(materials);
       db.upsertAlerts(alerts);
-      db.upsertPicks(activePicks);
+      // CRITICAL: Only write actual picks to SQLite — exclude puts (receiving orders)
+      // Puts have reference like "ManualPut-..." and inflate consumption calculations
+      const picksOnly = activePicks.filter(o => !o.isPut);
+      const putsFiltered = activePicks.length - picksOnly.length;
+      if (putsFiltered > 0) {
+        console.log(`[ItemPath] Filtered ${putsFiltered} put orders from picks (${picksOnly.length} picks written to SQLite)`);
+      }
+      db.upsertPicks(picksOnly);
       console.log(`[ItemPath] ✓ SQLite snapshot saved`);
     } catch (dbErr) {
       console.error('[ItemPath] SQLite write failed:', dbErr.message);
