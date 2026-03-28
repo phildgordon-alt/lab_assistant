@@ -224,9 +224,16 @@ function computeAll(db, itempath, netsuite) {
   const poBySku = {};
   for (const order of (poData.orders || [])) {
     for (const line of (order.lines || [])) {
-      if (!poBySku[line.sku]) poBySku[line.sku] = { totalQty: 0, nextDate: null, lines: [] };
+      if (!poBySku[line.sku]) poBySku[line.sku] = { totalQty: 0, nextDate: null, lines: [], seenPOs: new Set() };
       poBySku[line.sku].totalQty += line.qty;
-      poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase });
+      // Deduplicate by PO number — aggregate qty if same PO appears multiple times
+      if (poBySku[line.sku].seenPOs.has(order.poNumber)) {
+        const existing = poBySku[line.sku].lines.find(l => l.po === order.poNumber);
+        if (existing) existing.qty += line.qty;
+      } else {
+        poBySku[line.sku].seenPOs.add(order.poNumber);
+        poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase });
+      }
       if (order.date && (!poBySku[line.sku].nextDate || order.date < poBySku[line.sku].nextDate)) {
         poBySku[line.sku].nextDate = order.date;
       }
