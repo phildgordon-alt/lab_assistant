@@ -2941,22 +2941,34 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         Mark Discontinued
                       </button>
                       <button onClick={async () => {
-                        const prefix = lensIntelDetail.status.sku.slice(0, 4);
-                        if (!confirm(`Discontinue ALL SKUs starting with "${prefix}"? This will mark every matching SKU as X.`)) return;
+                        const prefix = prompt('Enter exact prefix to discontinue (e.g. "0620" or "8820"):');
+                        if (!prefix || prefix.length < 3) { alert('Prefix must be at least 3 characters'); return; }
+                        // Protected semi-finished SKUs — NEVER discontinue these
+                        const PROTECTED = new Set([
+                          '4800135438','4800154660','4800135420','4800135412',
+                          '4800135354','4800135347','4800135339',
+                          '4800150957','4800135305','4800150940','4800150932','4800150924',
+                          '4800150908','4800135297','4800150882','4800150890','4800150916',
+                        ]);
                         const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
                         const data = await resp.json();
-                        const matches = (data.items || []).filter(i => i.sku.startsWith(prefix));
-                        if (matches.length === 0) { alert('No matching SKUs found'); return; }
-                        if (!confirm(`Found ${matches.length} SKUs with prefix "${prefix}". Discontinue all?`)) return;
-                        const updates = matches.map(i => ({ sku: i.sku, abc_class: 'X' }));
+                        const allMatches = (data.items || []).filter(i => i.sku.startsWith(prefix));
+                        const protectedMatches = allMatches.filter(i => PROTECTED.has(i.sku));
+                        const safeMatches = allMatches.filter(i => !PROTECTED.has(i.sku) && i.status !== 'DISCONTINUED');
+                        if (safeMatches.length === 0) { alert(`No eligible SKUs found for prefix "${prefix}" (${protectedMatches.length} protected semi-finished SKUs excluded)`); return; }
+                        const skuList = safeMatches.slice(0, 20).map(i => `  ${i.sku} — ${i.description || ''} (on hand: ${i.on_hand})`).join('\n');
+                        const moreMsg = safeMatches.length > 20 ? `\n  ... and ${safeMatches.length - 20} more` : '';
+                        const protMsg = protectedMatches.length > 0 ? `\n\n⚠️ ${protectedMatches.length} PROTECTED semi-finished SKUs will NOT be touched.` : '';
+                        if (!confirm(`Discontinue ${safeMatches.length} SKUs with prefix "${prefix}"?\n\n${skuList}${moreMsg}${protMsg}`)) return;
+                        const updates = safeMatches.map(i => ({ sku: i.sku, abc_class: 'X' }));
                         await fetch(`${ovenServerUrl}/api/lens-intel/params/bulk`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ updates }) });
                         await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
                         const r2 = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
                         setLensIntelData(await r2.json());
                         setLensIntelDetail(null);
-                        alert(`${matches.length} SKUs discontinued (prefix: ${prefix})`);
+                        alert(`${safeMatches.length} SKUs discontinued (prefix: ${prefix})${protectedMatches.length > 0 ? `. ${protectedMatches.length} semi-finished SKUs protected.` : ''}`);
                       }} style={{ background: T.red, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono, opacity: 0.7 }}>
-                        Discontinue Prefix ({lensIntelDetail.status.sku.slice(0, 4)}...)
+                        Discontinue by Prefix...
                       </button>
                     </div>
                   </div>
