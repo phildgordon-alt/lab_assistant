@@ -2738,7 +2738,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: i.weeks_of_supply < 6 ? T.red : i.weeks_of_supply < 10 ? T.amber : T.green }}>{i.weeks_of_supply}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textMuted }}>{i.weeks_of_supply_with_po}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', color: i.on_hand <= i.dynamic_reorder_point ? T.red : T.textDim }}>{i.dynamic_reorder_point}</td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', color: i.open_po_qty > 0 ? T.blue : T.textDim }}>{i.open_po_qty || '—'}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: i.open_po_qty > 0 ? T.blue : T.textDim }} title={i.open_po_refs ? JSON.parse(i.open_po_refs).map(p => `${p.po}: ${p.qty}`).join(', ') : ''}>{i.open_po_qty || '—'}{i.open_po_refs && <span style={{ fontSize: 8, color: T.textDim, marginLeft: 3 }}>({JSON.parse(i.open_po_refs).map(p => p.po).join(', ')})</span>}</td>
                             <td style={{ padding: '5px 8px', color: T.textMuted, fontSize: 10 }}>{i.runout_date || '—'}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'center' }}>
                               {i.will_stockout ? <span style={{ fontSize: 8, padding: '2px 6px', borderRadius: 3, fontWeight: 700, background: `${T.red}20`, color: T.red }}>{i.days_at_risk}d</span> : '—'}
@@ -2777,6 +2777,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
                       <div style={{ fontSize: 20, fontWeight: 800, color: T.blue, fontFamily: mono }}>{lensIntelDetail.status.open_po_qty || 0}</div>
                       <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>OPEN PO QTY</div>
+                      {lensIntelDetail.status.open_po_refs && (() => { try { return JSON.parse(lensIntelDetail.status.open_po_refs).map((p, i) => <div key={i} style={{ fontSize: 9, color: T.blue, fontFamily: mono }}>{p.po}: {p.qty} ({p.status})</div>); } catch { return null; } })()}
                     </div>
                     <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
                       <div style={{ fontSize: 20, fontWeight: 800, color: lensIntelDetail.status.will_stockout ? T.red : T.green, fontFamily: mono }}>

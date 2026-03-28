@@ -249,15 +249,15 @@ function computeAll(db, itempath, netsuite) {
 
   // Drop and recreate to handle schema changes
   try { db.exec('DROP TABLE IF EXISTS lens_inventory_status'); } catch {}
-  db.exec("CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, projected_weekly REAL DEFAULT 0, consumption_method TEXT, consumption_trend_pct REAL DEFAULT 0, cv REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 19.0, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT 'OK', order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, demand_adj_qty INTEGER DEFAULT 0, abc_class TEXT DEFAULT 'B', routing TEXT DEFAULT 'STOCK', sku_type TEXT DEFAULT 'finished', regression_slope REAL, regression_r2 REAL, computed_at TEXT DEFAULT (datetime('now')))");
+  db.exec("CREATE TABLE IF NOT EXISTS lens_inventory_status (sku TEXT PRIMARY KEY, description TEXT, category TEXT, on_hand INTEGER DEFAULT 0, avg_weekly_consumption REAL DEFAULT 0, projected_weekly REAL DEFAULT 0, consumption_method TEXT, consumption_trend_pct REAL DEFAULT 0, cv REAL DEFAULT 0, weeks_of_supply REAL DEFAULT 0, weeks_of_supply_with_po REAL DEFAULT 0, safety_stock_weeks REAL DEFAULT 4.0, lead_time_weeks REAL DEFAULT 19.0, manufacturing_weeks REAL DEFAULT 13.0, transit_weeks REAL DEFAULT 4.0, fda_hold_weeks REAL DEFAULT 2.0, dynamic_reorder_point INTEGER DEFAULT 0, open_po_qty INTEGER DEFAULT 0, open_po_refs TEXT, next_po_date TEXT, runout_date TEXT, runout_date_with_po TEXT, will_stockout INTEGER DEFAULT 0, days_at_risk INTEGER DEFAULT 0, status TEXT DEFAULT 'OK', order_recommended INTEGER DEFAULT 0, order_qty_recommended INTEGER DEFAULT 0, demand_adj_qty INTEGER DEFAULT 0, abc_class TEXT DEFAULT 'B', routing TEXT DEFAULT 'STOCK', sku_type TEXT DEFAULT 'finished', regression_slope REAL, regression_r2 REAL, computed_at TEXT DEFAULT (datetime('now')))");
 
   const ins = db.prepare(`INSERT INTO lens_inventory_status
     (sku, description, category, on_hand, avg_weekly_consumption, projected_weekly, consumption_method,
      consumption_trend_pct, cv, weeks_of_supply, weeks_of_supply_with_po, safety_stock_weeks, lead_time_weeks,
-     manufacturing_weeks, transit_weeks, fda_hold_weeks, dynamic_reorder_point, open_po_qty, next_po_date,
+     manufacturing_weeks, transit_weeks, fda_hold_weeks, dynamic_reorder_point, open_po_qty, open_po_refs, next_po_date,
      runout_date, runout_date_with_po, will_stockout, days_at_risk, status, order_recommended,
      order_qty_recommended, demand_adj_qty, abc_class, routing, sku_type, regression_slope, regression_r2, computed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
   let computed = 0;
   const compute = db.transaction(() => {
@@ -329,6 +329,9 @@ function computeAll(db, itempath, netsuite) {
       const po = poBySku[sku];
       const openPoQty = po?.totalQty || 0;
       const nextPoDate = po?.nextDate || null;
+      const openPoRefs = po?.lines?.length > 0
+        ? JSON.stringify(po.lines.map(l => ({ po: l.po, qty: l.qty, status: l.status, phase: l.phase })))
+        : null;
       const wosWithPo = useRate > 0 ? Math.round(((onHand + openPoQty) / useRate) * 10) / 10 : 999;
 
       // Safety stock: Z × σ × √LeadTime (in weeks)
@@ -406,7 +409,7 @@ function computeAll(db, itempath, netsuite) {
       ins.run(sku, desc, cat, onHand,
         Math.round(avgWeekly * 10) / 10, Math.round(projectedWeekly * 10) / 10, projection.method,
         trendPct, cv, wos, wosWithPo, safetyWeeks, totalLeadTime,
-        mfgWeeks, transitWeeks, fdaWeeks, reorderPoint, openPoQty, nextPoDate,
+        mfgWeeks, transitWeeks, fdaWeeks, reorderPoint, openPoQty, openPoRefs, nextPoDate,
         runoutStr, runoutWithPoStr, willStockout, daysAtRisk, status,
         orderRecommended, orderQty, demandAdjQty, abcClass, routing, skuType,
         projection.regression?.slope ? Math.round(projection.regression.slope * 100) / 100 : null,
