@@ -141,7 +141,7 @@ function buildWeeklyConsumption(db) {
   const ipRows = db.prepare(`
     SELECT sku, date(completed_at) as date, SUM(qty) as qty
     FROM picks_history
-    WHERE completed_at IS NOT NULL AND qty <= 10
+    WHERE completed_at IS NOT NULL AND qty <= 50
     GROUP BY sku, date(completed_at)
   `).all();
 
@@ -186,7 +186,7 @@ function getSkuParams(db, sku) {
     fda_hold_weeks: DEFAULTS.fda_hold_weeks,
     total_lead_time_weeks: DEFAULTS.manufacturing_weeks + DEFAULTS.transit_weeks + DEFAULTS.fda_hold_weeks,
     safety_stock_weeks: DEFAULTS.safety_stock_weeks,
-    abc_class: DEFAULTS.abc_class,
+    abc_class: null, // null = auto-classify from consumption volume
     min_order_qty: 0,
     routing: 'STOCK',
   };
@@ -226,20 +226,28 @@ function computeAll(db, itempath, netsuite) {
     // Skip POs that are already received — Pending Bill (D) and Pending Billing (F)
     // These lenses are already on the shelf and counted in ItemPath on-hand
     const isReceived = order.statusCode === 'D' || order.statusCode === 'F';
+    const isPartial = order.statusCode === 'C'; // Partially Received
     for (const line of (order.lines || [])) {
       if (!poBySku[line.sku]) poBySku[line.sku] = { totalQty: 0, nextDate: null, lines: [], seenPOs: new Set() };
-      // Only count UNRECEIVED POs toward incoming quantity
-      if (!isReceived) poBySku[line.sku].totalQty += line.qty;
-      // Still track all POs for reference display (but mark received ones)
+      // Only count UNRECEIVED quantities toward incoming
+      // Status C (Partially Received): use remaining qty, not full ordered qty
+      // Status D/F (Pending Bill/Billing): already received, don't count
+      if (!isReceived) {
+        const incomingQty = isPartial ? (line.remaining || 0) : (line.qty || 0);
+        poBySku[line.sku].totalQty += incomingQty;
+      }
+      // Track all POs for reference display
       if (poBySku[line.sku].seenPOs.has(order.poNumber)) {
         const existing = poBySku[line.sku].lines.find(l => l.po === order.poNumber);
         if (existing) existing.qty += line.qty;
       } else {
         poBySku[line.sku].seenPOs.add(order.poNumber);
-        poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase, received: isReceived });
+        poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, remaining: line.remaining, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase, received: isReceived });
       }
-      if (order.date && (!poBySku[line.sku].nextDate || order.date < poBySku[line.sku].nextDate)) {
-        poBySku[line.sku].nextDate = order.date;
+      // Use ship date (expected arrival) for stockout risk, not PO creation date
+      const arrivalDate = order.shipDate || order.date;
+      if (arrivalDate && (!poBySku[line.sku].nextDate || arrivalDate < poBySku[line.sku].nextDate)) {
+        poBySku[line.sku].nextDate = arrivalDate;
       }
     }
   }
