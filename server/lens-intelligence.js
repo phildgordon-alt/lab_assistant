@@ -234,7 +234,7 @@ function computeAll(db, itempath, netsuite) {
   }
 
   // Get category from NetSuite
-  const getCat = (sku) => netsuite.getSkuCategory(sku) || 'Other';
+  const getCat = (sku) => netsuite.getSkuCategory(sku) || null;
 
   // Get weekly consumption for each SKU
   const weeklyRows = db.prepare('SELECT sku, week_start, units_consumed FROM lens_consumption_weekly ORDER BY sku, week_start DESC').all();
@@ -278,10 +278,12 @@ function computeAll(db, itempath, netsuite) {
     for (const sku of allSkus) {
       const cat = getCat(sku);
       // Only lenses — must be categorized as Lenses or have lens OPC prefix
-      const isLensPrefix = /^(4800|06[0-9]|026|001|5[0-9]{3})/.test(sku);
+      const isLensPrefix = /^(4800|06[0-9]|026|001|5[0-9]{3}|1960|8820|8100|8503)/.test(sku);
       if (cat === 'Lenses') { /* confirmed lens */ }
-      else if (cat === null && isLensPrefix) { /* uncategorized but looks like lens OPC */ }
-      else continue; // skip frames, tops, other, unknown non-lens
+      else if (isLensPrefix) { /* lens OPC prefix — include regardless of NetSuite category */ }
+      else if (cat === 'Frames' || cat === 'Tops') continue; // definitely not lenses
+      else if (cat === null || cat === 'Other') continue; // unknown and no lens prefix
+      else continue;
       // Discontinued SKUs: still track inventory for cycle counts / reconciliation
       // but don't compute ordering — just record on_hand with status DISCONTINUED
       if (discontinuedSkus.has(sku)) {
@@ -410,7 +412,9 @@ function computeAll(db, itempath, netsuite) {
 
       // Status
       let status = 'OK';
-      if (wosWithPo < totalLeadTime) status = 'CRITICAL';
+      if (useRate <= 0 && onHand <= 0) status = 'CRITICAL'; // no stock, no consumption = needs attention
+      else if (useRate <= 0) status = 'OK'; // has stock but no consumption — don't call it overstock
+      else if (wosWithPo < totalLeadTime) status = 'CRITICAL';
       else if (wosWithPo < totalLeadTime + safetyWeeks) status = 'WARNING';
       else if (wosWithPo > 40) status = 'OVERSTOCK';
 
