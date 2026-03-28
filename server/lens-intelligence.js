@@ -223,16 +223,20 @@ function computeAll(db, itempath, netsuite) {
   const poData = netsuite.getOpenPOs();
   const poBySku = {};
   for (const order of (poData.orders || [])) {
+    // Skip POs that are already received — Pending Bill (D) and Pending Billing (F)
+    // These lenses are already on the shelf and counted in ItemPath on-hand
+    const isReceived = order.statusCode === 'D' || order.statusCode === 'F';
     for (const line of (order.lines || [])) {
       if (!poBySku[line.sku]) poBySku[line.sku] = { totalQty: 0, nextDate: null, lines: [], seenPOs: new Set() };
-      poBySku[line.sku].totalQty += line.qty;
-      // Deduplicate by PO number — aggregate qty if same PO appears multiple times
+      // Only count UNRECEIVED POs toward incoming quantity
+      if (!isReceived) poBySku[line.sku].totalQty += line.qty;
+      // Still track all POs for reference display (but mark received ones)
       if (poBySku[line.sku].seenPOs.has(order.poNumber)) {
         const existing = poBySku[line.sku].lines.find(l => l.po === order.poNumber);
         if (existing) existing.qty += line.qty;
       } else {
         poBySku[line.sku].seenPOs.add(order.poNumber);
-        poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase });
+        poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase, received: isReceived });
       }
       if (order.date && (!poBySku[line.sku].nextDate || order.date < poBySku[line.sku].nextDate)) {
         poBySku[line.sku].nextDate = order.date;
