@@ -245,7 +245,14 @@ function computeAll(db, itempath, netsuite) {
   }
 
   // Compute for all SKUs
-  const allSkus = new Set([...Object.keys(onHandBySku), ...Object.keys(weeklyBySku)]);
+  // Include SKUs from: ItemPath inventory + consumption history + sku_params (tracked SKUs)
+  // This ensures out-of-stock SKUs with no recent consumption still show up
+  const trackedSkus = {};
+  try {
+    const params = db.prepare('SELECT sku FROM lens_sku_params').all();
+    for (const r of params) trackedSkus[r.sku] = true;
+  } catch {}
+  const allSkus = new Set([...Object.keys(onHandBySku), ...Object.keys(weeklyBySku), ...Object.keys(trackedSkus)]);
 
   // Drop and recreate to handle schema changes
   try { db.exec('DROP TABLE IF EXISTS lens_inventory_status'); } catch {}
