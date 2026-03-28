@@ -897,6 +897,7 @@ app.get('/api/maintenance/tasks', async (_req: Request, res: Response) => {
 
 // In-memory message store (for demo without full Slack API access)
 let slackMessages: { id: string; from: string; text: string; time: Date; priority: string; source: string }[] = [];
+let slackUserNames: Record<string, string> = {}; // user ID → display name cache
 
 // Demo mode: seed realistic lab Slack messages
 if (process.env.DEMO_MODE === 'true' && !process.env.SLACK_BOT_TOKEN) {
@@ -953,14 +954,36 @@ app.get('/api/slack/messages', async (req: Request, res: Response) => {
       return res.json({ ok: false, error: data.error, messages: slackMessages });
     }
 
+    // Resolve user IDs to display names (cached in module scope)
+    const userIds: string[] = [...new Set((data.messages || []).map((m: any) => m.user).filter(Boolean))] as string[];
+    if (!slackUserNames) slackUserNames = {};
+    const unknownIds = userIds.filter(id => !slackUserNames[id]);
+    for (const uid of unknownIds) {
+      try {
+        const uResp = await fetch(`https://slack.com/api/users.info?user=${uid}`, {
+          headers: { 'Authorization': `Bearer ${slackToken}` },
+          signal: AbortSignal.timeout(5000)
+        });
+        const uData = await uResp.json() as any;
+        if (uData.ok && uData.user) {
+          slackUserNames[uid] = uData.user.profile?.display_name || uData.user.profile?.real_name || uData.user.real_name || uData.user.name || uid;
+        }
+      } catch {}
+    }
+
     // Transform Slack messages to our format
     const messages = (data.messages || []).map((m: any) => ({
       id: m.ts,
-      from: m.user || 'Unknown',
+      ts: m.ts,
+      from: m.bot_profile?.name || slackUserNames?.[m.user] || m.username || m.user || 'Unknown',
+      user: m.user,
       text: m.text,
       time: new Date(parseFloat(m.ts) * 1000),
       priority: m.text?.toLowerCase().includes('rush') || m.text?.toLowerCase().includes('urgent') ? 'high' : 'normal',
-      source: 'slack'
+      source: 'slack',
+      bot_id: m.bot_id,
+      bot_profile: m.bot_profile,
+      username: m.username,
     }));
 
     res.json({ ok: true, messages, channel });
