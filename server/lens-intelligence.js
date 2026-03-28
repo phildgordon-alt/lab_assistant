@@ -225,16 +225,15 @@ function computeAll(db, itempath, netsuite) {
   for (const order of (poData.orders || [])) {
     // Skip POs that are already received — Pending Bill (D) and Pending Billing (F)
     // These lenses are already on the shelf and counted in ItemPath on-hand
-    const isReceived = order.statusCode === 'D' || order.statusCode === 'F';
-    const isPartial = order.statusCode === 'C'; // Partially Received
+    // Only count POs where NOTHING has been received yet
+    // A=Pending Approval, B=Pending Receipt, E=Partially Approved → count as incoming
+    // C=Partially Received, D=Pending Bill, F=Pending Billing → already received (in ItemPath)
+    const isReceived = order.statusCode === 'C' || order.statusCode === 'D' || order.statusCode === 'F';
     for (const line of (order.lines || [])) {
       if (!poBySku[line.sku]) poBySku[line.sku] = { totalQty: 0, nextDate: null, lines: [], seenPOs: new Set() };
-      // Only count UNRECEIVED quantities toward incoming
-      // Status C (Partially Received): use remaining qty, not full ordered qty
-      // Status D/F (Pending Bill/Billing): already received, don't count
+      // Only count POs with nothing received yet (A, B, E)
       if (!isReceived) {
-        const incomingQty = isPartial ? (line.remaining || 0) : (line.qty || 0);
-        poBySku[line.sku].totalQty += incomingQty;
+        poBySku[line.sku].totalQty += (line.qty || 0);
       }
       // Track all POs for reference display
       if (poBySku[line.sku].seenPOs.has(order.poNumber)) {
