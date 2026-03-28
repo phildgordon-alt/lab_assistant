@@ -288,8 +288,9 @@ function computeAll(db, itempath, netsuite) {
       const fdaWeeks = params.fda_hold_weeks;
       const totalLeadTime = mfgWeeks + transitWeeks + fdaWeeks;
 
-      // Detect SKU type: semi-finished starts with SF_ or common semi-fin prefixes
-      const skuType = /^(SF_|062|0[0-9]{2}[1-9])/.test(sku) ? 'semifinished' : 'finished';
+      // Detect SKU type: semi-finished = 062, 026, 001 prefixes, or SF_ marker
+      // 4800 and 8820 are finished lenses (single vision / plano)
+      const skuType = /^(SF_|062|026|001)/.test(sku) ? 'semifinished' : 'finished';
 
       // Consumption projection with regression
       const projection = projectConsumption(weeks.slice(0, 8));
@@ -383,13 +384,19 @@ function computeAll(db, itempath, netsuite) {
       const routing = params.routing || 'STOCK';
       if (routing === 'SURFACE') {
         status = 'SURFACE';
+      } else if (status === 'OVERSTOCK') {
+        // Don't order — we already have more than enough (including open POs)
+        orderRecommended = 0;
       } else if (onHand <= reorderPoint || status === 'CRITICAL') {
         orderRecommended = 1;
         // Correct formula: Order Qty = Reorder Point - Current Inventory
         // (ROP already includes lead time demand + safety stock)
-        orderQty = Math.max(params.min_order_qty || 0, reorderPoint - onHand);
-        // Demand-adjusted qty accounts for open POs
-        demandAdjQty = Math.max(0, reorderPoint - onHand - openPoQty);
+        // But subtract open POs — don't double-order what's already coming
+        orderQty = Math.max(0, reorderPoint - onHand - openPoQty);
+        if (orderQty < (params.min_order_qty || 0) && orderQty > 0) orderQty = params.min_order_qty;
+        demandAdjQty = orderQty;
+        // If open POs already cover the gap, don't recommend ordering
+        if (orderQty <= 0) orderRecommended = 0;
       }
 
       // ABC class (auto if not set)
