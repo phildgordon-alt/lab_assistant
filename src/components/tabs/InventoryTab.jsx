@@ -3410,12 +3410,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>LENSES / MONTH</div>
                               </div>
                               <div style={{ textAlign: 'center' }}>
-                                <div style={{ fontSize: 20, fontWeight: 800, color: si.netSavings > 0 ? T.green : T.red, fontFamily: mono }}>${si.netSavings > 0 ? '+' : ''}{si.netSavings.toLocaleString()}</div>
+                                <div style={{ fontSize: 20, fontWeight: 800, color: (si.netSavings||0) > 0 ? T.green : T.red, fontFamily: mono }}>${(si.netSavings||0) > 0 ? '+' : ''}{(si.netSavings||0).toLocaleString()}</div>
                                 <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>NET SAVINGS / YR</div>
                               </div>
                             </div>
                             <div style={{ marginTop: 8, fontSize: 9, color: T.textDim, fontFamily: mono }}>
-                              Surfacing cost: ${si.annualSurfacingCost.toLocaleString()}/yr &nbsp;|&nbsp; Avoided carrying cost: ${si.annualStockingCost.toLocaleString()}/yr &nbsp;|&nbsp; {si.skus} SKUs routed to surfacing
+                              Surfacing cost: ${(si.annualSurfacingCost||0).toLocaleString()}/yr &nbsp;|&nbsp; Avoided carrying cost: ${(si.annualStockingCost||0).toLocaleString()}/yr &nbsp;|&nbsp; {si.skus||0} SKUs routed to surfacing
                             </div>
                           </div>
                         );
@@ -3515,8 +3515,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                   <span style={{ color: T.textMuted }}>Vol: {Math.round(m.totalMonthlyVol)}/mo</span>
                                   <span style={{ color: T.green }}>{m.stockSkus} stock</span>
                                 </div>
-                                {m.totalCarryCost > 0 && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginTop: 2 }}>Carry: ${m.totalCarryCost.toFixed(0)}/yr</div>}
-                                {m.totalSurfCost > 0 && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Surf: ${m.totalSurfCost.toFixed(0)}/yr</div>}
+                                {(m.totalCarryCost||0) > 0 && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, marginTop: 2 }}>Carry: ${(m.totalCarryCost||0).toFixed(0)}/yr</div>}
+                                {(m.totalSurfCost||0) > 0 && <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>Surf: ${(m.totalSurfCost||0).toFixed(0)}/yr</div>}
                               </div>
                             ))}
                           </div>
@@ -3587,7 +3587,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <td style={{ padding: '6px 10px', textAlign: 'right', color: r.onHand === 0 ? T.red : T.text }}>{r.onHand}</td>
                                 <td style={{ padding: '6px 10px', textAlign: 'right', color: T.textMuted }}>{r.safetyStock}</td>
                                 <td style={{ padding: '6px 10px', textAlign: 'right', color: T.textMuted }}>
-                                  {r.decision === 'STOCK' ? `$${r.annualCarryCost}/yr carry` : `$${r.annualSurfCost}/yr surf`}
+                                  {r.decision === 'STOCK' ? `$${r.annualCarryCost||0}/yr carry` : `$${r.annualSurfCost||0}/yr surf`}
                                 </td>
                               </tr>
                             ))}
