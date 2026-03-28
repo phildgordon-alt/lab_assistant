@@ -537,6 +537,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [inboundSearch, setInboundSearch] = useState("");
   const [lensIntelData, setLensIntelData] = useState(null);
   const [lensIntelFilter, setLensIntelFilter] = useState("all");
+  const [orderTypeFilter, setOrderTypeFilter] = useState("all");
   const [lensIntelSearch, setLensIntelSearch] = useState("");
   const [lensIntelDetail, setLensIntelDetail] = useState(null);
   const [lensSettings, setLensSettings] = useState(false);
@@ -2947,8 +2948,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 const allOrderItems = items.filter(i => i.order_recommended === 1 && i.routing !== 'SURFACE');
                 const svCount = allOrderItems.filter(i => i.sku_type !== 'semifinished').length;
                 const sfCount = allOrderItems.filter(i => i.sku_type === 'semifinished').length;
-                const orderItems = lensIntelFilter === 'SV' ? allOrderItems.filter(i => i.sku_type !== 'semifinished')
-                  : lensIntelFilter === 'SF' ? allOrderItems.filter(i => i.sku_type === 'semifinished')
+                const orderItems = orderTypeFilter === 'SV' ? allOrderItems.filter(i => i.sku_type !== 'semifinished')
+                  : orderTypeFilter === 'SF' ? allOrderItems.filter(i => i.sku_type === 'semifinished')
                   : allOrderItems;
                 return (
                   <div>
@@ -2956,16 +2957,16 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <div style={{ fontSize: 13, color: T.textMuted, fontFamily: mono }}>{orderItems.length} SKUs need ordering</div>
                         {['all', 'SV', 'SF'].map(f => (
-                          <button key={f} onClick={() => setLensIntelFilter(f)} style={{
+                          <button key={f} onClick={() => setOrderTypeFilter(f)} style={{
                             padding: "6px 12px", borderRadius: 6, fontSize: 10, fontWeight: 700, fontFamily: mono, cursor: "pointer",
-                            background: lensIntelFilter === f ? (f === 'SV' ? `${T.blue}20` : f === 'SF' ? `${T.purple}20` : T.blueDark) : 'transparent',
-                            color: lensIntelFilter === f ? (f === 'SV' ? T.blue : f === 'SF' ? T.purple : T.blue) : T.textMuted,
-                            border: `1px solid ${lensIntelFilter === f ? (f === 'SV' ? T.blue : f === 'SF' ? T.purple : T.blue) : T.border}`
+                            background: orderTypeFilter === f ? (f === 'SV' ? `${T.blue}20` : f === 'SF' ? `${T.purple}20` : T.blueDark) : 'transparent',
+                            color: orderTypeFilter === f ? (f === 'SV' ? T.blue : f === 'SF' ? T.purple : T.blue) : T.textMuted,
+                            border: `1px solid ${orderTypeFilter === f ? (f === 'SV' ? T.blue : f === 'SF' ? T.purple : T.blue) : T.border}`
                           }}>{f === 'all' ? `All (${allOrderItems.length})` : f === 'SV' ? `Single Vision (${svCount})` : `Semi-Finished (${sfCount})`}</button>
                         ))}
                       </div>
-                      <ExportBtn label={`Export ${lensIntelFilter !== 'all' ? lensIntelFilter + ' ' : ''}Order CSV`} onClick={() => {
-                        const fname = lensIntelFilter === 'SV' ? 'sv_order_export.csv' : lensIntelFilter === 'SF' ? 'semifinished_order_export.csv' : 'lens_order_export.csv';
+                      <ExportBtn label={`Export ${orderTypeFilter !== 'all' ? orderTypeFilter + ' ' : ''}Order CSV`} onClick={() => {
+                        const fname = orderTypeFilter === 'SV' ? 'sv_order_export.csv' : orderTypeFilter === 'SF' ? 'semifinished_order_export.csv' : 'lens_order_export.csv';
                         downloadCSV(fname, ['sku','description','on_hand','avg_weekly_consumption','order_qty_recommended','demand_adj_qty','dynamic_reorder_point','weeks_of_supply','status','abc_class','routing','sku_type','lead_time_weeks','runout_date','days_at_risk','open_po_qty','open_po_refs'], orderItems);
                       }} />
                     </div>
