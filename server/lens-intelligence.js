@@ -288,9 +288,15 @@ function computeAll(db, itempath, netsuite) {
       const fdaWeeks = params.fda_hold_weeks;
       const totalLeadTime = mfgWeeks + transitWeeks + fdaWeeks;
 
-      // Detect SKU type: semi-finished = 062, 026, 001 prefixes, or SF_ marker
-      // 4800 and 8820 are finished lenses (single vision / plano)
-      const skuType = /^(SF_|062|026|001)/.test(sku) ? 'semifinished' : 'finished';
+      // Detect SKU type: check params override first, then prefix detection
+      // Some 4800 SKUs are semi-finished (e.g., 4800135438, 4800154660)
+      const KNOWN_SEMIFINISHED = new Set(['4800135438', '4800154660', '4800135420', '4800135412']);
+      let skuType = params.sku_type || null; // explicit override from lens_sku_params
+      if (!skuType) {
+        if (KNOWN_SEMIFINISHED.has(sku)) skuType = 'semifinished';
+        else if (/^(SF_|062|026|001)/.test(sku)) skuType = 'semifinished';
+        else skuType = 'finished';
+      }
 
       // Consumption projection with regression
       const projection = projectConsumption(weeks.slice(0, 8));
