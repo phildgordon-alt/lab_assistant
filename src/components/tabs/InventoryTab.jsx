@@ -2873,7 +2873,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           Slope: <strong style={{ color: lensIntelDetail.status.regression_slope > 0 ? T.red : T.green }}>{lensIntelDetail.status.regression_slope > 0 ? '+' : ''}{lensIntelDetail.status.regression_slope}</strong>
                         </div>
                         <div style={{ fontSize: 10, fontFamily: mono, color: T.textMuted }}>
-                          R²: <strong style={{ color: lensIntelDetail.status.regression_r2 >= 0.5 ? T.green : T.amber }}>{lensIntelDetail.status.regression_r2}</strong>
+                          R²: <strong style={{ color: lensIntelDetail.status.regression_r2 >= 0.5 ? T.green : T.amber }}>{Math.round((lensIntelDetail.status.regression_r2 || 0) * 100)}%</strong>
                           {lensIntelDetail.status.regression_r2 >= 0.5 ? ' (strong)' : lensIntelDetail.status.regression_r2 >= 0.3 ? ' (moderate)' : ' (weak)'}
                         </div>
                       </>
@@ -2936,6 +2936,24 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         setLensIntelDetail(null);
                       }} style={{ background: T.red, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono }}>
                         Mark Discontinued
+                      </button>
+                      <button onClick={async () => {
+                        const prefix = lensIntelDetail.status.sku.slice(0, 4);
+                        if (!confirm(`Discontinue ALL SKUs starting with "${prefix}"? This will mark every matching SKU as X.`)) return;
+                        const resp = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                        const data = await resp.json();
+                        const matches = (data.items || []).filter(i => i.sku.startsWith(prefix));
+                        if (matches.length === 0) { alert('No matching SKUs found'); return; }
+                        if (!confirm(`Found ${matches.length} SKUs with prefix "${prefix}". Discontinue all?`)) return;
+                        const updates = matches.map(i => ({ sku: i.sku, abc_class: 'X' }));
+                        await fetch(`${ovenServerUrl}/api/lens-intel/params/bulk`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ updates }) });
+                        await fetch(`${ovenServerUrl}/api/lens-intel/refresh`, { method: 'POST' });
+                        const r2 = await fetch(`${ovenServerUrl}/api/lens-intel/status`);
+                        setLensIntelData(await r2.json());
+                        setLensIntelDetail(null);
+                        alert(`${matches.length} SKUs discontinued (prefix: ${prefix})`);
+                      }} style={{ background: T.red, border: "none", borderRadius: 4, padding: "6px 16px", color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: mono, opacity: 0.7 }}>
+                        Discontinue Prefix ({lensIntelDetail.status.sku.slice(0, 4)}...)
                       </button>
                     </div>
                   </div>
