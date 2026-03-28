@@ -290,7 +290,16 @@ function computeAll(db, itempath, netsuite) {
 
       // Detect SKU type: check params override first, then prefix detection
       // Some 4800 SKUs are semi-finished (e.g., 4800135438, 4800154660)
-      const KNOWN_SEMIFINISHED = new Set(['4800135438', '4800154660', '4800135420', '4800135412']);
+      const KNOWN_SEMIFINISHED = new Set([
+        // Semi Poly
+        '4800135438', '4800154660', '4800135420', '4800135412',
+        // Semi Poly Bluelight
+        '4800135354', '4800135347', '4800135339',
+        // Semi H67
+        '4800150957', '4800135305', '4800150940', '4800150932', '4800150924',
+        // Semi H67 Blue Light
+        '4800150908', '4800135297', '4800150882', '4800150890', '4800150916',
+      ]);
       let skuType = params.sku_type || null; // explicit override from lens_sku_params
       if (!skuType) {
         if (KNOWN_SEMIFINISHED.has(sku)) skuType = 'semifinished';
