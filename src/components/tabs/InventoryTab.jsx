@@ -2767,7 +2767,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <div style={{ fontSize: 16, fontWeight: 800, color: T.text, fontFamily: mono }}>{lensIntelDetail.status.sku}</div>
                       <div style={{ fontSize: 12, color: T.textMuted }}>{lensIntelDetail.status.description}</div>
                     </div>
-                    <button onClick={() => setLensIntelDetail(null)} style={{ background: 'transparent', border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, fontSize: 11, cursor: 'pointer' }}>Close</button>
+                    <button onClick={() => setLensIntelDetail(null)} style={{ background: T.red, border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>✕ CLOSE</button>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 16 }}>
                     <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
