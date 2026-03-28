@@ -166,7 +166,8 @@ function computeCannibalization(db, scenarioId) {
   // Compute new product demand
   const totalLeadTime = (scenario.manufacturing_weeks || 13) + (scenario.transit_weeks || 4) + (scenario.fda_hold_weeks || 2);
   const safetyWeeks = 4;
-  const newProductWeeklyLenses = Math.round(totalLostWeekly * 2); // 2 lenses per job
+  // totalLostWeekly is already in lens units (from ItemPath picks), NOT jobs
+  const newProductWeeklyLenses = Math.round(totalLostWeekly);
   const initialOrderQty = Math.ceil((totalLeadTime + safetyWeeks) * newProductWeeklyLenses);
 
   return {

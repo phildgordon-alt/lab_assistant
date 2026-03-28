@@ -277,8 +277,10 @@ function computeAll(db, itempath, netsuite) {
 
     for (const sku of allSkus) {
       const cat = getCat(sku);
-      // Only lenses — must be categorized as Lenses or have lens OPC prefix
-      const isLensPrefix = /^(4800|06[0-9]|026|001|5[0-9]{3}|1960|8820|8100|8503)/.test(sku);
+      // Only lenses — all prefixes from Lens_Planning_V3.xlsx
+      // 4800, 0620, 6201, 6203, 6204, 8820, 5268, 5288, 5658, 5859, 5868,
+      // 1008, 1130, 1140, 2650, 3500, 0265, 0011, CR39
+      const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|1960|8820|8100|8503|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
       if (cat === 'Lenses') { /* confirmed lens */ }
       else if (isLensPrefix) { /* lens OPC prefix — include regardless of NetSuite category */ }
       else if (cat === 'Frames' || cat === 'Tops') continue; // definitely not lenses
@@ -311,15 +313,20 @@ function computeAll(db, itempath, netsuite) {
 
       // Detect SKU type: check params override first, then prefix detection
       // Some 4800 SKUs are semi-finished (e.g., 4800135438, 4800154660)
+      // All 31 semi-finished SKUs from Lens_Planning_V3.xlsx Semi_finSkus sheet
       const KNOWN_SEMIFINISHED = new Set([
         // Semi Poly
-        '4800135438', '4800154660', '4800135420', '4800135412',
+        '4800135412', '4800135420', '4800135438', '4800154660',
         // Semi Poly Bluelight
-        '4800135354', '4800135347', '4800135339',
+        '4800135339', '4800135347', '4800135354', '4800135362',
         // Semi H67
-        '4800150957', '4800135305', '4800150940', '4800150932', '4800150924',
+        '4800150924', '4800150932', '4800135305', '4800150940', '4800150957',
         // Semi H67 Blue Light
-        '4800150908', '4800135297', '4800150882', '4800150890', '4800150916',
+        '4800150882', '4800150890', '4800135297', '4800150908', '4800150916', '4800150965',
+        // Semi Photochromic PLY + 67
+        '265007922', '265007930', '265007948', '265007955', '265007963', '265007971', '265007989',
+        // Semi Photochromic 67
+        '265008466', '265008474', '265008482', '265008490', '265008508',
       ]);
       let skuType = params.sku_type || null; // explicit override from lens_sku_params
       if (!skuType) {
@@ -339,19 +346,24 @@ function computeAll(db, itempath, netsuite) {
         : (1 + MODEL_PARAMS.stockout_adj_finished / 100);
       const useRate = projectedWeekly * stockoutAdj;
 
+      // ABC class — compute early so it's available for safety stock
+      const totalConsumption = weeks.reduce((s, w) => s + w.qty, 0);
+      const adjAvgMonthly = useRate * 4.33; // weekly → monthly
+      const effectiveAbcClass = params.abc_class || (adjAvgMonthly >= 100 ? 'A' : adjAvgMonthly >= 20 ? 'B' : 'C');
+
       // Coefficient of variation (demand volatility)
       const weeklyQtys = weeks.map(w => w.qty);
       const stdDev = weeklyQtys.length >= 2
         ? Math.sqrt(weeklyQtys.reduce((s, v) => s + (v - avgWeekly) ** 2, 0) / (weeklyQtys.length - 1))
         : 0;
-      const cv = avgWeekly > 0 ? Math.round((stdDev / avgWeekly) * 100) / 100 : 0;
+      const cv = useRate > 0 ? Math.round((stdDev / useRate) * 100) / 100 : 0;
 
       // Safety stock: Z-score method or Weeks-of-Cover override
       let safetyWeeks;
       if (MODEL_PARAMS.use_woc_override) {
         safetyWeeks = MODEL_PARAMS.woc_target_weeks;
       } else {
-        safetyWeeks = SAFETY_BY_CLASS[params.abc_class] || params.safety_stock_weeks;
+        safetyWeeks = SAFETY_BY_CLASS[effectiveAbcClass] || params.safety_stock_weeks;
       }
 
       // Consumption trend
@@ -382,7 +394,7 @@ function computeAll(db, itempath, netsuite) {
         safetyStockUnits = Math.ceil(MODEL_PARAMS.woc_target_weeks * useRate);
       } else {
         // Z-score method: Z × σ × √LeadTime
-        const zScore = Z_SCORES[params.abc_class] || Z_SCORES.B;
+        const zScore = Z_SCORES[effectiveAbcClass] || Z_SCORES.B;
         safetyStockUnits = Math.ceil(zScore * weeklyStdDev * Math.sqrt(totalLeadTime));
       }
 
@@ -430,19 +442,18 @@ function computeAll(db, itempath, netsuite) {
         orderRecommended = 0;
       } else if (onHand <= reorderPoint || status === 'CRITICAL') {
         orderRecommended = 1;
-        // Correct formula: Order Qty = Reorder Point - Current Inventory
-        // (ROP already includes lead time demand + safety stock)
-        // But subtract open POs — don't double-order what's already coming
-        orderQty = Math.max(0, reorderPoint - onHand - openPoQty);
-        if (orderQty < (params.min_order_qty || 0) && orderQty > 0) orderQty = params.min_order_qty;
-        demandAdjQty = orderQty;
+        // Order Qty = gross need (ROP - current inventory)
+        orderQty = Math.max(0, reorderPoint - onHand);
+        // Demand Adj Qty = net need after subtracting open POs
+        demandAdjQty = Math.max(0, orderQty - openPoQty);
+        if (orderQty > 0 && orderQty < (params.min_order_qty || 0)) orderQty = params.min_order_qty;
+        if (demandAdjQty > 0 && demandAdjQty < (params.min_order_qty || 0)) demandAdjQty = params.min_order_qty;
         // If open POs already cover the gap, don't recommend ordering
-        if (orderQty <= 0) orderRecommended = 0;
+        if (demandAdjQty <= 0) orderRecommended = 0;
       }
 
-      // ABC class (auto if not set)
-      const totalConsumption = weeks.reduce((s, w) => s + w.qty, 0);
-      const abcClass = params.abc_class || (totalConsumption > 200 ? 'A' : totalConsumption > 50 ? 'B' : 'C');
+      // ABC class — use the effectiveAbcClass computed earlier (line 352)
+      const abcClass = effectiveAbcClass;
 
       ins.run(sku, desc, cat, onHand,
         Math.round(avgWeekly * 10) / 10, Math.round(projectedWeekly * 10) / 10, projection.method,
