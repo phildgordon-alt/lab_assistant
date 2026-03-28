@@ -2683,14 +2683,17 @@ function InventoryTab({ ovenServerUrl, settings }) {
               <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
                 <input type="text" placeholder="Search SKU or description..." value={lensIntelSearch} onChange={e => setLensIntelSearch(e.target.value)}
                   style={{ flex: 1, maxWidth: 300, padding: "8px 12px", background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }} />
-                {['all', 'CRITICAL', 'WARNING', 'OK', 'OVERSTOCK'].map(f => (
+                {['all', 'CRITICAL', 'WARNING', 'OK', 'OVERSTOCK', 'DISCONTINUED'].map(f => {
+                  const colorMap = { CRITICAL: T.red, WARNING: T.amber, OK: T.green, OVERSTOCK: T.blue, DISCONTINUED: T.textDim };
+                  const count = f === 'all' ? (sm.total || 0) : f === 'DISCONTINUED' ? items.filter(i => i.status === 'DISCONTINUED').length : (sm[f.toLowerCase()] || 0);
+                  return (
                   <button key={f} onClick={() => setLensIntelFilter(f)} style={{
                     padding: "7px 12px", borderRadius: 6, fontSize: 10, fontWeight: 600, fontFamily: mono, cursor: "pointer",
-                    background: lensIntelFilter === f ? (f === 'CRITICAL' ? T.red : f === 'WARNING' ? T.amber : f === 'OK' ? T.green : f === 'OVERSTOCK' ? T.blue : T.blue) : 'transparent',
+                    background: lensIntelFilter === f ? (colorMap[f] || T.blue) : 'transparent',
                     color: lensIntelFilter === f ? '#fff' : T.textMuted,
                     border: `1px solid ${lensIntelFilter === f ? 'transparent' : T.border}`
-                  }}>{f === 'all' ? `All (${sm.total || 0})` : `${f} (${sm[f.toLowerCase()] || 0})`}</button>
-                ))}
+                  }}>{f === 'all' ? `All (${count})` : `${f} (${count})`}</button>);
+                })}
               </div>
 
               {/* Main table */}

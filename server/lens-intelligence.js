@@ -275,7 +275,19 @@ function computeAll(db, itempath, netsuite) {
       if (cat === 'Lenses') { /* confirmed lens */ }
       else if (cat === null && isLensPrefix) { /* uncategorized but looks like lens OPC */ }
       else continue; // skip frames, tops, other, unknown non-lens
-      if (discontinuedSkus.has(sku)) continue;
+      // Discontinued SKUs: still track inventory for cycle counts / reconciliation
+      // but don't compute ordering — just record on_hand with status DISCONTINUED
+      if (discontinuedSkus.has(sku)) {
+        const onHand = onHandBySku[sku]?.qty || 0;
+        const desc = onHandBySku[sku]?.name || sku;
+        const params = getSkuParams(db, sku);
+        const skuType = params.sku_type || (/^(SF_|062|026|001)/.test(sku) ? 'semifinished' : 'finished');
+        ins.run(sku, desc, cat, onHand,
+          0, 0, 'discontinued', 0, 0, 999, 999, 0, 0, 0, 0, 0, 0, 0, null, null,
+          null, null, 0, 0, 'DISCONTINUED', 0, 0, 0, 'X', 'STOCK', skuType, null, null, today);
+        computed++;
+        continue;
+      }
 
       const onHand = onHandBySku[sku]?.qty || 0;
       const desc = onHandBySku[sku]?.name || sku;
