@@ -203,7 +203,7 @@ function runAnalysis(db, overrides = {}) {
       safetyStock,
       zScore,
       stdDev: Math.round(stdDev * 10) / 10,
-      annualCarryCost: decision === 'STOCK' ? Math.round(status.on_hand * matCosts.lensCost * carryingPct * 100) / 100 : 0,
+      annualCarryCost: decision === 'STOCK' ? Math.round((status.on_hand || 0) * matCosts.lensCost * carryingPct * 100) / 100 : 0,
       effectiveSurfPremium,
       leadTimePenalty,
       annualSurfCost: decision === 'SURFACE' ? Math.round(monthlyVol * 12 * effectiveSurfPremium * 100) / 100 : 0,

@@ -236,6 +236,13 @@ function computeAll(db, itempath, netsuite) {
   // Get category from NetSuite
   const getCat = (sku) => netsuite.getSkuCategory(sku) || null;
 
+  // Get NPI cannibalization adjustments (reduces demand for source SKUs when NPI is active)
+  let npiAdjustments = {};
+  try {
+    const npiEngine = require('./npi-engine');
+    npiAdjustments = npiEngine.getActiveAdjustments(db) || {};
+  } catch {}
+
   // Get weekly consumption for each SKU
   const weeklyRows = db.prepare('SELECT sku, week_start, units_consumed FROM lens_consumption_weekly ORDER BY sku, week_start DESC').all();
   const weeklyBySku = {};
@@ -344,7 +351,9 @@ function computeAll(db, itempath, netsuite) {
       const stockoutAdj = skuType === 'semifinished'
         ? (1 + MODEL_PARAMS.stockout_adj_semifin / 100)
         : (1 + MODEL_PARAMS.stockout_adj_finished / 100);
-      const useRate = projectedWeekly * stockoutAdj;
+      // Apply NPI cannibalization: reduce demand if a new product is replacing this SKU
+      const npiReduction = npiAdjustments[sku] || 0;
+      const useRate = Math.max(0, (projectedWeekly * stockoutAdj) - npiReduction);
 
       // ABC class — compute early so it's available for safety stock
       const totalConsumption = weeks.reduce((s, w) => s + w.qty, 0);
