@@ -942,8 +942,7 @@ function upsertPicks(picks) {
         // Sanity check: qty should be reasonable (< 10,000 per pick)
         const qty = typeof existing.qty === 'number' && existing.qty < 10000 ? existing.qty : 0;
         const picked = typeof existing.picked === 'number' && existing.picked < 10000 ? existing.picked : 0;
-        // Skip puts (large qty = receiving, not picking). Semi-finished picks can be 12-20.
-        if (qty > 50) continue;
+        // No qty filter — semi-finished picks can be 100+ units per pick
         historyStmt.run(
           existing.id,
           existing.order_id,

@@ -141,7 +141,7 @@ function buildWeeklyConsumption(db) {
   const ipRows = db.prepare(`
     SELECT sku, date(completed_at) as date, SUM(qty) as qty
     FROM picks_history
-    WHERE completed_at IS NOT NULL AND qty <= 50
+    WHERE completed_at IS NOT NULL
     GROUP BY sku, date(completed_at)
   `).all();
 
