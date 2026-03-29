@@ -361,8 +361,9 @@ function computeAll(db, itempath, netsuite) {
       // Semi-finished: 4800 (specific SKUs), 2650, 1008, 1130, 1140
       // NOT lenses: 1960 (frames/tops), 8100 (frames), 8503 (frames)
       const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
+      let effectiveCat = cat;
       if (cat === 'Lenses') { /* confirmed lens */ }
-      else if (isLensPrefix) { /* lens OPC prefix — include regardless of NetSuite category */ }
+      else if (isLensPrefix) { effectiveCat = 'Lenses'; /* lens OPC prefix — set category */ }
       else if (cat === 'Frames' || cat === 'Tops') continue; // definitely not lenses
       else if (cat === null || cat === 'Other') continue; // unknown and no lens prefix
       else continue;
@@ -373,7 +374,7 @@ function computeAll(db, itempath, netsuite) {
         const desc = onHandBySku[sku]?.name || sku;
         const params = getSkuParams(db, sku);
         const skuType = params.sku_type || (/^(SF_|062|026|001)/.test(sku) ? 'semifinished' : 'finished');
-        ins.run(sku, desc, cat, onHand,
+        ins.run(sku, desc, effectiveCat, onHand,
           0, 0, 'discontinued', 0, 0, 999, 999, 0, 0, 0, 0, 0, 0, 0, null, null,
           null, null, 0, 0, 'DISCONTINUED', 0, 0, 0, 'X', 'STOCK', skuType, null, null, today);
         computed++;
@@ -540,7 +541,7 @@ function computeAll(db, itempath, netsuite) {
       // ABC class — use the effectiveAbcClass computed earlier (line 352)
       const abcClass = effectiveAbcClass;
 
-      ins.run(sku, desc, cat, onHand,
+      ins.run(sku, desc, effectiveCat, onHand,
         Math.round(avgWeekly * 10) / 10, Math.round(projectedWeekly * 10) / 10, projection.method,
         trendPct, cv, wos, wosWithPo, safetyWeeks, totalLeadTime,
         mfgWeeks, transitWeeks, fdaWeeks, reorderPoint, openPoQty, openPoRefs, nextPoDate,
