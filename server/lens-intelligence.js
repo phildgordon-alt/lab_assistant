@@ -302,10 +302,11 @@ function computeAll(db, itempath, netsuite) {
 
     for (const sku of allSkus) {
       const cat = getCat(sku);
-      // Only lenses — all prefixes from Lens_Planning_V3.xlsx
-      // 4800, 0620, 6201, 6203, 6204, 8820, 5268, 5288, 5658, 5859, 5868,
-      // 1008, 1130, 1140, 2650, 3500, 0265, 0011, CR39
-      const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|1960|8820|8100|8503|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
+      // Only lenses — ONLY prefixes from Lens_Planning_V3.xlsx data sheets
+      // Finished: 4800, 8820, 5268, 5288, 5658, 5859, 5868, 6201, 6203, 6204, 3500, CR39
+      // Semi-finished: 4800 (specific SKUs), 2650, 1008, 1130, 1140
+      // NOT lenses: 1960 (frames/tops), 8100 (frames), 8503 (frames)
+      const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
       if (cat === 'Lenses') { /* confirmed lens */ }
       else if (isLensPrefix) { /* lens OPC prefix — include regardless of NetSuite category */ }
       else if (cat === 'Frames' || cat === 'Tops') continue; // definitely not lenses
