@@ -1693,12 +1693,16 @@ Respond with a structured batching plan in this format:
     for (const item of nsInv.items || []) {
       cats[item.sku] = item.category;
     }
-    // Fill in uncategorized ItemPath SKUs using lens prefix detection
+    // Override uncategorized or 'Other' ItemPath SKUs using prefix detection
     const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/;
+    const isFramePrefix = /^(1960|1969|8100|8503|850[0-9])/;
     const inv = itempath.getInventory();
     for (const m of (inv.materials || [])) {
-      if (m.sku && !cats[m.sku]) {
+      if (!m.sku) continue;
+      const current = cats[m.sku];
+      if (!current || current === 'Other') {
         if (isLensPrefix.test(m.sku)) cats[m.sku] = 'Lenses';
+        else if (isFramePrefix.test(m.sku)) cats[m.sku] = 'Frames';
       }
     }
     return json(res, cats);
