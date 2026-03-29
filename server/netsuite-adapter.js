@@ -275,10 +275,13 @@ function reconcile(itempath, category = null, topsData = null) {
     totalItemPath += ipQty;
     const diff = ipQty - nsQty;
 
+    // Category: NetSuite first, then lens prefix detection, then Unknown
+    const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
+    const itemCat = inventory[sku]?.category || (isLensPrefix ? 'Lenses' : 'Unknown');
     const item = {
       sku,
       name: inventory[sku]?.name || '',
-      category: inventory[sku]?.category || 'Unknown',
+      category: itemCat,
       className: inventory[sku]?.className || '',
       wh1: wh1Qty,
       wh2: wh2Qty,
