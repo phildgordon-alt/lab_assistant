@@ -1059,7 +1059,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 {/* Total inventory comparison */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
                   <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH (IRVINE)</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX/ITEMPATH (IRVINE)</div>
                     <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(reconData.summary.activeItemPath ?? reconData.summary.totalItemPath)?.toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>total units (active)</div>
                   </Card>
@@ -1080,7 +1080,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 {/* SKU count comparison */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
                   <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.amber}`, borderTop: `1px dashed ${T.border}` }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH SKUs</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX/ITEMPATH SKUs</div>
                     <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(reconData.summary.itempathSkus ?? 0).toLocaleString()}</div>
                     <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>unique SKUs in Kardex</div>
                   </Card>
@@ -1105,10 +1105,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <thead>
                         <tr style={{ background: T.bg }}>
                           <th style={{ padding: "10px 14px", textAlign: "left", fontSize: 10, color: T.textDim }}>CATEGORY</th>
-                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.amber }}>ITEMPATH</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.amber }}>KARDEX/ITEMPATH</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.purple || '#9b6ee0' }}>NETSUITE</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.textDim }}>VARIANCE</th>
-                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.amber }}>IP SKUs</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.amber }}>KARDEX SKUs</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.purple || '#9b6ee0' }}>NS SKUs</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.textDim }}>TOTAL SKUs</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.red }}>DISCONTINUED</th>
@@ -1994,7 +1994,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 {/* Totals */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 16 }}>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX/ITEMPATH</div>
                     <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(pickCompare.totals?.itempath || 0).toLocaleString()}</div>
                   </div>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
@@ -2681,7 +2681,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{lk.skus || 0} SKUs · {lk.days || 0} days</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
-                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH TRANSACTIONS</div>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>KARDEX/ITEMPATH TRANSACTIONS</div>
                   <div style={{ fontSize: 26, fontWeight: 800, color: T.green, fontFamily: mono }}>{(ip.total || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>{ip.skus || 0} SKUs · {ip.days || 0} days</div>
                 </Card>
@@ -2743,7 +2743,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>SKU</th>
                           <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER</th>
                           <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.red, borderBottom: `1px solid ${T.border}` }}>BREAKAGE</th>
-                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>ITEMPATH</th>
+                          <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>KARDEX/ITEMPATH</th>
                           <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
                         </tr>
                       </thead>
