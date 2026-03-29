@@ -249,21 +249,39 @@ function LensIntelSection({ sku }) {
           <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>Lead time: {s.lead_time_weeks}wk — order by this date to avoid stockout at {s.runout_date}</div>
         </div>
       )}
-      {/* Incoming POs */}
-      {poRefs.length > 0 && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 9, color: T.blue, fontFamily: mono, fontWeight: 700, marginBottom: 4 }}>INCOMING POs ({s.open_po_qty || 0} units)</div>
-          {poRefs.map((p, i) => (
-            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: mono, padding: '3px 0', borderBottom: `1px solid ${T.border}22` }}>
-              <span style={{ color: T.text, fontWeight: 600 }}>{p.po}</span>
-              <span style={{ color: T.amber }}>{p.qty} units</span>
-              <span style={{ color: p.onTheWater ? T.blue : p.received ? T.green : T.textMuted, fontSize: 9 }}>
-                {p.onTheWater ? 'ON THE WATER' : p.received ? 'RECEIVED' : p.status}
-              </span>
+      {/* POs — split into Incoming vs Received */}
+      {poRefs.length > 0 && (() => {
+        const isRcvd = (p) => p.received || (p.status || '').includes('Bill') || (p.status || '').includes('Received') || (p.phase || '') === 'Received';
+        const incoming = poRefs.filter(p => !isRcvd(p));
+        const received = poRefs.filter(p => isRcvd(p));
+        return (<>
+          {incoming.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 9, color: T.blue, fontFamily: mono, fontWeight: 700, marginBottom: 4 }}>INCOMING ({incoming.reduce((s,p) => s + (p.qty||0), 0)} units)</div>
+              {incoming.map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 10, fontFamily: mono, padding: '3px 0', borderBottom: `1px solid ${T.border}22` }}>
+                  <span style={{ color: T.text, fontWeight: 600 }}>{p.po}</span>
+                  <span style={{ color: T.amber }}>{p.qty} units</span>
+                  {p.date && <span style={{ color: T.textDim, fontSize: 8 }}>{p.date}</span>}
+                  <span style={{ color: p.onTheWater ? T.blue : T.textMuted, fontSize: 9 }}>{p.onTheWater ? 'ON THE WATER' : p.status || 'Pending'}</span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          )}
+          {received.length > 0 && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ fontSize: 9, color: T.green, fontFamily: mono, fontWeight: 700, marginBottom: 4 }}>RECEIVED ({received.reduce((s,p) => s + (p.qty||0), 0)} units)</div>
+              {received.map((p, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: mono, padding: '3px 0', borderBottom: `1px solid ${T.border}22` }}>
+                  <span style={{ color: T.text, fontWeight: 600 }}>{p.po}</span>
+                  <span style={{ color: T.green }}>{p.qty} units</span>
+                  <span style={{ color: T.green, fontSize: 9 }}>RECEIVED</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>);
+      })()}
       <div style={{ marginTop: 6, fontSize: 8, color: T.textDim, fontFamily: mono }}>
         Source: ItemPath + Looker — {s.consumption_method === 'regression' ? `Regression (R² ${Math.round((s.regression_r2 || 0) * 100)}%)` : 'Average'}
       </div>
