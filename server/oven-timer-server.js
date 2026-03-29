@@ -1687,11 +1687,19 @@ Respond with a structured batching plan in this format:
     return json(res, netsuite.getHealth());
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/categories') {
-    // Return SKU → category mapping for all NetSuite items
+    // Return SKU → category mapping for all NetSuite items + lens prefix fallback
     const nsInv = netsuite.getInventory();
     const cats = {};
     for (const item of nsInv.items || []) {
       cats[item.sku] = item.category;
+    }
+    // Fill in uncategorized ItemPath SKUs using lens prefix detection
+    const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/;
+    const inv = itempath.getInventory();
+    for (const m of (inv.materials || [])) {
+      if (m.sku && !cats[m.sku]) {
+        if (isLensPrefix.test(m.sku)) cats[m.sku] = 'Lenses';
+      }
     }
     return json(res, cats);
   }
