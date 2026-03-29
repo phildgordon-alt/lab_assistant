@@ -2769,14 +2769,36 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     </div>
                     <button onClick={() => setLensIntelDetail(null)} style={{ background: T.red, border: 'none', borderRadius: 6, padding: '6px 14px', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>✕ CLOSE</button>
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 16 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 10 }}>
                     <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
                       <div style={{ fontSize: 20, fontWeight: 800, color: T.text, fontFamily: mono }}>{lensIntelDetail.status.on_hand?.toLocaleString()}</div>
                       <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>ON HAND</div>
                     </div>
                     <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.amber, fontFamily: mono }}>{lensIntelDetail.status.avg_weekly_consumption}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>AVG / WEEK</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>{Math.round((lensIntelDetail.status.avg_weekly_consumption || 0) / 5 * 10) / 10} / day</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
                       <div style={{ fontSize: 20, fontWeight: 800, color: T.amber, fontFamily: mono }}>{lensIntelDetail.status.weeks_of_supply}</div>
                       <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>WEEKS SUPPLY</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: lensIntelDetail.status.will_stockout ? T.red : T.green, fontFamily: mono }}>
+                        {lensIntelDetail.status.will_stockout ? `${lensIntelDetail.status.days_at_risk}d risk` : 'Safe'}
+                      </div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>STOCKOUT</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10, marginBottom: 16 }}>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.red, fontFamily: mono }}>{(lensIntelDetail.status.dynamic_reorder_point || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>REORDER POINT</div>
+                    </div>
+                    <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: T.green, fontFamily: mono }}>{(lensIntelDetail.status.order_qty_recommended || 0).toLocaleString()}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>ORDER QTY</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>adj: {(lensIntelDetail.status.demand_adj_qty || 0).toLocaleString()}</div>
                     </div>
                     <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
                       <div style={{ fontSize: 20, fontWeight: 800, color: T.blue, fontFamily: mono }}>{lensIntelDetail.status.open_po_qty || 0}</div>
@@ -2784,10 +2806,15 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       {lensIntelDetail.status.open_po_refs && (() => { try { return JSON.parse(lensIntelDetail.status.open_po_refs).map((p, i) => <div key={i} style={{ fontSize: 9, color: T.blue, fontFamily: mono }}>{p.po}: {p.qty} ({p.status})</div>); } catch { return null; } })()}
                     </div>
                     <div style={{ background: T.bg, padding: 10, borderRadius: 6, textAlign: 'center' }}>
-                      <div style={{ fontSize: 20, fontWeight: 800, color: lensIntelDetail.status.will_stockout ? T.red : T.green, fontFamily: mono }}>
-                        {lensIntelDetail.status.will_stockout ? `${lensIntelDetail.status.days_at_risk}d risk` : 'Safe'}
+                      <div style={{ fontSize: 14, fontWeight: 700, color: T.textMuted, fontFamily: mono }}>{lensIntelDetail.status.sku_type === 'semifinished' ? 'SF' : 'FIN'} / {lensIntelDetail.status.abc_class}</div>
+                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>TYPE / CLASS</div>
+                      <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>
+                        {lensIntelDetail.status.consumption_method === 'regression' ? 'Regression' : 'Average'}
+                        {lensIntelDetail.status.consumption_method === 'regression' && ` (R² ${Math.round((lensIntelDetail.status.regression_r2 || 0) * 100)}%)`}
                       </div>
-                      <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>STOCKOUT</div>
+                      <div style={{ fontSize: 7, color: T.textDim, fontFamily: mono }}>
+                        Source: {new Date(lensIntelDetail.status.computed_at || '').toLocaleDateString() !== 'Invalid Date' ? 'ItemPath + Looker' : 'ItemPath'}
+                      </div>
                     </div>
                   </div>
                   {/* Weekly consumption chart */}
