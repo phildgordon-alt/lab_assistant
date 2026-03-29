@@ -139,31 +139,31 @@ function projectConsumption(weeks, weeksForward = 4) {
 // ─────────────────────────────────────────────────────────────────────────────
 function buildWeeklyConsumption(db) {
   // HYBRID CONSUMPTION:
-  // - ItemPath picks_history for March 6, 2026+ (real-time machine truth)
-  // - Looker/NetSuite looker_jobs for before March 6 (historical backfill)
-  // ItemPath = what operators physically pull (includes waste). Most accurate for current.
-  // Looker = shipped jobs with lens OPCs. Best available for history.
+  // - Looker/NetSuite: full history (all dates)
+  // - ItemPath picks_history: March 6, 2026+ (real-time machine truth)
+  // ItemPath takes priority for dates where both exist (more accurate — includes waste)
+  // Looker fills gaps where ItemPath has no data
   const CUTOVER_DATE = '2026-03-06';
 
   const dailyBySku = {};
 
-  // 1. Looker/NetSuite for history BEFORE March 6
+  // 1. Looker/NetSuite — ALL dates (base layer)
   try {
     const lkRows = db.prepare(`
       SELECT opc as sku, sent_from_lab_date as date, SUM(count_lenses) as qty
       FROM looker_jobs
-      WHERE sent_from_lab_date < ? AND opc IS NOT NULL AND opc != ''
+      WHERE opc IS NOT NULL AND opc != ''
       GROUP BY opc, sent_from_lab_date
-    `).all(CUTOVER_DATE);
+    `).all();
     for (const r of lkRows) {
       if (!r.sku || !r.date || !r.qty) continue;
       if (!dailyBySku[r.sku]) dailyBySku[r.sku] = {};
       dailyBySku[r.sku][r.date] = (dailyBySku[r.sku][r.date] || 0) + r.qty;
     }
-    console.log(`[Lens Intel] Looker historical consumption: ${lkRows.length} rows (before ${CUTOVER_DATE})`);
-  } catch (e) { console.log('[Lens Intel] Looker backfill not available:', e.message); }
+    console.log(`[Lens Intel] Looker consumption: ${lkRows.length} rows (all dates)`);
+  } catch (e) { console.log('[Lens Intel] Looker not available:', e.message); }
 
-  // 2. ItemPath picks_history for March 6+ (real-time truth)
+  // 2. ItemPath picks_history for March 6+ — OVERRIDES Looker for these dates
   const ipRows = db.prepare(`
     SELECT sku, date(completed_at) as date, SUM(qty) as qty
     FROM picks_history
@@ -172,9 +172,33 @@ function buildWeeklyConsumption(db) {
   `).all(CUTOVER_DATE);
   for (const r of ipRows) {
     if (!dailyBySku[r.sku]) dailyBySku[r.sku] = {};
-    dailyBySku[r.sku][r.date] = (dailyBySku[r.sku][r.date] || 0) + r.qty;
+    // Override Looker for this date — ItemPath is more accurate (includes waste)
+    dailyBySku[r.sku][r.date] = r.qty;
   }
-  console.log(`[Lens Intel] ItemPath consumption: ${ipRows.length} rows (${CUTOVER_DATE}+)`);
+  console.log(`[Lens Intel] ItemPath consumption: ${ipRows.length} rows (${CUTOVER_DATE}+, overrides Looker)`);
+
+  // 3. STOCKOUT-AWARE FILTERING: exclude days where stock was depleted
+  // When a SKU stocks out, consumption drops to near-zero (scraping the bin).
+  // Those days understate real demand. Detect and exclude them.
+  for (const [sku, days] of Object.entries(dailyBySku)) {
+    const sorted = Object.entries(days).sort((a, b) => a[0].localeCompare(b[0])); // oldest first
+    if (sorted.length < 3) continue; // not enough data to detect patterns
+
+    // Find the median daily consumption (represents in-stock rate)
+    const qtys = sorted.map(([, q]) => q).sort((a, b) => a - b);
+    const median = qtys[Math.floor(qtys.length / 2)];
+    if (median <= 0) continue;
+
+    // Threshold: days below 20% of median are likely stockout days
+    const threshold = median * 0.2;
+
+    // Walk backwards from most recent — trim stockout tail
+    // (only trim trailing stockout days, not gaps in the middle)
+    for (let i = sorted.length - 1; i >= 0; i--) {
+      if (sorted[i][1] >= threshold) break; // found an in-stock day, stop trimming
+      delete days[sorted[i][0]]; // remove this stockout day
+    }
+  }
 
   const del = db.prepare('DELETE FROM lens_consumption_weekly');
   const ins = db.prepare('INSERT OR REPLACE INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)');
