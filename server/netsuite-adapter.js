@@ -278,7 +278,8 @@ function reconcile(itempath, category = null, topsData = null) {
     // Category: NetSuite first, then lens prefix detection, then Unknown
     const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
     const isFramePrefix = /^(1960|1969|8100|8503|850[0-9])/.test(sku);
-    const itemCat = inventory[sku]?.category || (isLensPrefix ? 'Lenses' : isFramePrefix ? 'Frames' : 'Unknown');
+    const nsCat = inventory[sku]?.category;
+    const itemCat = (nsCat && nsCat !== 'Other') ? nsCat : (isLensPrefix ? 'Lenses' : isFramePrefix ? 'Frames' : 'Unknown');
     const item = {
       sku,
       name: inventory[sku]?.name || '',
@@ -324,7 +325,8 @@ function reconcile(itempath, category = null, topsData = null) {
   for (const sku of allSkus) {
     const isLensPfx = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
     const isFramePfx = /^(1960|1969|8100|8503|850[0-9])/.test(sku);
-    const cat = inventory[sku]?.category || (isLensPfx ? 'Lenses' : isFramePfx ? 'Frames' : 'Unknown');
+    const nsCat2 = inventory[sku]?.category;
+    const cat = (nsCat2 && nsCat2 !== 'Other') ? nsCat2 : (isLensPfx ? 'Lenses' : isFramePfx ? 'Frames' : 'Unknown');
     const nsQty = inventory[sku]?.qty || 0;
     const ipQty = ipTotal[sku] || 0;
     const disc = discontinuedSkus.has(sku);
