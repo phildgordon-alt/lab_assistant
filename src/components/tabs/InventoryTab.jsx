@@ -158,7 +158,7 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
           <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{item.sku || item.name || title}</div>
           <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono, marginTop: 2 }}>{item.name?.slice(0, 50) || item.description?.slice(0, 50) || ''}</div>
         </div>
-        <button onClick={onClose} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', color: T.text, cursor: 'pointer', fontSize: 20, fontWeight: 700, lineHeight: 1 }}>X</button>
+        <button onClick={onClose} style={{ background: T.red, border: 'none', borderRadius: 8, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer', fontSize: 18, fontWeight: 800, lineHeight: 1 }}>✕</button>
       </div>
 
       {/* Stock Status Banner */}
@@ -181,11 +181,86 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
         {renderSection('Physical', physicalFields)}
         {renderSection('Supplier', supplierFields)}
 
+        {/* Lens Intelligence data — fetch on mount */}
+        <LensIntelSection sku={item.sku} />
+
         {/* All other fields */}
         <div style={{ marginTop: 20 }}>
           <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>All Fields</div>
           {Object.entries(item).map(([k, v]) => renderField(k, v))}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Lens Intelligence inline section for the detail sidebar
+function LensIntelSection({ sku }) {
+  const [data, setData] = useState(null);
+  useEffect(() => {
+    if (!sku) return;
+    fetch(`http://${window.location.hostname}:3002/api/lens-intel/sku/${encodeURIComponent(sku)}`)
+      .then(r => r.json()).then(setData).catch(() => {});
+  }, [sku]);
+  if (!data?.status) return null;
+  const s = data.status;
+  const avgDaily = Math.round((s.avg_weekly_consumption || 0) / 5 * 10) / 10;
+  // Order-by date: subtract lead time from runout date
+  let orderByDate = null;
+  if (s.runout_date && s.lead_time_weeks) {
+    const runout = new Date(s.runout_date);
+    const orderBy = new Date(runout.getTime() - (s.lead_time_weeks * 7 * 86400000));
+    if (!isNaN(orderBy.getTime())) orderByDate = orderBy.toISOString().slice(0, 10);
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  const orderByPast = orderByDate && orderByDate < today;
+  const orderBySoon = orderByDate && !orderByPast && orderByDate < new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  // Parse PO refs
+  let poRefs = [];
+  try { if (s.open_po_refs) poRefs = JSON.parse(s.open_po_refs); } catch {}
+
+  return (
+    <div style={{ marginBottom: 16, padding: 14, background: `${T.blue}08`, border: `1px solid ${T.blue}20`, borderRadius: 8 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: T.blue, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10, fontFamily: mono }}>Lens Intelligence</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>AVG / WEEK</span><div style={{ fontSize: 16, fontWeight: 800, color: T.text, fontFamily: mono }}>{s.avg_weekly_consumption || 0}</div></div>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>AVG / DAY</span><div style={{ fontSize: 16, fontWeight: 800, color: T.text, fontFamily: mono }}>{avgDaily}</div></div>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>REORDER POINT</span><div style={{ fontSize: 16, fontWeight: 800, color: T.red, fontFamily: mono }}>{(s.dynamic_reorder_point || 0).toLocaleString()}</div></div>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>ORDER QTY</span><div style={{ fontSize: 16, fontWeight: 800, color: T.green, fontFamily: mono }}>{(s.order_qty_recommended || 0).toLocaleString()}</div></div>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>WEEKS SUPPLY</span><div style={{ fontSize: 16, fontWeight: 800, color: (s.weeks_of_supply||0) < 6 ? T.red : (s.weeks_of_supply||0) < 10 ? T.amber : T.green, fontFamily: mono }}>{s.weeks_of_supply}</div></div>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>STATUS</span><div style={{ fontSize: 14, fontWeight: 700, color: s.status === 'CRITICAL' ? T.red : s.status === 'WARNING' ? T.amber : T.green, fontFamily: mono }}>{s.status}</div></div>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>RUNOUT DATE</span><div style={{ fontSize: 14, fontWeight: 700, color: T.red, fontFamily: mono }}>{s.runout_date || '—'}</div></div>
+        <div><span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>TYPE / CLASS</span><div style={{ fontSize: 14, fontWeight: 700, color: T.textMuted, fontFamily: mono }}>{s.sku_type === 'semifinished' ? 'Semi-Fin' : 'Finished'} / {s.abc_class}</div></div>
+      </div>
+      {/* Order-by date */}
+      {orderByDate && (
+        <div style={{ marginTop: 10, padding: '8px 10px', background: orderByPast ? `${T.red}15` : orderBySoon ? `${T.amber}15` : `${T.green}10`, borderRadius: 6, border: `1px solid ${orderByPast ? T.red : orderBySoon ? T.amber : T.green}30` }}>
+          <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>PLACE ORDER BY</div>
+          <div style={{ fontSize: 16, fontWeight: 800, color: orderByPast ? T.red : orderBySoon ? T.amber : T.green, fontFamily: mono }}>
+            {orderByDate}
+            {orderByPast && <span style={{ fontSize: 10, marginLeft: 8 }}>⚠ OVERDUE</span>}
+            {orderBySoon && <span style={{ fontSize: 10, marginLeft: 8 }}>ORDER SOON</span>}
+          </div>
+          <div style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>Lead time: {s.lead_time_weeks}wk — order by this date to avoid stockout at {s.runout_date}</div>
+        </div>
+      )}
+      {/* Incoming POs */}
+      {poRefs.length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 9, color: T.blue, fontFamily: mono, fontWeight: 700, marginBottom: 4 }}>INCOMING POs ({s.open_po_qty || 0} units)</div>
+          {poRefs.map((p, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, fontFamily: mono, padding: '3px 0', borderBottom: `1px solid ${T.border}22` }}>
+              <span style={{ color: T.text, fontWeight: 600 }}>{p.po}</span>
+              <span style={{ color: T.amber }}>{p.qty} units</span>
+              <span style={{ color: p.onTheWater ? T.blue : p.received ? T.green : T.textMuted, fontSize: 9 }}>
+                {p.onTheWater ? 'ON THE WATER' : p.received ? 'RECEIVED' : p.status}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ marginTop: 6, fontSize: 8, color: T.textDim, fontFamily: mono }}>
+        Source: ItemPath + Looker — {s.consumption_method === 'regression' ? `Regression (R² ${Math.round((s.regression_r2 || 0) * 100)}%)` : 'Average'}
       </div>
     </div>
   );
