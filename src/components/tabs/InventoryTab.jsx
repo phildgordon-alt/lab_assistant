@@ -190,6 +190,11 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
           {Object.entries(item).map(([k, v]) => renderField(k, v))}
         </div>
       </div>
+
+      {/* Fixed bottom close button — always visible */}
+      <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+        <button onClick={onClose} style={{ width: '100%', background: T.red, border: 'none', borderRadius: 8, padding: '10px 0', color: '#fff', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: mono }}>✕ CLOSE</button>
+      </div>
     </div>
   );
 }
