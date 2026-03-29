@@ -1108,7 +1108,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.amber }}>ITEMPATH</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.purple || '#9b6ee0' }}>NETSUITE</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.textDim }}>VARIANCE</th>
-                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.textDim }}>SKUS</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.amber }}>IP SKUs</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.purple || '#9b6ee0' }}>NS SKUs</th>
+                          <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.textDim }}>TOTAL SKUs</th>
                           <th style={{ padding: "10px 14px", textAlign: "right", fontSize: 10, color: T.red }}>DISCONTINUED</th>
                         </tr>
                       </thead>
@@ -1123,13 +1125,15 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.amber, fontWeight: 600 }}>{c.itempath.toLocaleString()}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{c.netsuite.toLocaleString()}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 700, color: c.diff === 0 ? T.green : T.red }}>{c.diff > 0 ? '+' : ''}{c.diff.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.amber, fontWeight: 600 }}>{c.ipSkuCount ?? '—'}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{c.nsSkuCount ?? '—'}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.textMuted }}>{c.skus}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: (c.itempath_disc + c.netsuite_disc) > 0 ? T.red : T.textDim }}>{c.itempath_disc > 0 ? `IP:${c.itempath_disc}` : ''}{c.itempath_disc > 0 && c.netsuite_disc > 0 ? ' · ' : ''}{c.netsuite_disc > 0 ? `NS:${c.netsuite_disc}` : ''}{(c.itempath_disc + c.netsuite_disc) === 0 ? '—' : ''}</td>
                               </tr>
                             ))}
                             {excludedCats.length > 0 && (
                               <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                                <td colSpan={6} style={{ padding: "6px 14px", fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>EXCLUDED FROM TOTALS</td>
+                                <td colSpan={8} style={{ padding: "6px 14px", fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>EXCLUDED FROM TOTALS</td>
                               </tr>
                             )}
                             {excludedCats.map(c => (
@@ -1138,6 +1142,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim, fontWeight: 600 }}>{c.itempath.toLocaleString()}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim, fontWeight: 600 }}>{c.netsuite.toLocaleString()}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 700, color: T.textDim }}>{c.diff > 0 ? '+' : ''}{c.diff.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim }}>{c.ipSkuCount ?? '—'}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim }}>{c.nsSkuCount ?? '—'}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim }}>{c.skus}</td>
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim }}>—</td>
                               </tr>
