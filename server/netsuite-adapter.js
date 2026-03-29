@@ -321,7 +321,8 @@ function reconcile(itempath, category = null, topsData = null) {
   // Category-level totals (all SKUs, not just discrepancies)
   const byCategory = {};
   for (const sku of allSkus) {
-    const cat = inventory[sku]?.category || 'Unknown';
+    const isLensPfx = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
+    const cat = inventory[sku]?.category || (isLensPfx ? 'Lenses' : 'Unknown');
     const nsQty = inventory[sku]?.qty || 0;
     const ipQty = ipTotal[sku] || 0;
     const disc = discontinuedSkus.has(sku);
