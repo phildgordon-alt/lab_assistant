@@ -237,18 +237,17 @@ function classifySku(sku) {
   const nsItem = inventory[sku];
   const nsCat = nsItem?.category; // From CLASS_MAP: Lenses, Frames, Tops, or Other
 
-  // 1. NetSuite explicitly says Other (class 8,10,11,12,13 = accessories/ink/packaging/warranties)
-  //    Check FIRST — before prefix detection, because some accessory SKUs match lens/frame prefixes
-  if (nsCat === 'Other') return 'Accessories';
+  // 1. NetSuite says Lenses/Frames/Tops → trust it
+  if (nsCat === 'Lenses' || nsCat === 'Frames' || nsCat === 'Tops') return nsCat;
 
-  // 2. NetSuite says Lenses/Frames/Tops → trust it
-  if (nsCat && nsCat !== 'Other') return nsCat;
-
-  // 3. Prefix detection for items NetSuite doesn't classify or doesn't have
+  // 2. Prefix detection for items NetSuite doesn't classify
   if (LENS_PREFIX_RE.test(sku)) return 'Lenses';
   if (FRAME_PREFIX_RE.test(sku)) return 'Frames';
 
-  // 4. Not in NetSuite AND no recognizable prefix → needs investigation
+  // 3. NetSuite 'Other' = accessories/packaging/ink (not in Kardex, at AMS 3PL)
+  if (nsCat === 'Other') return 'Accessories';
+
+  // 4. No classification at all — needs investigation
   return 'Uncategorized';
 }
 
@@ -367,15 +366,15 @@ function reconcile(itempath, category = null, topsData = null) {
     c.netsuite_disc = Math.round(c.netsuite_disc);
   }
 
-  // Active totals (excluding discontinued AND accessories)
+  // Active totals (excluding discontinued only — everything else counts)
   const activeDiscrepancies = discrepancies.filter(d => !d.discontinued);
   const discDiscrepancies = discrepancies.filter(d => d.discontinued);
-  // Accessories are at AMS 3PL, not in the lab — exclude from main totals
-  const accessorySkus = new Set([...allSkus].filter(sku => classifySku(sku) === 'Accessories'));
-  const excludedIP = [...discontinuedSkus, ...accessorySkus].reduce((s, sku) => s + (ipTotal[sku] || 0), 0);
-  const excludedNS = [...discontinuedSkus, ...accessorySkus].reduce((s, sku) => s + (inventory[sku]?.qty || 0), 0);
-  const activeTotalIP = Math.round(totalItemPath - excludedIP);
-  const activeTotalNS = Math.round(totalNetSuite - excludedNS);
+  const discExcludedIP = [...discontinuedSkus].reduce((s, sku) => s + (ipTotal[sku] || 0), 0);
+  const discExcludedNS = [...discontinuedSkus].reduce((s, sku) => s + (inventory[sku]?.qty || 0), 0);
+  const activeTotalIP = Math.round(totalItemPath - discExcludedIP);
+  const activeTotalNS = Math.round(totalNetSuite - discExcludedNS);
+  const accessorySkuCount = [...allSkus].filter(sku => classifySku(sku) === 'Accessories').length;
+  const uncategorizedSkuCount = [...allSkus].filter(sku => classifySku(sku) === 'Uncategorized').length;
 
   return {
     summary: {
@@ -391,8 +390,8 @@ function reconcile(itempath, category = null, topsData = null) {
       activeNetSuite: activeTotalNS,
       activeDiff: activeTotalIP - activeTotalNS,
       discontinuedCount: discontinuedSkus.size,
-      accessorySkus: accessorySkus.size,
-      uncategorizedSkus: [...allSkus].filter(sku => classifySku(sku) === 'Uncategorized').length,
+      accessorySkus: accessorySkuCount,
+      uncategorizedSkus: uncategorizedSkuCount,
       netsuiteSkus: [...allSkus].filter(sku => (inventory[sku]?.qty || 0) > 0).length,
       itempathSkus: [...allSkus].filter(sku => (ipTotal[sku] || 0) > 0).length,
       critical: discrepancies.filter(d => d.severity === 'critical').length,
