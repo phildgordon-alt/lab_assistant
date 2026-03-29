@@ -233,21 +233,33 @@ async function poll() {
 const LENS_PREFIX_RE = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/;
 const FRAME_PREFIX_RE = /^(1960|1969|8100|8503|850[0-9])/;
 
-function classifySku(sku) {
+function classifySku(sku, itemName) {
   const nsItem = inventory[sku];
   const nsCat = nsItem?.category; // From CLASS_MAP: Lenses, Frames, Tops, or Other
+  const name = (itemName || nsItem?.name || '').toLowerCase();
 
   // 1. NetSuite says Lenses/Frames/Tops → trust it
   if (nsCat === 'Lenses' || nsCat === 'Frames' || nsCat === 'Tops') return nsCat;
 
-  // 2. Prefix detection for items NetSuite doesn't classify
+  // 2. Lens prefix detection
   if (LENS_PREFIX_RE.test(sku)) return 'Lenses';
-  if (FRAME_PREFIX_RE.test(sku)) return 'Frames';
 
-  // 3. NetSuite 'Other' = accessories/packaging/ink (not in Kardex, at AMS 3PL)
+  // 3. Ambiguous prefixes (1960, 8100) — check name for "top"
+  //    1960/8100 can be frames OR tops (Blank Top, Crystal Clear Top, etc.)
+  if (FRAME_PREFIX_RE.test(sku)) {
+    if (name.includes('top')) return 'Tops';
+    return 'Frames';
+  }
+
+  // 4. Name-based detection for anything else
+  if (name.includes('top') || name.includes('blank top') || name.includes('crystal clear')) return 'Tops';
+  if (name.includes('lens') || name.includes('sv ') || name.includes('poly') || name.includes('h67') || name.includes('b67') || name.includes('bly')) return 'Lenses';
+  if (name.includes('frame') || name.includes('glasses')) return 'Frames';
+
+  // 5. NetSuite 'Other' = accessories/packaging/ink
   if (nsCat === 'Other') return 'Accessories';
 
-  // 4. No classification at all — needs investigation
+  // 6. No classification — needs investigation
   return 'Uncategorized';
 }
 
@@ -264,6 +276,14 @@ function reconcile(itempath, category = null, topsData = null) {
       ipTotal[sku] = (ipTotal[sku] || 0) + qty;
     }
   }
+  // Build ItemPath name lookup for classification
+  const ipNames = {};
+  try {
+    const ipInv = itempath.getInventory();
+    for (const m of (ipInv.materials || [])) {
+      if (m.sku && m.name) ipNames[m.sku] = m.name;
+    }
+  } catch {}
   // Add TOPS manual count
   if (topsData) {
     for (const { sku, qty } of topsData) {
@@ -276,7 +296,7 @@ function reconcile(itempath, category = null, topsData = null) {
 
   // Filter by category if specified — uses unified classification logic
   if (category) {
-    allSkus = new Set([...allSkus].filter(sku => classifySku(sku) === category));
+    allSkus = new Set([...allSkus].filter(sku => classifySku(sku, inventory[sku]?.name || ipNames[sku] || '') === category));
   }
   console.log(`[NetSuite] Reconcile: ${allSkus.size} SKUs${category ? ` (category: ${category})` : ''}`);
   const discrepancies = [];
@@ -295,11 +315,12 @@ function reconcile(itempath, category = null, topsData = null) {
     totalItemPath += ipQty;
     const diff = ipQty - nsQty;
 
-    // Category: NetSuite class → prefix detection → Accessories (NS 'Other') → Uncategorized
-    const itemCat = classifySku(sku);
+    // Get name from either NetSuite or ItemPath
+    const itemName = inventory[sku]?.name || ipNames[sku] || '';
+    const itemCat = classifySku(sku, itemName);
     const item = {
       sku,
-      name: inventory[sku]?.name || '',
+      name: itemName,
       category: itemCat,
       className: inventory[sku]?.className || '',
       wh1: wh1Qty,
@@ -340,7 +361,8 @@ function reconcile(itempath, category = null, topsData = null) {
   // Category-level totals (all SKUs, not just discrepancies)
   const byCategory = {};
   for (const sku of allSkus) {
-    const cat = classifySku(sku);
+    const itemNm = inventory[sku]?.name || ipNames[sku] || '';
+    const cat = classifySku(sku, itemNm);
     const nsQty = inventory[sku]?.qty || 0;
     const ipQty = ipTotal[sku] || 0;
     const disc = discontinuedSkus.has(sku);
@@ -373,8 +395,8 @@ function reconcile(itempath, category = null, topsData = null) {
   const discExcludedNS = [...discontinuedSkus].reduce((s, sku) => s + (inventory[sku]?.qty || 0), 0);
   const activeTotalIP = Math.round(totalItemPath - discExcludedIP);
   const activeTotalNS = Math.round(totalNetSuite - discExcludedNS);
-  const accessorySkuCount = [...allSkus].filter(sku => classifySku(sku) === 'Accessories').length;
-  const uncategorizedSkuCount = [...allSkus].filter(sku => classifySku(sku) === 'Uncategorized').length;
+  const accessorySkuCount = [...allSkus].filter(sku => classifySku(sku, inventory[sku]?.name || ipNames[sku] || '') === 'Accessories').length;
+  const uncategorizedSkuCount = [...allSkus].filter(sku => classifySku(sku, inventory[sku]?.name || ipNames[sku] || '') === 'Uncategorized').length;
 
   return {
     summary: {
@@ -413,7 +435,7 @@ function lookupSku(sku) {
 }
 
 function getSkuCategory(sku) {
-  return classifySku(sku); // Uses unified classification logic
+  return classifySku(sku, inventory[sku]?.name || ''); // Uses unified classification logic
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
