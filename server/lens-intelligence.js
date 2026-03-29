@@ -245,7 +245,8 @@ function computeAll(db, itempath, netsuite) {
         if (existing) existing.qty += line.qty;
       } else {
         poBySku[line.sku].seenPOs.add(order.poNumber);
-        poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, remaining: line.remaining, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase, received: isReceived });
+        const missingShipDate = order.statusCode === 'B' && !order.shipDate;
+        poBySku[line.sku].lines.push({ po: order.poNumber, qty: line.qty, remaining: line.remaining, date: order.date, shipDate: order.shipDate, status: order.status, phase: order.phase, received: order.statusCode === 'C' || order.statusCode === 'D' || order.statusCode === 'F', onTheWater: order.phase === 'On the Water', missingShipDate, countedAsIncoming: countAsIncoming });
       }
       // Use ship date (expected arrival) for stockout risk, not PO creation date
       const arrivalDate = order.shipDate || order.date;
