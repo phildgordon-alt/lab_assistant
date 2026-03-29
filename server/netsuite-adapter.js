@@ -228,6 +228,31 @@ async function poll() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SKU CLASSIFICATION — single source of truth for category assignment
+// ─────────────────────────────────────────────────────────────────────────────
+const LENS_PREFIX_RE = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/;
+const FRAME_PREFIX_RE = /^(1960|1969|8100|8503|850[0-9])/;
+
+function classifySku(sku) {
+  const nsItem = inventory[sku];
+  const nsCat = nsItem?.category; // From CLASS_MAP: Lenses, Frames, Tops, or Other
+
+  // 1. NetSuite says Lenses/Frames/Tops → trust it
+  if (nsCat && nsCat !== 'Other') return nsCat;
+
+  // 2. Prefix detection for items NetSuite doesn't classify or doesn't have
+  if (LENS_PREFIX_RE.test(sku)) return 'Lenses';
+  if (FRAME_PREFIX_RE.test(sku)) return 'Frames';
+
+  // 3. NetSuite explicitly says Other (class 8,10,11,12,13 = accessories/ink/packaging/warranties)
+  //    These are at AMS 3PL, not in the lab — separate from main inventory
+  if (nsCat === 'Other') return 'Accessories';
+
+  // 4. Not in NetSuite AND no recognizable prefix → needs investigation
+  return 'Uncategorized';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // RECONCILE — Compare NetSuite vs ItemPath
 // ─────────────────────────────────────────────────────────────────────────────
 function reconcile(itempath, category = null, topsData = null) {
@@ -250,13 +275,9 @@ function reconcile(itempath, category = null, topsData = null) {
   // Compare
   let allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal)]);
 
-  // Filter by category if specified — only include SKUs where NetSuite knows the category
+  // Filter by category if specified — uses unified classification logic
   if (category) {
-    allSkus = new Set([...allSkus].filter(sku => {
-      const nsItem = inventory[sku];
-      if (nsItem) return nsItem.category === category;
-      return false; // ItemPath-only items don't have categories — exclude from filtered view
-    }));
+    allSkus = new Set([...allSkus].filter(sku => classifySku(sku) === category));
   }
   console.log(`[NetSuite] Reconcile: ${allSkus.size} SKUs${category ? ` (category: ${category})` : ''}`);
   const discrepancies = [];
@@ -275,11 +296,8 @@ function reconcile(itempath, category = null, topsData = null) {
     totalItemPath += ipQty;
     const diff = ipQty - nsQty;
 
-    // Category: NetSuite first, then lens prefix detection, then Unknown
-    const isLensPrefix = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
-    const isFramePrefix = /^(1960|1969|8100|8503|850[0-9])/.test(sku);
-    const nsCat = inventory[sku]?.category;
-    const itemCat = (nsCat && nsCat !== 'Other') ? nsCat : (isLensPrefix ? 'Lenses' : isFramePrefix ? 'Frames' : 'Unknown');
+    // Category: NetSuite class → prefix detection → Accessories (NS 'Other') → Uncategorized
+    const itemCat = classifySku(sku);
     const item = {
       sku,
       name: inventory[sku]?.name || '',
@@ -323,14 +341,11 @@ function reconcile(itempath, category = null, topsData = null) {
   // Category-level totals (all SKUs, not just discrepancies)
   const byCategory = {};
   for (const sku of allSkus) {
-    const isLensPfx = /^(4800|062|026|001|5[0-9]{3}|8820|1008|1130|1140|2650|3500|6201|6203|6204|CR39)/.test(sku);
-    const isFramePfx = /^(1960|1969|8100|8503|850[0-9])/.test(sku);
-    const nsCat2 = inventory[sku]?.category;
-    const cat = (nsCat2 && nsCat2 !== 'Other') ? nsCat2 : (isLensPfx ? 'Lenses' : isFramePfx ? 'Frames' : 'Unknown');
+    const cat = classifySku(sku);
     const nsQty = inventory[sku]?.qty || 0;
     const ipQty = ipTotal[sku] || 0;
     const disc = discontinuedSkus.has(sku);
-    if (!byCategory[cat]) byCategory[cat] = { category: cat, itempath: 0, netsuite: 0, diff: 0, skus: 0, itempath_disc: 0, netsuite_disc: 0 };
+    if (!byCategory[cat]) byCategory[cat] = { category: cat, itempath: 0, netsuite: 0, diff: 0, skus: 0, ipSkuCount: 0, nsSkuCount: 0, itempath_disc: 0, netsuite_disc: 0 };
     if (disc) {
       byCategory[cat].itempath_disc += ipQty;
       byCategory[cat].netsuite_disc += nsQty;
@@ -340,6 +355,8 @@ function reconcile(itempath, category = null, topsData = null) {
       byCategory[cat].diff += (ipQty - nsQty);
     }
     byCategory[cat].skus++;
+    if (ipQty > 0) byCategory[cat].ipSkuCount++;
+    if (nsQty > 0) byCategory[cat].nsSkuCount++;
   }
   // Round
   for (const c of Object.values(byCategory)) {
@@ -350,11 +367,15 @@ function reconcile(itempath, category = null, topsData = null) {
     c.netsuite_disc = Math.round(c.netsuite_disc);
   }
 
-  // Active totals (excluding discontinued)
+  // Active totals (excluding discontinued AND accessories)
   const activeDiscrepancies = discrepancies.filter(d => !d.discontinued);
   const discDiscrepancies = discrepancies.filter(d => d.discontinued);
-  const activeTotalIP = Math.round(totalItemPath - [...discontinuedSkus].reduce((s, sku) => s + (ipTotal[sku] || 0), 0));
-  const activeTotalNS = Math.round(totalNetSuite - [...discontinuedSkus].reduce((s, sku) => s + (inventory[sku]?.qty || 0), 0));
+  // Accessories are at AMS 3PL, not in the lab — exclude from main totals
+  const accessorySkus = new Set([...allSkus].filter(sku => classifySku(sku) === 'Accessories'));
+  const excludedIP = [...discontinuedSkus, ...accessorySkus].reduce((s, sku) => s + (ipTotal[sku] || 0), 0);
+  const excludedNS = [...discontinuedSkus, ...accessorySkus].reduce((s, sku) => s + (inventory[sku]?.qty || 0), 0);
+  const activeTotalIP = Math.round(totalItemPath - excludedIP);
+  const activeTotalNS = Math.round(totalNetSuite - excludedNS);
 
   return {
     summary: {
@@ -370,6 +391,8 @@ function reconcile(itempath, category = null, topsData = null) {
       activeNetSuite: activeTotalNS,
       activeDiff: activeTotalIP - activeTotalNS,
       discontinuedCount: discontinuedSkus.size,
+      accessorySkus: accessorySkus.size,
+      uncategorizedSkus: [...allSkus].filter(sku => classifySku(sku) === 'Uncategorized').length,
       netsuiteSkus: Object.keys(inventory).length,
       itempathSkus: Object.keys(ipTotal).length,
       critical: discrepancies.filter(d => d.severity === 'critical').length,
@@ -391,9 +414,7 @@ function lookupSku(sku) {
 }
 
 function getSkuCategory(sku) {
-  const item = inventory[sku];
-  if (item) return item.category; // Lenses, Frames, Tops, Other
-  return null; // unknown — not in NetSuite
+  return classifySku(sku); // Uses unified classification logic
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

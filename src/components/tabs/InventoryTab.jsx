@@ -1073,7 +1073,28 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <div style={{ fontSize: 28, fontWeight: 800, color: (reconData.summary.activeDiff ?? reconData.summary.totalDiff) === 0 ? T.green : T.red, fontFamily: mono }}>
                       {(reconData.summary.activeDiff ?? reconData.summary.totalDiff) > 0 ? '+' : ''}{(reconData.summary.activeDiff ?? reconData.summary.totalDiff)?.toLocaleString()}
                     </div>
-                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{reconData.summary.discontinuedCount || 0} discontinued SKUs excluded</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{reconData.summary.discontinuedCount || 0} discontinued{reconData.summary.accessorySkus ? `, ${reconData.summary.accessorySkus} accessory` : ''}{reconData.summary.uncategorizedSkus ? `, ${reconData.summary.uncategorizedSkus} uncategorized` : ''} SKUs excluded</div>
+                  </Card>
+                </div>
+
+                {/* SKU count comparison */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 16 }}>
+                  <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.amber}`, borderTop: `1px dashed ${T.border}` }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ITEMPATH SKUs</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(reconData.summary.itempathSkus ?? 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>unique SKUs in Kardex</div>
+                  </Card>
+                  <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${T.purple || '#9b6ee0'}`, borderTop: `1px dashed ${T.border}` }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>NETSUITE SKUs</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: T.purple || '#9b6ee0', fontFamily: mono }}>{(reconData.summary.netsuiteSkus ?? 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>unique SKUs in NetSuite</div>
+                  </Card>
+                  <Card style={{ padding: 16, textAlign: "center", borderLeft: `4px solid ${(() => { const d = (reconData.summary.itempathSkus ?? 0) - (reconData.summary.netsuiteSkus ?? 0); return d === 0 ? T.green : T.red; })()}`, borderTop: `1px dashed ${T.border}` }}>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>SKU VARIANCE</div>
+                    <div style={{ fontSize: 28, fontWeight: 800, color: (() => { const d = (reconData.summary.itempathSkus ?? 0) - (reconData.summary.netsuiteSkus ?? 0); return d === 0 ? T.green : T.red; })(), fontFamily: mono }}>
+                      {(() => { const d = (reconData.summary.itempathSkus ?? 0) - (reconData.summary.netsuiteSkus ?? 0); return (d > 0 ? '+' : '') + d.toLocaleString(); })()}
+                    </div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>SKU count difference</div>
                   </Card>
                 </div>
 
@@ -1092,16 +1113,37 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {reconData.byCategory.map(c => (
-                          <tr key={c.category} style={{ borderBottom: `1px solid ${T.border}` }}>
-                            <td style={{ padding: "8px 14px", fontWeight: 700, color: T.text }}>{c.category}</td>
-                            <td style={{ padding: "8px 14px", textAlign: "right", color: T.amber, fontWeight: 600 }}>{c.itempath.toLocaleString()}</td>
-                            <td style={{ padding: "8px 14px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{c.netsuite.toLocaleString()}</td>
-                            <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 700, color: c.diff === 0 ? T.green : T.red }}>{c.diff > 0 ? '+' : ''}{c.diff.toLocaleString()}</td>
-                            <td style={{ padding: "8px 14px", textAlign: "right", color: T.textMuted }}>{c.skus}</td>
-                            <td style={{ padding: "8px 14px", textAlign: "right", color: (c.itempath_disc + c.netsuite_disc) > 0 ? T.red : T.textDim }}>{c.itempath_disc > 0 ? `IP:${c.itempath_disc}` : ''}{c.itempath_disc > 0 && c.netsuite_disc > 0 ? ' · ' : ''}{c.netsuite_disc > 0 ? `NS:${c.netsuite_disc}` : ''}{(c.itempath_disc + c.netsuite_disc) === 0 ? '—' : ''}</td>
-                          </tr>
-                        ))}
+                        {(() => {
+                          const mainCats = reconData.byCategory.filter(c => c.category !== 'Accessories' && c.category !== 'Uncategorized');
+                          const excludedCats = reconData.byCategory.filter(c => c.category === 'Accessories' || c.category === 'Uncategorized');
+                          return (<>
+                            {mainCats.map(c => (
+                              <tr key={c.category} style={{ borderBottom: `1px solid ${T.border}` }}>
+                                <td style={{ padding: "8px 14px", fontWeight: 700, color: T.text }}>{c.category}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.amber, fontWeight: 600 }}>{c.itempath.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 600 }}>{c.netsuite.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 700, color: c.diff === 0 ? T.green : T.red }}>{c.diff > 0 ? '+' : ''}{c.diff.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.textMuted }}>{c.skus}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: (c.itempath_disc + c.netsuite_disc) > 0 ? T.red : T.textDim }}>{c.itempath_disc > 0 ? `IP:${c.itempath_disc}` : ''}{c.itempath_disc > 0 && c.netsuite_disc > 0 ? ' · ' : ''}{c.netsuite_disc > 0 ? `NS:${c.netsuite_disc}` : ''}{(c.itempath_disc + c.netsuite_disc) === 0 ? '—' : ''}</td>
+                              </tr>
+                            ))}
+                            {excludedCats.length > 0 && (
+                              <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+                                <td colSpan={6} style={{ padding: "6px 14px", fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>EXCLUDED FROM TOTALS</td>
+                              </tr>
+                            )}
+                            {excludedCats.map(c => (
+                              <tr key={c.category} style={{ borderBottom: `1px solid ${T.border}`, opacity: 0.5 }}>
+                                <td style={{ padding: "8px 14px", fontWeight: 700, color: T.textDim }}>{c.category} {c.category === 'Accessories' ? '(3PL)' : ''}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim, fontWeight: 600 }}>{c.itempath.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim, fontWeight: 600 }}>{c.netsuite.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", fontWeight: 700, color: T.textDim }}>{c.diff > 0 ? '+' : ''}{c.diff.toLocaleString()}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim }}>{c.skus}</td>
+                                <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim }}>—</td>
+                              </tr>
+                            ))}
+                          </>);
+                        })()}
                       </tbody>
                     </table>
                   </Card>
@@ -1174,7 +1216,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 {/* Category filter — re-fetches from server so KPIs recalculate */}
                 <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
                   <span style={{ fontSize: 11, color: T.textDim, fontFamily: mono, alignSelf: "center" }}>Category:</span>
-                  {['all', 'Lenses', 'Tops', 'Frames', 'Other'].map(c => (
+                  {['all', 'Lenses', 'Tops', 'Frames', 'Accessories', 'Uncategorized'].map(c => (
                     <button key={c} onClick={async () => {
                       setReconCategory(c);
                       try {
