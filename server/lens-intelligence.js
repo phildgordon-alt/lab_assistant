@@ -138,18 +138,43 @@ function projectConsumption(weeks, weeksForward = 4) {
 // WEEKLY CONSUMPTION — from ItemPath picks_history
 // ─────────────────────────────────────────────────────────────────────────────
 function buildWeeklyConsumption(db) {
+  // HYBRID CONSUMPTION:
+  // - ItemPath picks_history for March 6, 2026+ (real-time machine truth)
+  // - Looker/NetSuite looker_jobs for before March 6 (historical backfill)
+  // ItemPath = what operators physically pull (includes waste). Most accurate for current.
+  // Looker = shipped jobs with lens OPCs. Best available for history.
+  const CUTOVER_DATE = '2026-03-06';
+
+  const dailyBySku = {};
+
+  // 1. Looker/NetSuite for history BEFORE March 6
+  try {
+    const lkRows = db.prepare(`
+      SELECT opc as sku, sent_from_lab_date as date, SUM(count_lenses) as qty
+      FROM looker_jobs
+      WHERE sent_from_lab_date < ? AND opc IS NOT NULL AND opc != ''
+      GROUP BY opc, sent_from_lab_date
+    `).all(CUTOVER_DATE);
+    for (const r of lkRows) {
+      if (!r.sku || !r.date || !r.qty) continue;
+      if (!dailyBySku[r.sku]) dailyBySku[r.sku] = {};
+      dailyBySku[r.sku][r.date] = (dailyBySku[r.sku][r.date] || 0) + r.qty;
+    }
+    console.log(`[Lens Intel] Looker historical consumption: ${lkRows.length} rows (before ${CUTOVER_DATE})`);
+  } catch (e) { console.log('[Lens Intel] Looker backfill not available:', e.message); }
+
+  // 2. ItemPath picks_history for March 6+ (real-time truth)
   const ipRows = db.prepare(`
     SELECT sku, date(completed_at) as date, SUM(qty) as qty
     FROM picks_history
-    WHERE completed_at IS NOT NULL
+    WHERE completed_at IS NOT NULL AND date(completed_at) >= ?
     GROUP BY sku, date(completed_at)
-  `).all();
-
-  const dailyBySku = {};
+  `).all(CUTOVER_DATE);
   for (const r of ipRows) {
     if (!dailyBySku[r.sku]) dailyBySku[r.sku] = {};
     dailyBySku[r.sku][r.date] = (dailyBySku[r.sku][r.date] || 0) + r.qty;
   }
+  console.log(`[Lens Intel] ItemPath consumption: ${ipRows.length} rows (${CUTOVER_DATE}+)`);
 
   const del = db.prepare('DELETE FROM lens_consumption_weekly');
   const ins = db.prepare('INSERT OR REPLACE INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)');
