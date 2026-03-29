@@ -1073,7 +1073,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <div style={{ fontSize: 28, fontWeight: 800, color: (reconData.summary.activeDiff ?? reconData.summary.totalDiff) === 0 ? T.green : T.red, fontFamily: mono }}>
                       {(reconData.summary.activeDiff ?? reconData.summary.totalDiff) > 0 ? '+' : ''}{(reconData.summary.activeDiff ?? reconData.summary.totalDiff)?.toLocaleString()}
                     </div>
-                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{reconData.summary.discontinuedCount || 0} discontinued{reconData.summary.accessorySkus ? `, ${reconData.summary.accessorySkus} accessory` : ''}{reconData.summary.uncategorizedSkus ? `, ${reconData.summary.uncategorizedSkus} uncategorized` : ''} SKUs excluded</div>
+                    <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>{reconData.summary.discontinuedCount || 0} discontinued{reconData.summary.accessorySkus ? `, ${reconData.summary.accessorySkus} accessory` : ''}{reconData.summary.uncategorizedSkus ? `, ${reconData.summary.uncategorizedSkus} uncategorized` : ''} SKUs (greyed in table)</div>
                   </Card>
                 </div>
 
@@ -1118,6 +1118,17 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         {(() => {
                           const mainCats = reconData.byCategory.filter(c => c.category !== 'Accessories' && c.category !== 'Uncategorized');
                           const excludedCats = reconData.byCategory.filter(c => c.category === 'Accessories' || c.category === 'Uncategorized');
+                          const allCats = reconData.byCategory;
+                          const totals = allCats.reduce((t, c) => ({
+                            itempath: t.itempath + (c.itempath || 0),
+                            netsuite: t.netsuite + (c.netsuite || 0),
+                            diff: t.diff + (c.diff || 0),
+                            ipSkuCount: t.ipSkuCount + (c.ipSkuCount || 0),
+                            nsSkuCount: t.nsSkuCount + (c.nsSkuCount || 0),
+                            skus: t.skus + (c.skus || 0),
+                            itempath_disc: t.itempath_disc + (c.itempath_disc || 0),
+                            netsuite_disc: t.netsuite_disc + (c.netsuite_disc || 0),
+                          }), { itempath: 0, netsuite: 0, diff: 0, ipSkuCount: 0, nsSkuCount: 0, skus: 0, itempath_disc: 0, netsuite_disc: 0 });
                           return (<>
                             {mainCats.map(c => (
                               <tr key={c.category} style={{ borderBottom: `1px solid ${T.border}` }}>
@@ -1133,7 +1144,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             ))}
                             {excludedCats.length > 0 && (
                               <tr style={{ borderBottom: `1px solid ${T.border}` }}>
-                                <td colSpan={8} style={{ padding: "6px 14px", fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>EXCLUDED FROM TOTALS</td>
+                                <td colSpan={8} style={{ padding: "6px 14px", fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>EXCLUDED FROM ACTIVE TOTALS</td>
                               </tr>
                             )}
                             {excludedCats.map(c => (
@@ -1148,6 +1159,17 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <td style={{ padding: "8px 14px", textAlign: "right", color: T.textDim }}>—</td>
                               </tr>
                             ))}
+                            {/* TOTALS ROW — must add up to header KPIs */}
+                            <tr style={{ borderTop: `2px solid ${T.text}`, background: T.bg }}>
+                              <td style={{ padding: "10px 14px", fontWeight: 800, color: T.text, fontSize: 11, letterSpacing: 1 }}>TOTAL</td>
+                              <td style={{ padding: "10px 14px", textAlign: "right", color: T.amber, fontWeight: 800 }}>{totals.itempath.toLocaleString()}</td>
+                              <td style={{ padding: "10px 14px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 800 }}>{totals.netsuite.toLocaleString()}</td>
+                              <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 800, color: totals.diff === 0 ? T.green : T.red }}>{totals.diff > 0 ? '+' : ''}{totals.diff.toLocaleString()}</td>
+                              <td style={{ padding: "10px 14px", textAlign: "right", color: T.amber, fontWeight: 800 }}>{totals.ipSkuCount}</td>
+                              <td style={{ padding: "10px 14px", textAlign: "right", color: T.purple || '#9b6ee0', fontWeight: 800 }}>{totals.nsSkuCount}</td>
+                              <td style={{ padding: "10px 14px", textAlign: "right", color: T.text, fontWeight: 800 }}>{totals.skus}</td>
+                              <td style={{ padding: "10px 14px", textAlign: "right", color: (totals.itempath_disc + totals.netsuite_disc) > 0 ? T.red : T.textDim, fontWeight: 800 }}>{totals.itempath_disc > 0 ? `IP:${totals.itempath_disc}` : ''}{totals.itempath_disc > 0 && totals.netsuite_disc > 0 ? ' · ' : ''}{totals.netsuite_disc > 0 ? `NS:${totals.netsuite_disc}` : ''}{(totals.itempath_disc + totals.netsuite_disc) === 0 ? '—' : ''}</td>
+                            </tr>
                           </>);
                         })()}
                       </tbody>

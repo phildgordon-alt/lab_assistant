@@ -237,16 +237,16 @@ function classifySku(sku) {
   const nsItem = inventory[sku];
   const nsCat = nsItem?.category; // From CLASS_MAP: Lenses, Frames, Tops, or Other
 
-  // 1. NetSuite says Lenses/Frames/Tops → trust it
+  // 1. NetSuite explicitly says Other (class 8,10,11,12,13 = accessories/ink/packaging/warranties)
+  //    Check FIRST — before prefix detection, because some accessory SKUs match lens/frame prefixes
+  if (nsCat === 'Other') return 'Accessories';
+
+  // 2. NetSuite says Lenses/Frames/Tops → trust it
   if (nsCat && nsCat !== 'Other') return nsCat;
 
-  // 2. Prefix detection for items NetSuite doesn't classify or doesn't have
+  // 3. Prefix detection for items NetSuite doesn't classify or doesn't have
   if (LENS_PREFIX_RE.test(sku)) return 'Lenses';
   if (FRAME_PREFIX_RE.test(sku)) return 'Frames';
-
-  // 3. NetSuite explicitly says Other (class 8,10,11,12,13 = accessories/ink/packaging/warranties)
-  //    These are at AMS 3PL, not in the lab — separate from main inventory
-  if (nsCat === 'Other') return 'Accessories';
 
   // 4. Not in NetSuite AND no recognizable prefix → needs investigation
   return 'Uncategorized';
@@ -393,8 +393,8 @@ function reconcile(itempath, category = null, topsData = null) {
       discontinuedCount: discontinuedSkus.size,
       accessorySkus: accessorySkus.size,
       uncategorizedSkus: [...allSkus].filter(sku => classifySku(sku) === 'Uncategorized').length,
-      netsuiteSkus: Object.keys(inventory).length,
-      itempathSkus: Object.keys(ipTotal).length,
+      netsuiteSkus: [...allSkus].filter(sku => (inventory[sku]?.qty || 0) > 0).length,
+      itempathSkus: [...allSkus].filter(sku => (ipTotal[sku] || 0) > 0).length,
       critical: discrepancies.filter(d => d.severity === 'critical').length,
       high: discrepancies.filter(d => d.severity === 'high').length,
       low: discrepancies.filter(d => d.severity === 'low').length,
