@@ -170,6 +170,10 @@ function runAnalysis(db, overrides = {}) {
     const breakEven = calculateBreakEven(matCosts.lensCost, effectiveSurfPremium, carryingPct);
     let decision = monthlyVol < breakEven ? 'SURFACE' : 'STOCK';
 
+    // Semi-finished blanks must ALWAYS be STOCK — they're raw material for surfacing
+    const KNOWN_SEMIFINISHED = new Set(['4800135412','4800135420','4800135438','4800154660','4800135339','4800135347','4800135354','4800135362','4800150924','4800150932','4800135305','4800150940','4800150957','4800150882','4800150890','4800135297','4800150908','4800150916','4800150965','265007922','265007930','265007948','265007955','265007963','265007971','265007989','265008466','265008474','265008482','265008490','265008508']);
+    if (KNOWN_SEMIFINISHED.has(r.sku) || /^(062|026|001)/.test(r.sku)) decision = 'STOCK';
+
     // Statistical safety stock
     const weeklyValues = db.prepare('SELECT units_consumed FROM lens_consumption_weekly WHERE sku = ? ORDER BY week_start DESC LIMIT 12').all(r.sku).map(w => w.units_consumed);
     const monthlyValues = [];

@@ -467,7 +467,10 @@ function computeAll(db, itempath, netsuite) {
       let orderRecommended = 0;
       let orderQty = 0;
       let demandAdjQty = 0;
-      const routing = params.routing || 'STOCK';
+      let routing = params.routing || 'STOCK';
+      // Semi-finished blanks must ALWAYS be stocked — they're the raw material for surfacing
+      // Long-tail may have incorrectly routed them to SURFACE based on low apparent consumption
+      if (skuType === 'semifinished' && routing === 'SURFACE') routing = 'STOCK';
       if (routing === 'SURFACE') {
         status = 'SURFACE';
       } else if (status === 'OVERSTOCK') {
