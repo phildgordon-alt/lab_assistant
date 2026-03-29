@@ -699,19 +699,23 @@ function InventoryTab({ ovenServerUrl, settings }) {
         }
         if (tab === 'inventory') {
           if (!fetchedRef.current.inventory) {
-            const [invResp, vlmsResp, alertsResp, topsResp, catResp] = await Promise.all([
+            const [invResp, vlmsResp, alertsResp, topsResp] = await Promise.all([
               fetch(`${ovenServerUrl}/api/inventory`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/vlms`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/alerts`).then(r => r.json()),
               fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json()).catch(() => null),
-              fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()).catch(() => ({})),
             ]);
             setInventory(invResp);
             setVlms(vlmsResp);
             setAlerts(alertsResp);
             if (topsResp) setTopsData(topsResp);
-            setSkuCategories(catResp);
             fetchedRef.current.inventory = true;
+          }
+          // Always fetch categories (may update after server restart)
+          if (Object.keys(skuCategories).length === 0) {
+            fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()).then(c => {
+              if (c && Object.keys(c).length > 100) setSkuCategories(c);
+            }).catch(() => {});
           }
         }
         if (tab === 'reconciliation') {
