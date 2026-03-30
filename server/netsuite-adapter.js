@@ -467,7 +467,7 @@ async function fetchOpenPOs() {
       SELECT t.id, t.tranId AS poNumber, t.tranDate AS date, t.status,
              t.memo, t.entity AS entityId, t.shipDate
       FROM transaction t
-      WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+      WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F','G','H')
       ORDER BY t.tranDate DESC
     `);
 
@@ -494,7 +494,7 @@ async function fetchOpenPOs() {
         FROM transactionLine tl
         JOIN transaction t ON t.id = tl.transaction
         JOIN item ON item.id = tl.item
-        WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+        WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F','G','H')
           AND tl.quantity > 0
         ORDER BY t.tranDate DESC
       `);
@@ -510,7 +510,7 @@ async function fetchOpenPOs() {
           FROM transactionLine tl
           JOIN transaction t ON t.id = tl.transaction
           JOIN item ON item.id = tl.item
-          WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+          WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F','G','H')
             AND tl.quantity > 0
           ORDER BY t.tranDate DESC
         `);
@@ -525,7 +525,7 @@ async function fetchOpenPOs() {
           FROM transactionLine tl
           JOIN transaction t ON t.id = tl.transaction
           JOIN item ON item.id = tl.item
-          WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F')
+          WHERE t.type = 'PurchOrd' AND t.status IN ('A','B','C','D','E','F','G','H')
             AND tl.quantity > 0
           ORDER BY t.tranDate DESC
         `);
@@ -535,7 +535,7 @@ async function fetchOpenPOs() {
     if (lines.length > 0) console.log('[NetSuite] PO line keys:', Object.keys(lines[0]).join(', '));
 
     const CLASS_MAP = { '1': 'Frames', '2': 'Frames', '3': 'Lenses', '4': 'Lenses', '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops' };
-    const STATUS_MAP = { 'A': 'Pending Approval', 'B': 'Pending Receipt', 'C': 'Partially Received', 'D': 'Pending Bill', 'E': 'Partially Approved', 'F': 'Pending Billing' };
+    const STATUS_MAP = { 'A': 'Pending Approval', 'B': 'Pending Receipt', 'C': 'Partially Received', 'D': 'Pending Bill', 'E': 'Partially Approved', 'F': 'Pending Billing', 'G': 'Fully Billed', 'H': 'Closed' };
 
     // Query Item Receipts linked to these POs — shows shipment splits
     const receiptsByPO = {};
@@ -603,7 +603,7 @@ async function fetchOpenPOs() {
       // Determine phase: WIP (not shipped), On the Water (shipped, not received), Received
       let phase = 'WIP';
       if (h.status === 'B' || h.status === 'C') phase = h.shipdate ? 'On the Water' : 'Pending';
-      else if (h.status === 'D' || h.status === 'F') phase = 'Received';
+      else if (h.status === 'D' || h.status === 'F' || h.status === 'G' || h.status === 'H') phase = 'Received';
       return {
         id: h.id,
         poNumber: h.ponumber,
