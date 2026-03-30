@@ -2,6 +2,17 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { T, mono } from '../../constants';
 import { Card, SectionHeader } from '../shared';
 
+// Known semi-finished SKUs (31 from Lens_Planning_V3.xlsx)
+const SEMIFINISHED_SKUS = new Set([
+  '4800135412','4800135420','4800135438','4800154660',
+  '4800135339','4800135347','4800135354','4800135362',
+  '4800150924','4800150932','4800135305','4800150940','4800150957',
+  '4800150882','4800150890','4800135297','4800150908','4800150916','4800150965',
+  '265007922','265007930','265007948','265007955','265007963','265007971','265007989',
+  '265008466','265008474','265008482','265008490','265008508',
+]);
+const isSemiFinished = (sku) => SEMIFINISHED_SKUS.has(sku) || /^(062|026|001)/.test(sku || '');
+
 // CSV export helper
 function downloadCSV(filename, headers, rows) {
   const csv = [headers.join(','), ...rows.map(r => headers.map(h => {
@@ -169,6 +180,14 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
         </div>
         <div style={{ fontSize: 28, fontWeight: 900, color: stockColor, fontFamily: mono }}>{item.qty ?? '—'}</div>
       </div>
+
+      {/* Semi-finished indicator */}
+      {isSemiFinished(item.sku) && (
+        <div style={{ padding: '8px 20px', background: `${T.purple}15`, borderBottom: `1px solid ${T.purple}40`, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: T.purple, fontFamily: mono }}>SEMI-FINISHED BLANK</span>
+          <span style={{ fontSize: 9, color: T.textMuted, fontFamily: mono }}>Surfacing required — not a finished SV lens</span>
+        </div>
+      )}
 
       {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
@@ -931,8 +950,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           }}>{m.category || 'Other'}</span>
                         </td>
                         <td style={{ padding: "10px 12px", fontSize: 12, color: T.textMuted, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</td>
-                        <td style={{ padding: "10px 12px" }}>
+                        <td style={{ padding: "10px 12px", display: 'flex', gap: 4, alignItems: 'center' }}>
                           {m.coatingType && <Pill color={T.blue} bg={`${T.blue}15`}>{m.coatingType}</Pill>}
+                          {isSemiFinished(m.sku) && <Pill color={T.purple} bg={`${T.purple}15`}>SF</Pill>}
                         </td>
                         <td style={{
                           padding: "10px 12px", fontFamily: mono, fontSize: 13, fontWeight: 700, textAlign: "right",
