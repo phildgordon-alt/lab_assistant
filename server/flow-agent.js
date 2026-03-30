@@ -1778,11 +1778,11 @@ module.exports = {
         const s = (sku || '').toUpperCase();
         const n = (name || '').toUpperCase();
         const ct = (coatingType || '').toUpperCase();
-        // Exclude if clearly SV/plano/finished
+        // SKU prefix is the strongest signal — 062/026/001 are always semi-finished
+        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
+        // Exclude SV/plano finished lenses (only AFTER prefix check)
         if (ct.includes(' SV') || ct === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
         if (n.includes('ASPHERIC-SV') || n.includes('ASPHERIC SV')) return false;
-        // Include if SKU matches semi-finished prefixes
-        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
         // Include if name/coating explicitly says semi-finished
         if (n.includes('SEMI') || n.includes('SF ') || ct.includes('SF ')) return true;
         // Exclude finished lens prefixes (4800=finished, 8820=finished)
