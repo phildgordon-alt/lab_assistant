@@ -291,8 +291,9 @@ function reconcile(itempath, category = null, topsData = null) {
     }
   }
 
-  // Compare
-  let allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal)]);
+  // Compare — exclude GUID-format SKUs (internal ItemPath IDs, not real products)
+  const GUID_RE = /^[0-9A-F]{8}-[0-9A-F]{4}/i;
+  let allSkus = new Set([...Object.keys(inventory), ...Object.keys(ipTotal)].filter(sku => !GUID_RE.test(sku)));
 
   // Filter by category if specified — uses unified classification logic
   if (category) {
