@@ -794,7 +794,7 @@ function computePutList() {
           style: xml.lensStyle || '', lensType: xml.lensType || 'S',
           jobCount: 0, lensesNeeded: 0, rushCount: 0,
           // For surfacing jobs, suggest looking for same-material alternatives
-          canSubstitute: xml.lensType !== 'S', // surfacing can use different base
+          canSubstitute: xml.lensType !== 'S', // progressive/bifocal can use different base
           action: xml.lensType === 'S' ? 'REORDER' : 'FIND ALTERNATIVE OR REORDER',
         };
       }
@@ -1600,32 +1600,29 @@ module.exports = {
         }
       }
 
-      // Get semi-finished materials for alternative suggestions (not SV/plano)
+      // Get semi-finished materials for alternative suggestions
       const inv = itempath ? itempath.getInventory() : { materials: [] };
-      // Load discontinued SKUs — never suggest these as alternatives
+      // Load discontinued SKUs and semi-finished SKUs from database
       let discontinuedSkus = new Set();
+      let knownSemiFinished = new Set();
       try {
         const disc = db.prepare("SELECT sku FROM lens_sku_params WHERE abc_class = 'X'").all();
         for (const r of disc) discontinuedSkus.add(r.sku);
         const dep = db.prepare("SELECT opc FROM lens_catalog WHERE valid_to IS NOT NULL").all();
         for (const r of dep) discontinuedSkus.add(r.opc);
+        const sf = db.prepare("SELECT sku FROM lens_sku_params WHERE sku_type = 'semifinished'").all();
+        for (const r of sf) knownSemiFinished.add(r.sku);
       } catch {}
-      const isSF = (sku, name, ct) => {
-        const s = (sku || '').toUpperCase(), n = (name || '').toUpperCase(), c = (ct || '').toUpperCase();
-        // SKU prefix is the strongest signal — 062/026/001 are always semi-finished
-        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
-        // Exclude SV/plano finished lenses (only AFTER prefix check)
-        if (c.includes(' SV') || c === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
-        if (n.includes('ASPHERIC-SV') || n.includes('ASPHERIC SV')) return false;
-        if (n.includes('SEMI') || n.includes('SF ') || c.includes('SF ')) return true;
-        if (s.startsWith('4800') || s.startsWith('8820')) return false;
+      const isSF = (sku) => {
+        if (knownSemiFinished.has(sku)) return true;
+        if (/^(062|026|001)/.test(sku || '')) return true;
         return false;
       };
       const stockByMaterial = {};
       for (const m of (inv.materials || [])) {
         if (!m.sku || m.qty <= 0) continue;
         if (discontinuedSkus.has(m.sku)) continue;
-        if (!isSF(m.sku, m.name, m.coatingType)) continue;
+        if (!isSF(m.sku)) continue;
         const matKeys = ['PLY', 'BLY', 'H67', 'B67', 'CR39', 'TRV', 'S67'];
         for (const mat of matKeys) {
           if ((m.coatingType || '').toUpperCase().includes(mat) || (m.name || '').toUpperCase().includes(mat)) {
@@ -1652,7 +1649,7 @@ module.exports = {
         const coating = xml?.coating || 'Unknown';
         const material = xml?.lensMat || 'Unknown';
         const lensType = xml?.lensType || 'S';
-        const isSurfacing = lensType !== 'S';
+        const isSurfacing = lensType !== 'S'; // P=progressive, B=bifocal — always surfaced
         const rush = j.rush === 'Y' || xml?.rush === 'Y';
 
         const jobInfo = {
@@ -1781,38 +1778,27 @@ module.exports = {
       const materials = inv.materials || [];
 
       // Build stock lookup — ONLY semi-finished blanks, grouped by material
-      // Semi-finished SKUs: typically start with 062, 026, 001, or have "SF" in name/coating
-      // Single vision / plano: typically start with 4800, 8820, or have "SV" in coating type
-      const isSemiFinished = (sku, name, coatingType) => {
-        const s = (sku || '').toUpperCase();
-        const n = (name || '').toUpperCase();
-        const ct = (coatingType || '').toUpperCase();
-        // SKU prefix is the strongest signal — 062/026/001 are always semi-finished
-        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
-        // Exclude SV/plano finished lenses (only AFTER prefix check)
-        if (ct.includes(' SV') || ct === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
-        if (n.includes('ASPHERIC-SV') || n.includes('ASPHERIC SV')) return false;
-        // Include if name/coating explicitly says semi-finished
-        if (n.includes('SEMI') || n.includes('SF ') || ct.includes('SF ')) return true;
-        // Exclude finished lens prefixes (4800=finished, 8820=finished)
-        if (s.startsWith('4800') || s.startsWith('8820')) return false;
-        // Default: unknown — exclude to be safe
-        return false;
-      };
-
-      // Load discontinued SKUs — never suggest these as alternatives
+      // Use lens_sku_params.sku_type as source of truth, fall back to prefix detection
       let nelDiscontinued = new Set();
+      let nelSemiFinished = new Set();
       try {
         const disc = db.prepare("SELECT sku FROM lens_sku_params WHERE abc_class = 'X'").all();
         for (const r of disc) nelDiscontinued.add(r.sku);
         const dep = db.prepare("SELECT opc FROM lens_catalog WHERE valid_to IS NOT NULL").all();
         for (const r of dep) nelDiscontinued.add(r.opc);
+        const sf = db.prepare("SELECT sku FROM lens_sku_params WHERE sku_type = 'semifinished'").all();
+        for (const r of sf) nelSemiFinished.add(r.sku);
       } catch {}
+      const isSemiFinished = (sku) => {
+        if (nelSemiFinished.has(sku)) return true;
+        if (/^(062|026|001)/.test(sku || '')) return true;
+        return false;
+      };
       const stockByMaterial = {}; // material → [{ sku, qty, name, warehouse, coatingType }]
       for (const m of materials) {
         if (!m.sku || m.qty <= 0) continue; // must be in stock
         if (nelDiscontinued.has(m.sku)) continue; // skip discontinued
-        if (!isSemiFinished(m.sku, m.name, m.coatingType)) continue; // semi-finished only
+        if (!isSemiFinished(m.sku)) continue; // semi-finished only
         const ct = (m.coatingType || '').toUpperCase();
         const n = (m.name || '').toUpperCase();
         for (const mat of ['PLY', 'BLY', 'H67', 'B67', 'CR39', 'TRV', 'S67']) {
@@ -1835,7 +1821,7 @@ module.exports = {
         const material = xml.lensMat || 'Unknown';
         const style = xml.lensStyle || '';
         const lensType = xml.lensType || 'S';
-        const isSurfacing = lensType !== 'S';
+        const isSurfacing = lensType !== 'S'; // P=progressive, B=bifocal — always surfaced
         const rush = j.rush === 'Y' || xml.rush === 'Y';
 
         // Find alternatives — same material blanks in stock
