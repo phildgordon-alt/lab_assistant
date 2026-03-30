@@ -1602,6 +1602,14 @@ module.exports = {
 
       // Get semi-finished materials for alternative suggestions (not SV/plano)
       const inv = itempath ? itempath.getInventory() : { materials: [] };
+      // Load discontinued SKUs — never suggest these as alternatives
+      let discontinuedSkus = new Set();
+      try {
+        const disc = db.prepare("SELECT sku FROM lens_sku_params WHERE abc_class = 'X'").all();
+        for (const r of disc) discontinuedSkus.add(r.sku);
+        const dep = db.prepare("SELECT opc FROM lens_catalog WHERE valid_to IS NOT NULL").all();
+        for (const r of dep) discontinuedSkus.add(r.opc);
+      } catch {}
       const isSF = (sku, name, ct) => {
         const s = (sku || '').toUpperCase(), n = (name || '').toUpperCase(), c = (ct || '').toUpperCase();
         // SKU prefix is the strongest signal — 062/026/001 are always semi-finished
@@ -1616,6 +1624,7 @@ module.exports = {
       const stockByMaterial = {};
       for (const m of (inv.materials || [])) {
         if (!m.sku || m.qty <= 0) continue;
+        if (discontinuedSkus.has(m.sku)) continue;
         if (!isSF(m.sku, m.name, m.coatingType)) continue;
         const matKeys = ['PLY', 'BLY', 'H67', 'B67', 'CR39', 'TRV', 'S67'];
         for (const mat of matKeys) {
@@ -1791,9 +1800,18 @@ module.exports = {
         return false;
       };
 
+      // Load discontinued SKUs — never suggest these as alternatives
+      let nelDiscontinued = new Set();
+      try {
+        const disc = db.prepare("SELECT sku FROM lens_sku_params WHERE abc_class = 'X'").all();
+        for (const r of disc) nelDiscontinued.add(r.sku);
+        const dep = db.prepare("SELECT opc FROM lens_catalog WHERE valid_to IS NOT NULL").all();
+        for (const r of dep) nelDiscontinued.add(r.opc);
+      } catch {}
       const stockByMaterial = {}; // material → [{ sku, qty, name, warehouse, coatingType }]
       for (const m of materials) {
         if (!m.sku || m.qty <= 0) continue; // must be in stock
+        if (nelDiscontinued.has(m.sku)) continue; // skip discontinued
         if (!isSemiFinished(m.sku, m.name, m.coatingType)) continue; // semi-finished only
         const ct = (m.coatingType || '').toUpperCase();
         const n = (m.name || '').toUpperCase();
