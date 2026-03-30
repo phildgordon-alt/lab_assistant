@@ -5291,7 +5291,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       const ipRows = labDb.db.prepare(`
         SELECT sku, warehouse, SUM(qty) as qty, COUNT(*) as txns
         FROM picks_history
-        WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? AND qty <= 10
+        WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
         GROUP BY sku, warehouse
       `).all(from, to);
 
