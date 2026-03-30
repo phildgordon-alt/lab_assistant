@@ -1604,9 +1604,11 @@ module.exports = {
       const inv = itempath ? itempath.getInventory() : { materials: [] };
       const isSF = (sku, name, ct) => {
         const s = (sku || '').toUpperCase(), n = (name || '').toUpperCase(), c = (ct || '').toUpperCase();
+        // SKU prefix is the strongest signal — 062/026/001 are always semi-finished
+        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
+        // Exclude SV/plano finished lenses (only AFTER prefix check)
         if (c.includes(' SV') || c === 'SV' || n.includes('PLANO') || n.includes('SINGLE VISION')) return false;
         if (n.includes('ASPHERIC-SV') || n.includes('ASPHERIC SV')) return false;
-        if (s.startsWith('062') || s.startsWith('026') || s.startsWith('001')) return true;
         if (n.includes('SEMI') || n.includes('SF ') || c.includes('SF ')) return true;
         if (s.startsWith('4800') || s.startsWith('8820')) return false;
         return false;
