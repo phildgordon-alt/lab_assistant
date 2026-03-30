@@ -944,15 +944,18 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       <tr key={m.id || m.sku} onClick={() => setSelectedItem(m)} style={{ borderBottom: `1px solid ${T.border}`, background: isSelected ? `${T.blue}15` : isOut ? `${T.red}08` : isLow ? `${T.amber}08` : "transparent", cursor: 'pointer', transition: 'background 0.15s' }} onMouseEnter={e => e.currentTarget.style.background = `${T.blue}10`} onMouseLeave={e => e.currentTarget.style.background = isSelected ? `${T.blue}15` : isOut ? `${T.red}08` : isLow ? `${T.amber}08` : 'transparent'}>
                         <td style={{ padding: "10px 12px", fontFamily: mono, fontSize: 11, color: T.text, fontWeight: 600 }}>{m.sku}</td>
                         <td style={{ padding: "10px 12px" }}>
-                          <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, fontFamily: mono,
-                            background: m.category === 'Lenses' ? `${T.cyan}20` : m.category === 'Frames' ? `${T.purple || '#9b6ee0'}20` : m.category === 'Tops' ? `${T.amber}20` : `${T.textDim}20`,
-                            color: m.category === 'Lenses' ? T.cyan : m.category === 'Frames' ? (T.purple || '#9b6ee0') : m.category === 'Tops' ? T.amber : T.textDim
-                          }}>{m.category || 'Other'}</span>
+                          {isSemiFinished(m.sku) ? (
+                            <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, fontFamily: mono, background: `${T.purple}20`, color: T.purple }}>Semi-Finished</span>
+                          ) : (
+                            <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 3, fontWeight: 700, fontFamily: mono,
+                              background: m.category === 'Lenses' ? `${T.cyan}20` : m.category === 'Frames' ? `${T.purple || '#9b6ee0'}20` : m.category === 'Tops' ? `${T.amber}20` : `${T.textDim}20`,
+                              color: m.category === 'Lenses' ? T.cyan : m.category === 'Frames' ? (T.purple || '#9b6ee0') : m.category === 'Tops' ? T.amber : T.textDim
+                            }}>{m.category || 'Other'}</span>
+                          )}
                         </td>
                         <td style={{ padding: "10px 12px", fontSize: 12, color: T.textMuted, maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</td>
-                        <td style={{ padding: "10px 12px", display: 'flex', gap: 4, alignItems: 'center' }}>
+                        <td style={{ padding: "10px 12px" }}>
                           {m.coatingType && <Pill color={T.blue} bg={`${T.blue}15`}>{m.coatingType}</Pill>}
-                          {isSemiFinished(m.sku) && <Pill color={T.purple} bg={`${T.purple}15`}>SF</Pill>}
                         </td>
                         <td style={{
                           padding: "10px 12px", fontFamily: mono, fontSize: 13, fontWeight: 700, textAlign: "right",
