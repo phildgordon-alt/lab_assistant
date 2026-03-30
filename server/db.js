@@ -82,6 +82,29 @@ db.exec(`
 try { db.exec("ALTER TABLE lens_sku_params ADD COLUMN routing TEXT DEFAULT 'STOCK'"); } catch {}
 try { db.exec("ALTER TABLE lens_sku_params ADD COLUMN sku_type TEXT"); } catch {}
 
+// Populate known semi-finished SKUs (31 from Lens_Planning_V3.xlsx Semi_finSkus sheet)
+// These are the source of truth — 4800/2650 prefixes that are semi-finished, not finished stock
+const KNOWN_SEMIFINISHED = [
+  // Semi Poly
+  '4800135412', '4800135420', '4800135438', '4800154660',
+  // Semi Poly Bluelight
+  '4800135339', '4800135347', '4800135354', '4800135362',
+  // Semi H67
+  '4800150924', '4800150932', '4800135305', '4800150940', '4800150957',
+  // Semi H67 Blue Light
+  '4800150882', '4800150890', '4800135297', '4800150908', '4800150916', '4800150965',
+  // Semi Photochromic PLY + 67
+  '265007922', '265007930', '265007948', '265007955', '265007963', '265007971', '265007989',
+  // Semi Photochromic 67
+  '265008466', '265008474', '265008482', '265008490', '265008508',
+];
+try {
+  const upsert = db.prepare(`INSERT INTO lens_sku_params (sku, sku_type, routing) VALUES (?, 'semifinished', 'STOCK')
+    ON CONFLICT(sku) DO UPDATE SET sku_type = 'semifinished'`);
+  const run = db.transaction(() => { for (const sku of KNOWN_SEMIFINISHED) upsert.run(sku); });
+  run();
+} catch (e) { console.error('[DB] Failed to seed semi-finished SKUs:', e.message); }
+
 // Lens Intelligence — inventory health, stockout prediction, reorder recommendations
 db.exec(`
   CREATE TABLE IF NOT EXISTS lens_inventory_status (

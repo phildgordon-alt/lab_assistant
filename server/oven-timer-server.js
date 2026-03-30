@@ -298,7 +298,8 @@ function parseDviXml(xml) {
     origin: get('Origin'),
     coating: getLens('Coat') || get('Coat'),
     coatType: getAttr('Coat', 'Type'), // "Lab", "House", etc.
-    lensType: getEyeAttr('Type') || getAttr('Lens', 'Type'), // P=progressive, S=SV, B=bifocal
+    lensType: getEyeAttr('Type') || getAttr('Lens', 'Type'), // P=progressive, S=SV, B=bifocal, C=custom/aspheric SV
+    lensPick: getEyeAttr('Pick') || getAttr('Lens', 'Pick'), // F=factory/finished, S=surfacing
     lensStyle: getLens('Style'),
     lensOpc: getEyeAttr('OPC') || getLens('OPC'),  // Optical Product Code — maps to Kardex SKU
     lensMat: getEyeAttr('Material') || getLens('Mat'),
@@ -1506,7 +1507,7 @@ ${coatingQueue.length > 0 ? `Breakdown by coating type:
 ${Object.entries(coatingQueue.reduce((g,j) => { g[j.coating]=(g[j.coating]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
 
 Breakdown by lens type:
-${Object.entries(coatingQueue.reduce((g,j) => { const k = j.lensType==='P'?'Progressive':j.lensType==='S'?'Single Vision':j.lensType==='B'?'Bifocal':'Unknown'; g[k]=(g[k]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
+${Object.entries(coatingQueue.reduce((g,j) => { const k = j.lensType==='P'?'Progressive':j.lensType==='B'?'Bifocal':(j.lensType==='S'||j.lensType==='C')?'Single Vision':'Single Vision'; g[k]=(g[k]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
 
 Breakdown by lens material:
 ${Object.entries(coatingQueue.reduce((g,j) => { g[j.lensMat]=(g[j.lensMat]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
@@ -1527,7 +1528,7 @@ ${runningRacksData.length > 0 ? runningRacksData.map(r => `  - ${r.location}: ${
 ${COATERS.map(c => `  - ${c.name} (${c.id}): ${c.lensCapacity} lens capacity (${c.orderCapacity} orders), ${c.runHours}h run. ${c.notes}`).join('\n')}
 
 ### Full Job List in Coating Queue:
-${coatingQueue.slice(0, 300).map(j => `${j.jobId} | ${j.coating} | ${j.lensType==='P'?'Prog':j.lensType==='S'?'SV':j.lensType==='B'?'BF':'?'} | ${j.lensMat} | eye:${j.eyeSize} | ${j.rush?'RUSH':'std'} | wait:${j.minutesInStage}m | ${j.daysInLab}d in lab`).join('\n')}
+${coatingQueue.slice(0, 300).map(j => `${j.jobId} | ${j.coating} | ${j.lensType==='P'?'Prog':j.lensType==='B'?'BF':'SV'} | ${j.lensMat} | eye:${j.eyeSize} | ${j.rush?'RUSH':'std'} | wait:${j.minutesInStage}m | ${j.daysInLab}d in lab`).join('\n')}
 `;
 
       // Call gateway AI

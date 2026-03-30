@@ -1656,7 +1656,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
       case "aging_alert":{
         // SLA-based aging: SV (S) = 24h, Semi-finished (P/B) = 48h
         const getSla=(lt)=>lt==='S'?24:48;
-        const getLensLabel=(lt)=>lt==='S'?'SV':lt==='P'?'SF':lt==='B'?'SF':'SF';
+        const getLensLabel=(lt)=>lt==='P'?'SF':lt==='B'?'SF':'SV';
         const now=Date.now();
         const aged=(dviJobs||[])
           .filter(j=>{
@@ -1711,7 +1711,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                       <div style={{flex:1}}>
                         <div style={{display:"flex",alignItems:"center",gap:6}}>
                           <span style={{fontSize:12,fontWeight:700,color:T.text,fontFamily:mono}}>{j.job_id||j.jobId}</span>
-                          <Pill color={j.lensType==='S'?T.blue:T.purple}>{getLensLabel(j.lensType)}</Pill>
+                          <Pill color={(j.lensType==='P'||j.lensType==='B')?T.purple:T.blue}>{getLensLabel(j.lensType)}</Pill>
                           {isRush&&<Pill color={T.red}>RUSH</Pill>}
                         </div>
                         <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginTop:2}}>
@@ -2251,7 +2251,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                   ["Over SLA", agingJob.overSla!=null?`+${Math.floor(agingJob.overSla)}h ${Math.round((agingJob.overSla%1)*60)}m`:null],
                   ["Days In Lab", agingJob.daysInLab!=null?`${Math.floor(agingJob.daysInLab)}d ${Math.round((agingJob.daysInLab%1)*24)}h`:null],
                   ["SLA", agingJob.sla?`${agingJob.sla}h`:null],
-                  ["Lens Type", agingJob.lensType==='S'?'SV (Single Vision)':agingJob.lensType==='P'?'Progressive':agingJob.lensType==='B'?'Bifocal':agingJob.lensType],
+                  ["Lens Type", agingJob.lensType==='P'?'Progressive':agingJob.lensType==='B'?'Bifocal':'SV (Single Vision)'],
                   ["Lens Style", agingJob.lensStyle],
                   ["Lens Material", agingJob.lensMat],
                   ["Lens Thickness", agingJob.lensThick],

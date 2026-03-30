@@ -731,7 +731,7 @@ function computePutList() {
     const material = xml.lensMat || 'Unknown';
     const style = xml.lensStyle || '';
     const lensType = xml.lensType || 'S';
-    const line = lensType === 'S' ? 'sv' : 'surfacing';
+    const line = (lensType === 'P' || lensType === 'B') ? 'surfacing' : 'sv';
     const rush = j.rush === 'Y' || xml.rush === 'Y';
     const lensesNeeded = 2; // R + L
     totalLensesNeeded += lensesNeeded;
@@ -794,8 +794,8 @@ function computePutList() {
           style: xml.lensStyle || '', lensType: xml.lensType || 'S',
           jobCount: 0, lensesNeeded: 0, rushCount: 0,
           // For surfacing jobs, suggest looking for same-material alternatives
-          canSubstitute: xml.lensType !== 'S', // progressive/bifocal can use different base
-          action: xml.lensType === 'S' ? 'REORDER' : 'FIND ALTERNATIVE OR REORDER',
+          canSubstitute: xml.lensType === 'P' || xml.lensType === 'B', // only progressive/bifocal can use different base
+          action: (xml.lensType === 'P' || xml.lensType === 'B') ? 'FIND ALTERNATIVE OR REORDER' : 'REORDER',
         };
       }
       outOfStock[opc].jobCount++;
@@ -1649,7 +1649,7 @@ module.exports = {
         const coating = xml?.coating || 'Unknown';
         const material = xml?.lensMat || 'Unknown';
         const lensType = xml?.lensType || 'S';
-        const isSurfacing = lensType !== 'S'; // P=progressive, B=bifocal — always surfaced
+        const isSurfacing = lensType === 'P' || lensType === 'B'; // only progressive/bifocal need surfacing
         const rush = j.rush === 'Y' || xml?.rush === 'Y';
 
         const jobInfo = {
@@ -1710,8 +1710,9 @@ module.exports = {
       const processableNow = inProcess.length + readyToProcess.length;
 
       // SV vs Surfacing breakdown
-      const svAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return (x?.lensType || 'S') === 'S'; });
-      const surfAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return (x?.lensType || 'S') !== 'S'; });
+      const isSurfType = t => t === 'P' || t === 'B';
+      const svAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return !isSurfType(x?.lensType); });
+      const surfAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return isSurfType(x?.lensType); });
 
       const buildLineBreakdown = (label, jobs) => {
         const ip = jobs.filter(j => pastKardexStages.includes(j.stage)).length;
@@ -1821,7 +1822,7 @@ module.exports = {
         const material = xml.lensMat || 'Unknown';
         const style = xml.lensStyle || '';
         const lensType = xml.lensType || 'S';
-        const isSurfacing = lensType !== 'S'; // P=progressive, B=bifocal — always surfaced
+        const isSurfacing = lensType === 'P' || lensType === 'B'; // only progressive/bifocal need surfacing
         const rush = j.rush === 'Y' || xml.rush === 'Y';
 
         // Find alternatives — same material blanks in stock
