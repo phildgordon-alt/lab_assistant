@@ -538,9 +538,10 @@ async function poll() {
 
     const pollStart = Date.now();
 
-    // Materials: ONLY on first poll. Saved to SQLite via db.upsertInventory().
-    // Subsequent polls only fetch light data (orders, transactions).
-    if (pollCount <= 3 && !cachedMaterialsResp) {
+    // Materials: refresh every 10 minutes to keep qty current.
+    // Single API call (~10K items) — not heavy like location_contents (20K records).
+    const materialsStale = !cachedMaterialsResp || (pollCount % 10 === 0);
+    if (materialsStale) {
       console.log(`[ItemPath] Poll #${pollCount} — fetching materials catalog...`);
       try {
         // Use longer timeout for initial heavy load
@@ -572,9 +573,10 @@ async function poll() {
     const locationsData = await getLocationsData().catch(() => []);
     const locationsResp = { locations: locationsData };
 
-    // Location contents: ONLY on first poll. Heavy call (20K records).
+    // Location contents: refresh every 30 minutes. Heavy call (20K records).
     let locationContentsResp = { contents: cache.locationContents || [] };
-    if (pollCount <= 3 && !(cache.locationContents && cache.locationContents.length > 0)) {
+    const lcStale = !(cache.locationContents && cache.locationContents.length > 0) || (pollCount % 30 === 0);
+    if (lcStale) {
       console.log(`[ItemPath] Poll #${pollCount} — fetching location contents...`);
       try {
         const lcUrl = new URL(`${CONFIG.baseUrl}/api/location_contents`);
