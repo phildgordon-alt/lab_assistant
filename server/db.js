@@ -960,32 +960,17 @@ function upsertPicks(picks) {
   `).all();
 
   // Archive picks that are no longer in the current set (they were completed)
+  // NOTE: No longer writes to picks_history here — pick history is now recorded
+  // via /api/order_lines transaction recording in itempath-adapter.js and
+  // periodic imports from ItemPath History List exports.
   const archiveStmt = db.prepare(`
     UPDATE picks SET archived = 1, completed_at = datetime('now') WHERE id = ?
-  `);
-  const historyStmt = db.prepare(`
-    INSERT INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
   `);
 
   const archiveCompleted = db.transaction(() => {
     for (const existing of existingPicks) {
       if (!currentIds.has(existing.id)) {
-        // This pick is no longer active - archive it and record history
         archiveStmt.run(existing.id);
-        // Sanity check: qty should be reasonable (< 10,000 per pick)
-        const qty = typeof existing.qty === 'number' && existing.qty < 10000 ? existing.qty : 0;
-        const picked = typeof existing.picked === 'number' && existing.picked < 10000 ? existing.picked : 0;
-        // No qty filter — semi-finished picks can be 100+ units per pick
-        historyStmt.run(
-          existing.id,
-          existing.order_id,
-          existing.sku,
-          existing.name,
-          qty,
-          picked,
-          existing.warehouse
-        );
       }
     }
   });
