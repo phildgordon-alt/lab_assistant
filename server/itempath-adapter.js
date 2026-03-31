@@ -190,6 +190,10 @@ loadDailyTotals();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVE CACHE — updated every poll cycle
+// Track last successful pick sync time — used for order_lines modifiedDate[gte]
+// On startup, default to 2 hours ago to catch anything missed during downtime
+let lastPickSyncTime = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+
 // ─────────────────────────────────────────────────────────────────────────────
 let cache = {
   materials:        [],   // normalized inventory: { sku, name, qty, unit, location, coatingType, rxSpec, lastUpdated }
@@ -859,34 +863,67 @@ async function poll() {
       }
       db.upsertPicks(picksOnly);
 
-      // Record completed pick TRANSACTIONS directly to picks_history
-      // This is the reliable method — captures every completed pick, not just ones
-      // we happen to see while "In Process" during a 60s poll window
-      if (pickTxList.length > 0) {
-        let txRecorded = 0;
-        const txHistStmt = db.db.prepare(`
+      // Record completed picks via /api/order_lines — reliable, paginated, date-filtered
+      // Uses modifiedDate[gte] = last sync time so we catch up after downtime
+      try {
+        let olPage = 0;
+        let olTotal = 0;
+        let olInserted = 0;
+        const olStmt = db.db.prepare(`
           INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
-        const txSave = db.db.transaction(() => {
-          for (const tx of pickTxList) {
-            const sku = tx.material_code || tx.materialCode || tx.sku || '';
-            const name = tx.material_name || tx.materialName || tx.name || '';
-            const qty = Math.abs(parseFloat(tx.quantityConfirmed || tx.quantity) || 0);
-            if (!sku || qty <= 0) continue;
-            let wh = tx.warehouseName || '';
-            if (/kitchen/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
-            else if (/wh2/i.test(wh)) wh = 'WH2';
-            else if (/wh1/i.test(wh)) wh = 'WH1';
-            const completedAt = tx.creationDate || tx.creation_date || tx.completed_at || new Date().toISOString();
-            const pickId = `tx-${tx.id || ''}`;
-            const orderId = tx.orderName || tx.order_name || tx.order_id || '';
-            txHistStmt.run(pickId, orderId, sku, name, qty, qty, wh, completedAt);
-            txRecorded++;
-          }
-        });
-        txSave();
-        if (txRecorded > 0) console.log(`[ItemPath] ✓ ${txRecorded} pick transactions recorded to picks_history`);
+
+        while (true) {
+          const olUrl = new URL(`${CONFIG.baseUrl}/api/order_lines`);
+          olUrl.searchParams.set('directionType', '2');  // picks
+          olUrl.searchParams.set('status', 'processed');
+          olUrl.searchParams.set('modifiedDate[gte]', lastPickSyncTime);
+          olUrl.searchParams.set('limit', '1000');
+          olUrl.searchParams.set('page', olPage.toString());
+
+          const olResp = await fetch(olUrl.toString(), {
+            headers: authHeaders(),
+            signal: AbortSignal.timeout(60000),
+          });
+          if (!olResp.ok) { console.error(`[ItemPath] order_lines HTTP ${olResp.status}`); break; }
+          const olData = await olResp.json();
+          const lines = olData.order_lines || [];
+          if (lines.length === 0) break;
+          olTotal += lines.length;
+
+          const olSave = db.db.transaction(() => {
+            for (const line of lines) {
+              const sku = line.materialName || '';
+              const orderName = line.orderName || line.orderId || '';
+              const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
+              if (!sku || qty <= 0) continue;
+
+              let wh = line.warehouseName || line.costCenterName || '';
+              if (/kitchen/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
+              else if (/wh2/i.test(wh)) wh = 'WH2';
+              else if (/wh1/i.test(wh)) wh = 'WH1';
+
+              const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
+              // Use hist- prefix so it matches import format — same ID = same pick
+              const pickId = `hist-${line.id || line.orderLineId || ''}`;
+
+              const result = olStmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt);
+              if (result.changes > 0) olInserted++;
+            }
+          });
+          olSave();
+
+          if (lines.length < 1000) break; // last page
+          olPage++;
+          if (olPage > 20) { console.warn('[ItemPath] ⚠️ order_lines pagination hit 20 pages — may need catch-up'); break; }
+        }
+
+        if (olTotal > 0) console.log(`[ItemPath] ✓ ${olTotal} order_lines fetched, ${olInserted} new picks recorded`);
+        lastPickSyncTime = new Date().toISOString();
+      } catch (olErr) {
+        console.error('[ItemPath] order_lines pick recording failed:', olErr.message);
+        // Don't update lastPickSyncTime — will retry from same point next poll
       }
 
       console.log(`[ItemPath] ✓ SQLite snapshot saved`);
