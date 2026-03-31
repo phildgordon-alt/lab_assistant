@@ -368,13 +368,13 @@ function reconcile(itempath, category = null, topsData = null) {
     const ipQty = ipTotal[sku] || 0;
     const disc = discontinuedSkus.has(sku);
     if (!byCategory[cat]) byCategory[cat] = { category: cat, itempath: 0, netsuite: 0, diff: 0, skus: 0, ipSkuCount: 0, nsSkuCount: 0, itempath_disc: 0, netsuite_disc: 0 };
+    // Discontinued lenses stay in the main totals — just flagged
+    byCategory[cat].itempath += ipQty;
+    byCategory[cat].netsuite += nsQty;
+    byCategory[cat].diff += (ipQty - nsQty);
     if (disc) {
       byCategory[cat].itempath_disc += ipQty;
       byCategory[cat].netsuite_disc += nsQty;
-    } else {
-      byCategory[cat].itempath += ipQty;
-      byCategory[cat].netsuite += nsQty;
-      byCategory[cat].diff += (ipQty - nsQty);
     }
     byCategory[cat].skus++;
     if (ipQty > 0) byCategory[cat].ipSkuCount++;
@@ -389,13 +389,11 @@ function reconcile(itempath, category = null, topsData = null) {
     c.netsuite_disc = Math.round(c.netsuite_disc);
   }
 
-  // Active totals (excluding discontinued only — everything else counts)
+  // Totals include everything — discontinued are flagged but not excluded
   const activeDiscrepancies = discrepancies.filter(d => !d.discontinued);
   const discDiscrepancies = discrepancies.filter(d => d.discontinued);
-  const discExcludedIP = [...discontinuedSkus].reduce((s, sku) => s + (ipTotal[sku] || 0), 0);
-  const discExcludedNS = [...discontinuedSkus].reduce((s, sku) => s + (inventory[sku]?.qty || 0), 0);
-  const activeTotalIP = Math.round(totalItemPath - discExcludedIP);
-  const activeTotalNS = Math.round(totalNetSuite - discExcludedNS);
+  const activeTotalIP = Math.round(totalItemPath);
+  const activeTotalNS = Math.round(totalNetSuite);
   const accessorySkuCount = [...allSkus].filter(sku => classifySku(sku, inventory[sku]?.name || ipNames[sku] || '') === 'Accessories').length;
   const uncategorizedSkuCount = [...allSkus].filter(sku => classifySku(sku, inventory[sku]?.name || ipNames[sku] || '') === 'Uncategorized').length;
 
