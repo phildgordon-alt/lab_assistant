@@ -323,6 +323,14 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_picks_hist_sku ON picks_history(sku);
   CREATE INDEX IF NOT EXISTS idx_picks_hist_completed ON picks_history(completed_at);
   CREATE INDEX IF NOT EXISTS idx_picks_hist_recorded ON picks_history(recorded_at);
+`);
+// Add unique constraint on pick_id (dedup existing records first)
+try {
+  // Remove duplicates keeping lowest id
+  db.exec(`DELETE FROM picks_history WHERE id NOT IN (SELECT MIN(id) FROM picks_history GROUP BY pick_id)`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_picks_hist_pick_id ON picks_history(pick_id)`);
+} catch (e) { /* index may already exist */ }
+db.exec(`
 
   -- Binning Intelligence
   CREATE TABLE IF NOT EXISTS bin_contents (

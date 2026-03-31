@@ -61,9 +61,10 @@ function main() {
   let skipped = 0;
 
   const doImport = db.transaction(() => {
-    // Remove old backfill, tx-, and order-disappearance records in this date range
-    // hist- records are the source of truth from this import
-    db.prepare(`DELETE FROM picks_history WHERE pick_id NOT LIKE 'hist-%' AND date(completed_at) >= ? AND date(completed_at) <= ?`).run(minDate, maxDate);
+    // Remove old backfill and order-disappearance records in this date range
+    // Keep tx- records (live adapter) — hist- records take priority via INSERT OR IGNORE + unique index
+    db.prepare(`DELETE FROM picks_history WHERE pick_id LIKE 'backfill%' AND date(completed_at) >= ? AND date(completed_at) <= ?`).run(minDate, maxDate);
+    db.prepare(`DELETE FROM picks_history WHERE pick_id NOT LIKE 'hist-%' AND pick_id NOT LIKE 'tx-%' AND date(completed_at) >= ? AND date(completed_at) <= ?`).run(minDate, maxDate);
 
     for (const r of picks) {
       const sku = r['Material Reference'] || '';
