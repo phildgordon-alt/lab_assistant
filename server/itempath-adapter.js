@@ -191,8 +191,8 @@ loadDailyTotals();
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVE CACHE — updated every poll cycle
 // Track last successful pick sync time — used for order_lines modifiedDate[gte]
-// On startup, default to 2 hours ago to catch anything missed during downtime
-let lastPickSyncTime = new Date(Date.now() - 2 * 3600 * 1000).toISOString();
+// On startup, default to 10 minutes ago — import covers historical data
+let lastPickSyncTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
 // ─────────────────────────────────────────────────────────────────────────────
 let cache = {
@@ -916,7 +916,8 @@ async function poll() {
 
           if (lines.length < 1000) break; // last page
           olPage++;
-          if (olPage > 20) { console.warn('[ItemPath] ⚠️ order_lines pagination hit 20 pages — may need catch-up'); break; }
+          if (olPage > 5) { console.warn('[ItemPath] ⚠️ order_lines pagination hit 5 pages — stopping, will continue next poll'); break; }
+          await new Promise(r => setTimeout(r, 3000)); // 3s delay between pages
         }
 
         if (olTotal > 0) console.log(`[ItemPath] ✓ ${olTotal} order_lines fetched, ${olInserted} new picks recorded`);
