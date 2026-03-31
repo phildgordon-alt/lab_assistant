@@ -191,8 +191,8 @@ loadDailyTotals();
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVE CACHE — updated every poll cycle
 // Track last successful pick sync time — used for order_lines modifiedDate[gte]
-// On startup, default to 10 minutes ago — import covers historical data
-let lastPickSyncTime = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+// On startup, default to midnight today — catches all of today's picks
+let lastPickSyncTime = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).toISOString();
 
 // ─────────────────────────────────────────────────────────────────────────────
 let cache = {
