@@ -43,7 +43,7 @@ async function fetchPage(dateFrom, dateTo, page) {
 
   const resp = await fetch(url.toString(), {
     headers: { 'Authorization': `Bearer ${TOKEN}` },
-    signal: AbortSignal.timeout(60000),
+    signal: AbortSignal.timeout(120000),
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => '');
@@ -99,25 +99,22 @@ async function main() {
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const dayStr = d.toISOString().slice(0, 10);
 
-    // Count for this day
-    const dayCount = await countPicks(dayStr, dayStr);
-    apiCalls++;
-    if (dayCount === 0) {
-      console.log(`${dayStr}: 0 picks — skipping`);
-      await sleep(500);
-      continue;
-    }
+    // Skip weekends (no picks on Sat/Sun typically)
+    const dow = d.getDay();
+    if (dow === 0) { console.log(`${dayStr}: Sunday — skipping`); continue; }
 
-    const pages = Math.ceil(dayCount / PAGE_SIZE);
+    // Paginate directly — no count call (avoids timeout on large datasets)
     let dayFetched = 0;
     let dayInserted = 0;
+    let page = 0;
 
-    for (let page = 0; page < pages; page++) {
+    while (true) {
       await sleep(DELAY_MS);
       try {
         const data = await fetchPage(dayStr, dayStr, page);
         apiCalls++;
         const lines = data.order_lines || [];
+        if (lines.length === 0) break; // no more pages
         dayFetched += lines.length;
 
         const save = db.transaction(() => {
@@ -142,12 +139,13 @@ async function main() {
         });
         save();
 
-        if (pages > 1) process.stdout.write(`  page ${page + 1}/${pages} (${lines.length} lines) `);
+        if (lines.length < PAGE_SIZE) break; // last page
+        page++;
       } catch (e) {
         console.error(`\n  ERROR on ${dayStr} page ${page}: ${e.message}`);
-        console.error(`  Waiting 30s before retrying...`);
-        await sleep(30000);
-        page--; // retry
+        console.error(`  Waiting 60s before retrying...`);
+        await sleep(60000);
+        // retry same page
       }
     }
 
