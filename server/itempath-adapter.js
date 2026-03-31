@@ -856,6 +856,37 @@ async function poll() {
         console.log(`[ItemPath] Filtered ${putsFiltered} put orders from picks (${picksOnly.length} picks written to SQLite)`);
       }
       db.upsertPicks(picksOnly);
+
+      // Record completed pick TRANSACTIONS directly to picks_history
+      // This is the reliable method — captures every completed pick, not just ones
+      // we happen to see while "In Process" during a 60s poll window
+      if (pickTxList.length > 0) {
+        let txRecorded = 0;
+        const txHistStmt = db.db.prepare(`
+          INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        const txSave = db.db.transaction(() => {
+          for (const tx of pickTxList) {
+            const sku = tx.material_code || tx.materialCode || tx.sku || '';
+            const name = tx.material_name || tx.materialName || tx.name || '';
+            const qty = Math.abs(parseFloat(tx.quantityConfirmed || tx.quantity) || 0);
+            if (!sku || qty <= 0) continue;
+            let wh = tx.warehouseName || '';
+            if (/kitchen/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
+            else if (/wh2/i.test(wh)) wh = 'WH2';
+            else if (/wh1/i.test(wh)) wh = 'WH1';
+            const completedAt = tx.creationDate || tx.creation_date || tx.completed_at || new Date().toISOString();
+            const pickId = `tx-${tx.id || ''}`;
+            const orderId = tx.orderName || tx.order_name || tx.order_id || '';
+            txHistStmt.run(pickId, orderId, sku, name, qty, qty, wh, completedAt);
+            txRecorded++;
+          }
+        });
+        txSave();
+        if (txRecorded > 0) console.log(`[ItemPath] ✓ ${txRecorded} pick transactions recorded to picks_history`);
+      }
+
       console.log(`[ItemPath] ✓ SQLite snapshot saved`);
     } catch (dbErr) {
       console.error('[ItemPath] SQLite write failed:', dbErr.message);
