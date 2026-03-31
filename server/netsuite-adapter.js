@@ -833,6 +833,38 @@ function getConsumption(fromDate, toDate) {
   return { bySku, byDate, total, lenses, frames, from, to, skuCount: Object.keys(bySku).length, dayCount: Object.keys(byDate).length };
 }
 
+// Query NetSuite IA (Inventory Adjustment) history for a SKU
+async function getIAHistory(sku, fromDate = '2025-01-01') {
+  if (!CONSUMER_KEY || !TOKEN_ID) return { error: 'NetSuite not configured', transactions: [] };
+  try {
+    const rows = await suiteql(`
+      SELECT t.tranId AS docNumber, t.tranDate AS date, t.type, t.memo,
+             tl.quantity AS qty, item.itemId AS sku
+      FROM transactionLine tl
+      JOIN transaction t ON t.id = tl.transaction
+      JOIN item ON item.id = tl.item
+      WHERE item.itemId = '${sku}'
+        AND t.type IN ('InvAdjst', 'ItemRcpt', 'ItemShip', 'InvTrnfr')
+        AND t.tranDate >= '${fromDate}'
+      ORDER BY t.tranDate
+    `);
+    return {
+      sku,
+      fromDate,
+      count: rows.length,
+      transactions: rows.map(r => ({
+        doc: r.docnumber,
+        date: r.date,
+        type: r.type,
+        qty: parseFloat(r.qty) || 0,
+        memo: r.memo || '',
+      })),
+    };
+  } catch (e) {
+    return { error: e.message, sku, transactions: [] };
+  }
+}
+
 module.exports = {
   start,
   getInventory,
@@ -844,5 +876,6 @@ module.exports = {
   fetchOpenPOs,
   syncConsumption,
   getConsumption,
+  getIAHistory,
   poll,
 };

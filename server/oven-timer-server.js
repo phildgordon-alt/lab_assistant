@@ -1679,6 +1679,12 @@ Respond with a structured batching plan in this format:
     const topsRows = labDb.db.prepare('SELECT sku, qty FROM tops_inventory').all();
     return json(res, netsuite.reconcile(itempath, category, topsRows));
   }
+  if (req.method==='GET' && url.pathname.startsWith('/api/netsuite/ia-history/')) {
+    const sku = url.pathname.split('/').pop();
+    const from = url.searchParams.get('from') || '2025-01-01';
+    const data = await netsuite.getIAHistory(sku, from);
+    return json(res, data);
+  }
   if (req.method==='GET' && url.pathname==='/api/netsuite/pos') {
     const category = url.searchParams.get('category') || null;
     return json(res, netsuite.getOpenPOs(category));
