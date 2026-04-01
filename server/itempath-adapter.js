@@ -215,14 +215,15 @@ function trackCompletedOrders(currentOrders) {
   }
 }
 
-// Load on module init
+// Track last successful pick sync time — persisted to daily-picks.json
+// On startup: loaded from disk, capped at 30 min ago. Reset to midnight on day rollover.
+let lastPickSyncTime = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+// Load on module init (AFTER lastPickSyncTime is declared)
 loadDailyTotals();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVE CACHE — updated every poll cycle
-// Track last successful pick sync time — persisted to daily-picks.json
-// On startup: loaded from disk, capped at 30 min ago. Reset to midnight on day rollover.
-let lastPickSyncTime = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
 // ─────────────────────────────────────────────────────────────────────────────
 let cache = {
