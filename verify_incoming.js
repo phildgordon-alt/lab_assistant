@@ -21,9 +21,9 @@ for (const file of files) {
   const lines = fs.readFileSync(path.join(DAILY_DIR, file), 'utf8').split('\n');
   for (let i = 1; i < lines.length; i++) {
     const cols = lines[i].split('\t');
-    if (cols.length < 16) continue;
-    const jobId = (cols[15] || '').trim();
-    const entryDate = parseDate(cols[2]);
+    if (cols.length < 17) continue;
+    const jobId = (cols[16] || '').trim();  // Column 17 (0-indexed: 16) = DVI Job#
+    const entryDate = parseDate(cols[2]);   // Column 3 (0-indexed: 2) = Enter Date
     if (!jobId || !entryDate || seenJobs.has(jobId)) continue;
     seenJobs.add(jobId);
     jobsByEntryDate[entryDate] = (jobsByEntryDate[entryDate] || 0) + 1;

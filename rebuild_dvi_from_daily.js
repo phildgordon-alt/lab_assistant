@@ -50,18 +50,18 @@ function main() {
       const line = lines[i].trim();
       if (!line) continue;
       const cols = line.split('\t');
-      if (cols.length < 16) continue;
+      if (cols.length < 17) continue;
 
-      // Column mapping (tab-delimited):
-      // 0: Shopify #, 1: (dup), 2: Enter Date, 3: Ship Date, 4: Days In Proc
+      // Column mapping (tab-delimited, 0-indexed):
+      // 0: (empty), 1: Shopify #, 2: Enter Date, 3: Ship Date, 4: Days In Proc
       // 5: Fin lens Breakage, 6: Lens Mfr, 7: Blank Size, 8: Sphere Power
       // 9: Cylinder Power, 10: Subcon Vendor, 11: # Jobs, 12: % Breakage
-      // 13: Lens cost, 14: Subcontrac cost, 15: DVI Job#, 16: Rx#, 17: OPC
-      const jobId = (cols[15] || '').trim();
+      // 13: (empty), 14: Lens cost, 15: Subcontrac cost, 16: DVI Job#
+      const jobId = (cols[16] || '').trim();
       const entryDate = parseDate(cols[2]);
       const shipDate = parseDate(cols[3]);
       const daysInLab = parseFloat(cols[4]) || 0;
-      const coating = (cols[6] || '').trim(); // Lens Mfr = material, close enough
+      const coating = (cols[6] || '').trim();
       const rush = ''; // not in daily export
 
       if (!jobId || !entryDate) continue;
