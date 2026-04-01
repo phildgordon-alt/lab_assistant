@@ -542,9 +542,8 @@ async function poll() {
 
     const pollStart = Date.now();
 
-    // Materials: refresh every 10 minutes to keep qty current.
-    // Single API call (~10K items) — not heavy like location_contents (20K records).
-    const materialsStale = !cachedMaterialsResp || (pollCount % 10 === 0);
+    // Materials: refresh every 30 minutes to keep qty current without overloading API.
+    const materialsStale = !cachedMaterialsResp || (pollCount % 30 === 0);
     if (materialsStale) {
       console.log(`[ItemPath] Poll #${pollCount} — fetching materials catalog...`);
       try {
@@ -577,9 +576,9 @@ async function poll() {
     const locationsData = await getLocationsData().catch(() => []);
     const locationsResp = { locations: locationsData };
 
-    // Location contents: refresh every 30 minutes. Heavy call (20K records).
+    // Location contents: startup only. Heavy call (20K records) — was crashing ItemPath.
     let locationContentsResp = { contents: cache.locationContents || [] };
-    const lcStale = !(cache.locationContents && cache.locationContents.length > 0) || (pollCount % 30 === 0);
+    const lcStale = !(cache.locationContents && cache.locationContents.length > 0);
     if (lcStale) {
       console.log(`[ItemPath] Poll #${pollCount} — fetching location contents...`);
       try {
@@ -863,9 +862,11 @@ async function poll() {
       }
       db.upsertPicks(picksOnly);
 
-      // Record completed picks via /api/order_lines — reliable, paginated, date-filtered
-      // Uses modifiedDate[gte] = last sync time so we catch up after downtime
-      try {
+      // DISABLED — order_lines call was overloading ItemPath API
+      // Pick history is maintained via periodic History List CSV imports instead
+      // Re-enable when ItemPath confirms API capacity
+      if (true) { /* order_lines pick recording disabled */ }
+      else try {
         let olPage = 0;
         let olTotal = 0;
         let olInserted = 0;
