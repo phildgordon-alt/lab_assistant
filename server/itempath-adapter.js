@@ -64,6 +64,26 @@ const CONFIG = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// API CALL COUNTER — tracks daily usage, triggers conservation mode at 15K
+// ─────────────────────────────────────────────────────────────────────────────
+const API_CONSERVATION_THRESHOLD = 15000;
+let dailyApiCalls = 0;
+let apiCallDate = new Date().toISOString().substring(0, 10);
+
+function trackApiCall() {
+  const today = new Date().toISOString().substring(0, 10);
+  if (today !== apiCallDate) { dailyApiCalls = 0; apiCallDate = today; }
+  dailyApiCalls++;
+  if (dailyApiCalls === API_CONSERVATION_THRESHOLD) {
+    console.error(`[ItemPath] ⚠️ ${API_CONSERVATION_THRESHOLD} API calls today — CONSERVATION MODE active. pickSync and reconciliation paused.`);
+    try { sendSlackAlerts([{ sku: 'SYSTEM', name: 'API Conservation Mode', qty: dailyApiCalls, threshold: API_CONSERVATION_THRESHOLD, severity: 'CRITICAL' }]); } catch {}
+  }
+  if (dailyApiCalls % 1000 === 0) console.log(`[ItemPath] API calls today: ${dailyApiCalls}`);
+}
+
+function isConservationMode() { return dailyApiCalls >= API_CONSERVATION_THRESHOLD; }
+
+// ─────────────────────────────────────────────────────────────────────────────
 // INCREMENTAL PICK/PUT TRACKING — persisted to disk, survives restarts
 // Picks: orders disappear from API when completed → count their lines
 // Puts: track material qty increases between polls (items received into Kardex)
@@ -88,8 +108,14 @@ function loadDailyTotals() {
         dailyPutTotals = { WH1: saved.puts?.WH1 || 0, WH2: saved.puts?.WH2 || 0, WH3: saved.puts?.WH3 || 0, date: today };
         if (saved.hourlyPicks) { hourlyPicks.WH1 = { ...emptyHourly(), ...saved.hourlyPicks.WH1 }; hourlyPicks.WH2 = { ...emptyHourly(), ...saved.hourlyPicks.WH2 }; hourlyPicks.WH3 = { ...emptyHourly(), ...saved.hourlyPicks?.WH3 }; }
         if (saved.hourlyPuts) { hourlyPuts.WH1 = { ...emptyHourly(), ...saved.hourlyPuts.WH1 }; hourlyPuts.WH2 = { ...emptyHourly(), ...saved.hourlyPuts.WH2 }; hourlyPuts.WH3 = { ...emptyHourly(), ...saved.hourlyPuts?.WH3 }; }
+        // Restore lastPickSyncTime — cap at 30 min ago to prevent massive catch-up
+        if (saved.lastPickSyncTime) {
+          const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+          lastPickSyncTime = saved.lastPickSyncTime > thirtyMinAgo ? saved.lastPickSyncTime : thirtyMinAgo;
+        }
+        if (saved.dailyApiCalls) dailyApiCalls = saved.dailyApiCalls;
         const totalPickH = Object.values(hourlyPicks.WH1).reduce((a,b)=>a+b,0) + Object.values(hourlyPicks.WH2).reduce((a,b)=>a+b,0) + Object.values(hourlyPicks.WH3).reduce((a,b)=>a+b,0);
-        console.log(`[ItemPath] Loaded daily totals from disk: picks WH1=${dailyPickTotals.WH1} WH2=${dailyPickTotals.WH2} WH3=${dailyPickTotals.WH3}, puts WH1=${dailyPutTotals.WH1} WH2=${dailyPutTotals.WH2}, hourly entries=${totalPickH}`);
+        console.log(`[ItemPath] Loaded daily totals from disk: picks WH1=${dailyPickTotals.WH1} WH2=${dailyPickTotals.WH2} WH3=${dailyPickTotals.WH3}, puts WH1=${dailyPutTotals.WH1} WH2=${dailyPutTotals.WH2}, hourly entries=${totalPickH}, lastPickSync=${lastPickSyncTime}, apiCalls=${dailyApiCalls}`);
       } else {
         console.log(`[ItemPath] Saved totals are from ${saved.date}, today is ${today} — starting fresh`);
       }
@@ -110,6 +136,8 @@ function saveDailyTotals() {
       puts: { WH1: dailyPutTotals.WH1, WH2: dailyPutTotals.WH2, WH3: dailyPutTotals.WH3 },
       hourlyPicks,
       hourlyPuts,
+      lastPickSyncTime,
+      dailyApiCalls,
       savedAt: new Date().toISOString(),
     }));
   } catch(e) { /* ignore write errors */ }
@@ -123,6 +151,8 @@ function resetDailyIfNeeded() {
     hourlyPicks = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
     hourlyPuts = { WH1: emptyHourly(), WH2: emptyHourly(), WH3: emptyHourly() };
     previousOrderMap.clear();
+    lastPickSyncTime = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).toISOString();
+    dailyApiCalls = 0;
     saveDailyTotals();
     console.log(`[ItemPath] Daily pick/put counters reset for ${today}`);
   }
@@ -190,9 +220,9 @@ loadDailyTotals();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIVE CACHE — updated every poll cycle
-// Track last successful pick sync time — used for order_lines modifiedDate[gte]
-// On startup, default to midnight today — catches all of today's picks
-let lastPickSyncTime = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).toISOString();
+// Track last successful pick sync time — persisted to daily-picks.json
+// On startup: loaded from disk, capped at 30 min ago. Reset to midnight on day rollover.
+let lastPickSyncTime = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
 // ─────────────────────────────────────────────────────────────────────────────
 let cache = {
@@ -223,28 +253,34 @@ function authHeaders() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FETCH WRAPPER — timeout + error handling + payload logging
+// FETCH WRAPPER — serialized (one at a time), counted, with timeout
 // ─────────────────────────────────────────────────────────────────────────────
-async function ipFetch(endpointPath, params = {}) {
-  const url = new URL(`${CONFIG.baseUrl}${endpointPath}`);
-  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+let _fetchQueue = Promise.resolve();
 
-  const resp = await fetch(url.toString(), {
-    headers: authHeaders(),
-    signal: AbortSignal.timeout(30000),  // 30s timeout (was 120s — fail fast)
+async function ipFetch(endpointPath, params = {}, options = {}) {
+  const timeout = options.timeout || 30000;
+  // Serialize: wait for previous request to complete before starting this one
+  const result = new Promise((resolve, reject) => {
+    _fetchQueue = _fetchQueue.then(async () => {
+      trackApiCall();
+      const url = new URL(`${CONFIG.baseUrl}${endpointPath}`);
+      Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+      try {
+        const resp = await fetch(url.toString(), {
+          headers: authHeaders(),
+          signal: AbortSignal.timeout(timeout),
+        });
+        if (!resp.ok) throw new Error(`ItemPath ${endpointPath} → HTTP ${resp.status}`);
+        const text = await resp.text();
+        const sizeKB = (text.length / 1024).toFixed(1);
+        console.log(`[ItemPath] [#${dailyApiCalls}] ${endpointPath}${url.search} → ${sizeKB} KB`);
+        resolve(JSON.parse(text));
+      } catch (e) {
+        reject(e);
+      }
+    }).catch(() => {}); // keep queue alive even if a request fails
   });
-
-  if (!resp.ok) {
-    throw new Error(`ItemPath ${endpointPath} → HTTP ${resp.status}`);
-  }
-
-  const text = await resp.text();
-  const sizeKB = (text.length / 1024).toFixed(1);
-  const sizeMB = (text.length / (1024 * 1024)).toFixed(2);
-  const label = text.length > 1048576 ? `${sizeMB} MB` : `${sizeKB} KB`;
-  console.log(`[ItemPath] ${endpointPath}${url.search} → ${label}`);
-
-  return JSON.parse(text);
+  return result;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -547,19 +583,11 @@ async function poll() {
     if (materialsStale) {
       console.log(`[ItemPath] Poll #${pollCount} — fetching materials catalog...`);
       try {
-        // Use longer timeout for initial heavy load
-        const matUrl = new URL(`${CONFIG.baseUrl}/api/materials`);
-        matUrl.searchParams.set('limit', '10000');
-        const matResp = await fetch(matUrl.toString(), {
-          headers: authHeaders(),
-          signal: AbortSignal.timeout(120000),  // 2 minutes for initial load
-        });
-        if (!matResp.ok) throw new Error(`HTTP ${matResp.status}`);
-        cachedMaterialsResp = await matResp.json();
+        cachedMaterialsResp = await ipFetch('/api/materials', { limit: 10000 }, { timeout: 120000 });
         console.log(`[ItemPath] Materials loaded: ${(cachedMaterialsResp.materials || []).length} items`);
       } catch (e) {
         console.error(`[ItemPath] Materials fetch failed: ${e.message} — will retry next poll`);
-        cachedMaterialsResp = null; // retry on next poll
+        cachedMaterialsResp = null;
       }
     }
     const materialsResp = cachedMaterialsResp || { materials: [] };
@@ -582,14 +610,7 @@ async function poll() {
     if (lcStale) {
       console.log(`[ItemPath] Poll #${pollCount} — fetching location contents...`);
       try {
-        const lcUrl = new URL(`${CONFIG.baseUrl}/api/location_contents`);
-        lcUrl.searchParams.set('limit', '20000');
-        const lcResp = await fetch(lcUrl.toString(), {
-          headers: authHeaders(),
-          signal: AbortSignal.timeout(120000),  // 2 minutes
-        });
-        if (!lcResp.ok) throw new Error(`HTTP ${lcResp.status}`);
-        locationContentsResp = await lcResp.json();
+        locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 }, { timeout: 120000 });
         console.log(`[ItemPath] Location contents loaded: ${(locationContentsResp.contents || []).length} records`);
       } catch (e) {
         console.error(`[ItemPath] Location contents fetch failed: ${e.message}`);
@@ -862,71 +883,7 @@ async function poll() {
       }
       db.upsertPicks(picksOnly);
 
-      // DISABLED — order_lines call was overloading ItemPath API
-      // Pick history is maintained via periodic History List CSV imports instead
-      // Re-enable when ItemPath confirms API capacity
-      if (true) { /* order_lines pick recording disabled */ }
-      else try {
-        let olPage = 0;
-        let olTotal = 0;
-        let olInserted = 0;
-        const olStmt = db.db.prepare(`
-          INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        while (true) {
-          const olUrl = new URL(`${CONFIG.baseUrl}/api/order_lines`);
-          olUrl.searchParams.set('directionType', '2');  // picks
-          olUrl.searchParams.set('status', 'processed');
-          olUrl.searchParams.set('modifiedDate[gte]', lastPickSyncTime);
-          olUrl.searchParams.set('limit', '1000');
-          olUrl.searchParams.set('page', olPage.toString());
-
-          const olResp = await fetch(olUrl.toString(), {
-            headers: authHeaders(),
-            signal: AbortSignal.timeout(60000),
-          });
-          if (!olResp.ok) { console.error(`[ItemPath] order_lines HTTP ${olResp.status}`); break; }
-          const olData = await olResp.json();
-          const lines = olData.order_lines || [];
-          if (lines.length === 0) break;
-          olTotal += lines.length;
-
-          const olSave = db.db.transaction(() => {
-            for (const line of lines) {
-              const sku = line.materialName || '';
-              const orderName = line.orderName || line.orderId || '';
-              const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
-              if (!sku || qty <= 0) continue;
-
-              let wh = line.warehouseName || line.costCenterName || '';
-              if (/kitchen/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
-              else if (/wh2/i.test(wh)) wh = 'WH2';
-              else if (/wh1/i.test(wh)) wh = 'WH1';
-
-              const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
-              // Use hist- prefix so it matches import format — same ID = same pick
-              const pickId = `hist-${line.id || line.orderLineId || ''}`;
-
-              const result = olStmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt);
-              if (result.changes > 0) olInserted++;
-            }
-          });
-          olSave();
-
-          if (lines.length < 1000) break; // last page
-          olPage++;
-          if (olPage > 5) { console.warn('[ItemPath] ⚠️ order_lines pagination hit 5 pages — stopping, will continue next poll'); break; }
-          await new Promise(r => setTimeout(r, 3000)); // 3s delay between pages
-        }
-
-        if (olTotal > 0) console.log(`[ItemPath] ✓ ${olTotal} order_lines fetched, ${olInserted} new picks recorded`);
-        lastPickSyncTime = new Date().toISOString();
-      } catch (olErr) {
-        console.error('[ItemPath] order_lines pick recording failed:', olErr.message);
-        // Don't update lastPickSyncTime — will retry from same point next poll
-      }
+      // Pick recording handled by separate pickSync() timer — not in poll()
 
       console.log(`[ItemPath] ✓ SQLite snapshot saved`);
     } catch (dbErr) {
@@ -938,6 +895,176 @@ async function poll() {
     cache.syncError  = err.message;
     console.error('[ItemPath] Poll failed:', err.message);
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PICK SYNC — records completed picks from /api/order_lines every 5 minutes
+// Separate from poll() to control frequency and prevent API overload
+// ─────────────────────────────────────────────────────────────────────────────
+let pickSyncRunning = false;
+let pickSyncStatus = { lastRun: null, lastSuccess: null, picksRecorded: 0, errors: 0, reconciliation: null };
+
+async function pickSync() {
+  if (CONFIG.mockMode) return;
+  if (pickSyncRunning) { console.log('[pickSync] Already running — skipping'); return; }
+  if (isConservationMode()) { console.log('[pickSync] Conservation mode — skipping'); return; }
+  pickSyncRunning = true;
+
+  try {
+    const db = require('./db');
+
+    // Step 1: Cheap count check — are there new picks since last sync?
+    const countData = await ipFetch('/api/order_lines', {
+      directionType: 2, status: 'processed',
+      'modifiedDate[gte]': lastPickSyncTime,
+      countOnly: true,
+    }, { timeout: 15000 });
+
+    const newCount = countData.count || 0;
+    if (newCount === 0) {
+      console.log(`[pickSync] No new picks since ${lastPickSyncTime}`);
+      pickSyncStatus.lastRun = new Date().toISOString();
+      pickSyncRunning = false;
+      return;
+    }
+
+    console.log(`[pickSync] ${newCount} new picks since ${lastPickSyncTime} — fetching...`);
+
+    // Step 2: Fetch one page of completed picks (max 1000)
+    const data = await ipFetch('/api/order_lines', {
+      directionType: 2, status: 'processed',
+      'modifiedDate[gte]': lastPickSyncTime,
+      limit: 1000, page: 0,
+    }, { timeout: 60000 });
+
+    const lines = data.order_lines || [];
+    if (lines.length === 0) {
+      lastPickSyncTime = new Date().toISOString();
+      saveDailyTotals();
+      pickSyncStatus.lastRun = new Date().toISOString();
+      pickSyncRunning = false;
+      return;
+    }
+
+    // Step 3: Insert into picks_history
+    let inserted = 0;
+    const stmt = db.db.prepare(`
+      INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const save = db.db.transaction(() => {
+      for (const line of lines) {
+        const sku = line.materialName || '';
+        const orderName = line.orderName || line.orderId || '';
+        const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
+        if (!sku || qty <= 0) continue;
+
+        let wh = line.warehouseName || line.costCenterName || '';
+        if (/kitchen/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
+        else if (/wh2/i.test(wh)) wh = 'WH2';
+        else if (/wh1/i.test(wh)) wh = 'WH1';
+
+        const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
+        const pickId = `hist-${line.id || line.orderLineId || ''}`;
+
+        const result = stmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt);
+        if (result.changes > 0) inserted++;
+      }
+    });
+    save();
+
+    // Step 4: Advance cursor
+    // If we got a full page, advance to the last record's modifiedDate (more to catch next cycle)
+    // If partial page, advance to now (we're caught up)
+    if (lines.length >= 1000) {
+      const lastDate = lines[lines.length - 1].modifiedDate || lines[lines.length - 1].creationDate;
+      if (lastDate) lastPickSyncTime = lastDate;
+    } else {
+      lastPickSyncTime = new Date().toISOString();
+    }
+    saveDailyTotals();
+
+    pickSyncStatus.lastRun = new Date().toISOString();
+    pickSyncStatus.lastSuccess = new Date().toISOString();
+    pickSyncStatus.picksRecorded += inserted;
+    console.log(`[pickSync] ✓ ${lines.length} fetched, ${inserted} new picks recorded (cursor: ${lastPickSyncTime.substring(11, 19)})`);
+
+  } catch (e) {
+    pickSyncStatus.errors++;
+    pickSyncStatus.lastRun = new Date().toISOString();
+    console.error(`[pickSync] ERROR: ${e.message} — will retry from ${lastPickSyncTime}`);
+    // Don't advance lastPickSyncTime — retry from same point
+  } finally {
+    pickSyncRunning = false;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// COUNT RECONCILIATION — compares our count vs ItemPath every 30 minutes
+// Fires Slack alert if gap > 10 picks AND > 5%
+// ─────────────────────────────────────────────────────────────────────────────
+async function countReconciliation() {
+  if (CONFIG.mockMode) return;
+  if (isConservationMode()) return;
+
+  try {
+    const db = require('./db');
+    const today = new Date().toISOString().substring(0, 10);
+    const midnightToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).toISOString();
+
+    // ItemPath count for today
+    const countData = await ipFetch('/api/order_lines', {
+      directionType: 2, status: 'processed',
+      'modifiedDate[gte]': midnightToday,
+      countOnly: true,
+    }, { timeout: 15000 });
+    const ipCount = countData.count || 0;
+
+    // Our count for today
+    const ourCount = db.db.prepare(
+      "SELECT COUNT(*) as cnt FROM picks_history WHERE pick_id LIKE 'hist-%' AND date(completed_at) = ?"
+    ).get(today)?.cnt || 0;
+
+    const gap = ipCount - ourCount;
+    const gapPct = ipCount > 0 ? Math.round((gap / ipCount) * 100) : 0;
+
+    pickSyncStatus.reconciliation = {
+      timestamp: new Date().toISOString(),
+      itempath: ipCount,
+      ours: ourCount,
+      gap,
+      gapPct,
+      status: gap <= 10 || gapPct <= 5 ? 'OK' : 'GAP_DETECTED',
+    };
+
+    console.log(`[pickSync] Reconciliation: ItemPath=${ipCount} vs Ours=${ourCount} gap=${gap} (${gapPct}%)`);
+
+    // Alert if significant gap
+    if (gap > 10 && gapPct > 5) {
+      console.error(`[pickSync] ⚠️ MISSING ${gap} PICKS (${gapPct}%) — manual import may be needed`);
+      try {
+        sendSlackAlerts([{
+          sku: 'SYSTEM',
+          name: `Pick Sync Gap: missing ${gap} picks (${gapPct}%)`,
+          qty: ourCount,
+          threshold: ipCount,
+          severity: 'HIGH',
+        }]);
+      } catch {}
+    }
+  } catch (e) {
+    console.error(`[pickSync] Reconciliation error: ${e.message}`);
+  }
+}
+
+function getPickSyncStatus() {
+  return {
+    lastPickSyncTime,
+    dailyApiCalls,
+    conservationMode: isConservationMode(),
+    ...pickSyncStatus,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1230,6 +1357,20 @@ function start() {
 
   poll();
   setInterval(poll, CONFIG.pollInterval);
+
+  // Pick sync: 30s delay then every 5 minutes (separate from poll to control API load)
+  setTimeout(() => {
+    pickSync();
+    setInterval(pickSync, 5 * 60 * 1000);
+  }, 30000);
+
+  // Count reconciliation: 2min delay then every 30 minutes
+  setTimeout(() => {
+    countReconciliation();
+    setInterval(countReconciliation, 30 * 60 * 1000);
+  }, 120000);
+
+  console.log('[ItemPath] Pick sync: every 5 min (30s delay). Reconciliation: every 30 min (2min delay).');
 }
 
 function getHealth() {
@@ -1285,4 +1426,4 @@ function getLocationContents() {
   return cache.locationContents || [];
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock, getLocationContents };
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock, getLocationContents, getPickSyncStatus };

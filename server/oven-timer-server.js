@@ -1591,6 +1591,10 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/daily') {
     return json(res, itempath.getDailyPicks());
   }
+  // GET /api/inventory/pick-sync-status — pick sync health, reconciliation, API usage
+  if (req.method==='GET' && url.pathname==='/api/inventory/pick-sync-status') {
+    return json(res, itempath.getPickSyncStatus());
+  }
   // GET /api/inventory/picks/history?days=30 — daily pick totals from picks_history
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
