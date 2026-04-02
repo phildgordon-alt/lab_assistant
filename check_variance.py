@@ -9,8 +9,14 @@ LOOKER_URL = "https://PairEyewear.cloud.looker.com"
 CLIENT_ID = "R67SBc68xqrYpsBqpc2Y"
 CLIENT_SECRET = "TbBbjfmx4y3jWK8VJQztt7BJ"
 SHIPPED_DIR = os.path.join(os.path.dirname(__file__), "data", "dvi", "shipped")
-TARGET_DATE = "03/31"
-TARGET_ISO = "2026-03-31"
+import sys
+if len(sys.argv) > 1:
+    TARGET_ISO = sys.argv[1]  # e.g., 2026-03-31
+    parts = TARGET_ISO.split("-")
+    TARGET_DATE = f"{parts[1]}/{parts[2]}"  # e.g., 03/31
+else:
+    TARGET_DATE = "03/31"
+    TARGET_ISO = "2026-03-31"
 
 # 1. Get all References from shipped XMLs for target date
 print(f"Scanning {SHIPPED_DIR} for ShipDate={TARGET_DATE}...")
