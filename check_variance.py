@@ -64,13 +64,24 @@ not_found = 0
 date_buckets = {}
 missing_refs = []
 
+suffix_matched = 0
 for ref, invoice in dvi_refs.items():
+    # Try exact match first, then strip -1/-2/-3 suffix
+    matched_ref = None
     if ref in looker:
-        if looker[ref] == TARGET_ISO:
+        matched_ref = ref
+    else:
+        base = ref.split("-")[0]
+        if base != ref and base in looker:
+            matched_ref = base
+            suffix_matched += 1
+
+    if matched_ref:
+        if looker[matched_ref] == TARGET_ISO:
             mar31 += 1
         else:
             other_date += 1
-            d = looker[ref]
+            d = looker[matched_ref]
             date_buckets[d] = date_buckets.get(d, 0) + 1
     else:
         not_found += 1
@@ -83,6 +94,7 @@ print(f"DVI XMLs with ShipDate {TARGET_DATE}:  {count}")
 print(f"In Looker as {TARGET_ISO}:              {mar31}")
 print(f"In Looker under DIFFERENT date:         {other_date}")
 print(f"NOT in Looker at all:                   {not_found}")
+print(f"  (of which matched via suffix strip:   {suffix_matched})")
 
 if date_buckets:
     print(f"\nDate-shifted jobs:")
