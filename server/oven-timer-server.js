@@ -1968,15 +1968,19 @@ Respond with a structured batching plan in this format:
       ]);
       // Exclude today — only has partial data from one source, skews comparison
       const today = new Date().toISOString().slice(0, 10);
-      const daily = [...allDates].filter(d => d < today).sort((a, b) => b.localeCompare(a)).slice(0, days).map(d => ({
-        date: d,
-        dvi: dviByDate[d] || 0,
-        looker: lkJobsByDate[d] || 0,
-        hko: (dviHkoByDate[d] || 0) + (lkHkoByDate[d] || 0) > 0 ? Math.max(dviHkoByDate[d] || 0, lkHkoByDate[d] || 0) : 0,
-        dviHko: dviHkoByDate[d] || 0,
-        dviBreakage: dviBreakageByDate[d] || 0,
-        lookerBreakage: lkBreakageByDate[d] || 0,
-      }));
+      const daily = [...allDates].filter(d => d < today).sort((a, b) => b.localeCompare(a)).slice(0, days).map(d => {
+        const lkHko = lkHkoByDate[d] || 0;
+        const lkTotal = lkJobsByDate[d] || 0;
+        const lkPair = lkTotal - lkHko; // Looker Irvine-only (subtract HKO)
+        return {
+          date: d,
+          dvi: dviByDate[d] || 0,           // DVI Irvine-only (MachineID != "000")
+          looker: lkPair,                    // Looker Irvine-only (total - HKO)
+          hko: Math.max(dviHkoByDate[d] || 0, lkHko), // HKO from whichever source is higher
+          dviBreakage: dviBreakageByDate[d] || 0,
+          lookerBreakage: lkBreakageByDate[d] || 0,
+        };
+      });
 
       const totals = {
         dvi: daily.reduce((s, d) => s + d.dvi, 0),

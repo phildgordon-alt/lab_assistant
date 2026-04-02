@@ -2393,7 +2393,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER → NETSUITE</div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(totals.looker || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>all destinations</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Irvine only (excl HKO)</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.purple}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>HKO (EXTERNAL)</div>
