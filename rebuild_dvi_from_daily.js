@@ -61,7 +61,7 @@ function main() {
       const entryDate = parseDate(cols[2]);
       const shipDate = parseDate(cols[3]);
       const daysInLab = parseFloat(cols[4]) || 0;
-      const coating = (cols[6] || '').trim();
+      const coating = ''; // col 6 is Lens Mfr, not coating — daily exports have no coating column
       const rush = ''; // not in daily export
 
       if (!jobId || !entryDate) continue;
