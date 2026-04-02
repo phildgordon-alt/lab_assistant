@@ -1914,9 +1914,11 @@ Respond with a structured batching plan in this format:
 
       // Looker: jobs per day from job-level data (COUNT DISTINCT job_id)
       const lkJobsByDate = {};
+      const lkHkoByDate = {};
       const lkDayCounts = looker.getJobCountByDay(days);
       for (const row of lkDayCounts) {
         lkJobsByDate[row.date] = row.jobs;
+        if (row.hko_jobs > 0) lkHkoByDate[row.date] = row.hko_jobs;
       }
 
       // Looker breakages per day (what NetSuite sees)
@@ -1958,6 +1960,7 @@ Respond with a structured batching plan in this format:
         date: d,
         dvi: dviByDate[d] || 0,
         looker: lkJobsByDate[d] || 0,
+        hko: lkHkoByDate[d] || 0,
         dviBreakage: dviBreakageByDate[d] || 0,
         lookerBreakage: lkBreakageByDate[d] || 0,
       }));
@@ -1965,6 +1968,7 @@ Respond with a structured batching plan in this format:
       const totals = {
         dvi: daily.reduce((s, d) => s + d.dvi, 0),
         looker: daily.reduce((s, d) => s + d.looker, 0),
+        hko: daily.reduce((s, d) => s + d.hko, 0),
         dviBreakage: daily.reduce((s, d) => s + d.dviBreakage, 0),
         lookerBreakage: daily.reduce((s, d) => s + d.lookerBreakage, 0),
       };

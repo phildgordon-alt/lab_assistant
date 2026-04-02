@@ -78,13 +78,13 @@ async function fetchJobs() {
       'poms_jobs.order_number',
       'poms_jobs.dvi_id',
       'dvi_jobs.sent_from_lab_date',
+      'dvi_jobs.dvi_destination',
       'dvi_jobs.frame_upc',
       'dvi_job_lenses.opc',
       'dvi_job_lenses.count_lenses',
       'item_breakages.count_breakages',
     ],
     {
-      'dvi_jobs.dvi_destination': 'PAIR',
       'dvi_jobs.sent_from_lab_date': `${year}-01-01 to today`,
     },
     ['dvi_jobs.sent_from_lab_date desc', 'poms_jobs.job_id'],
@@ -98,9 +98,12 @@ async function fetchJobs() {
 // Keeps getUsage() and getFrameUsage() return shapes identical for compatibility
 // ─────────────────────────────────────────────────────────────────────────────
 function rebuildCache(rows) {
-  // Lens usage by date (same shape as old fetchUsage)
+  // Filter OUT HKO for consumption — HKO jobs don't consume from the Irvine lab
+  const pairRows = rows.filter(r => (r['dvi_jobs.dvi_destination'] || r.dvi_destination || 'PAIR') !== 'HKO');
+
+  // Lens usage by date — PAIR only (same shape as old fetchUsage)
   const byDate = {};
-  for (const r of rows) {
+  for (const r of pairRows) {
     const date = r['dvi_jobs.sent_from_lab_date'] || r.sent_from_lab_date;
     const opc = r['dvi_job_lenses.opc'] || r.opc || '';
     const lenses = r['dvi_job_lenses.count_lenses'] || r.count_lenses || 0;
@@ -117,9 +120,9 @@ function rebuildCache(rows) {
   }
   cache.daily = Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date));
 
-  // Frame usage by date — count unique job_ids per UPC (1 frame per job, not per lens)
+  // Frame usage by date — PAIR only
   const jobsByDateUpc = {};
-  for (const r of rows) {
+  for (const r of pairRows) {
     const date = r['dvi_jobs.sent_from_lab_date'] || r.sent_from_lab_date;
     const upc = r['dvi_jobs.frame_upc'] || r.frame_upc || '';
     const jobId = r['poms_jobs.job_id'] || r.job_id || '';
@@ -152,8 +155,8 @@ async function poll() {
     // Save to SQLite
     const del = db.db.prepare('DELETE FROM looker_jobs');
     const ins = db.db.prepare(`INSERT OR REPLACE INTO looker_jobs
-      (job_id, order_number, dvi_id, sent_from_lab_date, frame_upc, opc, count_lenses, count_breakages)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+      (job_id, order_number, dvi_id, sent_from_lab_date, dvi_destination, frame_upc, opc, count_lenses, count_breakages)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const save = db.db.transaction(() => {
       del.run();
       for (const r of rows) {
@@ -162,6 +165,7 @@ async function poll() {
           r['poms_jobs.order_number'] || '',
           r['poms_jobs.dvi_id'] || '',
           r['dvi_jobs.sent_from_lab_date'] || '',
+          r['dvi_jobs.dvi_destination'] || 'PAIR',
           r['dvi_jobs.frame_upc'] || '',
           r['dvi_job_lenses.opc'] || '',
           r['dvi_job_lenses.count_lenses'] || 0,
@@ -276,7 +280,9 @@ function getJobsByOrder(orderNumber) {
 function getJobCountByDay(days = 30) {
   const db = require('./db');
   return db.db.prepare(`
-    SELECT sent_from_lab_date as date, COUNT(DISTINCT job_id) as jobs
+    SELECT sent_from_lab_date as date,
+           COUNT(DISTINCT job_id) as jobs,
+           COUNT(DISTINCT CASE WHEN dvi_destination = 'HKO' THEN job_id END) as hko_jobs
     FROM looker_jobs
     GROUP BY sent_from_lab_date
     ORDER BY sent_from_lab_date DESC

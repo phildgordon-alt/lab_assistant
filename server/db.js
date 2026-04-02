@@ -149,6 +149,7 @@ db.exec(`
     order_number TEXT,
     dvi_id TEXT,
     sent_from_lab_date TEXT NOT NULL,
+    dvi_destination TEXT DEFAULT 'PAIR',
     frame_upc TEXT,
     opc TEXT,
     count_lenses INTEGER DEFAULT 0,
