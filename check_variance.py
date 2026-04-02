@@ -102,6 +102,19 @@ if date_buckets:
         print(f"  {d}: {date_buckets[d]}")
 
 if missing_refs:
-    print(f"\nSample missing (Reference -> Invoice):")
-    for ref, inv in missing_refs[:15]:
+    # Show invoice number distribution
+    inv_nums = sorted([int(inv) for ref, inv in missing_refs if inv.isdigit()])
+    if inv_nums:
+        print(f"\nMissing job invoice range: {inv_nums[0]} - {inv_nums[-1]}")
+        # Bucket by thousands
+        buckets = {}
+        for n in inv_nums:
+            k = f"{n // 1000}xxx"
+            buckets[k] = buckets.get(k, 0) + 1
+        print(f"Distribution by invoice range:")
+        for k in sorted(buckets.keys()):
+            print(f"  {k}: {buckets[k]}")
+
+    print(f"\nAll missing (Reference -> Invoice):")
+    for ref, inv in sorted(missing_refs, key=lambda x: x[1]):
         print(f"  {ref} -> {inv}.xml")
