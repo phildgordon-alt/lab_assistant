@@ -28,6 +28,7 @@ db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 // SCHEMA MIGRATIONS — safe ALTER TABLE for existing databases
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
+try { db.exec("ALTER TABLE looker_jobs ADD COLUMN dvi_destination TEXT DEFAULT 'PAIR'"); } catch {}
 
 // NPI — New Product Introduction scenarios
 db.exec(`
