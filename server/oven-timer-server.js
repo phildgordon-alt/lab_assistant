@@ -287,10 +287,15 @@ function parseDviXml(xml) {
   const reference = getAttr('OrderData', 'Reference');
   const daysInLab = getAttr('RxOrder', 'DaysInLab');
 
+  const machineId = getAttr('MegaTransfer', 'MachineID');
+  // HKO jobs: MachineID="000" and Pick="N" — processed at external lab, not Irvine
+  const isHko = machineId === '000';
+
   return {
     status: getAttr('Job', 'Status'),
     date: get('Date'),
     shipDate, shipTime, entryDate, invoice, reference, daysInLab,
+    machineId, isHko,
     rmtInv: get('RmtInv'),
     tray: get('Tray'),
     rxNum: reference || get('RxNum'),
@@ -1904,12 +1909,18 @@ Respond with a structured batching plan in this format:
 
       // DVI: shipped jobs per day from shipped XML archive (source of truth)
       // Use shipDate string directly (MM/DD/YY → YYYY-MM-DD) to avoid UTC timezone shift
+      // Separate HKO (MachineID="000") from Irvine lab jobs
       const dviByDate = {};
+      const dviHkoByDate = {};
       for (const [jobNum, xml] of shippedJobIndex) {
         if (!xml.shipDate) continue;
         const [mm, dd, yy] = xml.shipDate.split('/');
         const d = `20${yy}-${mm}-${dd}`;
-        dviByDate[d] = (dviByDate[d] || 0) + 1;
+        if (xml.isHko) {
+          dviHkoByDate[d] = (dviHkoByDate[d] || 0) + 1;
+        } else {
+          dviByDate[d] = (dviByDate[d] || 0) + 1;
+        }
       }
 
       // Looker: jobs per day from job-level data (COUNT DISTINCT job_id)
@@ -1950,6 +1961,7 @@ Respond with a structured batching plan in this format:
       // Merge dates
       const allDates = new Set([
         ...Object.keys(dviByDate),
+        ...Object.keys(dviHkoByDate),
         ...Object.keys(lkJobsByDate),
         ...Object.keys(lkBreakageByDate),
         ...Object.keys(dviBreakageByDate),
@@ -1960,7 +1972,8 @@ Respond with a structured batching plan in this format:
         date: d,
         dvi: dviByDate[d] || 0,
         looker: lkJobsByDate[d] || 0,
-        hko: lkHkoByDate[d] || 0,
+        hko: (dviHkoByDate[d] || 0) + (lkHkoByDate[d] || 0) > 0 ? Math.max(dviHkoByDate[d] || 0, lkHkoByDate[d] || 0) : 0,
+        dviHko: dviHkoByDate[d] || 0,
         dviBreakage: dviBreakageByDate[d] || 0,
         lookerBreakage: lkBreakageByDate[d] || 0,
       }));
@@ -3420,8 +3433,10 @@ Respond with a structured batching plan in this format:
     }
     // Primary source: Shipped XML archive (source of truth)
     // Use shipDate string directly to avoid UTC timezone shift
+    // Exclude HKO (MachineID="000") — those are external lab jobs
     for (const [jobNum, xml] of shippedJobIndex) {
       if (!xml.shipDate) continue;
+      if (xml.isHko) continue;
       const [mm, dd, yy] = xml.shipDate.split('/');
       const key = `20${yy}-${mm}-${dd}`;
       if (byDay[key]) {
