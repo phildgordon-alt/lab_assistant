@@ -2371,7 +2371,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     }}>{d}d</button>
                   ))}
                   <ExportBtn onClick={() => {
-                    downloadCSV('pipeline_summary.csv', ['date','dvi','looker','dviBreakage','lookerBreakage','variance'], (pipelineData?.daily || []).map(d => ({...d, variance: d.dvi - d.looker})));
+                    downloadCSV('pipeline_summary.csv', ['date','dvi','looker','hko','dviBreakage','lookerBreakage','variance'], (pipelineData?.daily || []).map(d => ({...d, hko: d.hko || 0, variance: d.dvi - d.looker})));
                   }} label="Export Summary" />
                   <ExportBtn onClick={async () => {
                     try {
@@ -2384,7 +2384,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               </div>
 
               {/* KPI cards */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 10 }}>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DVI (SHIPPED)</div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(totals.dvi || 0).toLocaleString()}</div>
@@ -2393,7 +2393,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.blue}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER → NETSUITE</div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(totals.looker || 0).toLocaleString()}</div>
-                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>jobs reported to NetSuite</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>all destinations</div>
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.purple}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>HKO (EXTERNAL)</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.purple, fontFamily: mono }}>{(totals.hko || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>routed to HKO</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${Math.abs((totals.dvi || 0) - (totals.looker || 0)) < 50 ? T.green : T.red}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE (DVI — LOOKER)</div>
@@ -2447,6 +2452,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>BRK (NS)</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI SHIPPED</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER → NS</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.purple, borderBottom: `1px solid ${T.border}` }}>HKO</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>BAR</th>
                       </tr>
@@ -2454,6 +2460,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <tbody>
                       {daily.map(d => {
                         const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+                        const hko = d.hko || 0;
                         const variance = d.dvi - d.looker;
                         const isToday = d.date === new Date().toISOString().slice(0, 10);
                         const dviPct = Math.round((d.dvi / maxJobs) * 100);
@@ -2474,6 +2481,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.lookerBreakage > 0 ? T.blue : T.textDim }}>{d.lookerBreakage > 0 ? d.lookerBreakage.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.dvi > 0 ? T.amber : T.textDim }}>{d.dvi > 0 ? d.dvi.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.looker > 0 ? T.blue : T.textDim }}>{d.looker > 0 ? d.looker.toLocaleString() : '—'}</td>
+                            <td style={{ padding: '6px 12px', textAlign: 'right', color: hko > 0 ? T.purple : T.textDim }}>{hko > 0 ? hko.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, color: variance === 0 ? T.textDim : Math.abs(variance) > 20 ? T.red : T.amber }}>
                               {d.dvi > 0 || d.looker > 0 ? (variance > 0 ? '+' : '') + variance : '—'}
                             </td>
