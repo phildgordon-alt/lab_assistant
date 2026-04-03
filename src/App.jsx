@@ -5718,6 +5718,8 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   const sm = data?.summary || {};
   let filtered = jobs;
   if (filter === 'Single Vision' || filter === 'Surfacing') filtered = filtered.filter(j => j.jobType === filter);
+  else if (filter === 'OVER5') filtered = filtered.filter(j => j.daysInLab >= 5);
+  else if (filter === 'OVER10') filtered = filtered.filter(j => j.daysInLab >= 10);
   else if (filter !== 'all') filtered = filtered.filter(j => j.zone === filter);
   if (search) {
     const q = search.toLowerCase();
@@ -5750,18 +5752,22 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
       </div>
 
       {/* Zone cards with action descriptions */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 16 }}>
         {[
           { zone: 'GREEN', label: '0-1 days', color: T.green, action: 'On track. No action needed.' },
           { zone: 'YELLOW', label: '1-2 days', color: T.amber, action: 'Watch list. Check if these jobs are stuck at a station.' },
           { zone: 'RED', label: '2-3 days', color: T.red, action: 'Supervisor review. Find out why these jobs haven\'t moved. Check for holds, breakage, or missing materials.' },
           { zone: 'CRITICAL', label: '3+ days', color: '#cc0000', action: 'Immediate escalation. These jobs are past SLA. Identify the blocker and resolve today.' },
+          { zone: 'OVER5', label: '5+ days', color: '#9333ea', action: 'Severely stuck. These jobs need direct intervention — contact DVI or vendor if subcontracted.' },
+          { zone: 'OVER10', label: '10+ days', color: '#7c2d12', action: 'Lost or abandoned. Investigate if these jobs are still valid or should be canceled.' },
         ].map(z => (
           <Card key={z.zone} onClick={() => setFilter(filter === z.zone ? 'all' : z.zone)}
             style={{ padding: 14, borderLeft: `4px solid ${z.color}`, cursor: 'pointer', background: filter === z.zone ? `${z.color}10` : T.card }}>
             <div style={{ textAlign: 'center', marginBottom: 6 }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>{sm[z.zone.toLowerCase()] || 0}</div>
-              <div style={{ fontSize: 10, fontWeight: 700, color: z.color, fontFamily: mono }}>{z.zone} ({z.label})</div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>
+                {z.zone === 'OVER5' ? (sm.over5 || 0) : z.zone === 'OVER10' ? (sm.over10 || 0) : (sm[z.zone.toLowerCase()] || 0)}
+              </div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: z.color, fontFamily: mono }}>{z.label}</div>
             </div>
             <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>{z.action}</div>
           </Card>

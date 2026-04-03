@@ -2284,12 +2284,14 @@ Respond with a structured batching plan in this format:
     const yellow = jobs.filter(j => j.zone === 'YELLOW').length;
     const red = jobs.filter(j => j.zone === 'RED').length;
     const critical = jobs.filter(j => j.zone === 'CRITICAL').length;
+    const over5 = jobs.filter(j => j.daysInLab >= 5).length;
+    const over10 = jobs.filter(j => j.daysInLab >= 10).length;
     const outlierPct = total > 0 ? Math.round(((red + critical) / total) * 1000) / 10 : 0;
     const avgDays = total > 0 ? Math.round(jobs.reduce((s, j) => s + j.daysInLab, 0) / total * 10) / 10 : 0;
 
     return json(res, {
       jobs,
-      summary: { total, green, yellow, red, critical, outlierPct, avgDays, outlierThreshold: 5 },
+      summary: { total, green, yellow, red, critical, over5, over10, outlierPct, avgDays, outlierThreshold: 5 },
       singleVision: { ...zoneCounts(sv), slaTarget: 2 },
       surfacing: { ...zoneCounts(surf), slaTarget: 3 },
     });
