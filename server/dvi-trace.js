@@ -170,18 +170,26 @@ class DviTraceWatcher extends EventEmitter {
     const { host } = this._connConfig;
     console.log(`[DVI-Trace] Started — watching \\\\${host}\\${TRACE_SHARE}\\${TRACE_DIR}\\LT*.DAT (every ${POLL_INTERVAL/1000}s)`);
 
+    // Restore persisted state from SQLite FIRST (stable timestamps survive restarts)
+    const restored = this.loadFromDb();
+
     // Delay history load to avoid SMB connection race with dvi-sync
     const startHistory = async () => {
       await new Promise(r => setTimeout(r, 3000));
       await this.loadHistory();
+      // Save after history load merges new data with restored state
+      this.saveToDb();
     };
     startHistory().then(() => {
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
+      // Periodic checkpoint every 5 minutes
+      this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
     }).catch(err => {
       console.error('[DVI-Trace] History load failed, starting live poll anyway:', err.message);
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
+      this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
     });
     return true;
   }
@@ -293,11 +301,80 @@ class DviTraceWatcher extends EventEmitter {
       clearInterval(this.timer);
       this.timer = null;
     }
+    if (this._checkpointTimer) {
+      clearInterval(this._checkpointTimer);
+      this._checkpointTimer = null;
+    }
     if (this.client) {
       try { this.client.close(); } catch (e) {}
       this.client = null;
     }
+    this.saveToDb();
     console.log('[DVI-Trace] Stopped');
+  }
+
+  // ── SQLite Persistence ──────────────────────────────────────
+  loadFromDb() {
+    try {
+      const db = require('./db');
+      const rows = db.db.prepare('SELECT * FROM dvi_trace_jobs').all();
+      if (rows.length === 0) return 0;
+      for (const row of rows) {
+        const events = row.events_json ? JSON.parse(row.events_json) : [];
+        this.jobs.set(row.job_id, {
+          jobId: row.job_id,
+          tray: row.tray,
+          station: row.station,
+          stationNum: row.station_num,
+          stage: row.stage,
+          category: row.category,
+          status: row.status || 'Active',
+          firstSeen: row.first_seen_ms,
+          lastSeen: row.last_seen_ms,
+          operator: row.operator,
+          machineId: row.machine_id,
+          hasBreakage: !!row.has_breakage,
+          events,
+        });
+      }
+      console.log(`[DVI-Trace] Restored ${rows.length} jobs from SQLite`);
+      return rows.length;
+    } catch (e) {
+      console.error(`[DVI-Trace] Failed to load from SQLite: ${e.message}`);
+      return 0;
+    }
+  }
+
+  saveToDb() {
+    try {
+      const db = require('./db');
+      const upsert = db.db.prepare(`
+        INSERT OR REPLACE INTO dvi_trace_jobs
+        (job_id, tray, station, station_num, stage, category, status,
+         first_seen_ms, last_seen_ms, operator, machine_id, has_breakage,
+         event_count, events_json, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `);
+      const save = db.db.transaction(() => {
+        for (const [jobId, job] of this.jobs) {
+          // Only store last 10 events per job to keep DB size reasonable
+          const recentEvents = (job.events || []).slice(-10);
+          upsert.run(
+            jobId, job.tray, job.station, job.stationNum || 0,
+            job.stage, job.category, job.status,
+            job.firstSeen, job.lastSeen,
+            job.operator || null, job.machineId || null,
+            job.hasBreakage ? 1 : 0,
+            (job.events || []).length,
+            JSON.stringify(recentEvents)
+          );
+        }
+      });
+      save();
+      console.log(`[DVI-Trace] Saved ${this.jobs.size} jobs to SQLite`);
+    } catch (e) {
+      console.error(`[DVI-Trace] Failed to save to SQLite: ${e.message}`);
+    }
   }
 
   async poll() {

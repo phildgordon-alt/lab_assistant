@@ -461,6 +461,28 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_hist_shipped ON dvi_jobs_history(shipped_at);
   CREATE INDEX IF NOT EXISTS idx_jobs_hist_recorded ON dvi_jobs_history(recorded_at);
 
+  -- DVI Trace persistence — survives server restarts
+  CREATE TABLE IF NOT EXISTS dvi_trace_jobs (
+    job_id TEXT PRIMARY KEY,
+    tray TEXT,
+    station TEXT,
+    station_num INTEGER,
+    stage TEXT,
+    category TEXT,
+    status TEXT DEFAULT 'Active',
+    first_seen_ms INTEGER,
+    last_seen_ms INTEGER,
+    operator TEXT,
+    machine_id TEXT,
+    has_breakage INTEGER DEFAULT 0,
+    event_count INTEGER DEFAULT 0,
+    events_json TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_trace_stage ON dvi_trace_jobs(stage);
+  CREATE INDEX IF NOT EXISTS idx_trace_firstseen ON dvi_trace_jobs(first_seen_ms);
+  CREATE INDEX IF NOT EXISTS idx_trace_status ON dvi_trace_jobs(status);
+
   -- Daily production stats (aggregate for trend queries)
   CREATE TABLE IF NOT EXISTS daily_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
