@@ -7826,6 +7826,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
   // Lens-per-hour chart data from SOM — must be before conditional returns (React hook rules)
   const [lphData, setLphData] = useState(null);
   const [lphHours, setLphHours] = useState(168);
+  const [lphHidden, setLphHidden] = useState(new Set());
   useEffect(() => {
     setLphData(null);
     const go = () => fetch(`${base}/api/som/lens-per-hour?hours=${lphHours}`).then(r=>r.json()).then(setLphData).catch(()=>{});
@@ -7845,9 +7846,10 @@ function FlowAgentTab({ovenServerUrl,settings}){
     <div>
       {/* LENS PER HOUR CHART — SOM Machine Throughput */}
       {(() => {
-        const series = lphData?.series || [];
+        const allSeries = lphData?.series || [];
         const hours = lphData?.hours || [];
         const colors = ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+        const series = allSeries.filter(s => !lphHidden.has(s.name));
         const maxL = Math.max(1, ...series.flatMap(s => s.data.map(d => d.lenses)));
         if (!lphData) return (<div style={{padding:16,color:'#6b7280',fontSize:12,fontFamily:mono}}>Loading lens throughput...</div>);
         return series.length > 0 ? (
@@ -7855,19 +7857,23 @@ function FlowAgentTab({ovenServerUrl,settings}){
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <div style={{fontSize:14,fontWeight:700,color:'#e5e7eb',fontFamily:mono}}>LENS THROUGHPUT BY MACHINE</div>
               <div style={{display:'flex',gap:6}}>
-                {[24,48].map(h=>(
+                {[24,48,168].map(h=>(
                   <button key={h} onClick={()=>{setLphData(null);setLphHours(h);}}
-                    style={{background:lphHours===h?'rgba(59,130,246,0.15)':'transparent',border:`1px solid ${lphHours===h?'rgba(59,130,246,0.3)':'rgba(255,255,255,0.1)'}`,borderRadius:6,padding:'4px 10px',color:lphHours===h?'#60a5fa':'#9ca3af',cursor:'pointer',fontFamily:mono,fontSize:11}}>{h}h</button>
+                    style={{background:lphHours===h?'rgba(59,130,246,0.15)':'transparent',border:`1px solid ${lphHours===h?'rgba(59,130,246,0.3)':'rgba(255,255,255,0.1)'}`,borderRadius:6,padding:'4px 10px',color:lphHours===h?'#60a5fa':'#9ca3af',cursor:'pointer',fontFamily:mono,fontSize:11}}>{h===168?'7d':h+'h'}</button>
                 ))}
               </div>
             </div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:10,marginBottom:8}}>
-              {series.map((s,i)=>(
-                <span key={s.name} style={{fontSize:10,color:'#9ca3af',fontFamily:mono}}>
-                  <span style={{display:'inline-block',width:10,height:3,background:colors[i%colors.length],borderRadius:2,marginRight:4}}/>
-                  {s.name}
-                </span>
-              ))}
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
+              {allSeries.map((s,i)=>{
+                const hidden = lphHidden.has(s.name);
+                return (
+                  <button key={s.name} onClick={()=>{const n=new Set(lphHidden);if(n.has(s.name))n.delete(s.name);else n.add(s.name);setLphHidden(n);}}
+                    style={{fontSize:10,color:hidden?'#4b5563':colors[i%colors.length],fontFamily:mono,background:hidden?'rgba(255,255,255,0.02)':'rgba(255,255,255,0.06)',border:`1px solid ${hidden?'rgba(255,255,255,0.05)':'rgba(255,255,255,0.1)'}`,borderRadius:4,padding:'3px 8px',cursor:'pointer',opacity:hidden?0.4:1}}>
+                    <span style={{display:'inline-block',width:10,height:3,background:hidden?'#4b5563':colors[i%colors.length],borderRadius:2,marginRight:4}}/>
+                    {s.name}
+                  </button>
+                );
+              })}
             </div>
             <div style={{background:'rgba(255,255,255,0.02)',borderRadius:8,border:'1px solid rgba(255,255,255,0.06)',padding:16}}>
               <div style={{position:'relative',height:200}}>
