@@ -914,29 +914,13 @@ async function pickSync() {
   try {
     const db = require('./db');
 
-    // Step 1: Cheap count check — are there new picks since last sync?
-    const countData = await ipFetch('/api/order_lines', {
-      directionType: 2, status: 'processed',
-      'modifiedDate[gte]': lastPickSyncTime,
-      countOnly: true,
-    }, { timeout: 60000 });
-
-    const newCount = countData.count || 0;
-    if (newCount === 0) {
-      console.log(`[pickSync] No new picks since ${lastPickSyncTime}`);
-      pickSyncStatus.lastRun = new Date().toISOString();
-      pickSyncRunning = false;
-      return;
-    }
-
-    console.log(`[pickSync] ${newCount} new picks since ${lastPickSyncTime} — fetching...`);
-
-    // Step 2: Fetch one page of completed picks (max 1000)
+    // Fetch completed picks since last sync (skip count check — was timing out)
+    console.log(`[pickSync] Fetching picks since ${lastPickSyncTime}...`);
     const data = await ipFetch('/api/order_lines', {
       directionType: 2, status: 'processed',
       'modifiedDate[gte]': lastPickSyncTime,
-      limit: 1000, page: 0,
-    }, { timeout: 60000 });
+      limit: 500, page: 0,
+    }, { timeout: 120000 });
 
     const lines = data.order_lines || [];
     if (lines.length === 0) {
