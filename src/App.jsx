@@ -7823,23 +7823,24 @@ function FlowAgentTab({ovenServerUrl,settings}){
     {id:"history",label:"Push History",icon:"📜"},
   ];
 
+  // Lens-per-hour chart data from SOM — must be before conditional returns (React hook rules)
+  const [lphData, setLphData] = useState(null);
+  const [lphHours, setLphHours] = useState(24);
+  useEffect(() => {
+    if (!ovenServerUrl) return;
+    setLphData(null);
+    const go = () => fetch(`${ovenServerUrl}/api/som/lens-per-hour?hours=${lphHours}`).then(r=>r.json()).then(setLphData).catch(()=>{});
+    go();
+    const iv = setInterval(go, 300000);
+    return () => clearInterval(iv);
+  }, [ovenServerUrl, lphHours]);
+
   if(loading)return(<div style={{textAlign:"center",padding:60,color:"#9ca3af",fontFamily:mono}}>Loading Flow Agent...</div>);
   if(error)return(<div style={{textAlign:"center",padding:60,color:"#ef4444",fontFamily:mono}}>Flow Agent Error: {error}</div>);
 
   const stages=snapshot?.stages||[];
   const ovenETAs=snapshot?.ovenETAs||[];
   const pacing=snapshot?.slaPacing||{};
-
-  // Lens-per-hour chart data from SOM
-  const [lphData, setLphData] = useState(null);
-  const [lphHours, setLphHours] = useState(24);
-  useEffect(() => {
-    if (!ovenServerUrl) return;
-    const go = () => fetch(`${ovenServerUrl}/api/som/lens-per-hour?hours=${lphHours}`).then(r=>r.json()).then(setLphData).catch(()=>{});
-    go();
-    const iv = setInterval(go, 300000);
-    return () => clearInterval(iv);
-  }, [ovenServerUrl, lphHours]);
 
   return(
     <div>
