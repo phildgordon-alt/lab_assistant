@@ -998,13 +998,13 @@ async function countReconciliation() {
     const today = new Date().toISOString().substring(0, 10);
     const midnightToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).toISOString();
 
-    // ItemPath count for today
+    // ItemPath count for today — fetch with small limit instead of countOnly (was causing timeouts)
     const countData = await ipFetch('/api/order_lines', {
       directionType: 2, status: 'processed',
       'modifiedDate[gte]': midnightToday,
-      countOnly: true,
-    }, { timeout: 15000 });
-    const ipCount = countData.count || 0;
+      limit: 1,
+    }, { timeout: 30000 });
+    const ipCount = countData.total_count || countData.count || (countData.order_lines || []).length;
 
     // Our count for today
     const ourCount = db.db.prepare(
