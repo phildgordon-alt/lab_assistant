@@ -651,10 +651,14 @@ module.exports = {
       const { date, hours } = options;
       let whereClause, params;
       if (date) {
-        // SOM MySQL is in Pacific time (SYSTEM timezone) — no UTC conversion needed
-        // Shift: 5AM-11PM Pacific
-        whereClause = "TimeUnit = 'H' AND DATE(Time) = ? AND HOUR(Time) >= 5 AND HOUR(Time) < 23";
-        params = [date];
+        // SOM MySQL is in Pacific time — no UTC conversion needed
+        // Show 24h rolling: previous day 4PM through current day 4PM
+        // This matches the SOM Control Center's default view
+        const prevDay = new Date(date + 'T00:00:00');
+        prevDay.setDate(prevDay.getDate() - 1);
+        const prevStr = prevDay.toISOString().slice(0, 10);
+        whereClause = "TimeUnit = 'H' AND ((DATE(Time) = ? AND HOUR(Time) >= 16) OR (DATE(Time) = ? AND HOUR(Time) < 16))";
+        params = [prevStr, date];
       } else {
         whereClause = "TimeUnit = 'H' AND Time > DATE_SUB(NOW(), INTERVAL ? HOUR)";
         params = [hours || 24];
@@ -687,10 +691,16 @@ module.exports = {
         byCategory[cat][row.hour] += parseInt(row.lenses) || 0;
       }
 
-      // Build full shift hours (5AM-11PM Pacific, already in local time)
+      // Build full 24h window: previous day 4PM through current day 3PM
       const allHours = [];
       if (date) {
-        for (let h = 5; h < 23; h++) {
+        const prevDay = new Date(date + 'T00:00:00');
+        prevDay.setDate(prevDay.getDate() - 1);
+        const prevStr = prevDay.toISOString().slice(0, 10);
+        for (let h = 16; h < 24; h++) {
+          allHours.push(`${prevStr} ${String(h).padStart(2,'0')}:00:00`);
+        }
+        for (let h = 0; h < 16; h++) {
           allHours.push(`${date} ${String(h).padStart(2,'0')}:00:00`);
         }
       } else {
