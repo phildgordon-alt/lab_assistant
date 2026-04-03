@@ -840,7 +840,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
   const SubNav = () => (
     <div style={{ display: "flex", gap: 4, marginBottom: 20 }}>
-      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "lens-intel", label: "Lens Intelligence" }, { id: "lens-flow", label: "Lens Flow" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "inbound", label: "Inbound" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
+      {[{ id: "warehouses", label: "Activity" }, { id: "picks", label: "Picks" }, { id: "warehouse-stock", label: "Warehouse Stock" }, { id: "lens-intel", label: "Lens Intelligence" }, { id: "inventory", label: "Inventory" }, { id: "reconciliation", label: "Reconciliation" }, { id: "consumption", label: "Consumption" }, { id: "pipeline", label: "Jobs Pipeline" }, { id: "lens-usage", label: "Transactions" }, { id: "inbound", label: "Inbound" }, { id: "pos", label: "Purchase Orders" }, { id: "tops", label: "TOPS Count" }, { id: "binning", label: "Binning Intelligence" }, { id: "alerts", label: "Alerts" }, { id: "search", label: "Lens Search" }].map(t => (
         <button key={t.id} onClick={() => setSub(t.id)} style={{
           background: sub === t.id ? T.blueDark : "transparent", border: `1px solid ${sub === t.id ? T.blue : T.border}`,
           borderRadius: 6, padding: "8px 16px", color: sub === t.id ? T.blue : T.textMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", fontFamily: mono
@@ -2817,106 +2817,6 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     </table>
                   </div>
                 </Card>
-              )}
-            </div>
-          );
-        })()}
-
-        {sub === "lens-flow" && (() => {
-          const [lensFlowData, setLensFlowData] = useState(null);
-          const [lensFlowHours, setLensFlowHours] = useState(24);
-          if (!lensFlowData) {
-            fetch(`${ovenServerUrl}/api/som/lens-per-hour?hours=${lensFlowHours}`).then(r => r.json()).then(setLensFlowData).catch(() => {});
-          }
-          const series = lensFlowData?.series || [];
-          const hours = lensFlowData?.hours || [];
-          const colors = ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
-          const maxLenses = Math.max(1, ...series.flatMap(s => s.data.map(d => d.lenses)));
-
-          return (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: T.text }}>Lens Flow — Hourly Throughput by Machine</h3>
-                <div style={{ display: 'flex', gap: 8 }}>
-                  {[24, 48].map(h => (
-                    <button key={h} onClick={() => { setLensFlowData(null); setLensFlowHours(h); }}
-                      style={{ background: lensFlowHours === h ? T.blueDark : 'transparent', border: `1px solid ${lensFlowHours === h ? T.blue : T.border}`,
-                        borderRadius: 6, padding: '6px 14px', color: lensFlowHours === h ? T.blue : T.textMuted, fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: mono }}>
-                      {h}h
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {series.length === 0 ? (
-                <Card style={{ padding: 40, textAlign: 'center' }}>
-                  <div style={{ color: T.textDim, fontSize: 13 }}>{lensFlowData ? 'No OEE data available from SOM' : 'Loading...'}</div>
-                </Card>
-              ) : (
-                <>
-                  {/* Legend */}
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, marginBottom: 12 }}>
-                    {series.map((s, i) => (
-                      <span key={s.name} style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>
-                        <span style={{ display: 'inline-block', width: 10, height: 3, background: colors[i % colors.length], borderRadius: 2, marginRight: 4 }} />
-                        {s.name}
-                      </span>
-                    ))}
-                  </div>
-                  {/* Chart */}
-                  <Card style={{ padding: 16 }}>
-                    <div style={{ position: 'relative', height: 300 }}>
-                      {/* Y-axis labels */}
-                      {[0, 0.25, 0.5, 0.75, 1].map(pct => (
-                        <div key={pct} style={{ position: 'absolute', left: 0, bottom: `${pct * 100}%`, width: '100%', borderBottom: `1px solid ${T.border}22`, zIndex: 0 }}>
-                          <span style={{ position: 'absolute', left: 0, top: -8, fontSize: 9, color: T.textDim, fontFamily: mono }}>{Math.round(maxLenses * pct)}</span>
-                        </div>
-                      ))}
-                      {/* SVG lines */}
-                      <svg width="100%" height="100%" viewBox={`0 0 ${hours.length * 40} 300`} preserveAspectRatio="none" style={{ position: 'absolute', left: 30, top: 0, width: 'calc(100% - 30px)', height: '100%' }}>
-                        {series.map((s, si) => {
-                          const points = s.data.map((d, di) => `${di * (hours.length > 1 ? (hours.length * 40 - 40) / (hours.length - 1) : 0)},${300 - (d.lenses / maxLenses) * 280}`).join(' ');
-                          return <polyline key={s.name} points={points} fill="none" stroke={colors[si % colors.length]} strokeWidth="2" opacity="0.8" />;
-                        })}
-                      </svg>
-                    </div>
-                    {/* X-axis labels */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginLeft: 30, marginTop: 4 }}>
-                      {hours.filter((_, i) => i % Math.max(1, Math.floor(hours.length / 12)) === 0).map(h => (
-                        <span key={h} style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>
-                          {new Date(h).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
-                        </span>
-                      ))}
-                    </div>
-                  </Card>
-                  {/* Summary table */}
-                  <Card style={{ marginTop: 10, padding: 12 }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, fontFamily: mono }}>
-                      <thead>
-                        <tr>
-                          <th style={{ padding: '6px 8px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>MACHINE TYPE</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>TOTAL LENSES</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>AVG/HR</th>
-                          <th style={{ padding: '6px 8px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>PEAK</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {series.map((s, i) => {
-                          const total = s.data.reduce((sum, d) => sum + d.lenses, 0);
-                          const avg = s.data.length > 0 ? Math.round(total / s.data.length) : 0;
-                          const peak = Math.max(0, ...s.data.map(d => d.lenses));
-                          return (
-                            <tr key={s.name} style={{ borderBottom: `1px solid ${T.border}22` }}>
-                              <td style={{ padding: '6px 8px', color: colors[i % colors.length], fontWeight: 600 }}>{s.name}</td>
-                              <td style={{ padding: '6px 8px', textAlign: 'right', color: T.text }}>{total.toLocaleString()}</td>
-                              <td style={{ padding: '6px 8px', textAlign: 'right', color: T.textMuted }}>{avg}</td>
-                              <td style={{ padding: '6px 8px', textAlign: 'right', color: T.amber }}>{peak}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </Card>
-                </>
               )}
             </div>
           );

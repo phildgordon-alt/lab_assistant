@@ -7830,8 +7830,68 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const ovenETAs=snapshot?.ovenETAs||[];
   const pacing=snapshot?.slaPacing||{};
 
+  // Lens-per-hour chart data from SOM
+  const [lphData, setLphData] = useState(null);
+  const [lphHours, setLphHours] = useState(24);
+  useEffect(() => {
+    if (!ovenServerUrl) return;
+    const go = () => fetch(`${ovenServerUrl}/api/som/lens-per-hour?hours=${lphHours}`).then(r=>r.json()).then(setLphData).catch(()=>{});
+    go();
+    const iv = setInterval(go, 300000);
+    return () => clearInterval(iv);
+  }, [ovenServerUrl, lphHours]);
+
   return(
     <div>
+      {/* LENS PER HOUR CHART — SOM Machine Throughput */}
+      {(() => {
+        const series = lphData?.series || [];
+        const hours = lphData?.hours || [];
+        const colors = ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
+        const maxL = Math.max(1, ...series.flatMap(s => s.data.map(d => d.lenses)));
+        return series.length > 0 ? (
+          <div style={{marginBottom:20}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <div style={{fontSize:14,fontWeight:700,color:'#e5e7eb',fontFamily:mono}}>LENS THROUGHPUT BY MACHINE</div>
+              <div style={{display:'flex',gap:6}}>
+                {[24,48].map(h=>(
+                  <button key={h} onClick={()=>{setLphData(null);setLphHours(h);}}
+                    style={{background:lphHours===h?'rgba(59,130,246,0.15)':'transparent',border:`1px solid ${lphHours===h?'rgba(59,130,246,0.3)':'rgba(255,255,255,0.1)'}`,borderRadius:6,padding:'4px 10px',color:lphHours===h?'#60a5fa':'#9ca3af',cursor:'pointer',fontFamily:mono,fontSize:11}}>{h}h</button>
+                ))}
+              </div>
+            </div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:10,marginBottom:8}}>
+              {series.map((s,i)=>(
+                <span key={s.name} style={{fontSize:10,color:'#9ca3af',fontFamily:mono}}>
+                  <span style={{display:'inline-block',width:10,height:3,background:colors[i%colors.length],borderRadius:2,marginRight:4}}/>
+                  {s.name}
+                </span>
+              ))}
+            </div>
+            <div style={{background:'rgba(255,255,255,0.02)',borderRadius:8,border:'1px solid rgba(255,255,255,0.06)',padding:16}}>
+              <div style={{position:'relative',height:200}}>
+                {[0,0.25,0.5,0.75,1].map(p=>(
+                  <div key={p} style={{position:'absolute',left:0,bottom:`${p*100}%`,width:'100%',borderBottom:'1px solid rgba(255,255,255,0.04)'}}>
+                    <span style={{position:'absolute',left:0,top:-8,fontSize:9,color:'#6b7280',fontFamily:mono}}>{Math.round(maxL*p)}</span>
+                  </div>
+                ))}
+                <svg width="100%" height="100%" viewBox={`0 0 ${Math.max(hours.length,1)*40} 200`} preserveAspectRatio="none" style={{position:'absolute',left:30,top:0,width:'calc(100% - 30px)',height:'100%'}}>
+                  {series.map((s,si)=>{
+                    const pts=s.data.map((d,di)=>`${di*(hours.length>1?(hours.length*40-40)/(hours.length-1):0)},${200-(d.lenses/maxL)*180}`).join(' ');
+                    return <polyline key={s.name} points={pts} fill="none" stroke={colors[si%colors.length]} strokeWidth="2" opacity="0.8"/>;
+                  })}
+                </svg>
+              </div>
+              <div style={{display:'flex',justifyContent:'space-between',marginLeft:30,marginTop:4}}>
+                {hours.filter((_,i)=>i%Math.max(1,Math.floor(hours.length/12))===0).map(h=>(
+                  <span key={h} style={{fontSize:9,color:'#6b7280',fontFamily:mono}}>{new Date(h).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        ) : null;
+      })()}
+
       {/* HEADER */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
