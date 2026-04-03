@@ -7825,15 +7825,17 @@ function FlowAgentTab({ovenServerUrl,settings}){
 
   // Lens-per-hour chart data from SOM — must be before conditional returns (React hook rules)
   const [lphData, setLphData] = useState(null);
-  const [lphHours, setLphHours] = useState(168);
+  const [lphDay, setLphDay] = useState(0); // 0=today, 1=yesterday, etc.
   const [lphHidden, setLphHidden] = useState(new Set());
   useEffect(() => {
     setLphData(null);
-    const go = () => fetch(`${base}/api/som/lens-per-hour?hours=${lphHours}`).then(r=>r.json()).then(setLphData).catch(()=>{});
+    const d = new Date(); d.setDate(d.getDate() - lphDay);
+    const dateStr = d.toISOString().slice(0, 10);
+    const go = () => fetch(`${base}/api/som/lens-per-hour?date=${dateStr}`).then(r=>r.json()).then(setLphData).catch(()=>{});
     go();
     const iv = setInterval(go, 300000);
     return () => clearInterval(iv);
-  }, [base, lphHours]);
+  }, [base, lphDay]);
 
   if(loading)return(<div style={{textAlign:"center",padding:60,color:"#9ca3af",fontFamily:mono}}>Loading Flow Agent...</div>);
   if(error)return(<div style={{textAlign:"center",padding:60,color:"#ef4444",fontFamily:mono}}>Flow Agent Error: {error}</div>);
@@ -7856,11 +7858,12 @@ function FlowAgentTab({ovenServerUrl,settings}){
           <div style={{marginBottom:20}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <div style={{fontSize:14,fontWeight:700,color:'#e5e7eb',fontFamily:mono}}>LENS THROUGHPUT BY MACHINE</div>
-              <div style={{display:'flex',gap:6}}>
-                {[24,48,168].map(h=>(
-                  <button key={h} onClick={()=>{setLphData(null);setLphHours(h);}}
-                    style={{background:lphHours===h?'rgba(59,130,246,0.15)':'transparent',border:`1px solid ${lphHours===h?'rgba(59,130,246,0.3)':'rgba(255,255,255,0.1)'}`,borderRadius:6,padding:'4px 10px',color:lphHours===h?'#60a5fa':'#9ca3af',cursor:'pointer',fontFamily:mono,fontSize:11}}>{h===168?'7d':h+'h'}</button>
-                ))}
+              <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                <button onClick={()=>setLphDay(lphDay+1)} style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:6,padding:'4px 10px',color:'#9ca3af',cursor:'pointer',fontFamily:mono,fontSize:11}}>&larr;</button>
+                <span style={{fontSize:12,color:'#e5e7eb',fontFamily:mono,minWidth:100,textAlign:'center'}}>
+                  {lphDay===0?'Today':lphDay===1?'Yesterday':(() => {const d=new Date();d.setDate(d.getDate()-lphDay);return d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});})()}
+                </span>
+                <button onClick={()=>setLphDay(Math.max(0,lphDay-1))} disabled={lphDay===0} style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:6,padding:'4px 10px',color:lphDay===0?'#374151':'#9ca3af',cursor:lphDay===0?'default':'pointer',fontFamily:mono,fontSize:11}}>&rarr;</button>
               </div>
             </div>
             <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
@@ -7890,8 +7893,8 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 </svg>
               </div>
               <div style={{display:'flex',justifyContent:'space-between',marginLeft:30,marginTop:4}}>
-                {hours.filter((_,i)=>i%Math.max(1,Math.floor(hours.length/12))===0).map(h=>(
-                  <span key={h} style={{fontSize:9,color:'#6b7280',fontFamily:mono}}>{new Date(h).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</span>
+                {hours.map(h=>(
+                  <span key={h} style={{fontSize:9,color:'#6b7280',fontFamily:mono}}>{new Date(h+'Z').toLocaleTimeString([],{hour:'numeric'})}</span>
                 ))}
               </div>
             </div>

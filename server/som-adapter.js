@@ -645,9 +645,19 @@ module.exports = {
    * Get lens-per-hour by machine type (for throughput chart)
    * Queries lab_oee for the last 24h, groups by hour and device category
    */
-  async getLensPerHour(hours = 24) {
+  async getLensPerHour(options = {}) {
     if (!connection) return { series: [], isLive: false };
     try {
+      const { date, hours } = options;
+      let whereClause, params;
+      if (date) {
+        // Specific date, shift hours 5AM-11PM (05:00 to 23:00 local)
+        whereClause = "TimeUnit = 'H' AND DATE(Time) = ? AND HOUR(Time) >= 5 AND HOUR(Time) < 23";
+        params = [date];
+      } else {
+        whereClause = "TimeUnit = 'H' AND Time > DATE_SUB(NOW(), INTERVAL ? HOUR)";
+        params = [hours || 24];
+      }
       const [rows] = await connection.query(`
         SELECT
           DeviceID,
@@ -656,10 +666,10 @@ module.exports = {
           DATE_FORMAT(Time, '%Y-%m-%d %H:00:00') as hour,
           SUM(Lenses) as lenses
         FROM view_som_oee
-        WHERE TimeUnit = 'H' AND Time > DATE_SUB(NOW(), INTERVAL ? HOUR)
+        WHERE ${whereClause}
         GROUP BY DeviceID, DevModel, DeviceType, hour
         ORDER BY hour ASC, DeviceID
-      `, [hours]);
+      `, params);
 
       // Group by device category → hourly series
       const byCategory = {};

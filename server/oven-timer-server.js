@@ -2951,8 +2951,9 @@ Respond with a structured batching plan in this format:
     return json(res, som.getOEE());
   }
   if (req.method==='GET' && url.pathname==='/api/som/lens-per-hour') {
+    const date = url.searchParams.get('date');
     const hours = parseInt(url.searchParams.get('hours') || '24');
-    const data = await som.getLensPerHour(hours);
+    const data = await som.getLensPerHour(date ? { date } : { hours });
     return json(res, data);
   }
 
