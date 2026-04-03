@@ -650,16 +650,15 @@ module.exports = {
     try {
       const [rows] = await connection.query(`
         SELECT
-          o.DeviceID,
-          d.Model,
-          d.TypeDescr,
-          DATE_FORMAT(o.Time, '%Y-%m-%d %H:00:00') as hour,
-          SUM(o.Lenses) as lenses
-        FROM lab_oee o
-        LEFT JOIN production_device d ON o.DeviceID = d.Device
-        WHERE o.Time > DATE_SUB(NOW(), INTERVAL ? HOUR)
-        GROUP BY o.DeviceID, hour
-        ORDER BY hour ASC, o.DeviceID
+          DeviceID,
+          DevModel as Model,
+          DeviceType as TypeDescr,
+          DATE_FORMAT(Time, '%Y-%m-%d %H:00:00') as hour,
+          SUM(Lenses) as lenses
+        FROM view_som_oee
+        WHERE TimeUnit = 'H' AND Time > DATE_SUB(NOW(), INTERVAL ? HOUR)
+        GROUP BY DeviceID, DevModel, DeviceType, hour
+        ORDER BY hour ASC, DeviceID
       `, [hours]);
 
       // Group by device category → hourly series
