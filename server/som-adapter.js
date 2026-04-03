@@ -667,7 +667,7 @@ module.exports = {
         const cat = categorizeDevice(row.Model, row.TypeDescr, row.DeviceID);
         if (!byCategory[cat]) byCategory[cat] = {};
         if (!byCategory[cat][row.hour]) byCategory[cat][row.hour] = 0;
-        byCategory[cat][row.hour] += row.lenses || 0;
+        byCategory[cat][row.hour] += parseInt(row.lenses) || 0;
       }
 
       // Build chart series
