@@ -7825,7 +7825,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
 
   // Lens-per-hour chart data from SOM — must be before conditional returns (React hook rules)
   const [lphData, setLphData] = useState(null);
-  const [lphHours, setLphHours] = useState(24);
+  const [lphHours, setLphHours] = useState(168);
   useEffect(() => {
     setLphData(null);
     const go = () => fetch(`${base}/api/som/lens-per-hour?hours=${lphHours}`).then(r=>r.json()).then(setLphData).catch(()=>{});
@@ -7849,6 +7849,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
         const hours = lphData?.hours || [];
         const colors = ['#10b981','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#ec4899','#06b6d4','#84cc16','#f97316','#6366f1','#14b8a6','#e11d48'];
         const maxL = Math.max(1, ...series.flatMap(s => s.data.map(d => d.lenses)));
+        if (!lphData) return (<div style={{padding:16,color:'#6b7280',fontSize:12,fontFamily:mono}}>Loading lens throughput...</div>);
         return series.length > 0 ? (
           <div style={{marginBottom:20}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
