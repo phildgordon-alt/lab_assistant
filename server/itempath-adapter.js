@@ -37,7 +37,7 @@ const fs = require('fs');
 const CONFIG = {
   baseUrl:       process.env.ITEMPATH_URL    || 'https://your-itempath-instance.com',
   appToken:      process.env.ITEMPATH_TOKEN  || '',   // non-expiring application token
-  pollInterval:  parseInt(process.env.ITEMPATH_POLL_MS || '60000'),  // 60s default
+  pollInterval:  parseInt(process.env.ITEMPATH_POLL_MS || '300000'),  // 5 min default (was 60s — overloading ItemPath)
   mockMode:      !process.env.ITEMPATH_TOKEN,          // auto-mock if no token configured
 
   // Low stock thresholds — SKU type → minimum qty before alert fires
@@ -580,7 +580,7 @@ async function poll() {
     const pollStart = Date.now();
 
     // Materials: refresh every 30 minutes to keep qty current without overloading API.
-    const materialsStale = !cachedMaterialsResp || (pollCount % 30 === 0);
+    const materialsStale = !cachedMaterialsResp || (pollCount % 6 === 0); // every 6 polls (~30min at 5min interval)
     if (materialsStale) {
       console.log(`[ItemPath] Poll #${pollCount} — fetching materials catalog...`);
       try {
@@ -919,7 +919,7 @@ async function pickSync() {
       directionType: 2, status: 'processed',
       'modifiedDate[gte]': lastPickSyncTime,
       countOnly: true,
-    }, { timeout: 15000 });
+    }, { timeout: 60000 });
 
     const newCount = countData.count || 0;
     if (newCount === 0) {
