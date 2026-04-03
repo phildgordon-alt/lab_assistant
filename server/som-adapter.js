@@ -651,9 +651,14 @@ module.exports = {
       const { date, hours } = options;
       let whereClause, params;
       if (date) {
-        // Specific date, shift hours 5AM-11PM (05:00 to 23:00 local)
-        whereClause = "TimeUnit = 'H' AND DATE(Time) = ? AND HOUR(Time) >= 5 AND HOUR(Time) < 23";
-        params = [date];
+        // Specific date, shift hours 5AM-11PM Pacific
+        // SOM stores in UTC — Pacific is UTC-7 (PDT) or UTC-8 (PST)
+        // 5AM Pacific = 12:00 UTC, 11PM Pacific = 06:00 UTC next day
+        const startUTC = `${date} 12:00:00`;  // 5AM PDT in UTC
+        const nextDay = new Date(date + 'T00:00:00'); nextDay.setDate(nextDay.getDate() + 1);
+        const endUTC = `${nextDay.toISOString().slice(0,10)} 06:00:00`; // 11PM PDT in UTC
+        whereClause = "TimeUnit = 'H' AND Time >= ? AND Time < ?";
+        params = [startUTC, endUTC];
       } else {
         whereClause = "TimeUnit = 'H' AND Time > DATE_SUB(NOW(), INTERVAL ? HOUR)";
         params = [hours || 24];
