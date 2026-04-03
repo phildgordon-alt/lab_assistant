@@ -2551,6 +2551,25 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           )
                         ];
                       })}
+                      {[5, 10].map(n => {
+                        const slice = daily.slice(0, n);
+                        const sumDvi = slice.reduce((s, d) => s + d.dvi, 0);
+                        const sumLk = slice.reduce((s, d) => s + d.looker, 0);
+                        const sumHko = slice.reduce((s, d) => s + (d.hko || 0), 0);
+                        const sumVar = sumDvi - sumLk;
+                        return (
+                          <tr key={`sum-${n}`} style={{ background: `${T.surface}`, borderTop: `2px solid ${T.border}` }}>
+                            <td style={{ padding: '8px 12px', fontWeight: 800, color: T.text, fontSize: 11 }}>{n}-DAY TOTAL</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', color: T.textDim }}>—</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', color: T.textDim }}>—</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: T.amber }}>{sumDvi.toLocaleString()}</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: T.blue }}>{sumLk.toLocaleString()}</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: T.purple }}>{sumHko > 0 ? sumHko.toLocaleString() : '—'}</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: Math.abs(sumVar) > 50 ? T.red : T.amber }}>{sumVar > 0 ? '+' : ''}{sumVar.toLocaleString()}</td>
+                            <td style={{ padding: '8px 12px' }} />
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
