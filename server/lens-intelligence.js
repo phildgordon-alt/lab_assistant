@@ -377,7 +377,7 @@ function computeAll(db, itempath, netsuite) {
         const params = getSkuParams(db, sku);
         const skuType = params.sku_type || (/^(SF_|062|026|001)/.test(sku) ? 'semifinished' : 'finished');
         ins.run(sku, desc, effectiveCat, onHand,
-          0, 0, 'discontinued', 0, 0, 999, 999, 0, 0, 0, 0, 0, 0, 0, null, null,
+          0, 0, 'discontinued', 0, 0, null, null, 0, 0, 0, 0, 0, 0, 0, null, null,
           null, null, 0, 0, 'DISCONTINUED', 0, 0, 0, 'X', 'STOCK', skuType, null, null, today);
         computed++;
         continue;

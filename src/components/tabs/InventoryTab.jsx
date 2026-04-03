@@ -2961,8 +2961,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <td style={{ padding: '5px 8px', textAlign: 'right', color: i.consumption_trend_pct > 10 ? T.red : i.consumption_trend_pct < -10 ? T.green : T.textDim }}>
                               {i.consumption_trend_pct > 0 ? '+' : ''}{i.consumption_trend_pct}%
                             </td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: i.weeks_of_supply < 6 ? T.red : i.weeks_of_supply < 10 ? T.amber : T.green }}>{i.weeks_of_supply}</td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textMuted }}>{i.weeks_of_supply_with_po}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontWeight: 700, color: i.weeks_of_supply == null ? T.textDim : i.weeks_of_supply < 6 ? T.red : i.weeks_of_supply < 10 ? T.amber : T.green }}>{i.weeks_of_supply == null ? '—' : i.weeks_of_supply}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', color: T.textMuted }}>{i.weeks_of_supply_with_po == null ? '—' : i.weeks_of_supply_with_po}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', color: i.on_hand <= i.dynamic_reorder_point ? T.red : T.textDim }}>{i.dynamic_reorder_point}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', color: i.open_po_qty > 0 ? T.blue : T.textDim }} title={i.open_po_refs ? JSON.parse(i.open_po_refs).map(p => `${p.po}: ${p.qty}`).join(', ') : ''}>{i.open_po_qty || '—'}{i.open_po_refs && <span style={{ fontSize: 8, color: T.textDim, marginLeft: 3 }}>({JSON.parse(i.open_po_refs).map(p => p.po).join(', ')})</span>}</td>
                             <td style={{ padding: '5px 8px', color: T.textMuted, fontSize: 10 }}>{i.runout_date || '—'}</td>
