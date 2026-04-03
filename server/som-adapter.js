@@ -685,8 +685,22 @@ module.exports = {
         byCategory[cat][row.hour] += parseInt(row.lenses) || 0;
       }
 
-      // Build chart series
-      const allHours = [...new Set(rows.map(r => r.hour))].sort();
+      // Build full shift hours (5AM-11PM Pacific = 12:00-05:00 UTC)
+      // Include ALL hours so the chart shows ramp-up from zero
+      const allHours = [];
+      if (date) {
+        for (let h = 12; h <= 23; h++) {
+          allHours.push(`${date} ${String(h).padStart(2,'0')}:00:00`);
+        }
+        const nextDay = new Date(date + 'T00:00:00'); nextDay.setDate(nextDay.getDate() + 1);
+        const nd = nextDay.toISOString().slice(0, 10);
+        for (let h = 0; h <= 5; h++) {
+          allHours.push(`${nd} ${String(h).padStart(2,'0')}:00:00`);
+        }
+      } else {
+        allHours.push(...[...new Set(rows.map(r => r.hour))].sort());
+      }
+
       const series = Object.entries(byCategory).map(([category, hourData]) => ({
         name: category,
         data: allHours.map(h => ({ hour: h, lenses: hourData[h] || 0 }))
