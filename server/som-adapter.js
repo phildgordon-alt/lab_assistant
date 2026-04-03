@@ -672,10 +672,16 @@ module.exports = {
         ORDER BY hour ASC, DeviceID
       `, params);
 
-      // Group by device category → hourly series
+      // Group by SOM device type (matches SOM Control Center labels)
+      const TYPE_LABELS = {
+        'SBK': 'Blocker', 'SEN': 'Engraver', 'SST': 'Stacker', 'SPO': 'Polisher',
+        'SCO': 'Coater', 'SDB': 'De blocker', 'SED': 'Edger', 'SGE': 'Generator',
+        'SCU': 'Cleaning Unit', 'SDT': 'De taper', 'SLI': 'Line input', 'SLO': 'Line output',
+        'SCI': 'Cosmetic Insp', 'SME': 'Measurement',
+      };
       const byCategory = {};
       for (const row of rows) {
-        const cat = categorizeDevice(row.Model, row.TypeDescr, row.DeviceID);
+        const cat = TYPE_LABELS[row.TypeDescr] || row.TypeDescr || row.Model || 'Unknown';
         if (!byCategory[cat]) byCategory[cat] = {};
         if (!byCategory[cat][row.hour]) byCategory[cat][row.hour] = 0;
         byCategory[cat][row.hour] += parseInt(row.lenses) || 0;
