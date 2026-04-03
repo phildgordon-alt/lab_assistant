@@ -642,6 +642,50 @@ module.exports = {
   },
 
   /**
+   * Get lens-per-hour by machine type (for throughput chart)
+   * Queries lab_oee for the last 24h, groups by hour and device category
+   */
+  async getLensPerHour(hours = 24) {
+    if (!connection) return { series: [], isLive: false };
+    try {
+      const [rows] = await connection.query(`
+        SELECT
+          o.DeviceID,
+          d.Model,
+          d.TypeDescr,
+          DATE_FORMAT(o.Time, '%Y-%m-%d %H:00:00') as hour,
+          SUM(o.Lenses) as lenses
+        FROM lab_oee o
+        LEFT JOIN production_device d ON o.DeviceID = d.Device
+        WHERE o.Time > DATE_SUB(NOW(), INTERVAL ? HOUR)
+        GROUP BY o.DeviceID, hour
+        ORDER BY hour ASC, o.DeviceID
+      `, [hours]);
+
+      // Group by device category → hourly series
+      const byCategory = {};
+      for (const row of rows) {
+        const cat = categorizeDevice(row.Model, row.TypeDescr, row.DeviceID);
+        if (!byCategory[cat]) byCategory[cat] = {};
+        if (!byCategory[cat][row.hour]) byCategory[cat][row.hour] = 0;
+        byCategory[cat][row.hour] += row.lenses || 0;
+      }
+
+      // Build chart series
+      const allHours = [...new Set(rows.map(r => r.hour))].sort();
+      const series = Object.entries(byCategory).map(([category, hourData]) => ({
+        name: category,
+        data: allHours.map(h => ({ hour: h, lenses: hourData[h] || 0 }))
+      }));
+
+      return { series, hours: allHours, isLive, lastPoll };
+    } catch (e) {
+      console.warn('[SOM] getLensPerHour error:', e.message);
+      return { series: [], isLive, error: e.message };
+    }
+  },
+
+  /**
    * Get order/job tracking by department
    */
   getOrders() {

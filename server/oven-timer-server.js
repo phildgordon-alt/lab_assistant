@@ -2950,6 +2950,11 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/som/oee') {
     return json(res, som.getOEE());
   }
+  if (req.method==='GET' && url.pathname==='/api/som/lens-per-hour') {
+    const hours = parseInt(url.searchParams.get('hours') || '24');
+    const data = await som.getLensPerHour(hours);
+    return json(res, data);
+  }
 
   // ── DVI File Sync endpoints ───────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/dvi-sync/status') {
