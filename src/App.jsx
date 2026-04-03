@@ -7854,7 +7854,22 @@ function FlowAgentTab({ovenServerUrl,settings}){
         const series = allSeries.filter(s => !lphHidden.has(s.name));
         const maxL = Math.max(1, ...series.flatMap(s => s.data.map(d => d.lenses)));
         if (!lphData) return (<div style={{padding:16,color:'#6b7280',fontSize:12,fontFamily:mono}}>Loading lens throughput...</div>);
-        return series.length > 0 ? (
+        if (series.length === 0) return (
+          <div style={{marginBottom:20}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+              <div style={{fontSize:14,fontWeight:700,color:'#e5e7eb',fontFamily:mono}}>LENS THROUGHPUT BY MACHINE</div>
+              <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                <button onClick={()=>setLphDay(lphDay+1)} style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:6,padding:'4px 10px',color:'#9ca3af',cursor:'pointer',fontFamily:mono,fontSize:11}}>&larr;</button>
+                <span style={{fontSize:12,color:'#e5e7eb',fontFamily:mono,minWidth:100,textAlign:'center'}}>
+                  {lphDay===0?'Today':lphDay===1?'Yesterday':(()=>{const d=new Date();d.setDate(d.getDate()-lphDay);return d.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});})()}
+                </span>
+                <button onClick={()=>setLphDay(Math.max(0,lphDay-1))} disabled={lphDay===0} style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:6,padding:'4px 10px',color:lphDay===0?'#374151':'#9ca3af',cursor:lphDay===0?'default':'pointer',fontFamily:mono,fontSize:11}}>&rarr;</button>
+              </div>
+            </div>
+            <div style={{padding:30,textAlign:'center',color:'#6b7280',fontSize:12,fontFamily:mono,background:'rgba(255,255,255,0.02)',borderRadius:8,border:'1px solid rgba(255,255,255,0.06)'}}>No SOM data for this day. Use &larr; to go back.</div>
+          </div>
+        );
+        return (
           <div style={{marginBottom:20}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <div style={{fontSize:14,fontWeight:700,color:'#e5e7eb',fontFamily:mono}}>LENS THROUGHPUT BY MACHINE</div>
@@ -7899,7 +7914,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
               </div>
             </div>
           </div>
-        ) : null;
+        );
       })()}
 
       {/* HEADER */}
