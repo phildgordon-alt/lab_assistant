@@ -386,6 +386,8 @@ function loadShippedIndex() {
         parsed.enteredAt = new Date(`20${yy}-${mm}-${dd}T00:00:00`).getTime();
       }
       shippedJobIndex.set(jobNum, parsed);
+      // Persist to SQLite (ground truth)
+      try { labDb.upsertShippedJob(parsed); } catch (e) { /* ignore db errors during load */ }
       loaded++;
     } catch (e) { /* skip bad files */ }
   }
