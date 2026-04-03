@@ -7854,7 +7854,9 @@ function FlowAgentTab({ovenServerUrl,settings}){
         const series = allSeries.filter(s => !lphHidden.has(s.name));
         const maxL = Math.max(1, ...series.flatMap(s => s.data.map(d => d.lenses)));
         if (!lphData) return (<div style={{padding:16,color:'#6b7280',fontSize:12,fontFamily:mono}}>Loading lens throughput...</div>);
-        if (series.length === 0) return (
+        const hasData = allSeries.length > 0;
+        const allFiltered = hasData && series.length === 0;
+        if (!hasData) return (
           <div style={{marginBottom:20}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
               <div style={{fontSize:14,fontWeight:700,color:'#e5e7eb',fontFamily:mono}}>LENS THROUGHPUT BY MACHINE</div>
@@ -7881,7 +7883,8 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 <button onClick={()=>setLphDay(Math.max(0,lphDay-1))} disabled={lphDay===0} style={{background:'rgba(255,255,255,0.06)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:6,padding:'4px 10px',color:lphDay===0?'#374151':'#9ca3af',cursor:lphDay===0?'default':'pointer',fontFamily:mono,fontSize:11}}>&rarr;</button>
               </div>
             </div>
-            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8,alignItems:'center'}}>
+              {lphHidden.size > 0 && <button onClick={()=>setLphHidden(new Set())} style={{fontSize:10,fontFamily:mono,background:'rgba(59,130,246,0.15)',border:'1px solid rgba(59,130,246,0.3)',borderRadius:4,padding:'3px 8px',cursor:'pointer',color:'#60a5fa'}}>Show All</button>}
               {allSeries.map((s,i)=>{
                 const hidden = lphHidden.has(s.name);
                 return (
