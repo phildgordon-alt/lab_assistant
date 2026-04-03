@@ -7902,8 +7902,17 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 ))}
                 <svg width="100%" height="100%" viewBox={`0 0 ${Math.max(hours.length,1)*40} 200`} preserveAspectRatio="none" style={{position:'absolute',left:30,top:0,width:'calc(100% - 30px)',height:'100%'}}>
                   {series.map((s,si)=>{
-                    const pts=s.data.map((d,di)=>`${di*(hours.length>1?(hours.length*40-40)/(hours.length-1):0)},${200-(d.lenses/maxL)*180}`).join(' ');
-                    return <polyline key={s.name} points={pts} fill="none" stroke={colors[si%colors.length]} strokeWidth="2" opacity="0.8"/>;
+                    const xScale = hours.length>1?(hours.length*40-40)/(hours.length-1):0;
+                    const pts=s.data.map((d,di)=>`${di*xScale},${200-(d.lenses/maxL)*180}`).join(' ');
+                    const peakIdx = s.data.reduce((best,d,i)=>d.lenses>s.data[best].lenses?i:best,0);
+                    const peakVal = s.data[peakIdx]?.lenses || 0;
+                    const peakX = peakIdx*xScale;
+                    const peakY = 200-(peakVal/maxL)*180;
+                    return [
+                      <polyline key={s.name} points={pts} fill="none" stroke={colors[si%colors.length]} strokeWidth="2" opacity="0.8"/>,
+                      peakVal > 0 && <circle key={s.name+'-peak'} cx={peakX} cy={peakY} r="3" fill={colors[si%colors.length]} stroke="#111" strokeWidth="1"/>,
+                      peakVal > 0 && <text key={s.name+'-label'} x={peakX} y={peakY-6} textAnchor="middle" fill={colors[si%colors.length]} fontSize="8" fontFamily="'JetBrains Mono',monospace" fontWeight="700">{peakVal}</text>
+                    ];
                   })}
                 </svg>
               </div>
