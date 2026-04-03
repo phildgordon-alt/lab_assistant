@@ -461,6 +461,61 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_hist_shipped ON dvi_jobs_history(shipped_at);
   CREATE INDEX IF NOT EXISTS idx_jobs_hist_recorded ON dvi_jobs_history(recorded_at);
 
+  -- DVI Shipped Jobs — full XML ground truth (Phase 1)
+  CREATE TABLE IF NOT EXISTS dvi_shipped_jobs (
+    invoice TEXT PRIMARY KEY,
+    reference TEXT,
+    tray TEXT,
+    rx_number TEXT,
+    entry_date TEXT,
+    entry_time TEXT,
+    ship_date TEXT,
+    ship_time TEXT,
+    days_in_lab INTEGER,
+    department TEXT,
+    job_type TEXT,
+    operator TEXT,
+    job_origin TEXT,
+    machine_id TEXT,
+    is_hko INTEGER DEFAULT 0,
+    lens_opc_r TEXT,
+    lens_opc_l TEXT,
+    lens_style TEXT,
+    lens_material TEXT,
+    lens_type TEXT,
+    lens_pick TEXT,
+    lens_color TEXT,
+    coating TEXT,
+    coat_type TEXT,
+    frame_upc TEXT,
+    frame_name TEXT,
+    frame_style TEXT,
+    frame_sku TEXT,
+    frame_mfr TEXT,
+    frame_color TEXT,
+    eye_size TEXT,
+    bridge TEXT,
+    edge_type TEXT,
+    rx_r_sphere TEXT,
+    rx_r_cylinder TEXT,
+    rx_r_axis TEXT,
+    rx_r_pd TEXT,
+    rx_r_add TEXT,
+    rx_l_sphere TEXT,
+    rx_l_cylinder TEXT,
+    rx_l_axis TEXT,
+    rx_l_pd TEXT,
+    rx_l_add TEXT,
+    recorded_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_dsj_ship ON dvi_shipped_jobs(ship_date);
+  CREATE INDEX IF NOT EXISTS idx_dsj_ref ON dvi_shipped_jobs(reference);
+  CREATE INDEX IF NOT EXISTS idx_dsj_opc_r ON dvi_shipped_jobs(lens_opc_r);
+  CREATE INDEX IF NOT EXISTS idx_dsj_opc_l ON dvi_shipped_jobs(lens_opc_l);
+  CREATE INDEX IF NOT EXISTS idx_dsj_frame ON dvi_shipped_jobs(frame_upc);
+  CREATE INDEX IF NOT EXISTS idx_dsj_dept ON dvi_shipped_jobs(department);
+  CREATE INDEX IF NOT EXISTS idx_dsj_op ON dvi_shipped_jobs(operator);
+
   -- DVI Trace persistence — survives server restarts
   CREATE TABLE IF NOT EXISTS dvi_trace_jobs (
     job_id TEXT PRIMARY KEY,
@@ -1891,6 +1946,64 @@ function upsertLensCatalog(lens) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// DVI SHIPPED JOBS (XML ground truth)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const upsertShippedJobStmt = db.prepare(`
+  INSERT OR REPLACE INTO dvi_shipped_jobs (
+    invoice, reference, tray, rx_number, entry_date, entry_time,
+    ship_date, ship_time, days_in_lab, department, job_type, operator,
+    job_origin, machine_id, is_hko,
+    lens_opc_r, lens_opc_l, lens_style, lens_material, lens_type, lens_pick, lens_color,
+    coating, coat_type,
+    frame_upc, frame_name, frame_style, frame_sku, frame_mfr, frame_color,
+    eye_size, bridge, edge_type,
+    rx_r_sphere, rx_r_cylinder, rx_r_axis, rx_r_pd, rx_r_add,
+    rx_l_sphere, rx_l_cylinder, rx_l_axis, rx_l_pd, rx_l_add
+  ) VALUES (
+    ?, ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?, ?,
+    ?, ?, ?,
+    ?, ?, ?, ?, ?, ?, ?,
+    ?, ?,
+    ?, ?, ?, ?, ?, ?,
+    ?, ?, ?,
+    ?, ?, ?, ?, ?,
+    ?, ?, ?, ?, ?
+  )
+`);
+
+function convertDate(raw) {
+  // Convert MM/DD/YY → YYYY-MM-DD, pass through if already YYYY-MM-DD or null
+  if (!raw) return null;
+  const m = raw.match(/^(\d{2})\/(\d{2})\/(\d{2})$/);
+  if (m) return `20${m[3]}-${m[1]}-${m[2]}`;
+  return raw; // already ISO or unknown format
+}
+
+function upsertShippedJob(p) {
+  if (!p || !p.invoice) return;
+  const rx = p.rx || {};
+  const R = rx.R || {};
+  const L = rx.L || {};
+  upsertShippedJobStmt.run(
+    p.invoice, p.reference || null, p.tray || null, p.rxNum || null,
+    convertDate(p.entryDate), p.entryTime || null,
+    convertDate(p.shipDate), p.shipTime || null,
+    p.daysInLab ? parseInt(p.daysInLab, 10) : null,
+    p.department || null, p.jobType || null, p.operator || null,
+    p.jobOrigin || null, p.machineId || null, p.isHko ? 1 : 0,
+    p.lensOpc || null, p.lensOpcL || null,
+    p.lensStyle || null, p.lensMat || null, p.lensType || null, p.lensPick || null, p.lensColor || null,
+    p.coating || null, p.coatType || null,
+    p.frameUpc || null, p.frameName || null, p.frameStyle || null, p.frameSku || null, p.frameMfr || null, p.frameColor || null,
+    p.eyeSize || null, p.bridge || null, p.edgeType || null,
+    R.sphere || null, R.cylinder || null, R.axis || null, R.pd || null, R.add || null,
+    L.sphere || null, L.cylinder || null, L.axis || null, L.pd || null, L.add || null
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1969,5 +2082,7 @@ module.exports = {
   // Assembly Dashboard config
   getAssemblyConfig,
   setAssemblyConfig,
-  getAllAssemblyConfig
+  getAllAssemblyConfig,
+  // DVI Shipped Jobs (XML ground truth)
+  upsertShippedJob,
 };

@@ -291,10 +291,24 @@ function parseDviXml(xml) {
   // HKO jobs: MachineID="000" and Pick="N" — processed at external lab, not Irvine
   const isHko = machineId === '000';
 
+  // Additional fields for shipped job ground truth
+  const department = getAttr('RxOrder', 'Department');
+  const jobType = getAttr('RxOrder', 'JobType');
+  const operator = getAttr('OrderData', 'Operator');
+  const entryTime = getAttr('OrderData', 'EntryTime');
+  const jobOrigin = getAttr('OrderData', 'JobOrigin');
+  const lensOpcL = leftEyeBlock ? ((leftEyeBlock[0] || '').match(/\sOPC="([^"]*)"/) || [])[1] || null : null;
+  const frameUpc = ((frameXml || '').match(/\sUPC="([^"]*)"/) || [])[1] || null;
+  const frameName = ((frameXml || '').match(/\sName="([^"]*)"/) || [])[1] || null;
+  const frameMat = ((frameXml || '').match(/\sMaterial="([^"]*)"/) || [])[1] || null;
+  const frameColor = ((frameXml || '').match(/\sColor="([^"]*)"/) || [])[1] || null;
+  const edgeType = ((frameXml || '').match(/\sEdgeType="([^"]*)"/) || [])[1] || null;
+
   return {
     status: getAttr('Job', 'Status'),
     date: get('Date'),
-    shipDate, shipTime, entryDate, invoice, reference, daysInLab,
+    shipDate, shipTime, entryDate, entryTime, invoice, reference, daysInLab,
+    department, jobType, operator, jobOrigin,
     machineId, isHko,
     rmtInv: get('RmtInv'),
     tray: get('Tray'),
@@ -307,15 +321,21 @@ function parseDviXml(xml) {
     lensPick: getEyeAttr('Pick') || getAttr('Lens', 'Pick'), // F=factory/finished, S=surfacing
     lensStyle: getLens('Style'),
     lensOpc: getEyeAttr('OPC') || getLens('OPC'),  // Optical Product Code — maps to Kardex SKU
+    lensOpcL,  // Left eye OPC (may differ from right)
     lensMat: getEyeAttr('Material') || getLens('Mat'),
     lensThick: getLens('Thick'),
     lensColor: getLens('Color'),
+    frameUpc,
+    frameName,
+    frameMat,
+    frameColor,
     frameStyle: getFrame('Style'),
     frameSku: getFrame('SKU'),
     frameMfr: getFrame('Mfr'),
     eyeSize: getFrame('EyeSize') || get('EyeSize'),
     bridge: getFrame('Bridge') || get('Bridge'),
     edge: getFrame('Edge') || get('Edge'),
+    edgeType,
     serviceInstruction: getAttr('Service', 'Instruction'),
     rx, // { R: {sphere,cylinder,axis,pd,add}, L: {sphere,cylinder,axis,pd,add} }
   };
@@ -1995,6 +2015,17 @@ Respond with a structured batching plan in this format:
       console.error('[Pipeline] Error:', e.message);
       return json(res, { error: e.message, daily: [], totals: {}, days: 0 }, 500);
     }
+  }
+
+  // ── Shipped job lookup — cross-reference all data sources ──────────
+  if (req.method==='GET' && url.pathname==='/api/shipping/lookup') {
+    const invoice = url.searchParams.get('invoice');
+    if (!invoice) return json(res, { error: 'invoice param required' }, 400);
+    const dbRow = labDb.db.prepare('SELECT * FROM dvi_shipped_jobs WHERE invoice = ?').get(invoice);
+    const memData = shippedJobIndex.get(invoice);
+    const lookerRows = dbRow?.reference ? labDb.db.prepare('SELECT * FROM looker_jobs WHERE order_number = ?').all(dbRow.reference) : [];
+    const histRow = labDb.db.prepare('SELECT * FROM dvi_jobs_history WHERE job_id = ? ORDER BY shipped_at DESC LIMIT 1').get(invoice);
+    return json(res, { invoice, found: !!dbRow, labXml: dbRow, looker: lookerRows, dviHistory: histRow, inMemory: !!memData });
   }
 
   // ── Shipped job detail — single day or date range ──────────
