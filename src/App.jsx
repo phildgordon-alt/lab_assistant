@@ -7908,9 +7908,11 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 </svg>
               </div>
               <div style={{display:'flex',justifyContent:'space-between',marginLeft:30,marginTop:4}}>
-                {hours.map((h,i)=>(
-                  i%2===0 ? <span key={h} style={{fontSize:9,color:'#6b7280',fontFamily:mono}}>{new Date(h.replace(' ','T')+'Z').toLocaleTimeString([],{hour:'numeric',hour12:true})}</span> : <span key={h}/>
-                ))}
+                {hours.map((h,i)=>{
+                  const hr = parseInt(h.split(' ')[1]);
+                  const label = hr===0?'12 AM':hr<12?hr+' AM':hr===12?'12 PM':(hr-12)+' PM';
+                  return <span key={h} style={{fontSize:9,color:'#6b7280',fontFamily:mono}}>{label}</span>;
+                })}
               </div>
             </div>
           </div>

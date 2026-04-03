@@ -651,14 +651,10 @@ module.exports = {
       const { date, hours } = options;
       let whereClause, params;
       if (date) {
-        // Specific date, shift hours 5AM-11PM Pacific
-        // SOM stores in UTC — Pacific is UTC-7 (PDT) or UTC-8 (PST)
-        // 5AM Pacific = 12:00 UTC, 11PM Pacific = 06:00 UTC next day
-        const startUTC = `${date} 12:00:00`;  // 5AM PDT in UTC
-        const nextDay = new Date(date + 'T00:00:00'); nextDay.setDate(nextDay.getDate() + 1);
-        const endUTC = `${nextDay.toISOString().slice(0,10)} 06:00:00`; // 11PM PDT in UTC
-        whereClause = "TimeUnit = 'H' AND Time >= ? AND Time < ?";
-        params = [startUTC, endUTC];
+        // SOM MySQL is in Pacific time (SYSTEM timezone) — no UTC conversion needed
+        // Shift: 5AM-11PM Pacific
+        whereClause = "TimeUnit = 'H' AND DATE(Time) = ? AND HOUR(Time) >= 5 AND HOUR(Time) < 23";
+        params = [date];
       } else {
         whereClause = "TimeUnit = 'H' AND Time > DATE_SUB(NOW(), INTERVAL ? HOUR)";
         params = [hours || 24];
@@ -685,17 +681,11 @@ module.exports = {
         byCategory[cat][row.hour] += parseInt(row.lenses) || 0;
       }
 
-      // Build full shift hours (5AM-11PM Pacific = 12:00-05:00 UTC)
-      // Include ALL hours so the chart shows ramp-up from zero
+      // Build full shift hours (5AM-11PM Pacific, already in local time)
       const allHours = [];
       if (date) {
-        for (let h = 12; h <= 23; h++) {
+        for (let h = 5; h < 23; h++) {
           allHours.push(`${date} ${String(h).padStart(2,'0')}:00:00`);
-        }
-        const nextDay = new Date(date + 'T00:00:00'); nextDay.setDate(nextDay.getDate() + 1);
-        const nd = nextDay.toISOString().slice(0, 10);
-        for (let h = 0; h <= 5; h++) {
-          allHours.push(`${nd} ${String(h).padStart(2,'0')}:00:00`);
         }
       } else {
         allHours.push(...[...new Set(rows.map(r => r.hour))].sort());
