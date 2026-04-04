@@ -3,7 +3,8 @@
   "logLevel": "info",
 
   "connection": {
-    "type": "smb",
+    "type": "${DVI_SYNC_TYPE:-local}",
+    "basePath": "${DVI_SYNC_LOCAL_PATH:-/Volumes/visdir}",
     "host": "${DVI_SYNC_HOST:-192.168.0.27}",
     "port": 445,
     "user": "${DVI_SYNC_USER:-dvi}",

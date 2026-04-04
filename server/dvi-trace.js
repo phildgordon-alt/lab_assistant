@@ -19,6 +19,7 @@
  */
 
 const { EventEmitter } = require('events');
+const fs = require('fs');
 const path = require('path');
 
 let SMB2;
@@ -35,6 +36,12 @@ try {
 const POLL_INTERVAL = 5000; // 5 seconds
 const TRACE_SHARE = 'visdir';
 const TRACE_DIR = 'TRACE';
+
+// Local mount path — if set, reads files from local filesystem instead of SMB2 library.
+// Set DVI_TRACE_LOCAL_PATH to the mounted visdir TRACE directory, e.g.:
+//   DVI_TRACE_LOCAL_PATH=/Volumes/visdir/TRACE
+// This bypasses the Node.js SMB2 library entirely (avoids OpenSSL cipher issues).
+const LOCAL_PATH = process.env.DVI_TRACE_LOCAL_PATH || '';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -148,27 +155,40 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   start(config) {
-    if (!SMB2) {
-      console.error('[DVI-Trace] SMB2 not installed');
-      return false;
+    const localPath = config?.localPath || LOCAL_PATH;
+    this._useLocal = !!localPath;
+    this._localPath = localPath;
+
+    if (this._useLocal) {
+      // Local mount mode — no SMB2 needed
+      if (!fs.existsSync(localPath)) {
+        console.error(`[DVI-Trace] Local path does not exist: ${localPath}`);
+        return false;
+      }
+      console.log(`[DVI-Trace] Started LOCAL mode — reading from ${localPath}/LT*.DAT (every ${POLL_INTERVAL/1000}s)`);
+    } else {
+      if (!SMB2) {
+        console.error('[DVI-Trace] SMB2 not installed and no DVI_TRACE_LOCAL_PATH set');
+        return false;
+      }
+
+      this._connConfig = {
+        host: config?.host || process.env.DVI_SYNC_HOST || '192.168.0.27',
+        user: config?.user || process.env.DVI_SYNC_USER || 'dvi',
+        pass: config?.password || process.env.DVI_SYNC_PASSWORD || 'dvi',
+        domain: config?.domain || process.env.DVI_SYNC_DOMAIN || 'WORKGROUP',
+      };
+
+      this._createClient();
+
+      const { host } = this._connConfig;
+      console.log(`[DVI-Trace] Started SMB mode — watching \\\\${host}\\${TRACE_SHARE}\\${TRACE_DIR}\\LT*.DAT (every ${POLL_INTERVAL/1000}s)`);
     }
 
-    this._connConfig = {
-      host: config?.host || process.env.DVI_SYNC_HOST || '192.168.0.27',
-      user: config?.user || process.env.DVI_SYNC_USER || 'dvi',
-      pass: config?.password || process.env.DVI_SYNC_PASSWORD || 'dvi',
-      domain: config?.domain || process.env.DVI_SYNC_DOMAIN || 'WORKGROUP',
-    };
     this._consecutiveErrors = 0;
-
-    this._createClient();
-
     this.running = true;
     this.currentFile = null;
     this.byteOffset = 0;
-
-    const { host } = this._connConfig;
-    console.log(`[DVI-Trace] Started — watching \\\\${host}\\${TRACE_SHARE}\\${TRACE_DIR}\\LT*.DAT (every ${POLL_INTERVAL/1000}s)`);
 
     // Restore persisted state from SQLite FIRST (stable timestamps survive restarts)
     const restored = this.loadFromDb();
@@ -201,17 +221,22 @@ class DviTraceWatcher extends EventEmitter {
    * live polling only picks up new data.
    */
   async loadHistory() {
-    if (!this.client) return;
+    if (!this._useLocal && !this.client) return;
     const todayFile = getTodayFilename();
 
     try {
       // List all LT files in TRACE directory
-      const files = await new Promise((resolve, reject) => {
-        this.client.readdir(TRACE_DIR, (err, list) => {
-          if (err) return reject(err);
-          resolve(list);
+      let files;
+      if (this._useLocal) {
+        files = fs.readdirSync(this._localPath).filter(f => !f.startsWith('.'));
+      } else {
+        files = await new Promise((resolve, reject) => {
+          this.client.readdir(TRACE_DIR, (err, list) => {
+            if (err) return reject(err);
+            resolve(list);
+          });
         });
-      });
+      }
 
       const ltFiles = files
         .filter(f => /^LT\d{6}\.DAT$/i.test(f))
@@ -378,7 +403,8 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   async poll() {
-    if (!this.running || !this.client) return;
+    if (!this.running) return;
+    if (!this._useLocal && !this.client) return;
 
     const filename = getTodayFilename();
     const remotePath = `${TRACE_DIR}\\${filename}`;
@@ -398,11 +424,15 @@ class DviTraceWatcher extends EventEmitter {
     const lastSuccessfulRead = this._lastSuccessfulRead || 0;
     const timeSinceRead = Date.now() - lastSuccessfulRead;
     if (lastSuccessfulRead > 0 && timeSinceRead > 120000) {
-      // No successful read in 2 minutes — SMB connection probably dead
+      // No successful read in 2 minutes
       this._staleCount = (this._staleCount || 0) + 1;
       if (this._staleCount % 12 === 1) { // Log every ~60s (12 polls × 5s)
-        console.warn(`[DVI-Trace] STALE: No successful read in ${Math.round(timeSinceRead/1000)}s — reconnecting SMB`);
-        this._createClient();
+        if (this._useLocal) {
+          console.warn(`[DVI-Trace] STALE: No successful read in ${Math.round(timeSinceRead/1000)}s — check mount at ${this._localPath}`);
+        } else {
+          console.warn(`[DVI-Trace] STALE: No successful read in ${Math.round(timeSinceRead/1000)}s — reconnecting SMB`);
+          this._createClient();
+        }
         this._consecutiveErrors = 0;
       }
     }
@@ -460,12 +490,12 @@ class DviTraceWatcher extends EventEmitter {
     } catch (err) {
       // Don't spam errors for transient/expected SMB conditions
       const msg = err.message || '';
-      if (msg.includes('STATUS_OBJECT_NAME_NOT_FOUND')) return;
+      if (msg.includes('STATUS_OBJECT_NAME_NOT_FOUND') || msg.includes('ENOENT')) return;
       if (msg.includes('STATUS_PENDING') || msg.includes('ETIMEDOUT') || msg.includes('ECONNRESET') || msg.includes('EALREADY')) {
         this._consecutiveErrors = (this._consecutiveErrors || 0) + 1;
         if (this._consecutiveErrors % 3 === 0) {
-          console.warn(`[DVI-Trace] ${this._consecutiveErrors} consecutive errors (${msg.substring(0, 40)}) — reconnecting SMB`);
-          this._createClient();
+          console.warn(`[DVI-Trace] ${this._consecutiveErrors} consecutive errors (${msg.substring(0, 40)})`);
+          if (!this._useLocal) this._createClient();
         }
         return;
       }
@@ -474,6 +504,16 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   readFile(remotePath) {
+    if (this._useLocal) {
+      // Local mode: remotePath is like "TRACE\LT260404.DAT" — extract filename
+      const filename = remotePath.split('\\').pop();
+      const fullPath = path.join(this._localPath, filename);
+      try {
+        return Promise.resolve(fs.readFileSync(fullPath));
+      } catch (err) {
+        return Promise.reject(err);
+      }
+    }
     return new Promise((resolve, reject) => {
       // 15-second timeout — SMB reads can hang indefinitely on dead connections
       const timeout = setTimeout(() => {
