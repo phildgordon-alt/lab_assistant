@@ -977,6 +977,7 @@ async function pickSync() {
 
   } catch (e) {
     pickSyncStatus.errors++;
+    pickSyncStatus.lastError = e.message;
     pickSyncStatus.lastRun = new Date().toISOString();
     console.error(`[pickSync] ERROR: ${e.message} — will retry from ${lastPickSyncTime}`);
     // Don't advance lastPickSyncTime — retry from same point
