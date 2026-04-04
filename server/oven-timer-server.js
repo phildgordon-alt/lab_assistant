@@ -3213,7 +3213,12 @@ Respond with a structured batching plan in this format:
         source: 'dvi-xml'
       });
     }
-    if (queueJobCount > 0 || skippedShipped > 0 || skippedOld > 0) console.log(`[DVI-Jobs] Queue: ${queueJobCount} unreleased, ${skippedShipped} shipped, ${skippedOld} old (>7d) skipped`);
+    // Log queue stats at most once per 5 minutes
+    const _now = Date.now();
+    if (!global._lastQueueLog || _now - global._lastQueueLog > 300000) {
+      if (queueJobCount > 0 || skippedShipped > 0 || skippedOld > 0) console.log(`[DVI-Jobs] Queue: ${queueJobCount} unreleased, ${skippedShipped} shipped, ${skippedOld} old (>7d) skipped`);
+      global._lastQueueLog = _now;
+    }
 
     // Get shipped stats from BOTH trace (today's movements) AND shipped XML index (archived files)
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
