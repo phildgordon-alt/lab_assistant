@@ -1911,10 +1911,10 @@ Respond with a structured batching plan in this format:
             skus: Object.keys(nsBySku).length, days: nsDayCount,
           },
           variance: kardexTotal - (nsLenses + nsFrames),
-        },
-        labXml: {
-          total: xmlLenses + xmlFrames, lenses: xmlLenses, frames: xmlFrames,
-          jobs: xmlJobs, days: xmlDays,
+          labXml: {
+            total: xmlLenses + xmlFrames, lenses: xmlLenses, frames: xmlFrames,
+            jobs: xmlJobs, days: xmlDays,
+          },
         },
         skuCount: skus.length,
       });
