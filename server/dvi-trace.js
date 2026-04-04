@@ -162,8 +162,21 @@ class DviTraceWatcher extends EventEmitter {
     if (this._useLocal) {
       // Local mount mode — no SMB2 needed
       if (!fs.existsSync(localPath)) {
-        console.error(`[DVI-Trace] Local path does not exist: ${localPath}`);
-        return false;
+        // Mount may not be ready yet (boot race). Wait up to 60s.
+        console.log(`[DVI-Trace] Local path not found: ${localPath} — waiting for mount (up to 60s)...`);
+        this._waitForMount(localPath, 60000).then(found => {
+          if (found) {
+            console.log(`[DVI-Trace] Mount appeared — starting LOCAL mode`);
+            this._startPolling();
+          } else {
+            console.error(`[DVI-Trace] Mount never appeared at ${localPath} — DVI trace disabled`);
+            this.running = false;
+          }
+        });
+        this.running = true;
+        // Restore from SQLite while waiting so status endpoint works
+        this.loadFromDb();
+        return true;
       }
       console.log(`[DVI-Trace] Started LOCAL mode — reading from ${localPath}/LT*.DAT (every ${POLL_INTERVAL/1000}s)`);
     } else {
@@ -191,8 +204,13 @@ class DviTraceWatcher extends EventEmitter {
     this.byteOffset = 0;
 
     // Restore persisted state from SQLite FIRST (stable timestamps survive restarts)
-    const restored = this.loadFromDb();
+    this.loadFromDb();
 
+    this._startPolling();
+    return true;
+  }
+
+  _startPolling() {
     // Delay history load to avoid SMB connection race with dvi-sync
     const startHistory = async () => {
       await new Promise(r => setTimeout(r, 3000));
@@ -203,7 +221,6 @@ class DviTraceWatcher extends EventEmitter {
     startHistory().then(() => {
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
-      // Periodic checkpoint every 5 minutes
       this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
     }).catch(err => {
       console.error('[DVI-Trace] History load failed, starting live poll anyway:', err.message);
@@ -211,7 +228,18 @@ class DviTraceWatcher extends EventEmitter {
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
       this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
     });
-    return true;
+  }
+
+  _waitForMount(mountPath, timeoutMs) {
+    return new Promise(resolve => {
+      const start = Date.now();
+      const check = () => {
+        if (fs.existsSync(mountPath)) return resolve(true);
+        if (Date.now() - start > timeoutMs) return resolve(false);
+        setTimeout(check, 5000); // check every 5s
+      };
+      check();
+    });
   }
 
   /**
