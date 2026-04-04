@@ -5782,7 +5782,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
               Outlier Rate: {sm.outlierPct || 0}% {(sm.outlierPct || 0) > 5 ? '— ABOVE THRESHOLD' : '— Within target'}
             </div>
             <div style={{ fontSize: 11, color: T.textMuted, marginTop: 4 }}>
-              <strong>What this means:</strong> {sm.outlierPct || 0}% of active WIP jobs ({sm.red + sm.critical || 0} jobs) have been in the lab 2 or more days.
+              <strong>What this means:</strong> {sm.outlierPct || 0}% of active WIP jobs ({sm.critical || 0} jobs) have been in the lab 3 or more days.
               Our target is under 5%. {(sm.outlierPct || 0) > 5
                 ? 'We are above target — review the Red and Critical jobs below to identify bottlenecks. Common causes: machine downtime, missing materials, breakage rework, or jobs stuck on hold.'
                 : 'We are within target. Continue monitoring.'}

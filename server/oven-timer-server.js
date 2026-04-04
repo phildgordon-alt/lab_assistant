@@ -2309,7 +2309,7 @@ Respond with a structured batching plan in this format:
         critical: c,
         overSLA: list.filter(j => j.overSLA).length,
         avgDays: list.length > 0 ? Math.round(list.reduce((s, j) => s + j.daysInLab, 0) / list.length * 10) / 10 : 0,
-        outlierPct: list.length > 0 ? Math.round(((r + c) / list.length) * 1000) / 10 : 0,
+        outlierPct: list.length > 0 ? Math.round((list.filter(j => j.daysInLab >= 3).length / list.length) * 1000) / 10 : 0,
       };
     };
 
@@ -2319,7 +2319,8 @@ Respond with a structured batching plan in this format:
     const critical = jobs.filter(j => j.zone === 'CRITICAL').length;
     const over5 = jobs.filter(j => j.daysInLab >= 5).length;
     const over10 = jobs.filter(j => j.daysInLab >= 10).length;
-    const outlierPct = total > 0 ? Math.round(((red + critical) / total) * 1000) / 10 : 0;
+    const over3 = jobs.filter(j => j.daysInLab >= 3).length;
+    const outlierPct = total > 0 ? Math.round((over3 / total) * 1000) / 10 : 0;
     const avgDays = total > 0 ? Math.round(jobs.reduce((s, j) => s + j.daysInLab, 0) / total * 10) / 10 : 0;
 
     return json(res, {
