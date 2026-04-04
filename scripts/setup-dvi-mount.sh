@@ -19,7 +19,7 @@ DVI_HOST="${DVI_SYNC_HOST:-192.168.0.27}"
 DVI_USER="${DVI_SYNC_USER:-dvi}"
 DVI_PASS="${DVI_SYNC_PASSWORD:-dvi}"
 SHARE="visdir"
-MOUNT_POINT="/Volumes/visdir"
+MOUNT_POINT="/Users/Shared/lab_assistant/data/dvi/mount"
 
 echo "=== DVI SMB Mount Setup ==="
 echo "Host: $DVI_HOST"

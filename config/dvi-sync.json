@@ -4,7 +4,7 @@
 
   "connection": {
     "type": "${DVI_SYNC_TYPE:-local}",
-    "basePath": "${DVI_SYNC_LOCAL_PATH:-/Volumes/visdir}",
+    "basePath": "${DVI_SYNC_LOCAL_PATH:-/Users/Shared/lab_assistant/data/dvi/mount}",
     "host": "${DVI_SYNC_HOST:-192.168.0.27}",
     "port": 445,
     "user": "${DVI_SYNC_USER:-dvi}",
