@@ -948,6 +948,51 @@ db.exec(`
     value TEXT NOT NULL,
     updated_at TEXT DEFAULT (datetime('now'))
   );
+
+  -- Users (synced from Okta, or created manually for dev)
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    name TEXT,
+    role TEXT DEFAULT 'viewer',
+    okta_id TEXT,
+    avatar_url TEXT,
+    last_login TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+  CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+  -- Sessions (login/logout tracking)
+  CREATE TABLE IF NOT EXISTS user_sessions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token TEXT UNIQUE NOT NULL,
+    source TEXT DEFAULT 'okta',
+    ip_address TEXT,
+    user_agent TEXT,
+    started_at TEXT DEFAULT (datetime('now')),
+    last_activity TEXT DEFAULT (datetime('now')),
+    ended_at TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(token);
+  CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id);
+
+  -- Activity log (page views, actions)
+  CREATE TABLE IF NOT EXISTS user_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    session_id INTEGER,
+    action TEXT NOT NULL,
+    detail TEXT,
+    metadata TEXT,
+    timestamp TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (user_id) REFERENCES users(id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_activity_user ON user_activity(user_id);
+  CREATE INDEX IF NOT EXISTS idx_activity_action ON user_activity(action);
+  CREATE INDEX IF NOT EXISTS idx_activity_ts ON user_activity(timestamp);
 `);
 
 console.log('[DB] SQLite database initialized:', DB_FILE);

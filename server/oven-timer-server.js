@@ -63,6 +63,10 @@ netsuite.start();
 looker.start();
 lensIntel.start(labDb.db, itempath, netsuite);
 
+// ── Authentication & Authorization ────────────────────────────
+const auth = require('./auth');
+auth.init(labDb.db);
+
 // ── Limble CMMS maintenance integration ───────────────────────
 const limble = require('./limble-adapter');
 limble.start();
@@ -797,6 +801,18 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); res.end(); return; }
+
+  // ── Authentication & Authorization ──────────────────────────
+  const authContext = auth.authenticate(req);
+  req.auth = authContext;
+
+  // Block write operations for non-admin users
+  if (req.method !== 'GET' && req.method !== 'OPTIONS' && req.method !== 'HEAD') {
+    const authCheck = auth.authorize(authContext, req.method);
+    if (!authCheck.allowed) {
+      return json(res, { error: authCheck.reason }, 403);
+    }
+  }
 
   // ── Health ──────────────────────────────────────────────────
   if (req.method==='GET' && url.pathname==='/health') {
@@ -6167,6 +6183,28 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         return;
       }
     }
+  }
+
+  // ── Auth endpoints ──────────────────────────────────────────
+  if (req.method==='GET' && url.pathname==='/api/auth/me') {
+    if (!req.auth) return json(res, { authenticated: false });
+    return json(res, { authenticated: true, user: req.auth.user, role: req.auth.role, source: req.auth.source });
+  }
+  if (req.method==='GET' && url.pathname==='/api/auth/users') {
+    if (req.auth?.role !== 'admin') return json(res, { error: 'Admin only' }, 403);
+    return json(res, { users: auth.getUsers() });
+  }
+  if (req.method==='POST' && url.pathname==='/api/auth/users/role') {
+    if (req.auth?.role !== 'admin') return json(res, { error: 'Admin only' }, 403);
+    const body = await readBody(req);
+    const { email, role } = body;
+    auth.setUserRole(email, role);
+    return json(res, { ok: true });
+  }
+  if (req.method==='GET' && url.pathname==='/api/auth/activity') {
+    if (req.auth?.role !== 'admin') return json(res, { error: 'Admin only' }, 403);
+    const days = parseInt(url.searchParams.get('days') || '7');
+    return json(res, auth.getActivityStats(days));
   }
 
   // ── 404 ─────────────────────────────────────────────────────
