@@ -2025,8 +2025,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     <div style={{ fontSize: 24, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(pickCompare.totals?.itempath || 0).toLocaleString()}</div>
                   </div>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
-                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER + BREAKAGE</div>
-                    <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(pickCompare.totals?.lookerPlusBreakage || 0).toLocaleString()}</div>
+                    <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER (TOTAL)</div>
+                    <div style={{ fontSize: 24, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(pickCompare.totals?.lookerTotal || 0).toLocaleString()}</div>
                   </div>
                   <div style={{ textAlign: "center", padding: 12, background: T.bg, borderRadius: 6 }}>
                     <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>VARIANCE</div>

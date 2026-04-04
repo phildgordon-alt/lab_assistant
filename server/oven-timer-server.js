@@ -5623,7 +5623,6 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       const ip = ipByDate[date] || { transactions: 0, items: 0, wh1: 0, wh2: 0, wh3: 0 };
       const lk = lkByDate[date] || { lenses: 0, frames: 0, breakages: 0 };
       const lkTotal = lk.lenses + lk.frames;
-      const lkPlusBreakage = lkTotal + lk.breakages;
       return {
         date,
         itempath: ip.transactions,
@@ -5635,8 +5634,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         lookerFrames: lk.frames,
         lookerTotal: lkTotal,
         breakages: lk.breakages,
-        lookerPlusBreakage: lkPlusBreakage,
-        variance: ip.transactions - lkPlusBreakage,
+        variance: ip.transactions - lkTotal,
       };
     });
 
@@ -5647,9 +5645,8 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       wh3: s.wh3 + d.wh3,
       lookerTotal: s.lookerTotal + d.lookerTotal,
       breakages: s.breakages + d.breakages,
-      lookerPlusBreakage: s.lookerPlusBreakage + d.lookerPlusBreakage,
       variance: s.variance + d.variance,
-    }), { itempath: 0, wh1: 0, wh2: 0, wh3: 0, lookerTotal: 0, breakages: 0, lookerPlusBreakage: 0, variance: 0 });
+    }), { itempath: 0, wh1: 0, wh2: 0, wh3: 0, lookerTotal: 0, breakages: 0, variance: 0 });
 
     return json(res, { daily, totals, days: daily.length });
   }
