@@ -1996,6 +1996,29 @@ Respond with a structured batching plan in this format:
         if (brkCount === 0) console.log('[Pipeline] DVI trace has', traceJobs.length, 'jobs but 0 with hasBreakage');
       } catch (e) { console.error('[Pipeline] DVI breakage error:', e.message); }
 
+      // Lab XML Truth: aggregated from persisted XML data (ground truth)
+      const labXmlByDate = {};
+      const labXmlLensByDate = {};
+      const labXmlFramesByDate = {};
+      try {
+        const xmlRows = labDb.db.prepare(`
+          SELECT ship_date,
+                 COUNT(*) as jobs,
+                 COUNT(lens_opc_r) + COUNT(lens_opc_l) as lens_count,
+                 COUNT(DISTINCT frame_upc) as unique_frames,
+                 COUNT(frame_upc) as frame_count,
+                 SUM(CASE WHEN is_hko = 1 THEN 1 ELSE 0 END) as hko
+          FROM dvi_shipped_jobs
+          WHERE ship_date >= date('now', '-' || ? || ' days')
+          GROUP BY ship_date
+        `).all(days);
+        for (const row of xmlRows) {
+          labXmlByDate[row.ship_date] = row.jobs - row.hko;
+          labXmlLensByDate[row.ship_date] = row.lens_count;
+          labXmlFramesByDate[row.ship_date] = row.frame_count;
+        }
+      } catch (e) { console.error('[Pipeline] Lab XML error:', e.message); }
+
       // Merge dates
       const allDates = new Set([
         ...Object.keys(dviByDate),
@@ -2003,6 +2026,7 @@ Respond with a structured batching plan in this format:
         ...Object.keys(lkJobsByDate),
         ...Object.keys(lkBreakageByDate),
         ...Object.keys(dviBreakageByDate),
+        ...Object.keys(labXmlByDate),
       ]);
       // Exclude today — only has partial data from one source, skews comparison
       const today = new Date().toISOString().slice(0, 10);
@@ -2017,6 +2041,9 @@ Respond with a structured batching plan in this format:
           hko: Math.max(dviHkoByDate[d] || 0, lkHko), // HKO from whichever source is higher
           dviBreakage: dviBreakageByDate[d] || 0,
           lookerBreakage: lkBreakageByDate[d] || 0,
+          labXml: labXmlByDate[d] || 0,
+          labXmlLenses: labXmlLensByDate[d] || 0,
+          labXmlFrames: labXmlFramesByDate[d] || 0,
         };
       });
 
@@ -2026,6 +2053,7 @@ Respond with a structured batching plan in this format:
         hko: daily.reduce((s, d) => s + d.hko, 0),
         dviBreakage: daily.reduce((s, d) => s + d.dviBreakage, 0),
         lookerBreakage: daily.reduce((s, d) => s + d.lookerBreakage, 0),
+        labXml: daily.reduce((s, d) => s + d.labXml, 0),
       };
 
       return json(res, { daily, totals, days: daily.length });

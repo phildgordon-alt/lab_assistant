@@ -2371,7 +2371,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                     }}>{d}d</button>
                   ))}
                   <ExportBtn onClick={() => {
-                    downloadCSV('pipeline_summary.csv', ['date','dvi','looker','hko','dviBreakage','lookerBreakage','variance'], (pipelineData?.daily || []).map(d => ({...d, hko: d.hko || 0, variance: d.dvi - d.looker})));
+                    downloadCSV('pipeline_summary.csv', ['date','dvi','looker','labXml','hko','dviBreakage','lookerBreakage','variance'], (pipelineData?.daily || []).map(d => ({...d, hko: d.hko || 0, labXml: d.labXml || 0, variance: d.dvi - d.looker})));
                   }} label="Export Summary" />
                   <ExportBtn onClick={async () => {
                     try {
@@ -2384,7 +2384,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               </div>
 
               {/* KPI cards */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 10, marginBottom: 10 }}>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.amber}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>DVI (SHIPPED)</div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{(totals.dvi || 0).toLocaleString()}</div>
@@ -2394,6 +2394,11 @@ function InventoryTab({ ovenServerUrl, settings }) {
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LOOKER → NETSUITE</div>
                   <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{(totals.looker || 0).toLocaleString()}</div>
                   <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>Irvine only (excl HKO)</div>
+                </Card>
+                <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.green}` }}>
+                  <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>LAB XML TRUTH</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{(totals.labXml || 0).toLocaleString()}</div>
+                  <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono }}>ground truth (excl HKO)</div>
                 </Card>
                 <Card style={{ padding: 14, textAlign: "center", borderLeft: `4px solid ${T.purple}` }}>
                   <div style={{ fontSize: 9, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>HKO (EXTERNAL)</div>
@@ -2452,6 +2457,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>BRK (NS)</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.amber, borderBottom: `1px solid ${T.border}` }}>DVI SHIPPED</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.blue, borderBottom: `1px solid ${T.border}` }}>LOOKER → NS</th>
+                        <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.green, borderBottom: `1px solid ${T.border}` }}>LAB XML</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.purple, borderBottom: `1px solid ${T.border}` }}>HKO</th>
                         <th style={{ padding: '8px 12px', textAlign: 'right', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>VARIANCE</th>
                         <th style={{ padding: '8px 12px', textAlign: 'left', fontSize: 10, color: T.textDim, borderBottom: `1px solid ${T.border}` }}>BAR</th>
@@ -2465,6 +2471,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         const isToday = d.date === new Date().toISOString().slice(0, 10);
                         const dviPct = Math.round((d.dvi / maxJobs) * 100);
                         const lkPct = Math.round((d.looker / maxJobs) * 100);
+                        const xmlPct = Math.round(((d.labXml || 0) / maxJobs) * 100);
                         const isExpanded = pipelineDetailDate === d.date;
                         return [
                           <tr key={d.date} onClick={() => {
@@ -2481,6 +2488,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.lookerBreakage > 0 ? T.blue : T.textDim }}>{d.lookerBreakage > 0 ? d.lookerBreakage.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.dvi > 0 ? T.amber : T.textDim }}>{d.dvi > 0 ? d.dvi.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: d.looker > 0 ? T.blue : T.textDim }}>{d.looker > 0 ? d.looker.toLocaleString() : '—'}</td>
+                            <td style={{ padding: '6px 12px', textAlign: 'right', color: d.labXml > 0 ? T.green : T.textDim }}>{d.labXml > 0 ? d.labXml.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', color: hko > 0 ? T.purple : T.textDim }}>{hko > 0 ? hko.toLocaleString() : '—'}</td>
                             <td style={{ padding: '6px 12px', textAlign: 'right', fontWeight: 600, color: variance === 0 ? T.textDim : Math.abs(variance) > 20 ? T.red : T.amber }}>
                               {d.dvi > 0 || d.looker > 0 ? (variance > 0 ? '+' : '') + variance : '—'}
@@ -2493,12 +2501,15 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
                                   <div style={{ width: `${lkPct}%`, height: '100%', background: T.blue, borderRadius: 2, opacity: 0.7 }} />
                                 </div>
+                                <div style={{ height: 4, background: T.surface, borderRadius: 2, overflow: 'hidden' }}>
+                                  <div style={{ width: `${xmlPct}%`, height: '100%', background: T.green, borderRadius: 2, opacity: 0.7 }} />
+                                </div>
                               </div>
                             </td>
                           </tr>,
                           isExpanded && (
                             <tr key={d.date + '-detail'}>
-                              <td colSpan={7} style={{ padding: 0, background: `${T.amber}05` }}>
+                              <td colSpan={9} style={{ padding: 0, background: `${T.amber}05` }}>
                                 {!pipelineDetail ? (
                                   <div style={{ padding: 16, textAlign: 'center', color: T.textDim, fontSize: 12 }}>Loading jobs...</div>
                                 ) : (
@@ -2555,6 +2566,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         const slice = daily.slice(0, n);
                         const sumDvi = slice.reduce((s, d) => s + d.dvi, 0);
                         const sumLk = slice.reduce((s, d) => s + d.looker, 0);
+                        const sumXml = slice.reduce((s, d) => s + (d.labXml || 0), 0);
                         const sumHko = slice.reduce((s, d) => s + (d.hko || 0), 0);
                         const sumVar = sumDvi - sumLk;
                         return (
@@ -2564,6 +2576,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <td style={{ padding: '8px 12px', textAlign: 'right', color: T.textDim }}>—</td>
                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: T.amber }}>{sumDvi.toLocaleString()}</td>
                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: T.blue }}>{sumLk.toLocaleString()}</td>
+                            <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: T.green }}>{sumXml > 0 ? sumXml.toLocaleString() : '—'}</td>
                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: T.purple }}>{sumHko > 0 ? sumHko.toLocaleString() : '—'}</td>
                             <td style={{ padding: '8px 12px', textAlign: 'right', fontWeight: 700, color: Math.abs(sumVar) > 50 ? T.red : T.amber }}>{sumVar > 0 ? '+' : ''}{sumVar.toLocaleString()}</td>
                             <td style={{ padding: '8px 12px' }} />
@@ -2576,6 +2589,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                 <div style={{ display: "flex", gap: 16, padding: "8px 12px", borderTop: `1px solid ${T.border}`, fontSize: 10, fontFamily: mono, color: T.textDim }}>
                   <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.amber, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />DVI shipped jobs</span>
                   <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.blue, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Looker → NetSuite</span>
+                  <span><span style={{ display: "inline-block", width: 10, height: 4, background: T.green, borderRadius: 2, marginRight: 4, opacity: 0.7 }} />Lab XML truth</span>
                   <span>Click a day to see job detail + export</span>
                 </div>
               </Card>
