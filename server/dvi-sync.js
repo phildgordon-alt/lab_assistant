@@ -397,6 +397,7 @@ class DviSyncService extends EventEmitter {
       );
 
       if (files.length === 0) {
+        syncState.lastError = null;
         syncState.status = 'idle';
         return;
       }
@@ -409,6 +410,7 @@ class DviSyncService extends EventEmitter {
       }
 
       if (toProcess.length === 0) {
+        syncState.lastError = null;
         syncState.status = 'idle';
         return;
       }
@@ -426,6 +428,7 @@ class DviSyncService extends EventEmitter {
       }
 
       syncState.lastSuccess = new Date().toISOString();
+      syncState.lastError = null;
       syncState.status = 'idle';
       saveState();
 
