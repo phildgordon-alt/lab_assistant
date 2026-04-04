@@ -564,11 +564,17 @@ function updatePreviousQty(materials) {
 let pollCount = 0;
 let cachedMaterialsResp = null;
 
+let pollRunning = false;
 async function poll() {
   if (CONFIG.mockMode) {
     loadMockData();
     return;
   }
+  if (pollRunning) {
+    console.log('[ItemPath] Poll already running — skipping');
+    return;
+  }
+  pollRunning = true;
 
   pollCount++;
 
@@ -895,6 +901,8 @@ async function poll() {
     cache.syncStatus = 'error';
     cache.syncError  = err.message;
     console.error('[ItemPath] Poll failed:', err.message);
+  } finally {
+    pollRunning = false;
   }
 }
 
