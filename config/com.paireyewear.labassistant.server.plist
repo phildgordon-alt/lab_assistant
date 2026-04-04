@@ -15,8 +15,8 @@
     <string>com.paireyewear.labassistant.server</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/opt/homebrew/bin/node</string>
-        <string>/Users/Shared/lab_assistant/server/oven-timer-server.js</string>
+        <string>/bin/bash</string>
+        <string>/Users/Shared/lab_assistant/scripts/start-server.sh</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
