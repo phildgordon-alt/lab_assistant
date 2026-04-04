@@ -151,7 +151,7 @@ async function main() {
 
     totalFetched += dayFetched;
     totalInserted += dayInserted;
-    console.log(`${dayStr}: ${dayCount} picks, ${dayFetched} fetched, ${dayInserted} new (${apiCalls} API calls total)`);
+    console.log(`${dayStr}: ${dayFetched} fetched, ${dayInserted} new (${apiCalls} API calls total)`);
   }
 
   // Final count
