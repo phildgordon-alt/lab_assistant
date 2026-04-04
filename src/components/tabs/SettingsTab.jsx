@@ -648,8 +648,8 @@ function DVIFilesPanel({settings}){
         <div style={{padding:"12px 16px",borderBottom:`1px solid ${T.border}`,display:"flex",alignItems:"center",gap:10}}>
           <div style={statusDot(sync&&!sync.error)}/>
           <div style={{flex:1}}>
-            <div style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:mono}}>DVI File Sync (SMB)</div>
-            <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>\\192.168.0.27\visdir — copy/move files from DVI share</div>
+            <div style={{fontSize:13,fontWeight:700,color:T.text,fontFamily:mono}}>DVI File Sync ({sync?.config?.connectionType||'unknown'})</div>
+            <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{sync?.config?.connectionType==='smb'?`\\\\${sync?.config?.host||'?'}\\visdir`:'Local mount'} — copy/move files from DVI share</div>
           </div>
           <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{sync?.running?'RUNNING':sync?'IDLE':'UNKNOWN'}</span>
         </div>
