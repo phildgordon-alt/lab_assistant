@@ -246,7 +246,7 @@ function parseDviXml(xml) {
   };
 
   // Extract frame-scoped fields
-  const frameBlock = xml.match(/<Frame[^>]*>([\s\S]*?)<\/Frame>/);
+  const frameBlock = xml.match(/<Frame[^>]*>([\s\S]*?)<\/Frame>/) || xml.match(/<Frame[^>]*\/>/);
   const frameXml = frameBlock ? frameBlock[0] : '';
   const getFrame = (tag) => { const m = frameXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`)); return m ? m[1].trim() : null; };
 
