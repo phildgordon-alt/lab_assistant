@@ -1854,6 +1854,27 @@ Respond with a structured batching plan in this format:
         nsDayCount = Object.values(dailyMap).filter(d => d.netsuite > 0).length;
       } catch (e) { console.error('[Consumption] DVI/NetSuite error:', e.message); }
 
+      // ── DVI XML: Lab ground truth from shipped XML files ──
+      let xmlLenses = 0, xmlFrames = 0, xmlJobs = 0, xmlDays = 0;
+      try {
+        const xmlRows = labDb.db.prepare(`
+          SELECT ship_date, COUNT(*) as jobs,
+                 COUNT(lens_opc_r) as r_lenses, COUNT(lens_opc_l) as l_lenses,
+                 COUNT(frame_upc) as frames
+          FROM dvi_shipped_jobs
+          WHERE is_hko = 0 AND ship_date >= ? AND ship_date <= ?
+          GROUP BY ship_date
+        `).all(from, to);
+        for (const row of xmlRows) {
+          xmlJobs += row.jobs;
+          xmlLenses += row.r_lenses + row.l_lenses;
+          xmlFrames += row.frames;
+          if (!dailyMap[row.ship_date]) dailyMap[row.ship_date] = { date: row.ship_date, kardex: 0, netsuite: 0, breakages: 0 };
+          dailyMap[row.ship_date].labXml = (row.r_lenses + row.l_lenses) + row.frames;
+        }
+        xmlDays = xmlRows.length;
+      } catch (e) { console.error('[Consumption] Lab XML error:', e.message); }
+
       // ── Merge into SKU table ──
       const daily = Object.values(dailyMap).sort((a, b) => b.date.localeCompare(a.date));
       const allSkus = new Set([...Object.keys(kardexBySku), ...Object.keys(nsBySku)].filter(isLensOrFrame));
@@ -1890,6 +1911,10 @@ Respond with a structured batching plan in this format:
             skus: Object.keys(nsBySku).length, days: nsDayCount,
           },
           variance: kardexTotal - (nsLenses + nsFrames),
+        },
+        labXml: {
+          total: xmlLenses + xmlFrames, lenses: xmlLenses, frames: xmlFrames,
+          jobs: xmlJobs, days: xmlDays,
         },
         skuCount: skus.length,
       });
