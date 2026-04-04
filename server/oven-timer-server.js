@@ -3619,7 +3619,7 @@ Respond with a structured batching plan in this format:
         status: trace.connected && !trace.stale ? 'ok' : trace.connected && trace.stale ? 'stale' : 'down',
         message: !trace.running ? 'Not started' :
                  !trace.connected ? `Connection errors (${trace.consecutiveErrors})` :
-                 trace.stale ? `No events for ${Math.round(trace.lastEventAgeSec/60)}m` :
+                 trace.stale ? `No activity for ${Math.round(trace.lastEventAgeSec/3600)}h` :
                  `Live — ${trace.lastEventAgeSec}s ago`,
         lastEvent: trace.lastEvent,
         jobs: trace.jobCount,

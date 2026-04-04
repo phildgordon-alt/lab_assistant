@@ -729,8 +729,8 @@ class DviTraceWatcher extends EventEmitter {
   getStatus() {
     const lastEvt = this.todayStats.lastEvent;
     const lastEvtAge = lastEvt ? (Date.now() - lastEvt) / 1000 : null; // seconds since last event
-    // Healthy = running + received an event in the last 5 minutes
-    const stale = lastEvtAge !== null && lastEvtAge > 300; // 5 min with no events
+    // Stale = no events for 2+ hours (lab is likely not running)
+    const stale = lastEvtAge !== null && lastEvtAge > 7200; // 2 hours with no events
     const connected = this.running && this._consecutiveErrors < 3;
     return {
       running: this.running,
