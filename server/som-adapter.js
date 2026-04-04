@@ -403,27 +403,10 @@ async function poll() {
           jobs: r.jobs
         }));
       } catch (stationErr) {
-        // Workstation table might not exist - try simpler query
-        try {
-          const [simpleStationRows] = await connection.query(`
-            SELECT
-              CurrentWorkstationID as stationId,
-              CurrentDepartmentID as deptId,
-              COUNT(*) as jobs
-            FROM order_header
-            WHERE EntryDate >= CURDATE() AND CurrentWorkstationID IS NOT NULL
-            GROUP BY CurrentWorkstationID, CurrentDepartmentID
-            ORDER BY jobs DESC
-          `);
-          byStation = simpleStationRows.map(r => ({
-            stationId: r.stationId,
-            stationName: `Station ${r.stationId}`,
-            departmentId: r.deptId,
-            zone: DEPARTMENTS[r.deptId]?.zone || 'unknown',
-            jobs: r.jobs
-          }));
-        } catch (e2) {
-          console.warn('[SOM] Could not query by station:', e2.message);
+        // CurrentWorkstationID doesn't exist in this SOM install — skip station breakdown
+        if (!this._stationWarnLogged) {
+          console.log('[SOM] Station breakdown unavailable (no CurrentWorkstationID column) — skipping');
+          this._stationWarnLogged = true;
         }
       }
 

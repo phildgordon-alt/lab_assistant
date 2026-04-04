@@ -41,6 +41,7 @@ let lastSync = null;
 let syncError = null;
 let pollTimer = null;
 let pollCount = 0;
+let _receiptWarnLogged = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OAUTH 1.0 SIGNATURE (HMAC-SHA256)
@@ -562,7 +563,10 @@ async function fetchOpenPOs() {
       }
       console.log(`[NetSuite] Item Receipts: ${receipts.length} receipts across ${Object.keys(receiptsByPO).length} POs`);
     } catch (e) {
-      console.log('[NetSuite] Item receipt query failed (non-critical):', e.message);
+      if (!_receiptWarnLogged) {
+        console.log('[NetSuite] Item receipt query unavailable (non-critical):', e.message?.substring(0, 80));
+        _receiptWarnLogged = true;
+      }
     }
 
     // Build status lookup for POs (to infer received from status)

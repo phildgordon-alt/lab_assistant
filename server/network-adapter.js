@@ -296,7 +296,7 @@ async function pollSite(siteId) {
     fetchUnifi(`${prefix}/stat/sta`),
     fetchUnifi(`${prefix}/stat/health`),
     fetchUnifi(`${prefix}/list/alarm`),
-    fetchUnifi(`${prefix}/stat/event?_limit=50`),
+    fetchUnifi(`${prefix}/stat/event?_limit=50`).catch(() => null),
     fetchUnifi(`${prefix}/stat/remoteuserstat`).catch(() => null),
   ]);
 
