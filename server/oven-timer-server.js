@@ -3256,18 +3256,21 @@ Respond with a structured batching plan in this format:
     const shippedYesterday = allShipped.filter(j => j.lastSeen && j.lastSeen >= yesterdayMs && j.lastSeen < todayMs);
     const shippedThisWeek = allShipped.filter(j => j.lastSeen && j.lastSeen >= weekMs);
 
-    // Count assembly completions today from trace history
+    // Count assembly completions today from trace history (one count per job, not per event)
     let assembledToday = 0;
     let assemblyPassToday = 0;
     let assemblyFailToday = 0;
     for (const j of allTracedJobs) {
       const history = dviTrace.getJobHistory ? dviTrace.getJobHistory(j.job_id) : null;
       if (!history || !history.events) continue;
+      let jobPassed = false, jobFailed = false;
       for (const e of history.events) {
         if (e.timestamp < todayMs) continue;
-        if (e.station === 'ASSEMBLY PASS') { assembledToday++; assemblyPassToday++; }
-        else if (e.station === 'ASSEMBLY FAIL') { assembledToday++; assemblyFailToday++; }
+        if (e.station === 'ASSEMBLY PASS') jobPassed = true;
+        else if (e.station === 'ASSEMBLY FAIL') jobFailed = true;
       }
+      if (jobPassed) { assembledToday++; assemblyPassToday++; }
+      else if (jobFailed) { assembledToday++; assemblyFailToday++; }
     }
 
     return json(res, {
@@ -3315,42 +3318,49 @@ Respond with a structured batching plan in this format:
       const history = dviTrace.getJobHistory(j.job_id);
       if (!history || !history.events) continue;
       const events = history.events;
+      // Find the LAST assembly pass/fail event today for this job (one count per job)
+      let lastAssemblyEvent = null;
+      let lastAssemblyIdx = -1;
       for (let i = 0; i < events.length; i++) {
         const e = events[i];
         if (e.timestamp < todayMs) continue;
-        if (e.station !== 'ASSEMBLY PASS' && e.station !== 'ASSEMBLY FAIL') continue;
-
-        if (e.station === 'ASSEMBLY PASS') passFailToday.pass++;
-        if (e.station === 'ASSEMBLY FAIL') passFailToday.fail++;
-
-        // Look backward for the ASSEMBLY #N station this job came from
-        let fromStation = null;
-        let fromOperator = e.operator || null;
-        for (let k = i - 1; k >= 0; k--) {
-          if (/^ASSEMBLY #\d+/.test(events[k].station)) {
-            fromStation = events[k].station;
-            if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
-            break;
-          }
-          // Only grab operator from ASSEMBLY-stage events (not shipping/QC)
-          if (!fromOperator && events[k].operator && /ASSEMBL|RECOMBOB/i.test(events[k].station)) {
-            fromOperator = events[k].operator;
-          }
+        if (e.station === 'ASSEMBLY PASS' || e.station === 'ASSEMBLY FAIL') {
+          lastAssemblyEvent = e;
+          lastAssemblyIdx = i;
         }
-        // Do NOT fall back to j.operator — that could be a shipping/QC operator
-
-        if (fromStation) {
-          stationCompletions[fromStation] = (stationCompletions[fromStation] || 0) + 1;
-        }
-
-        completedToday.push({
-          id: j.job_id,
-          result: e.station,
-          operator: fromOperator,
-          fromStation,
-          timestamp: e.timestamp
-        });
       }
+      if (!lastAssemblyEvent) continue;
+
+      if (lastAssemblyEvent.station === 'ASSEMBLY PASS') passFailToday.pass++;
+      if (lastAssemblyEvent.station === 'ASSEMBLY FAIL') passFailToday.fail++;
+
+      // Look backward for the ASSEMBLY #N station this job came from
+      let fromStation = null;
+      let fromOperator = lastAssemblyEvent.operator || null;
+      for (let k = lastAssemblyIdx - 1; k >= 0; k--) {
+        if (/^ASSEMBLY #\d+/.test(events[k].station)) {
+          fromStation = events[k].station;
+          if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
+          break;
+        }
+        // Only grab operator from ASSEMBLY-stage events (not shipping/QC)
+        if (!fromOperator && events[k].operator && /ASSEMBL|RECOMBOB/i.test(events[k].station)) {
+          fromOperator = events[k].operator;
+        }
+      }
+      // Do NOT fall back to j.operator — that could be a shipping/QC operator
+
+      if (fromStation) {
+        stationCompletions[fromStation] = (stationCompletions[fromStation] || 0) + 1;
+      }
+
+      completedToday.push({
+        id: j.job_id,
+        result: lastAssemblyEvent.station,
+        operator: fromOperator,
+        fromStation,
+        timestamp: lastAssemblyEvent.timestamp
+      });
     }
 
     // Build per-station breakdown for active jobs
