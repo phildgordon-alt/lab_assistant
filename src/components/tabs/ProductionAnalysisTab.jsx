@@ -381,7 +381,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
       {data && (() => {
         // Build VSM stage data by merging snapshot + production-analysis
         const snapshotStages = flowSnapshot?.stages || [];
-        const snapshotMap = Object.fromEntries(snapshotStages.map(s => [s.id, s]));
+        const snapshotMap = Object.fromEntries(snapshotStages.map(s => [s.id?.toUpperCase(), s]));
         const activeHours = hours.length > 1 ? (hours[hours.length - 1] - hours[0]) || 1 : 1;
 
         const vsmStages = STAGES.map(s => {
