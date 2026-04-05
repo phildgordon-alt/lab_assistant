@@ -3220,41 +3220,25 @@ Respond with a structured batching plan in this format:
       global._lastQueueLog = _now;
     }
 
-    // Get shipped stats from BOTH trace (today's movements) AND shipped XML index (archived files)
+    // Shipped stats — single source of truth: dvi_shipped_jobs SQLite table
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
     const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
     const todayMs = todayStart.getTime();
-    const yesterdayMs = yesterdayStart.getTime();
-    const weekMs = weekStart.getTime();
+    const todayStr = todayStart.toISOString().slice(0, 10);
+    const yesterdayStr = yesterdayStart.toISOString().slice(0, 10);
+    const weekStr = `${weekStart.getFullYear()}-${String(weekStart.getMonth()+1).padStart(2,'0')}-${String(weekStart.getDate()).padStart(2,'0')}`;
 
-    // Source 1: Trace jobs with SHIPPED status (from today's trace file)
-    const allTracedJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
-    const traceShipped = allTracedJobs.filter(j => j.status === 'SHIPPED' || j.stage === 'SHIPPED');
-    const traceShippedIds = new Set(traceShipped.map(j => j.job_id));
-
-    // Source 2: Shipped XML archive (persistent — all shipped jobs with parsed dates)
-    const xmlShipped = [];
-    for (const [jobNum, xml] of shippedJobIndex) {
-      if (traceShippedIds.has(jobNum)) continue; // already counted from trace
-      if (!xml.shippedAt) continue;
-      xmlShipped.push({
-        job_id: jobNum, invoice: xml.invoice || jobNum, tray: xml.tray || jobNum,
-        station: 'SH CONVEY', stage: 'SHIPPING', status: 'SHIPPED',
-        coating: xml.coating, lensStyle: xml.lensStyle, lensMat: xml.lensMat,
-        frameStyle: xml.frameStyle, frameSku: xml.frameSku, rxNum: xml.rxNum,
-        rush: 'N', Rush: 'N',
-        firstSeen: xml.enteredAt || null, lastSeen: xml.shippedAt,
-        daysInLab: xml.daysInLab ? parseFloat(xml.daysInLab) : 0,
-        source: 'dvi-shipped-xml'
-      });
-    }
-
-    // Merge both sources
-    const allShipped = [...traceShipped, ...xmlShipped];
-    const shippedToday = allShipped.filter(j => j.lastSeen && j.lastSeen >= todayMs);
-    const shippedYesterday = allShipped.filter(j => j.lastSeen && j.lastSeen >= yesterdayMs && j.lastSeen < todayMs);
-    const shippedThisWeek = allShipped.filter(j => j.lastSeen && j.lastSeen >= weekMs);
+    const shippedCounts = labDb.db.prepare(`
+      SELECT ship_date, COUNT(*) as cnt FROM dvi_shipped_jobs
+      WHERE is_hko = 0 AND ship_date >= ?
+      GROUP BY ship_date
+    `).all(weekStr);
+    const shippedByDate = {};
+    for (const r of shippedCounts) shippedByDate[r.ship_date] = r.cnt;
+    const shippedTodayCount = shippedByDate[todayStr] || 0;
+    const shippedYesterdayCount = shippedByDate[yesterdayStr] || 0;
+    const shippedThisWeekCount = Object.values(shippedByDate).reduce((s, v) => s + v, 0);
 
     // Count assembly completions today from trace history (one count per job, not per event)
     let assembledToday = 0;
@@ -3276,12 +3260,10 @@ Respond with a structured batching plan in this format:
     return json(res, {
       jobs: enriched,
       shipped: {
-        today: shippedToday.length,
-        yesterday: shippedYesterday.length,
-        thisWeek: shippedThisWeek.length,
-        todayJobs: shippedToday,
-        yesterdayJobs: shippedYesterday,
-        total: allShipped.length
+        today: shippedTodayCount,
+        yesterday: shippedYesterdayCount,
+        thisWeek: shippedThisWeekCount,
+        source: 'dvi_shipped_jobs'
       },
       assembly: {
         assembledToday,
@@ -3553,29 +3535,29 @@ Respond with a structured batching plan in this format:
   // ── Shipped history — daily shipped counts from trace + shipped XML ─────
   if (req.method==='GET' && url.pathname==='/api/shipping/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
+    // Single source of truth: dvi_shipped_jobs SQLite table (from shipped XML files)
+    const rows = labDb.db.prepare(`
+      SELECT ship_date, COUNT(*) as shipped
+      FROM dvi_shipped_jobs
+      WHERE is_hko = 0 AND ship_date >= date('now', '-' || ? || ' days')
+      GROUP BY ship_date
+      ORDER BY ship_date DESC
+    `).all(days);
+    // Build full day range with zeros for missing days
     const byDay = {};
-    // Initialize days using local time (not UTC)
     for (let d = 0; d < days; d++) {
       const date = new Date();
       date.setDate(date.getDate() - d);
       const key = `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
       byDay[key] = { date: key, shipped: 0, rush: 0 };
     }
-    // Primary source: Shipped XML archive (source of truth)
-    // Use shipDate string directly to avoid UTC timezone shift
-    // Exclude HKO (MachineID="000") — those are external lab jobs
-    for (const [jobNum, xml] of shippedJobIndex) {
-      if (!xml.shipDate) continue;
-      if (xml.isHko) continue;
-      const [mm, dd, yy] = xml.shipDate.split('/');
-      const key = `20${yy}-${mm}-${dd}`;
-      if (byDay[key]) {
-        byDay[key].shipped++;
-        if (xml.rush === 'Y') byDay[key].rush++;
+    for (const row of rows) {
+      if (byDay[row.ship_date]) {
+        byDay[row.ship_date].shipped = row.shipped;
       }
     }
     const history = Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date));
-    return json(res, { history, days, shippedIndexSize: shippedJobIndex.size });
+    return json(res, { history, days, source: 'dvi_shipped_jobs' });
   }
 
   if (req.method==='GET' && url.pathname==='/api/assembly/config') {
