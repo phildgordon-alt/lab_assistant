@@ -39,19 +39,15 @@ function yesterdayStr() {
 }
 
 const MACHINE_COLORS = {
-  // SOM device type abbreviations
-  'Blocker': '#3B82F6', 'Generator': '#8B5CF6', 'Edger': '#EC4899',
-  'Engraver': '#06B6D4', 'Polisher': '#F59E0B', 'Coater': '#10B981',
-  // SOM uses these abbreviations
-  'FSE': '#3B82F6',   // Blocker (Freeform Surface Equipment)
+  'Blocker': '#3B82F6',
+  'FSE': '#06B6D4',   // Freeform Surface Edger
   'CCS': '#10B981',   // Coater
-  'FSP': '#8B5CF6',   // Generator (Freeform Surface Processing)
-  'OPA': '#06B6D4',   // Engraver (Optical Pattern Analysis)
-  'FSO': '#EC4899',   // Edger (Freeform Surface Optimization)
-  'CLU': '#F59E0B',   // Polisher (Cylinder Lapping Unit)
-  'TSA': '#A78BFA',   // Tray Scanner
+  'FSP': '#8B5CF6',   // Freeform Surface Polisher
   'DBA': '#34D399',   // Digital Blocker
-  'LCU': '#FB923C',   // Lens Cutting Unit
+  'FED': '#EC4899',   // Freeform Edger
+  'FSG': '#F59E0B',   // Freeform Surface Generator
+  'CLU': '#FB923C',   // Cylinder Lapping Unit
+  'TSA': '#A78BFA',   // Tray Scanner
 };
 
 function MachineChart({ serverUrl, date }) {
