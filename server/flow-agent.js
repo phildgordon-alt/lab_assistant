@@ -2101,15 +2101,18 @@ module.exports = {
       `).all(dayStartMs, SHIFT_START, dayStartMs, dayEndMs);
 
       // ── Picks per hour from picks_history ──
-      // completed_at is TEXT like 'YYYY-MM-DD HH:MM:SS' (Pacific)
+      // completed_at is TEXT — may use T or space separator (e.g. '2026-04-04T14:30:00' or '2026-04-04 14:30:00')
+      // Use substr to match date portion and extract hour, avoiding separator format issues
       const pickRows = db.prepare(`
         SELECT CAST(substr(completed_at, 12, 2) AS INTEGER) AS hour,
                COUNT(*) AS cnt,
                COALESCE(SUM(qty), 0) AS total_qty
         FROM picks_history
-        WHERE completed_at >= ? AND completed_at < ?
+        WHERE substr(completed_at, 1, 10) = ?
+          AND CAST(substr(completed_at, 12, 2) AS INTEGER) >= ?
+          AND CAST(substr(completed_at, 12, 2) AS INTEGER) < ?
         GROUP BY hour
-      `).all(`${targetDate} 05:00:00`, `${targetDate} 23:00:00`);
+      `).all(targetDate, SHIFT_START, SHIFT_END);
 
       // ── Shipped per hour from dvi_shipped_jobs ──
       const shipRows = db.prepare(`
