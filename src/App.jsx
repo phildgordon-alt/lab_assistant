@@ -8,6 +8,7 @@ import MaintenanceTab from "./components/tabs/MaintenanceTab";
 import AnalyticsTab from "./components/tabs/AnalyticsTab";
 import ProductionAnalysisTab from "./components/tabs/ProductionAnalysisTab";
 import LensScanner from "./components/LensScanner";
+import { StageHistory } from "./components/shared";
 
 // ── Error Boundary — catches render errors and shows fallback UI ───────────────
 class ErrorBoundary extends Component {
@@ -2238,6 +2239,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
       {subView==="pipeline"&&<CoatingPipelineView serverUrl={ovenServerUrl} settings={settings}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
+      <StageHistory serverUrl={ovenServerUrl} stage="COATING" stageLabel="Coated" color="#F59E0B" />
     </div>
     </ProductionStageTab>
   );
@@ -4741,6 +4743,8 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </Card>
         );
       })()}
+
+      <StageHistory serverUrl={ovenServerUrl} stage="SURFACING" stageLabel="Surfaced" color="#3B82F6" />
     </ProductionStageTab>
   );
 }
@@ -4931,6 +4935,8 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
           </div>
         </Card>
       )}
+
+      <StageHistory serverUrl={ovenServerUrl} stage="CUTTING" stageLabel="Cut" color="#8B5CF6" />
     </ProductionStageTab>
   );
 }
@@ -5491,6 +5497,8 @@ function IncomingTab({ ovenServerUrl, settings }) {
           <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No incoming data available</div>
         )}
       </Card>
+
+      <StageHistory serverUrl={ovenServerUrl} stage="INCOMING" stageLabel="Incoming" color="#06B6D4" />
     </ProductionStageTab>
   );
 }
