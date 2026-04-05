@@ -52,9 +52,6 @@ const MACHINE_COLORS = {
 
 function MachineChart({ serverUrl, date }) {
   const [somData, setSomData] = useState(null);
-  const containerRef = useRef(null);
-  const [chartW, setChartW] = useState(1400);
-
   useEffect(() => {
     if (!serverUrl) return;
     fetch(`${serverUrl}/api/som/lens-per-hour?date=${date}`)
@@ -63,25 +60,15 @@ function MachineChart({ serverUrl, date }) {
       .catch(() => setSomData(null));
   }, [serverUrl, date]);
 
-  useEffect(() => {
-    if (!containerRef.current) return;
-    setChartW(containerRef.current.clientWidth - 40);
-    const ro = new ResizeObserver(entries => { setChartW(entries[0].contentRect.width - 40); });
-    ro.observe(containerRef.current);
-    return () => ro.disconnect();
-  }, []);
-
   if (!somData || !somData.series || somData.series.length === 0) return null;
 
   const series = somData.series;
   const hours = somData.hours || [];
   const maxVal = Math.max(1, ...series.flatMap(s => (s.data || []).map(d => d.lenses || 0)));
   const H = 160;
-  const padL = 35;
-  const barGroupW = hours.length > 0 ? (chartW - padL) / hours.length : 30;
 
   return (
-    <div ref={containerRef} style={{
+    <div style={{
       background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
       borderRadius: 10, padding: 16, marginBottom: 18
     }}>
@@ -93,42 +80,43 @@ function MachineChart({ serverUrl, date }) {
           </span>
         ))}
       </div>
-      <svg width={chartW} height={H + 25} style={{ display: 'block' }}>
-        {/* Grid lines */}
+      <div style={{ position: 'relative', height: H }}>
+        {/* Y-axis grid */}
         {[0, 0.25, 0.5, 0.75, 1].map(f => (
-          <g key={f}>
-            <line x1={padL} y1={H - f * H} x2={chartW} y2={H - f * H} stroke="rgba(255,255,255,0.05)" />
-            <text x={padL - 4} y={H - f * H + 3} fill={T.textDim} fontSize={8} fontFamily={mono} textAnchor="end">
-              {Math.round(f * maxVal)}
-            </text>
-          </g>
+          <div key={f} style={{ position: 'absolute', left: 0, bottom: `${f * 100}%`, width: '100%', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+            <span style={{ position: 'absolute', left: 0, top: -8, fontSize: 8, color: T.textDim, fontFamily: mono }}>{Math.round(f * maxVal)}</span>
+          </div>
         ))}
-        {/* Stacked bars per hour */}
-        {hours.map((h, hi) => {
-          const x = padL + hi * barGroupW;
-          let yOffset = 0;
-          return (
-            <g key={h}>
-              {series.map(s => {
-                const dp = (s.data || []).find(d => d.hour === h);
-                const val = dp ? dp.lenses : 0;
-                const barH = (val / maxVal) * H;
-                const y = H - yOffset - barH;
-                yOffset += barH;
-                return val > 0 ? (
-                  <rect key={s.name} x={x + 2} y={y} width={Math.max(1, barGroupW - 4)} height={barH}
-                    fill={MACHINE_COLORS[s.name] || T.textDim} opacity={0.8} rx={2}>
-                    <title>{s.name} {h > 12 ? h - 12 + 'p' : h + 'a'}: {val} lenses</title>
-                  </rect>
-                ) : null;
-              })}
-              <text x={x + barGroupW / 2} y={H + 14} fill={T.textDim} fontSize={8} fontFamily={mono} textAnchor="middle">
-                {h > 12 ? h - 12 + 'p' : h === 12 ? '12p' : h + 'a'}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+        {/* Bars via CSS flex */}
+        <div style={{ position: 'absolute', left: 30, right: 0, top: 0, bottom: 0, display: 'flex', alignItems: 'flex-end', gap: 1 }}>
+          {hours.map(h => {
+            let totalH = 0;
+            const segments = series.map(s => {
+              const dp = (s.data || []).find(d => d.hour === h);
+              const val = dp ? dp.lenses : 0;
+              const pct = (val / maxVal) * 100;
+              totalH += pct;
+              return { name: s.name, val, pct };
+            }).filter(seg => seg.val > 0);
+            return (
+              <div key={h} style={{ flex: 1, display: 'flex', flexDirection: 'column-reverse', height: '100%', justifyContent: 'flex-start' }}>
+                {segments.map(seg => (
+                  <div key={seg.name} style={{ width: '100%', height: `${seg.pct}%`, background: MACHINE_COLORS[seg.name] || T.textDim, opacity: 0.8, minHeight: seg.val > 0 ? 2 : 0 }}
+                    title={`${seg.name}: ${seg.val} lenses`} />
+                ))}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {/* X labels */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginLeft: 30, marginTop: 4 }}>
+        {hours.map(h => (
+          <span key={h} style={{ fontSize: 8, color: T.textDim, fontFamily: mono }}>
+            {h > 12 ? h - 12 + 'p' : h === 12 ? '12p' : h + 'a'}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
@@ -144,20 +132,6 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const [error, setError] = useState(null);
   const [hiddenStages, setHiddenStages] = useState(new Set());
 
-  // Chart container ref for responsive width
-  const chartRef = useRef(null);
-  const [chartW, setChartW] = useState(1200);
-
-  useEffect(() => {
-    if (!chartRef.current) return;
-    // Measure immediately
-    setChartW(chartRef.current.clientWidth || 1200);
-    const obs = new ResizeObserver(entries => {
-      for (const e of entries) setChartW(e.contentRect.width);
-    });
-    obs.observe(chartRef.current);
-    return () => obs.disconnect();
-  }, []);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -252,14 +226,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const maxPicks = Math.max(1, ...picks.map(p => p.count));
 
   // SVG chart dimensions
-  const svgPadL = 40;
-  const svgPadR = 10;
-  const svgH = 240;
-  const plotW = chartW - svgPadL - svgPadR;
-  const plotH = svgH - 30; // leave room for x labels
-
-  const xForHour = (idx) => svgPadL + (hours.length > 1 ? (idx / (hours.length - 1)) * plotW : plotW / 2);
-  const yForVal = (val) => 10 + (1 - val / chartMax) * (plotH - 20);
+  const plotH = 210; // chart area height
 
   return (
     <div>
@@ -419,37 +386,26 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
           })}
         </div>
 
-        {/* SVG Chart */}
-        <div ref={chartRef} style={{ width: '100%', minWidth: 0 }}>
-          <svg width={chartW} height={svgH} style={{ display: 'block' }}>
-            {/* Grid lines */}
-            {[0, 0.25, 0.5, 0.75, 1].map(p => {
-              const y = yForVal(chartMax * p);
-              return (
-                <g key={p}>
-                  <line x1={svgPadL} y1={y} x2={chartW - svgPadR} y2={y}
-                    stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-                  <text x={svgPadL - 4} y={y + 3} textAnchor="end"
-                    fill={T.textDim} fontSize="9" fontFamily="'JetBrains Mono',monospace">
-                    {Math.round(chartMax * p)}
-                  </text>
-                </g>
-              );
-            })}
-
-            {/* X-axis labels */}
-            {hours.map((h, i) => (
-              <text key={h} x={xForHour(i)} y={svgH - 4} textAnchor="middle"
-                fill={T.textDim} fontSize="9" fontFamily="'JetBrains Mono',monospace">
-                {formatHour(h)}
-              </text>
-            ))}
+        {/* Chart area — CSS positioned like Flow tab */}
+        <div style={{ position: 'relative', height: plotH + 10 }}>
+          {/* Y-axis grid lines via CSS */}
+          {[0, 0.25, 0.5, 0.75, 1].map(p => (
+            <div key={p} style={{ position: 'absolute', left: 0, bottom: `${p * 100}%`, width: '100%', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+              <span style={{ position: 'absolute', left: 0, top: -8, fontSize: 9, color: T.textDim, fontFamily: mono }}>{Math.round(chartMax * p)}</span>
+            </div>
+          ))}
+          {/* SVG with CSS width */}
+          <svg width="100%" height="100%"
+            viewBox={`0 0 ${Math.max(hours.length, 1) * 40} ${plotH}`}
+            preserveAspectRatio="none"
+            style={{ position: 'absolute', left: 30, top: 0, width: 'calc(100% - 40px)', height: '100%' }}>
 
             {/* Compare lines (dashed, behind) */}
             {compareOn && compareData && visibleStages.map(s => {
               const arr = compareData[s.key] || [];
               if (arr.length < 2) return null;
-              const pts = arr.map((d, i) => `${xForHour(i)},${yForVal(d.count)}`).join(' ');
+              const xScale = hours.length > 1 ? (hours.length * 40 - 40) / (hours.length - 1) : 0;
+              const pts = arr.map((d, i) => `${i * xScale},${plotH - (d.count / chartMax) * (plotH - 20)}`).join(' ');
               return (
                 <polyline key={s.key + '-cmp'} points={pts} fill="none"
                   stroke={s.color} strokeWidth="1.5" strokeDasharray="4,3" opacity="0.35" />
@@ -460,17 +416,19 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
             {visibleStages.map(s => {
               const arr = throughput[s.key] || [];
               if (arr.length < 2) return null;
-              const pts = arr.map((d, i) => `${xForHour(i)},${yForVal(d.count)}`).join(' ');
+              const xScale = hours.length > 1 ? (hours.length * 40 - 40) / (hours.length - 1) : 0;
+              const pts = arr.map((d, i) => `${i * xScale},${plotH - (d.count / chartMax) * (plotH - 20)}`).join(' ');
               const peakIdx = arr.reduce((best, d, i) => d.count > arr[best].count ? i : best, 0);
               const peakVal = arr[peakIdx]?.count || 0;
+              const peakX = peakIdx * xScale;
+              const peakY = plotH - (peakVal / chartMax) * (plotH - 20);
               return (
                 <g key={s.key}>
                   <polyline points={pts} fill="none" stroke={s.color} strokeWidth="2" opacity="0.85" />
                   {peakVal > 0 && (
                     <>
-                      <circle cx={xForHour(peakIdx)} cy={yForVal(peakVal)} r="3"
-                        fill={s.color} stroke={T.bg} strokeWidth="1" />
-                      <text x={xForHour(peakIdx)} y={yForVal(peakVal) - 7} textAnchor="middle"
+                      <circle cx={peakX} cy={peakY} r="3" fill={s.color} stroke={T.bg} strokeWidth="1" />
+                      <text x={peakX} y={peakY - 6} textAnchor="middle"
                         fill={s.color} fontSize="8" fontFamily="'JetBrains Mono',monospace" fontWeight="700">
                         {peakVal}
                       </text>
@@ -480,6 +438,12 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
               );
             })}
           </svg>
+        </div>
+        {/* X-axis labels */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginLeft: 30, marginTop: 4 }}>
+          {hours.map(h => (
+            <span key={h} style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>{formatHour(h)}</span>
+          ))}
         </div>
       </div>
 
