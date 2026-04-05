@@ -2053,4 +2053,210 @@ module.exports = {
     } catch {}
     return result;
   },
+
+  // ── Production Analysis ──
+
+  /**
+   * Hour-by-hour, stage-by-stage production analysis for a given day.
+   * Pulls from stage_transitions, picks_history, dvi_shipped_jobs.
+   * @param {string} date — YYYY-MM-DD (Pacific)
+   * @param {string|null} compareDate — optional YYYY-MM-DD for comparison
+   * @returns {object} structured production analysis
+   */
+  getProductionAnalysis(date, compareDate = null) {
+    const STAGES = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
+    const SHIFT_START = 5;  // 5 AM
+    const SHIFT_END = 23;   // 11 PM (exclusive: last bucket is hour 22)
+    const shiftHours = Array.from({ length: SHIFT_END - SHIFT_START }, (_, i) => i + SHIFT_START);
+
+    function analyzeDay(targetDate) {
+      // Day boundaries: 5AM to 11PM Pacific
+      // transition_at is epoch ms in Pacific time context
+      // Build epoch ms for targetDate 05:00 and 23:00 Pacific
+      // Since timestamps are already Pacific, parse as local
+      const dayStart = new Date(`${targetDate}T05:00:00`);
+      const dayEnd = new Date(`${targetDate}T23:00:00`);
+      const dayStartMs = dayStart.getTime();
+      const dayEndMs = dayEnd.getTime();
+
+      // ── Stage throughput by hour (unique jobs entering each stage) ──
+      const throughputRows = db.prepare(`
+        SELECT to_stage,
+               CAST((transition_at - ?) / 3600000 AS INTEGER) + ? AS hour,
+               COUNT(DISTINCT job_id) AS job_count
+        FROM stage_transitions
+        WHERE transition_at >= ? AND transition_at < ?
+        GROUP BY to_stage, hour
+      `).all(dayStartMs, SHIFT_START, dayStartMs, dayEndMs);
+
+      // ── Operator count by stage by hour ──
+      const operatorRows = db.prepare(`
+        SELECT to_stage,
+               CAST((transition_at - ?) / 3600000 AS INTEGER) + ? AS hour,
+               COUNT(DISTINCT operator_id) AS operator_count
+        FROM stage_transitions
+        WHERE transition_at >= ? AND transition_at < ?
+          AND operator_id IS NOT NULL AND operator_id != ''
+        GROUP BY to_stage, hour
+      `).all(dayStartMs, SHIFT_START, dayStartMs, dayEndMs);
+
+      // ── Picks per hour from picks_history ──
+      // completed_at is TEXT like 'YYYY-MM-DD HH:MM:SS' (Pacific)
+      const pickRows = db.prepare(`
+        SELECT CAST(substr(completed_at, 12, 2) AS INTEGER) AS hour,
+               COUNT(*) AS cnt,
+               COALESCE(SUM(qty), 0) AS total_qty
+        FROM picks_history
+        WHERE completed_at >= ? AND completed_at < ?
+        GROUP BY hour
+      `).all(`${targetDate} 05:00:00`, `${targetDate} 23:00:00`);
+
+      // ── Shipped per hour from dvi_shipped_jobs ──
+      const shipRows = db.prepare(`
+        SELECT CAST(substr(ship_time, 1, 2) AS INTEGER) AS hour,
+               COUNT(*) AS cnt
+        FROM dvi_shipped_jobs
+        WHERE ship_date = ? AND is_hko = 0
+          AND CAST(substr(ship_time, 1, 2) AS INTEGER) >= ?
+          AND CAST(substr(ship_time, 1, 2) AS INTEGER) < ?
+        GROUP BY hour
+      `).all(targetDate, SHIFT_START, SHIFT_END);
+
+      // ── Build throughput structure ──
+      const throughput = {};
+      const operatorsByStage = {};
+      for (const stage of STAGES) {
+        throughput[stage] = shiftHours.map(h => ({ hour: h, count: 0, operators: 0 }));
+        operatorsByStage[stage] = shiftHours.map(h => ({ hour: h, count: 0 }));
+      }
+
+      // Add picking data from picks_history into throughput
+      for (const p of pickRows) {
+        const h = p.hour;
+        if (h < SHIFT_START || h >= SHIFT_END) continue;
+        const entry = throughput.PICKING.find(e => e.hour === h);
+        if (entry) entry.count += p.cnt;
+      }
+
+      for (const row of throughputRows) {
+        const stage = (row.to_stage || '').toUpperCase();
+        if (!STAGES.includes(stage)) continue;
+        const h = row.hour;
+        if (h < SHIFT_START || h >= SHIFT_END) continue;
+        const entry = throughput[stage].find(e => e.hour === h);
+        if (entry) entry.count = row.job_count;
+      }
+
+      // Add shipped data into SHIPPING throughput
+      for (const s of shipRows) {
+        const h = s.hour;
+        if (h < SHIFT_START || h >= SHIFT_END) continue;
+        const entry = throughput.SHIPPING.find(e => e.hour === h);
+        if (entry) entry.count = s.cnt;
+      }
+
+      for (const row of operatorRows) {
+        const stage = (row.to_stage || '').toUpperCase();
+        if (!STAGES.includes(stage)) continue;
+        const h = row.hour;
+        if (h < SHIFT_START || h >= SHIFT_END) continue;
+        const tEntry = throughput[stage].find(e => e.hour === h);
+        if (tEntry) tEntry.operators = row.operator_count;
+        const oEntry = operatorsByStage[stage].find(e => e.hour === h);
+        if (oEntry) oEntry.count = row.operator_count;
+      }
+
+      // ── Daily totals ──
+      const dailyTotals = {};
+      for (const stage of STAGES) {
+        dailyTotals[stage] = throughput[stage].reduce((sum, e) => sum + e.count, 0);
+      }
+
+      // ── Picks array ──
+      const picks = shiftHours.map(h => {
+        const row = pickRows.find(p => p.hour === h);
+        return { hour: h, count: row ? row.cnt : 0, qty: row ? row.total_qty : 0 };
+      }).filter(p => p.count > 0 || p.qty > 0);
+      // Include all hours even if zero? Nah — filter to non-zero for cleaner output
+      // Actually, keep all shift hours for consistent charting
+      const picksAll = shiftHours.map(h => {
+        const row = pickRows.find(p => p.hour === h);
+        return { hour: h, count: row ? row.cnt : 0, qty: row ? row.total_qty : 0 };
+      });
+
+      // ── Shipped array ──
+      const shippedAll = shiftHours.map(h => {
+        const row = shipRows.find(s => s.hour === h);
+        return { hour: h, count: row ? row.cnt : 0 };
+      });
+
+      return { throughput, dailyTotals, operators: operatorsByStage, picks: picksAll, shipped: shippedAll };
+    }
+
+    // ── Analyze target date ──
+    const primary = analyzeDay(date);
+
+    // ── Analyze comparison date (if requested) ──
+    let compareData = null;
+    let compareDailyTotals = null;
+    if (compareDate) {
+      const comp = analyzeDay(compareDate);
+      compareData = comp.throughput;
+      compareDailyTotals = comp.dailyTotals;
+    }
+
+    // ── Bottleneck analysis ──
+    // Pipeline order for bottleneck detection
+    const pipelineOrder = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
+    const activeHours = shiftHours.filter(h => {
+      // Count hours that had any activity
+      return pipelineOrder.some(s => {
+        const entry = primary.throughput[s]?.find(e => e.hour === h);
+        return entry && entry.count > 0;
+      });
+    });
+    const numActiveHours = Math.max(1, activeHours.length);
+
+    let bottleneck = null;
+    let minRatio = Infinity;
+
+    for (let i = 1; i < pipelineOrder.length; i++) {
+      const stage = pipelineOrder[i];
+      const upstream = pipelineOrder[i - 1];
+      const stageTotal = primary.dailyTotals[stage] || 0;
+      const upstreamTotal = primary.dailyTotals[upstream] || 0;
+      const stageRate = Math.round((stageTotal / numActiveHours) * 10) / 10;
+      const upstreamRate = Math.round((upstreamTotal / numActiveHours) * 10) / 10;
+
+      // Bottleneck = stage with lowest rate relative to upstream
+      if (upstreamRate > 0 && stageRate < upstreamRate) {
+        const ratio = stageRate / upstreamRate;
+        if (ratio < minRatio) {
+          minRatio = ratio;
+          bottleneck = {
+            stage,
+            avgRate: stageRate,
+            upstreamStage: upstream,
+            upstreamRate,
+            gap: Math.round((upstreamRate - stageRate) * 10) / 10,
+            reason: `${stage} throughput (${stageRate}/hr) below upstream ${upstream.toLowerCase()} (${upstreamRate}/hr)`,
+          };
+        }
+      }
+    }
+
+    return {
+      date,
+      compareTo: compareDate || null,
+      hours: shiftHours,
+      throughput: primary.throughput,
+      compareData,
+      dailyTotals: primary.dailyTotals,
+      compareDailyTotals,
+      operators: primary.operators,
+      picks: primary.picks,
+      shipped: primary.shipped,
+      bottleneck,
+    };
+  },
 };

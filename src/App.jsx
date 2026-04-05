@@ -6,6 +6,7 @@ import OverviewTab from "./components/tabs/OverviewTab";
 import InventoryTab from "./components/tabs/InventoryTab";
 import MaintenanceTab from "./components/tabs/MaintenanceTab";
 import AnalyticsTab from "./components/tabs/AnalyticsTab";
+import ProductionAnalysisTab from "./components/tabs/ProductionAnalysisTab";
 import LensScanner from "./components/LensScanner";
 
 // ── Error Boundary — catches render errors and shows fallback UI ───────────────
@@ -11569,6 +11570,7 @@ function LabAssistantV2(){
     ]},
     {id:"analytics_menu",label:"Analytics",icon:"📊",type:"dropdown",items:[
       {id:"analytics",label:"Analytics",icon:"📊"},
+      {id:"production-analysis",label:"Production Analysis",icon:"📈"},
       {id:"aging",label:"Aging Jobs",icon:"⏳"},
       {id:"qc",label:"QC & Breakage",icon:"✓"},
     ]},
@@ -11678,6 +11680,7 @@ function LabAssistantV2(){
         {view==="inventory"&&<InventoryTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
+        {view==="production-analysis"&&<ProductionAnalysisTab serverUrl={ovenServerUrl} settings={settings}/>}
         {view==="qc"&&<QCTab trays={trays} dviJobs={mergedJobs} breakage={breakage} setBreakage={setBreakage}/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
