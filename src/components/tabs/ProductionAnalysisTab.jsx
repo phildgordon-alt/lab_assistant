@@ -138,10 +138,12 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
 
   // Chart container ref for responsive width
   const chartRef = useRef(null);
-  const [chartW, setChartW] = useState(800);
+  const [chartW, setChartW] = useState(1200);
 
   useEffect(() => {
     if (!chartRef.current) return;
+    // Measure immediately
+    setChartW(chartRef.current.clientWidth || 1200);
     const obs = new ResizeObserver(entries => {
       for (const e of entries) setChartW(e.contentRect.width);
     });
@@ -411,8 +413,8 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
         </div>
 
         {/* SVG Chart */}
-        <div ref={chartRef} style={{ width: '100%', overflow: 'hidden' }}>
-          <svg width={svgW} height={svgH} style={{ display: 'block' }}>
+        <div ref={chartRef} style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
+          <svg width={chartW} height={svgH} style={{ display: 'block', width: '100%' }}>
             {/* Grid lines */}
             {[0, 0.25, 0.5, 0.75, 1].map(p => {
               const y = yForVal(chartMax * p);
