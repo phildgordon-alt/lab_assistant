@@ -398,6 +398,44 @@ function loadShippedIndex() {
   if (loaded > 0) console.log(`[DVI-Shipped] Loaded ${loaded} shipped files (${shippedJobIndex.size} total)`);
 }
 
+// ── Single source of truth for shipped counts ──────────────────
+// ALWAYS use this function. Never count shipped from trace, in-memory index, or mixed sources.
+function getShippedCounts() {
+  const today = new Date(); today.setHours(0,0,0,0);
+  const yesterday = new Date(today); yesterday.setDate(yesterday.getDate() - 1);
+  const weekStart = new Date(today); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+  const todayStr = today.toISOString().slice(0, 10);
+  const yesterdayStr = yesterday.toISOString().slice(0, 10);
+  const weekStr = `${weekStart.getFullYear()}-${String(weekStart.getMonth()+1).padStart(2,'0')}-${String(weekStart.getDate()).padStart(2,'0')}`;
+
+  const rows = labDb.db.prepare(`
+    SELECT ship_date, COUNT(*) as cnt FROM dvi_shipped_jobs
+    WHERE is_hko = 0 AND ship_date >= ?
+    GROUP BY ship_date
+  `).all(weekStr);
+
+  const byDate = {};
+  for (const r of rows) byDate[r.ship_date] = r.cnt;
+
+  // 14-day history
+  const history = [];
+  for (let d = 13; d >= 0; d--) {
+    const dt = new Date(Date.now() - d * 86400000);
+    const key = dt.toISOString().slice(0, 10);
+    const label = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const dayRow = labDb.db.prepare(`SELECT COUNT(*) as cnt FROM dvi_shipped_jobs WHERE is_hko = 0 AND ship_date = ?`).get(key);
+    history.push({ date: key, label, count: dayRow?.cnt || 0 });
+  }
+
+  return {
+    today: byDate[todayStr] || 0,
+    yesterday: byDate[yesterdayStr] || 0,
+    thisWeek: Object.values(byDate).reduce((s, v) => s + v, 0),
+    history,
+    source: 'dvi_shipped_jobs'
+  };
+}
+
 // Load on startup and refresh every 60s
 loadDviJobIndex();
 loadShippedIndex();
@@ -718,7 +756,8 @@ function buildLandingPage() {
 
   // Get live stats from trace
   const allJobs = dviTrace.getJobs();
-  const shippedToday = allJobs.filter(j => j.stage === 'SHIPPING' && j.lastSeen >= todayMs).length;
+  const _sc = getShippedCounts();
+  const shippedToday = _sc.today;
   const wipCount = allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length;
 
   // Assembly completions (count ASSEMBLY PASS/FAIL events today)
@@ -3220,25 +3259,10 @@ Respond with a structured batching plan in this format:
       global._lastQueueLog = _now;
     }
 
-    // Shipped stats — single source of truth: dvi_shipped_jobs SQLite table
+    // Shipped stats — single source of truth
+    const _shipped = getShippedCounts();
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    const weekStart = new Date(todayStart); weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
     const todayMs = todayStart.getTime();
-    const todayStr = todayStart.toISOString().slice(0, 10);
-    const yesterdayStr = yesterdayStart.toISOString().slice(0, 10);
-    const weekStr = `${weekStart.getFullYear()}-${String(weekStart.getMonth()+1).padStart(2,'0')}-${String(weekStart.getDate()).padStart(2,'0')}`;
-
-    const shippedCounts = labDb.db.prepare(`
-      SELECT ship_date, COUNT(*) as cnt FROM dvi_shipped_jobs
-      WHERE is_hko = 0 AND ship_date >= ?
-      GROUP BY ship_date
-    `).all(weekStr);
-    const shippedByDate = {};
-    for (const r of shippedCounts) shippedByDate[r.ship_date] = r.cnt;
-    const shippedTodayCount = shippedByDate[todayStr] || 0;
-    const shippedYesterdayCount = shippedByDate[yesterdayStr] || 0;
-    const shippedThisWeekCount = Object.values(shippedByDate).reduce((s, v) => s + v, 0);
 
     // Count assembly completions today from trace history (one count per job, not per event)
     let assembledToday = 0;
@@ -3260,9 +3284,9 @@ Respond with a structured batching plan in this format:
     return json(res, {
       jobs: enriched,
       shipped: {
-        today: shippedTodayCount,
-        yesterday: shippedYesterdayCount,
-        thisWeek: shippedThisWeekCount,
+        today: _shipped.today,
+        yesterday: _shipped.yesterday,
+        thisWeek: _shipped.thisWeek,
         source: 'dvi_shipped_jobs'
       },
       assembly: {
@@ -3428,7 +3452,7 @@ Respond with a structured batching plan in this format:
       stationCompletions,
       operatorStats,
       stationOperators,
-      shippedToday: allJobs.filter(j => j.stage === 'SHIPPING' && j.lastSeen >= todayMs).length,
+      shippedToday: getShippedCounts().today,
       incomingToday: allJobs.filter(j => j.stage === 'INCOMING' && j.lastSeen >= todayMs).length,
       totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
       source: 'dvi-trace',
@@ -4460,31 +4484,11 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       for (const s of stages) wipByStage[s] = 0;
       for (const j of wipJobs) { wipByStage[j.stage] = (wipByStage[j.stage] || 0) + 1; }
 
-      // Shipped stats
-      const allShipped = [];
-      for (const j of allTraceJobs) {
-        if (j.status === 'SHIPPED' && j.lastSeen) allShipped.push(j);
-      }
-      for (const [jobNum, xml] of shippedJobIndex) {
-        if (!xml.shippedAt) continue;
-        if (allShipped.find(j => j.job_id === jobNum)) continue;
-        allShipped.push({ job_id: jobNum, lastSeen: xml.shippedAt, status: 'SHIPPED' });
-      }
-      const shippedToday = allShipped.filter(j => j.lastSeen >= todayMs).length;
-      const shippedThisWeek = allShipped.filter(j => j.lastSeen >= weekStart.getTime()).length;
-
-      // Shipped history (14 days)
-      const shippedByDay = [];
-      for (let d = 13; d >= 0; d--) {
-        const dayDate = new Date(Date.now() - d * 86400000);
-        const key = dayDate.toISOString().slice(0, 10);
-        const label = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        let count = 0;
-        for (const j of allShipped) {
-          if (new Date(j.lastSeen).toISOString().slice(0, 10) === key) count++;
-        }
-        shippedByDay.push({ date: key, label, count });
-      }
+      // Shipped stats — single source of truth
+      const _sc = getShippedCounts();
+      const shippedToday = _sc.today;
+      const shippedThisWeek = _sc.thisWeek;
+      const shippedByDay = _sc.history;
 
       // Coating runs
       const activeCoating = Object.values(coatingRuns).map(r => ({
@@ -4795,18 +4799,10 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       for (const s of stages) wipByStage[s] = 0;
       for (const j of wipJobs) { wipByStage[j.stage] = (wipByStage[j.stage] || 0) + 1; }
 
-      // Shipped
-      const allShipped = [];
-      for (const j of allTraceJobs) {
-        if (j.status === 'SHIPPED' && j.lastSeen) allShipped.push(j);
-      }
-      for (const [jobNum, xml] of shippedJobIndex) {
-        if (!xml.shippedAt) continue;
-        if (allShipped.find(j => j.job_id === jobNum)) continue;
-        allShipped.push({ job_id: jobNum, lastSeen: xml.shippedAt, status: 'SHIPPED' });
-      }
-      const shippedToday = allShipped.filter(j => j.lastSeen >= todayMs).length;
-      const shippedThisWeek = allShipped.filter(j => j.lastSeen >= weekStart.getTime()).length;
+      // Shipped — single source of truth
+      const _sc2 = getShippedCounts();
+      const shippedToday = _sc2.today;
+      const shippedThisWeek = _sc2.thisWeek;
 
       // Breakage / Rush / Aging
       const breakageJobs = allTraceJobs.filter(j => j.hasBreakage || j.stage === 'BREAKAGE');
@@ -4852,16 +4848,9 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         ['Date', 'Day', 'Count'],
       ];
 
-      // 14-day shipped history
-      for (let d = 13; d >= 0; d--) {
-        const dayDate = new Date(Date.now() - d * 86400000);
-        const key = dayDate.toISOString().slice(0, 10);
-        const label = dayDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-        let count = 0;
-        for (const j of allShipped) {
-          if (new Date(j.lastSeen).toISOString().slice(0, 10) === key) count++;
-        }
-        rows.push([key, label, count]);
+      // 14-day shipped history — from single source of truth
+      for (const day of _sc2.history) {
+        rows.push([day.date, day.label, day.count]);
       }
 
       // WIP detail
