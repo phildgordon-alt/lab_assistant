@@ -414,8 +414,16 @@ function getShippedCounts() {
     GROUP BY ship_date
   `).all(weekStr);
 
+  const hkoRows = labDb.db.prepare(`
+    SELECT ship_date, COUNT(*) as cnt FROM dvi_shipped_jobs
+    WHERE is_hko = 1 AND ship_date >= ?
+    GROUP BY ship_date
+  `).all(weekStr);
+
   const byDate = {};
   for (const r of rows) byDate[r.ship_date] = r.cnt;
+  const hkoByDate = {};
+  for (const r of hkoRows) hkoByDate[r.ship_date] = r.cnt;
 
   // 14-day history
   const history = [];
@@ -431,6 +439,8 @@ function getShippedCounts() {
     today: byDate[todayStr] || 0,
     yesterday: byDate[yesterdayStr] || 0,
     thisWeek: Object.values(byDate).reduce((s, v) => s + v, 0),
+    hkoToday: hkoByDate[todayStr] || 0,
+    hkoYesterday: hkoByDate[yesterdayStr] || 0,
     history,
     source: 'dvi_shipped_jobs'
   };
@@ -3287,6 +3297,8 @@ Respond with a structured batching plan in this format:
         today: _shipped.today,
         yesterday: _shipped.yesterday,
         thisWeek: _shipped.thisWeek,
+        hkoToday: _shipped.hkoToday,
+        hkoYesterday: _shipped.hkoYesterday,
         source: 'dvi_shipped_jobs'
       },
       assembly: {

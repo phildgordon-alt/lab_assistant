@@ -2122,6 +2122,12 @@ module.exports = {
         GROUP BY hour
       `).all(targetDate, SHIFT_START, SHIFT_END);
 
+      // ── HKO shipped (external lab) — shown separately ──
+      const hkoRow = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM dvi_shipped_jobs
+        WHERE ship_date = ? AND is_hko = 1
+      `).get(targetDate);
+
       // ── Build throughput structure ──
       const throughput = {};
       const operatorsByStage = {};
@@ -2191,7 +2197,7 @@ module.exports = {
         return { hour: h, count: row ? row.cnt : 0 };
       });
 
-      return { throughput, dailyTotals, operators: operatorsByStage, picks: picksAll, shipped: shippedAll };
+      return { throughput, dailyTotals, operators: operatorsByStage, picks: picksAll, shipped: shippedAll, hko: hkoRow?.cnt || 0 };
     }
 
     // ── Analyze target date ──
@@ -2257,6 +2263,7 @@ module.exports = {
       operators: primary.operators,
       picks: primary.picks,
       shipped: primary.shipped,
+      hko: primary.hko,
       bottleneck,
     };
   },

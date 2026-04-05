@@ -260,6 +260,11 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
                   <span style={{ fontSize: 10, color: T.textDim, marginLeft: 6 }}>vs {compareDate}</span>
                 </div>
               )}
+              {s.key === 'SHIPPING' && data?.hko > 0 && (
+                <div style={{ fontSize: 10, fontFamily: mono, color: T.textDim, marginTop: 4 }}>
+                  + {data.hko} HKO
+                </div>
+              )}
             </div>
           );
         })}
