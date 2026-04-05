@@ -2141,13 +2141,14 @@ module.exports = {
       for (const row of throughputRows) {
         const stage = (row.to_stage || '').toUpperCase();
         if (!STAGES.includes(stage)) continue;
+        if (stage === 'SHIPPING') continue; // SHIPPING comes only from dvi_shipped_jobs below
         const h = row.hour;
         if (h < SHIFT_START || h >= SHIFT_END) continue;
         const entry = throughput[stage].find(e => e.hour === h);
         if (entry) entry.count = row.job_count;
       }
 
-      // Add shipped data into SHIPPING throughput
+      // SHIPPING throughput: ONLY from dvi_shipped_jobs (single source of truth)
       for (const s of shipRows) {
         const h = s.hour;
         if (h < SHIFT_START || h >= SHIFT_END) continue;
