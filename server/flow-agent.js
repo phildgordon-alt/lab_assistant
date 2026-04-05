@@ -2300,9 +2300,17 @@ module.exports = {
 
   /**
    * Get production summary for the last N days — for the history list.
-   * Returns daily totals + bottleneck per day. Lightweight (no hourly data).
+   * Cached for 5 minutes to avoid repeated heavy queries.
    */
+  _historyCache: null,
+  _historyCacheTime: 0,
+  _historyCacheDays: 0,
+
   getProductionHistory(days = 14) {
+    const now = Date.now();
+    if (this._historyCache && this._historyCacheDays === days && now - this._historyCacheTime < 300000) {
+      return this._historyCache;
+    }
     const STAGES = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
     const pipelineOrder = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
     const history = [];
@@ -2389,6 +2397,9 @@ module.exports = {
       });
     }
 
+    this._historyCache = history;
+    this._historyCacheTime = Date.now();
+    this._historyCacheDays = days;
     return history;
   },
 };
