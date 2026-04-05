@@ -2297,4 +2297,98 @@ module.exports = {
       bottleneck,
     };
   },
+
+  /**
+   * Get production summary for the last N days — for the history list.
+   * Returns daily totals + bottleneck per day. Lightweight (no hourly data).
+   */
+  getProductionHistory(days = 14) {
+    const STAGES = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
+    const pipelineOrder = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
+    const history = [];
+
+    for (let d = 0; d < days; d++) {
+      const dt = new Date();
+      dt.setDate(dt.getDate() - d);
+      const dateStr = dt.toISOString().slice(0, 10);
+      const dow = dt.getDay();
+      // Skip Sundays
+      if (dow === 0) continue;
+
+      const dayStart = new Date(`${dateStr}T05:00:00`);
+      const dayEnd = new Date(`${dateStr}T23:00:00`);
+      const dayStartMs = dayStart.getTime();
+      const dayEndMs = dayEnd.getTime();
+
+      // Stage totals (distinct jobs entering each stage)
+      const stageRows = db.prepare(`
+        SELECT to_stage, COUNT(DISTINCT job_id) AS cnt
+        FROM stage_transitions
+        WHERE transition_at >= ? AND transition_at < ? AND from_stage != to_stage
+        GROUP BY to_stage
+      `).all(dayStartMs, dayEndMs);
+
+      const totals = {};
+      for (const s of STAGES) totals[s] = 0;
+      for (const row of stageRows) {
+        const stage = (row.to_stage || '').toUpperCase();
+        if (stage === 'SHIPPING') continue;
+        if (STAGES.includes(stage)) totals[stage] = row.cnt;
+      }
+
+      // Picks (normalized to jobs)
+      const pickStats = db.prepare(`
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN name LIKE 'EVELYN%' OR name LIKE 'Dead Lens%' OR name LIKE 'Manual%' THEN 1 ELSE 0 END) AS manual
+        FROM picks_history WHERE substr(completed_at, 1, 10) = ?
+      `).get(dateStr);
+      totals.PICKING = Math.round(((pickStats?.total || 0) - (pickStats?.manual || 0)) / 3);
+
+      // Shipped
+      const shipRow = db.prepare(`SELECT COUNT(*) AS cnt FROM dvi_shipped_jobs WHERE ship_date = ? AND is_hko = 0`).get(dateStr);
+      totals.SHIPPING = shipRow?.cnt || 0;
+
+      // HKO
+      const hkoRow = db.prepare(`SELECT COUNT(*) AS cnt FROM dvi_shipped_jobs WHERE ship_date = ? AND is_hko = 1`).get(dateStr);
+
+      // Bottleneck (same logic as main endpoint)
+      // Count active hours
+      const activeHourRows = db.prepare(`
+        SELECT CAST((transition_at - ?) / 3600000 AS INTEGER) + 5 AS hour
+        FROM stage_transitions
+        WHERE transition_at >= ? AND transition_at < ?
+        GROUP BY hour
+      `).all(dayStartMs, dayStartMs, dayEndMs);
+      const numActiveHours = Math.max(1, activeHourRows.length);
+
+      let bottleneck = null;
+      let minRatio = Infinity;
+      for (let i = 1; i < pipelineOrder.length; i++) {
+        const stage = pipelineOrder[i];
+        const upstream = pipelineOrder[i - 1];
+        const stageTotal = totals[stage] || 0;
+        const upstreamTotal = totals[upstream] || 0;
+        if (upstreamTotal === 0 || stageTotal === 0) continue;
+        const stageRate = Math.round((stageTotal / numActiveHours) * 10) / 10;
+        const upstreamRate = Math.round((upstreamTotal / numActiveHours) * 10) / 10;
+        if (stageRate < upstreamRate && stageRate < minRatio) {
+          minRatio = stageRate;
+          bottleneck = { stage, avgRate: stageRate, upstreamRate };
+        }
+      }
+
+      const label = dt.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+
+      history.push({
+        date: dateStr,
+        label,
+        dow,
+        totals,
+        hko: hkoRow?.cnt || 0,
+        bottleneck,
+      });
+    }
+
+    return history;
+  },
 };

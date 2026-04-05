@@ -5858,6 +5858,17 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     }
   }
 
+  // GET /api/flow/production-history?days=14
+  if (req.method==='GET' && url.pathname==='/api/flow/production-history') {
+    const days = parseInt(url.searchParams.get('days') || '14');
+    try {
+      return json(res, flowAgent.getProductionHistory(days));
+    } catch (e) {
+      console.error('[Flow] production-history error:', e.message);
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
   // ── EWS (Early Warning System) ──────────────────────────────
 
   // GET /api/ews/alerts — active alerts (or ?filter=all for all)

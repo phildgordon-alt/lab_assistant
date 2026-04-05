@@ -131,7 +131,15 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [hiddenStages, setHiddenStages] = useState(new Set());
+  const [history, setHistory] = useState([]);
 
+  // Fetch history (once on mount)
+  useEffect(() => {
+    fetch(`${base}/api/flow/production-history?days=14`)
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setHistory(Array.isArray(d) ? d : []))
+      .catch(() => setHistory([]));
+  }, [base]);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -524,6 +532,69 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* ═══ H. DAILY HISTORY ═══ */}
+      {history.length > 0 && (
+        <div style={{
+          background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: 10, padding: 16, marginTop: 18
+        }}>
+          <SectionHeader>14-Day Production History</SectionHeader>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: mono, fontSize: 11 }}>
+              <thead>
+                <tr>
+                  {['Day', 'Picked', 'Surfaced', 'Cut', 'Coated', 'Assembled', 'Shipped', 'HKO', 'Bottleneck'].map(col => (
+                    <th key={col} style={{
+                      textAlign: col === 'Day' || col === 'Bottleneck' ? 'left' : 'right',
+                      padding: '8px 10px', borderBottom: `1px solid ${T.border}`,
+                      color: T.textMuted, fontSize: 9, textTransform: 'uppercase', letterSpacing: 1,
+                      whiteSpace: 'nowrap'
+                    }}>{col}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {history.map(day => {
+                  const t = day.totals || {};
+                  const isToday = day.date === todayStr();
+                  const bn = day.bottleneck;
+                  const bnStage = bn ? STAGE_MAP[bn.stage] : null;
+                  return (
+                    <tr key={day.date}
+                      onClick={() => setDate(day.date)}
+                      style={{ cursor: 'pointer', background: day.date === date ? 'rgba(59,130,246,0.08)' : 'transparent' }}
+                      onMouseOver={e => { if (day.date !== date) e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; }}
+                      onMouseOut={e => { if (day.date !== date) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <td style={{ padding: '8px 10px', borderBottom: `1px solid ${T.border}10`, color: isToday ? T.blue : T.text, fontWeight: isToday ? 700 : 400, whiteSpace: 'nowrap' }}>
+                        {day.label}{isToday ? ' (today)' : ''}
+                      </td>
+                      {['PICKING', 'SURFACING', 'CUTTING', 'COATING', 'ASSEMBLY', 'SHIPPING'].map(stage => (
+                        <td key={stage} style={{
+                          padding: '8px 10px', borderBottom: `1px solid ${T.border}10`, textAlign: 'right',
+                          color: (t[stage] || 0) > 0 ? T.text : T.textDim
+                        }}>
+                          {t[stage] || 0}
+                        </td>
+                      ))}
+                      <td style={{ padding: '8px 10px', borderBottom: `1px solid ${T.border}10`, textAlign: 'right', color: T.textDim }}>
+                        {day.hko || 0}
+                      </td>
+                      <td style={{
+                        padding: '8px 10px', borderBottom: `1px solid ${T.border}10`,
+                        color: bnStage ? bnStage.color : T.textDim, fontWeight: bn ? 600 : 400
+                      }}>
+                        {bn ? `${bn.stage} (${bn.avgRate}/hr)` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
