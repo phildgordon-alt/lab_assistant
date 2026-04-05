@@ -38,6 +38,93 @@ function yesterdayStr() {
   return d.toISOString().slice(0, 10);
 }
 
+const MACHINE_COLORS = {
+  'Blocker': '#3B82F6', 'Generator': '#8B5CF6', 'Edger': '#EC4899',
+  'Engraver': '#06B6D4', 'Polisher': '#F59E0B', 'Coater': '#10B981',
+};
+
+function MachineChart({ serverUrl, date }) {
+  const [somData, setSomData] = useState(null);
+  const containerRef = useRef(null);
+  const [chartW, setChartW] = useState(800);
+
+  useEffect(() => {
+    if (!serverUrl) return;
+    fetch(`${serverUrl}/api/som/lens-per-hour?date=${date}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setSomData(d))
+      .catch(() => setSomData(null));
+  }, [serverUrl, date]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const ro = new ResizeObserver(entries => { setChartW(entries[0].contentRect.width - 60); });
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  if (!somData || !somData.series || somData.series.length === 0) return null;
+
+  const series = somData.series;
+  const hours = somData.hours || [];
+  const maxVal = Math.max(1, ...series.flatMap(s => (s.data || []).map(d => d.lenses || 0)));
+  const H = 200;
+  const padL = 40;
+  const barGroupW = hours.length > 0 ? (chartW - padL) / hours.length : 30;
+
+  return (
+    <div ref={containerRef} style={{
+      background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+      borderRadius: 10, padding: 16, marginBottom: 18
+    }}>
+      <SectionHeader>Machine Throughput (SOM)</SectionHeader>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+        {series.map(s => (
+          <span key={s.name} style={{ fontSize: 10, fontFamily: mono, color: MACHINE_COLORS[s.name] || T.textDim }}>
+            ● {s.name}: {(s.data || []).reduce((sum, d) => sum + (d.lenses || 0), 0)} lenses
+          </span>
+        ))}
+      </div>
+      <svg width={chartW} height={H + 30} style={{ overflow: 'visible' }}>
+        {/* Grid lines */}
+        {[0, 0.25, 0.5, 0.75, 1].map(f => (
+          <g key={f}>
+            <line x1={padL} y1={H - f * H} x2={chartW} y2={H - f * H} stroke="rgba(255,255,255,0.05)" />
+            <text x={padL - 4} y={H - f * H + 3} fill={T.textDim} fontSize={8} fontFamily={mono} textAnchor="end">
+              {Math.round(f * maxVal)}
+            </text>
+          </g>
+        ))}
+        {/* Stacked bars per hour */}
+        {hours.map((h, hi) => {
+          const x = padL + hi * barGroupW;
+          let yOffset = 0;
+          return (
+            <g key={h}>
+              {series.map(s => {
+                const dp = (s.data || []).find(d => d.hour === h);
+                const val = dp ? dp.lenses : 0;
+                const barH = (val / maxVal) * H;
+                const y = H - yOffset - barH;
+                yOffset += barH;
+                return val > 0 ? (
+                  <rect key={s.name} x={x + 2} y={y} width={Math.max(1, barGroupW - 4)} height={barH}
+                    fill={MACHINE_COLORS[s.name] || T.textDim} opacity={0.8} rx={2}>
+                    <title>{s.name} {h > 12 ? h - 12 + 'p' : h + 'a'}: {val} lenses</title>
+                  </rect>
+                ) : null;
+              })}
+              <text x={x + barGroupW / 2} y={H + 14} fill={T.textDim} fontSize={8} fontFamily={mono} textAnchor="middle">
+                {h > 12 ? h - 12 + 'p' : h === 12 ? '12p' : h + 'a'}
+              </text>
+            </g>
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
+
 export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const base = serverUrl || `http://${window.location.hostname}:3002`;
 
@@ -153,10 +240,6 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
 
   // Picks max
   const maxPicks = Math.max(1, ...picks.map(p => p.count));
-
-  // Operator heatmap max
-  const allOpCounts = Object.values(operators).flatMap(arr => (arr || []).map(h => h.count));
-  const maxOps = Math.max(1, ...allOpCounts);
 
   // SVG chart dimensions
   const svgPadL = 40;
@@ -418,72 +501,8 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
         </div>
       )}
 
-      {/* ═══ F. OPERATOR HEATMAP ═══ */}
-      {Object.keys(operators).length > 0 && (
-        <div style={{
-          background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
-          borderRadius: 10, padding: 16, marginBottom: 18
-        }}>
-          <SectionHeader>Operator Staffing Heatmap</SectionHeader>
-          <div style={{ overflowX: 'auto' }}>
-            {/* Hour headers */}
-            <div style={{ display: 'flex', gap: 2, marginBottom: 4, paddingLeft: 90 }}>
-              {hours.map(h => (
-                <div key={h} style={{ width: 32, textAlign: 'center', fontSize: 8, color: T.textDim, fontFamily: mono }}>
-                  {formatHour(h)}
-                </div>
-              ))}
-            </div>
-            {/* Stage rows */}
-            {STAGES.map(s => {
-              const stageOps = operators[s.key] || [];
-              // Build a map of hour -> count
-              const hourMap = {};
-              stageOps.forEach(h => { hourMap[h.hour] = h.count; });
-              return (
-                <div key={s.key} style={{ display: 'flex', gap: 2, marginBottom: 2, alignItems: 'center' }}>
-                  <div style={{
-                    width: 90, fontSize: 10, fontFamily: mono, color: s.color, fontWeight: 600, flexShrink: 0
-                  }}>
-                    {s.label}
-                  </div>
-                  {hours.map(h => {
-                    const count = hourMap[h] || 0;
-                    const intensity = count / maxOps;
-                    const bg = count === 0
-                      ? 'rgba(255,255,255,0.02)'
-                      : intensity < 0.3
-                        ? `rgba(${hexToRgb(s.color)},${0.12 + intensity * 0.3})`
-                        : intensity < 0.6
-                          ? `rgba(${hexToRgb(s.color)},${0.25 + intensity * 0.3})`
-                          : `rgba(${hexToRgb(s.color)},${0.4 + intensity * 0.4})`;
-                    return (
-                      <div key={h} style={{
-                        width: 32, height: 24, borderRadius: 3, background: bg,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center'
-                      }} title={`${s.label} ${formatHourFull(h)}: ${count} operators`}>
-                        <span style={{
-                          fontSize: 9, fontFamily: mono,
-                          color: count > 0 ? T.text : 'transparent', fontWeight: count > 0 ? 600 : 400
-                        }}>
-                          {count || ''}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-            {/* Legend */}
-            <div style={{ display: 'flex', gap: 16, marginTop: 8, paddingLeft: 90 }}>
-              <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>0 = no staff</span>
-              <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>dim = 1-2</span>
-              <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>medium = 3-5</span>
-              <span style={{ fontSize: 9, color: T.textDim, fontFamily: mono }}>bright = 6+</span>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ═══ F. MACHINE THROUGHPUT (SOM) ═══ */}
+      <MachineChart serverUrl={serverUrl} date={date} />
 
       {/* ═══ G. DAILY COMPARISON TABLE ═══ */}
       {compareOn && compareDailyTotals && Object.keys(compareDailyTotals).length > 0 && (
@@ -538,11 +557,3 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   );
 }
 
-// Helper: convert hex color to r,g,b string for rgba()
-function hexToRgb(hex) {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.substring(0, 2), 16);
-  const g = parseInt(h.substring(2, 4), 16);
-  const b = parseInt(h.substring(4, 6), 16);
-  return `${r},${g},${b}`;
-}
