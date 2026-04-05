@@ -93,7 +93,7 @@ function MachineChart({ serverUrl, date }) {
           </span>
         ))}
       </div>
-      <svg width="100%" height={H + 25} style={{ display: 'block', overflow: 'hidden' }}>
+      <svg width={chartW} height={H + 25} style={{ display: 'block' }}>
         {/* Grid lines */}
         {[0, 0.25, 0.5, 0.75, 1].map(f => (
           <g key={f}>
@@ -255,7 +255,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const svgPadL = 40;
   const svgPadR = 10;
   const svgH = 240;
-  const svgW = chartW - 2; // account for border
+  const svgW = chartW - 36; // account for card padding (16*2) + border (2*2)
   const plotW = svgW - svgPadL - svgPadR;
   const plotH = svgH - 30; // leave room for x labels
 
@@ -263,7 +263,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const yForVal = (val) => 10 + (1 - val / chartMax) * (plotH - 20);
 
   return (
-    <div>
+    <div ref={chartRef}>
       {/* ═══ A. HEADER + CONTROLS ═══ */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -421,8 +421,8 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
         </div>
 
         {/* SVG Chart */}
-        <div ref={chartRef} style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
-          <svg width="100%" height={svgH} style={{ display: 'block', overflow: 'hidden' }}>
+        <div style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
+          <svg width={svgW} height={svgH} style={{ display: 'block' }}>
             {/* Grid lines */}
             {[0, 0.25, 0.5, 0.75, 1].map(p => {
               const y = yForVal(chartMax * p);
