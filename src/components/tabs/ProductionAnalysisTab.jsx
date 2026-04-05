@@ -93,7 +93,7 @@ function MachineChart({ serverUrl, date }) {
           </span>
         ))}
       </div>
-      <svg viewBox={`0 0 ${chartW} ${H + 25}`} width="100%" height={H + 25} preserveAspectRatio="xMinYMin meet" style={{ display: 'block' }}>
+      <svg viewBox={`0 0 ${chartW} ${H + 25}`} width="100%" height={H + 25} preserveAspectRatio="none" style={{ display: 'block' }}>
         {/* Grid lines */}
         {[0, 0.25, 0.5, 0.75, 1].map(f => (
           <g key={f}>
@@ -422,7 +422,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
 
         {/* SVG Chart */}
         <div style={{ width: '100%', minWidth: 0 }}>
-          <svg viewBox={`0 0 ${svgInternalW} ${svgH}`} width="100%" height={svgH} preserveAspectRatio="xMinYMin meet" style={{ display: 'block' }}>
+          <svg viewBox={`0 0 ${svgInternalW} ${svgH}`} width="100%" height={svgH} preserveAspectRatio="none" style={{ display: 'block' }}>
             {/* Grid lines */}
             {[0, 0.25, 0.5, 0.75, 1].map(p => {
               const y = yForVal(chartMax * p);
