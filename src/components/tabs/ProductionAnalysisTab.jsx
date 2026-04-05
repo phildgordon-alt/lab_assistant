@@ -392,7 +392,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
             key: s.key,
             label: s.label,
             color: s.color,
-            wip: snap.current_count ?? 0,
+            wip: date === todayStr() ? (snap.current_count ?? 0) : total,
             rate,
             total,
             status: snap.status || 'ok',
