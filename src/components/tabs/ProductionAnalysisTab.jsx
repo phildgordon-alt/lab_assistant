@@ -93,7 +93,7 @@ function MachineChart({ serverUrl, date }) {
           </span>
         ))}
       </div>
-      <svg viewBox={`0 0 ${chartW} ${H + 25}`} width="100%" height={H + 25} preserveAspectRatio="none" style={{ display: 'block' }}>
+      <svg width={chartW} height={H + 25} style={{ display: 'block' }}>
         {/* Grid lines */}
         {[0, 0.25, 0.5, 0.75, 1].map(f => (
           <g key={f}>
@@ -255,15 +255,14 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const svgPadL = 40;
   const svgPadR = 10;
   const svgH = 240;
-  const svgInternalW = 1400; // fixed internal coordinate system
-  const plotW = svgInternalW - svgPadL - svgPadR;
+  const plotW = chartW - svgPadL - svgPadR;
   const plotH = svgH - 30; // leave room for x labels
 
   const xForHour = (idx) => svgPadL + (hours.length > 1 ? (idx / (hours.length - 1)) * plotW : plotW / 2);
   const yForVal = (val) => 10 + (1 - val / chartMax) * (plotH - 20);
 
   return (
-    <div ref={chartRef}>
+    <div>
       {/* ═══ A. HEADER + CONTROLS ═══ */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -421,14 +420,14 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
         </div>
 
         {/* SVG Chart */}
-        <div style={{ width: '100%', minWidth: 0 }}>
-          <svg viewBox={`0 0 ${svgInternalW} ${svgH}`} width="100%" height={svgH} preserveAspectRatio="none" style={{ display: 'block' }}>
+        <div ref={chartRef} style={{ width: '100%', minWidth: 0 }}>
+          <svg width={chartW} height={svgH} style={{ display: 'block' }}>
             {/* Grid lines */}
             {[0, 0.25, 0.5, 0.75, 1].map(p => {
               const y = yForVal(chartMax * p);
               return (
                 <g key={p}>
-                  <line x1={svgPadL} y1={y} x2={svgInternalW - svgPadR} y2={y}
+                  <line x1={svgPadL} y1={y} x2={chartW - svgPadR} y2={y}
                     stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
                   <text x={svgPadL - 4} y={y + 3} textAnchor="end"
                     fill={T.textDim} fontSize="9" fontFamily="'JetBrains Mono',monospace">
