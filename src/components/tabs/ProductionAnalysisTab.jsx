@@ -53,7 +53,7 @@ const MACHINE_COLORS = {
 function MachineChart({ serverUrl, date }) {
   const [somData, setSomData] = useState(null);
   const containerRef = useRef(null);
-  const [chartW, setChartW] = useState(800);
+  const [chartW, setChartW] = useState(1400);
 
   useEffect(() => {
     if (!serverUrl) return;
