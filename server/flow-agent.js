@@ -2299,18 +2299,28 @@ module.exports = {
   },
 
   /**
-   * Get production summary for the last N days — for the history list.
-   * Cached for 5 minutes to avoid repeated heavy queries.
+   * Get production summary for the last N days.
+   * Reads from production_daily SQLite table (fast). Recomputes today only.
    */
-  _historyCache: null,
-  _historyCacheTime: 0,
-  _historyCacheDays: 0,
-
   getProductionHistory(days = 14) {
-    const now = Date.now();
-    if (this._historyCache && this._historyCacheDays === days && now - this._historyCacheTime < 300000) {
-      return this._historyCache;
+    const labDb = require('./db');
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    // Read persisted history from SQLite
+    const persisted = labDb.getProductionDaily(days);
+    const persistedDates = new Set(persisted.map(d => d.date));
+
+    // Check if today is present and recent (within 5 min)
+    const todayRow = persisted.find(d => d.date === todayStr);
+    const todayFresh = todayRow && todayRow.updated_at &&
+      (Date.now() - new Date(todayRow.updated_at).getTime()) < 300000;
+
+    // If we have enough persisted data and today is fresh, return it
+    if (persisted.length >= Math.min(days, 10) && todayFresh) {
+      return persisted;
     }
+
+    // Otherwise, compute missing days and persist them
     const STAGES = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
     const pipelineOrder = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
     const history = [];
@@ -2322,6 +2332,8 @@ module.exports = {
       const dow = dt.getDay();
       // Skip Sundays
       if (dow === 0) continue;
+      // Skip days already persisted (except today — always refresh today)
+      if (dateStr !== todayStr && persistedDates.has(dateStr)) continue;
 
       const dayStart = new Date(`${dateStr}T05:00:00`);
       const dayEnd = new Date(`${dateStr}T23:00:00`);
@@ -2397,9 +2409,16 @@ module.exports = {
       });
     }
 
-    this._historyCache = history;
-    this._historyCacheTime = Date.now();
-    this._historyCacheDays = days;
-    return history;
+    // Persist all computed days to SQLite
+    for (const day of history) {
+      try { labDb.upsertProductionDaily(day); } catch (e) { /* ignore */ }
+    }
+
+    // Return merged: persisted (for days we didn't recompute) + freshly computed
+    const merged = new Map();
+    for (const d of persisted) merged.set(d.date, d);
+    for (const d of history) merged.set(d.date, d); // fresh overwrites stale
+    const result = [...merged.values()].sort((a, b) => b.date.localeCompare(a.date)).slice(0, days);
+    return result;
   },
 };

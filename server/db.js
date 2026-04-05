@@ -552,6 +552,26 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_daily_stats_date ON daily_stats(stat_date);
 
+  -- Production daily summary (pre-computed, one row per day, all stages)
+  CREATE TABLE IF NOT EXISTS production_daily (
+    date TEXT PRIMARY KEY,
+    label TEXT,
+    dow INTEGER,
+    picked INTEGER DEFAULT 0,
+    incoming INTEGER DEFAULT 0,
+    surfacing INTEGER DEFAULT 0,
+    coating INTEGER DEFAULT 0,
+    cutting INTEGER DEFAULT 0,
+    assembly INTEGER DEFAULT 0,
+    shipping INTEGER DEFAULT 0,
+    hko INTEGER DEFAULT 0,
+    bottleneck_stage TEXT,
+    bottleneck_rate REAL,
+    bottleneck_upstream_rate REAL,
+    hourly_json TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
   -- NetSuite consumption (transaction lines, negative qty = consumed)
   CREATE TABLE IF NOT EXISTS netsuite_consumption (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2078,6 +2098,51 @@ function getAllAssemblyConfig() {
   return result;
 }
 
+// ── Production Daily Summary ─────────────────────────────────────────────────
+const upsertProductionDailyStmt = db.prepare(`
+  INSERT OR REPLACE INTO production_daily
+  (date, label, dow, picked, incoming, surfacing, coating, cutting, assembly, shipping, hko,
+   bottleneck_stage, bottleneck_rate, bottleneck_upstream_rate, hourly_json, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+`);
+
+function upsertProductionDaily(day) {
+  const t = day.totals || {};
+  const bn = day.bottleneck;
+  upsertProductionDailyStmt.run(
+    day.date, day.label, day.dow,
+    t.PICKING || 0, t.INCOMING || 0, t.SURFACING || 0, t.COATING || 0,
+    t.CUTTING || 0, t.ASSEMBLY || 0, t.SHIPPING || 0, day.hko || 0,
+    bn?.stage || null, bn?.avgRate || null, bn?.upstreamRate || null,
+    day.hourly_json || null
+  );
+}
+
+function getProductionDaily(days = 14) {
+  return db.prepare(`
+    SELECT date, label, dow, picked, incoming, surfacing, coating, cutting, assembly, shipping, hko,
+           bottleneck_stage, bottleneck_rate, bottleneck_upstream_rate, hourly_json, updated_at
+    FROM production_daily
+    ORDER BY date DESC
+    LIMIT ?
+  `).all(days).map(row => ({
+    date: row.date,
+    label: row.label,
+    dow: row.dow,
+    totals: {
+      PICKING: row.picked, INCOMING: row.incoming, SURFACING: row.surfacing,
+      COATING: row.coating, CUTTING: row.cutting, ASSEMBLY: row.assembly, SHIPPING: row.shipping
+    },
+    hko: row.hko,
+    bottleneck: row.bottleneck_stage ? {
+      stage: row.bottleneck_stage,
+      avgRate: row.bottleneck_rate,
+      upstreamRate: row.bottleneck_upstream_rate
+    } : null,
+    updated_at: row.updated_at
+  }));
+}
+
 module.exports = {
   db,
   logSync,
@@ -2130,4 +2195,7 @@ module.exports = {
   getAllAssemblyConfig,
   // DVI Shipped Jobs (XML ground truth)
   upsertShippedJob,
+  // Production daily summary
+  upsertProductionDaily,
+  getProductionDaily,
 };
