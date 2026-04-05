@@ -3275,6 +3275,7 @@ Respond with a structured batching plan in this format:
     const todayMs = todayStart.getTime();
 
     // Count assembly completions today from trace history (one count per job, not per event)
+    const allTracedJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
     let assembledToday = 0;
     let assemblyPassToday = 0;
     let assemblyFailToday = 0;
