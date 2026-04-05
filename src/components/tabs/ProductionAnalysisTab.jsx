@@ -65,7 +65,8 @@ function MachineChart({ serverUrl, date }) {
 
   useEffect(() => {
     if (!containerRef.current) return;
-    const ro = new ResizeObserver(entries => { setChartW(entries[0].contentRect.width - 60); });
+    setChartW(containerRef.current.clientWidth - 40);
+    const ro = new ResizeObserver(entries => { setChartW(entries[0].contentRect.width - 40); });
     ro.observe(containerRef.current);
     return () => ro.disconnect();
   }, []);
@@ -75,8 +76,8 @@ function MachineChart({ serverUrl, date }) {
   const series = somData.series;
   const hours = somData.hours || [];
   const maxVal = Math.max(1, ...series.flatMap(s => (s.data || []).map(d => d.lenses || 0)));
-  const H = 200;
-  const padL = 40;
+  const H = 160;
+  const padL = 35;
   const barGroupW = hours.length > 0 ? (chartW - padL) / hours.length : 30;
 
   return (
@@ -92,7 +93,7 @@ function MachineChart({ serverUrl, date }) {
           </span>
         ))}
       </div>
-      <svg width={chartW} height={H + 30} style={{ overflow: 'visible' }}>
+      <svg width="100%" height={H + 25} style={{ display: 'block', overflow: 'hidden' }}>
         {/* Grid lines */}
         {[0, 0.25, 0.5, 0.75, 1].map(f => (
           <g key={f}>
@@ -421,7 +422,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
 
         {/* SVG Chart */}
         <div ref={chartRef} style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
-          <svg width={chartW} height={svgH} style={{ display: 'block', width: '100%' }}>
+          <svg width="100%" height={svgH} style={{ display: 'block', overflow: 'hidden' }}>
             {/* Grid lines */}
             {[0, 0.25, 0.5, 0.75, 1].map(p => {
               const y = yForVal(chartMax * p);
