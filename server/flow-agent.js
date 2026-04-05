@@ -2176,11 +2176,32 @@ module.exports = {
         if (oEntry) oEntry.count = row.operator_count;
       }
 
-      // ── Daily totals ──
+      // ── Daily totals (distinct jobs per stage for the whole day, NOT sum of hourly) ──
+      const dailyTotalRows = db.prepare(`
+        SELECT to_stage, COUNT(DISTINCT job_id) AS cnt
+        FROM stage_transitions
+        WHERE transition_at >= ? AND transition_at < ?
+        GROUP BY to_stage
+      `).all(dayStartMs, dayEndMs);
       const dailyTotals = {};
-      for (const stage of STAGES) {
-        dailyTotals[stage] = throughput[stage].reduce((sum, e) => sum + e.count, 0);
+      for (const stage of STAGES) dailyTotals[stage] = 0;
+      for (const row of dailyTotalRows) {
+        const stage = (row.to_stage || '').toUpperCase();
+        if (stage === 'SHIPPING') continue; // SHIPPING comes from dvi_shipped_jobs
+        if (STAGES.includes(stage)) dailyTotals[stage] = row.cnt;
       }
+      // PICKING from picks_history
+      const pickTotal = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM picks_history
+        WHERE substr(completed_at, 1, 10) = ?
+      `).get(targetDate);
+      dailyTotals.PICKING = pickTotal?.cnt || 0;
+      // SHIPPING from dvi_shipped_jobs (single source of truth)
+      const shipTotal = db.prepare(`
+        SELECT COUNT(*) AS cnt FROM dvi_shipped_jobs
+        WHERE ship_date = ? AND is_hko = 0
+      `).get(targetDate);
+      dailyTotals.SHIPPING = shipTotal?.cnt || 0;
 
       // ── Picks array ──
       const picks = shiftHours.map(h => {
