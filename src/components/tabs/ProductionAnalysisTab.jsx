@@ -132,6 +132,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const [error, setError] = useState(null);
   const [hiddenStages, setHiddenStages] = useState(new Set());
   const [history, setHistory] = useState([]);
+  const [flowSnapshot, setFlowSnapshot] = useState(null);
 
   // Fetch history (once on mount)
   useEffect(() => {
@@ -140,6 +141,23 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
       .then(d => setHistory(Array.isArray(d) ? d : []))
       .catch(() => setHistory([]));
   }, [base]);
+
+  // Fetch flow snapshot for VSM
+  const fetchSnapshot = useCallback(() => {
+    fetch(`${base}/api/flow/snapshot`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setFlowSnapshot(d))
+      .catch(() => setFlowSnapshot(null));
+  }, [base]);
+
+  useEffect(() => { fetchSnapshot(); }, [fetchSnapshot]);
+
+  // Auto-refresh snapshot every 60s if viewing today
+  useEffect(() => {
+    if (date !== todayStr()) return;
+    const iv = setInterval(fetchSnapshot, 60000);
+    return () => clearInterval(iv);
+  }, [date, fetchSnapshot]);
 
   // Fetch data
   const fetchData = useCallback(async () => {
@@ -358,6 +376,165 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
           </div>
         </div>
       )}
+
+      {/* ═══ C2. VALUE STREAM MAP ═══ */}
+      {data && (() => {
+        // Build VSM stage data by merging snapshot + production-analysis
+        const snapshotStages = flowSnapshot?.stages || [];
+        const snapshotMap = Object.fromEntries(snapshotStages.map(s => [s.id, s]));
+        const activeHours = hours.length > 1 ? (hours[hours.length - 1] - hours[0]) || 1 : 1;
+
+        const vsmStages = STAGES.map(s => {
+          const snap = snapshotMap[s.key] || {};
+          const total = dailyTotals[s.key] || 0;
+          const rate = Math.round((total / activeHours) * 10) / 10;
+          return {
+            key: s.key,
+            label: s.label,
+            color: s.color,
+            wip: snap.current_count ?? 0,
+            rate,
+            total,
+            status: snap.status || 'ok',
+            isBottleneck: bottleneck?.stage === s.key,
+          };
+        });
+
+        // Compute flow rates between adjacent stages (min of pair)
+        const arrows = [];
+        for (let i = 0; i < vsmStages.length - 1; i++) {
+          const from = vsmStages[i];
+          const to = vsmStages[i + 1];
+          const flowRate = Math.min(from.rate, to.rate);
+          const keepingUp = to.rate >= from.rate * 0.85; // 85% threshold
+          arrows.push({ flowRate, keepingUp, fromKey: from.key, toKey: to.key });
+        }
+
+        const boxW = 160;
+        const boxH = 120;
+        const arrowW = 80;
+        const totalW = vsmStages.length * boxW + (vsmStages.length - 1) * arrowW;
+
+        return (
+          <div style={{
+            background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)',
+            borderRadius: 10, padding: 16, marginBottom: 18
+          }}>
+            <SectionHeader>Value Stream Map</SectionHeader>
+            <style>{`
+              @keyframes vsm-pulse {
+                0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+                50% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+              }
+            `}</style>
+            <div style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              overflowX: 'auto', padding: '16px 0', gap: 0
+            }}>
+              {vsmStages.map((stage, i) => (
+                <React.Fragment key={stage.key}>
+                  {/* Stage box */}
+                  <div style={{
+                    width: boxW, minWidth: boxW, height: boxH,
+                    background: stage.isBottleneck ? `${T.red}15` : `${stage.color}10`,
+                    border: `2px solid ${stage.isBottleneck ? T.red : stage.color}${stage.isBottleneck ? '' : '40'}`,
+                    borderRadius: 10,
+                    display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                    position: 'relative',
+                    animation: stage.isBottleneck ? 'vsm-pulse 2s ease-in-out infinite' : 'none',
+                    flexShrink: 0,
+                  }}>
+                    {/* Bottleneck warning icon */}
+                    {stage.isBottleneck && (
+                      <div style={{
+                        position: 'absolute', top: -10, right: -10,
+                        width: 22, height: 22, borderRadius: '50%',
+                        background: T.red, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 12, fontWeight: 700, color: '#fff',
+                        border: `2px solid ${T.bg}`
+                      }}>!</div>
+                    )}
+
+                    {/* Stage name */}
+                    <div style={{
+                      fontSize: 11, fontWeight: 700, color: stage.color,
+                      textTransform: 'uppercase', letterSpacing: 1.2, fontFamily: mono,
+                      marginBottom: 4
+                    }}>{stage.key}</div>
+
+                    {/* WIP count */}
+                    <div style={{
+                      fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono,
+                      lineHeight: 1
+                    }}>{stage.wip}</div>
+                    <div style={{
+                      fontSize: 9, color: T.textDim, fontFamily: mono, marginTop: 2
+                    }}>WIP</div>
+
+                    {/* Throughput rate */}
+                    <div style={{
+                      fontSize: 11, color: T.textMuted, fontFamily: mono, marginTop: 6,
+                      background: 'rgba(255,255,255,0.05)', borderRadius: 4, padding: '2px 8px'
+                    }}>
+                      {stage.rate} jobs/hr
+                    </div>
+
+                    {/* Daily total at bottom */}
+                    <div style={{
+                      position: 'absolute', bottom: -18,
+                      fontSize: 9, color: T.textDim, fontFamily: mono,
+                    }}>
+                      {stage.total} today
+                    </div>
+                  </div>
+
+                  {/* Arrow between stages */}
+                  {i < vsmStages.length - 1 && (() => {
+                    const arrow = arrows[i];
+                    const arrowColor = arrow.keepingUp ? T.green : T.red;
+                    return (
+                      <div style={{
+                        width: arrowW, minWidth: arrowW, display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center', position: 'relative',
+                        flexShrink: 0,
+                      }}>
+                        {/* Flow rate label */}
+                        <div style={{
+                          fontSize: 10, fontFamily: mono, fontWeight: 700,
+                          color: arrowColor, marginBottom: 4, whiteSpace: 'nowrap'
+                        }}>
+                          {arrow.flowRate}/hr
+                        </div>
+                        {/* Arrow SVG */}
+                        <svg width={arrowW} height="20" viewBox={`0 0 ${arrowW} 20`}>
+                          <defs>
+                            <marker id={`vsm-arrow-${i}`} markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+                              <polygon points="0 0, 8 3, 0 6" fill={arrowColor} />
+                            </marker>
+                          </defs>
+                          <line x1="4" y1="10" x2={arrowW - 10} y2="10"
+                            stroke={arrowColor} strokeWidth="2.5"
+                            markerEnd={`url(#vsm-arrow-${i})`}
+                            opacity="0.8" />
+                        </svg>
+                        {/* Status indicator */}
+                        {!arrow.keepingUp && (
+                          <div style={{
+                            fontSize: 8, fontFamily: mono, color: T.red, marginTop: 2,
+                            opacity: 0.8
+                          }}>
+                            BACKING UP
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ═══ D. HOUR-BY-HOUR THROUGHPUT CHART ═══ */}
       <div style={{
