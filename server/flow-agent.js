@@ -2079,13 +2079,14 @@ module.exports = {
       const dayStartMs = dayStart.getTime();
       const dayEndMs = dayEnd.getTime();
 
-      // ── Stage throughput by hour (unique jobs entering each stage) ──
+      // ── Stage throughput by hour (unique jobs ENTERING each stage, exclude intra-stage) ──
       const throughputRows = db.prepare(`
         SELECT to_stage,
                CAST((transition_at - ?) / 3600000 AS INTEGER) + ? AS hour,
                COUNT(DISTINCT job_id) AS job_count
         FROM stage_transitions
         WHERE transition_at >= ? AND transition_at < ?
+          AND from_stage != to_stage
         GROUP BY to_stage, hour
       `).all(dayStartMs, SHIFT_START, dayStartMs, dayEndMs);
 
@@ -2139,12 +2140,12 @@ module.exports = {
         operatorsByStage[stage] = shiftHours.map(h => ({ hour: h, count: 0 }));
       }
 
-      // Add picking data from picks_history into throughput
+      // Add picking data from picks_history into throughput (normalized to ~jobs: /3)
       for (const p of pickRows) {
         const h = p.hour;
         if (h < SHIFT_START || h >= SHIFT_END) continue;
         const entry = throughput.PICKING.find(e => e.hour === h);
-        if (entry) entry.count += p.cnt;
+        if (entry) entry.count += Math.round(p.cnt / 3);
       }
 
       for (const row of throughputRows) {
@@ -2176,11 +2177,12 @@ module.exports = {
         if (oEntry) oEntry.count = row.operator_count;
       }
 
-      // ── Daily totals (distinct jobs per stage for the whole day, NOT sum of hourly) ──
+      // ── Daily totals (distinct jobs ENTERING each stage, exclude intra-stage moves) ──
       const dailyTotalRows = db.prepare(`
         SELECT to_stage, COUNT(DISTINCT job_id) AS cnt
         FROM stage_transitions
         WHERE transition_at >= ? AND transition_at < ?
+          AND from_stage != to_stage
         GROUP BY to_stage
       `).all(dayStartMs, dayEndMs);
       const dailyTotals = {};
@@ -2190,12 +2192,16 @@ module.exports = {
         if (stage === 'SHIPPING') continue; // SHIPPING comes from dvi_shipped_jobs
         if (STAGES.includes(stage)) dailyTotals[stage] = row.cnt;
       }
-      // PICKING from picks_history
-      const pickTotal = db.prepare(`
-        SELECT COUNT(*) AS cnt FROM picks_history
+      // PICKING from picks_history — normalized to jobs (exclude manual picks, divide by 3)
+      const pickStats = db.prepare(`
+        SELECT COUNT(*) AS total,
+               SUM(CASE WHEN name LIKE 'EVELYN%' OR name LIKE 'Dead Lens%' OR name LIKE 'Manual%' THEN 1 ELSE 0 END) AS manual
+        FROM picks_history
         WHERE substr(completed_at, 1, 10) = ?
       `).get(targetDate);
-      dailyTotals.PICKING = pickTotal?.cnt || 0;
+      const totalPicks = pickStats?.total || 0;
+      const manualPicks = pickStats?.manual || 0;
+      dailyTotals.PICKING = Math.round((totalPicks - manualPicks) / 3);
       // SHIPPING from dvi_shipped_jobs (single source of truth)
       const shipTotal = db.prepare(`
         SELECT COUNT(*) AS cnt FROM dvi_shipped_jobs
