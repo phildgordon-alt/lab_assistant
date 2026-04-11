@@ -37,11 +37,10 @@
       },
       "dest": "./data/dvi/jobs",
       "action": "copy",
-      "patterns": ["*.xml", "*.json"],
+      "patterns": ["*.xml"],
       "pollInterval": 30000,
-      "processJson": true,
       "processXml": true,
-      "note": "should be move — needs delete permission on DVI share"
+      "note": "should be move — needs delete permission on DVI share. JSON files intentionally excluded: the Lab Server never registered a JSON processor (loadDviJobIndex reads *.xml only) so pulling them was wasted SMB traffic. If JSON job updates become needed, register a processor via dviSync.onJson(...) in oven-timer-server.js and re-add '*.json' here."
     },
     {
       "id": "daily_export",
