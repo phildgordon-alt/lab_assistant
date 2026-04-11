@@ -514,8 +514,12 @@ const CORS      = process.env.CORS_ORIGIN || '*';
 // ── In-memory state ───────────────────────────────────────────
 
 let runs        = [];
-let liveTimers  = {};   // keyed by "ovenId::rack"
+let liveTimers  = {};   // keyed by "ovenId::rack"; each value has a _ts stamped on write
 let liveUpdated = 0;    // timestamp of last live heartbeat
+
+// How long a heartbeat entry is considered fresh. Tablets heartbeat every
+// 6s; 15s gives two misses of headroom before a rack disappears from the UI.
+const LIVE_ENTRY_TTL_MS = 15000;
 
 // ── Oven rack job tracking ──────────────────────────────────────
 // Each rack: { ovenId, rackIndex, jobs: [jobId, ...], coating, loadedAt }
@@ -905,10 +909,24 @@ const server = http.createServer(async (req, res) => {
   }
 
   // ── POST live heartbeat ─────────────────────────────────────
+  // Each OvenTimer.html tablet POSTs a flat map of its own non-idle racks
+  // keyed by "ovenId::rack". Previously this did `liveTimers = body`, which
+  // wiped every other oven's state every 6s — with ≥2 tablets online the
+  // home page flickered between whichever oven heartbeated last. Merge
+  // instead, stamp each entry with arrival time, and let the GET handler
+  // filter entries older than LIVE_ENTRY_TTL_MS so cleared racks age out.
   if (req.method==='POST' && url.pathname==='/api/oven-live') {
     try {
-      liveTimers  = await readBody(req);
-      liveUpdated = Date.now();
+      const body = await readBody(req) || {};
+      const now = Date.now();
+      for (const [k, v] of Object.entries(body)) {
+        liveTimers[k] = { ...v, _ts: now };
+      }
+      // Reap stale entries so the map can't grow unbounded when racks clear.
+      for (const [k, v] of Object.entries(liveTimers)) {
+        if (!v || !v._ts || now - v._ts > LIVE_ENTRY_TTL_MS) delete liveTimers[k];
+      }
+      liveUpdated = now;
       return json(res,{ok:true});
     } catch(e) { return json(res,{ok:false,error:e.message},400); }
   }
@@ -930,7 +948,12 @@ const server = http.createServer(async (req, res) => {
 
   // ── GET live state ──────────────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/oven-live') {
-    return json(res,{ok:true,timers:liveTimers,asOf:liveUpdated,stale:(Date.now()-liveUpdated)>15000});
+    const now = Date.now();
+    const fresh = {};
+    for (const [k, v] of Object.entries(liveTimers)) {
+      if (v && v._ts && now - v._ts <= LIVE_ENTRY_TTL_MS) fresh[k] = v;
+    }
+    return json(res,{ok:true,timers:fresh,asOf:liveUpdated,stale:(now-liveUpdated)>15000});
   }
 
   // ── GET stats ───────────────────────────────────────────────
