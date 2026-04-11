@@ -44,7 +44,45 @@ standalone/AssemblyDashboard.html  server/dvi-adapter.js       → DVI API
 - `/?mode=tablet` — Manager tablet, same features, touch-optimized (44px targets, bottom nav)
 - `/?mode=corporate` — Read-only corporate viewer, 4 tabs only, no write operations
 
-### Two-Server Architecture (CRITICAL)
+### Production Architecture — Processes, Ports, Launchd (AUTHORITATIVE)
+
+**This section is the source of truth. If other parts of this file conflict, this wins.**
+
+The Lab_Assistant production Mac Studio (`labs-mac-studio`, `192.168.0.224`, user `labassistant`) runs **four LaunchAgents**, all under `/Users/labassistant/Library/LaunchAgents/`:
+
+| LaunchAgent label | Plist | Binds | Purpose |
+|---|---|---|---|
+| `com.paireyewear.labassistant.server` | `.server.plist` | TCP **3002** | **Lab Server** — the whole Node app (`server/oven-timer-server.js`). Despite the filename, this process owns everything: `/api/*`, React SPA from `dist/`, `/standalone/*.html` static serving, `/status` landing tiles, WebSocket oven sync, `dvi-sync.js` (SMB), ItemPath adapter, SOM adapter, pickSync, dvi-trace, flow-agent, nightly-etl. |
+| `com.paireyewear.labassistant.gateway` | `.gateway.plist` | TCP **3001** | **Gateway** — `gateway/index.ts` via `npx tsx`. AI/Slack process. Proxies inventory/maintenance data to the Lab Server. |
+| `com.paireyewear.labassistant.healthcheck` | `.healthcheck.plist` | — | Idle / on-demand. |
+| `com.paireyewear.labassistant.backup` | `.backup.plist` | — | Nightly backup agent. |
+
+**Rules:**
+
+1. **Never launch the Lab Server or Gateway manually** on the Mac Studio. No `node server/oven-timer-server.js`, no `npm run server`, no `start.sh`, no PM2. Those are dev-machine conveniences; on prod they create duplicate processes that race the launchd-managed ones on the SMB mount, SQLite file, and ItemPath API. See the 2026-04-10 incident for what that costs (6-day dvi-sync cliff + doubled ItemPath load + home page flicker). Legitimate restart:
+   ```
+   launchctl kickstart -k gui/$(id -u)/com.paireyewear.labassistant.server
+   launchctl kickstart -k gui/$(id -u)/com.paireyewear.labassistant.gateway
+   ```
+
+2. **`server/oven-timer-server.js` is misnamed.** It is the entire Lab Server, not just the oven timer bridge. Don't treat the filename as descriptive.
+
+3. **There is no separate "standalones server."** The files in `standalone/` — `OvenTimer.html`, `CoatingTimer.html`, `AssemblyDashboard.html`, `BatchAssign.html`, `ToolScanner.html`, `TrayLoader.html` — are **static HTML clients**. They run on per-station tablets (one OvenTimer.html per oven = 6 tablets, one CoatingTimer.html per coater, etc.) and POST back to the Lab Server on 3002. They do **not** have their own Node process. The Lab Server serves them at `GET /standalone/<name>.html` via the static handler in `oven-timer-server.js`.
+
+4. **The React SPA is served by the same Lab Server process.** `GET /` returns `dist/index.html` if present, otherwise falls back to a code-generated tile landing page. Both paths are handled by `oven-timer-server.js`.
+
+5. **Database path is `data/lab_assistant.db`** (underscore). There is also a stale empty `server/lab-assistant.db` (hyphen) from dev scaffolding — ignore it. The backfill scripts and every production code path use the underscore version.
+
+6. **How to verify the running state** (use this instead of guessing from the file tree):
+   ```
+   launchctl list | grep paireyewear
+   sudo lsof -iTCP -sTCP:LISTEN -n -P
+   pgrep -fl "oven-timer-server.js"
+   ps eww -p <pid>        # env vars distinguish launchd from manual launches
+   ```
+   A launchd-managed process has `XPC_SERVICE_NAME=com.paireyewear.labassistant.server` and no TTY. A manual Terminal launch has `TERM_PROGRAM=Apple_Terminal`, `TERM_SESSION_ID=...`, and a TTY like `s001`.
+
+### Legacy two-server description (kept for context)
 
 Lab_Assistant runs **two separate servers** that must both be running:
 
