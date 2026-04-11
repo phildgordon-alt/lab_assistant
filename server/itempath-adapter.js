@@ -586,12 +586,25 @@ async function poll() {
     const pollStart = Date.now();
 
     // Materials: refresh every 30 minutes to keep qty current without overloading API.
+    // IT (2026-04) asked us to paginate (limit=1000&page=N) instead of a single limit=10000
+    // call — the big request was timing out ItemPath's DB.
     const materialsStale = !cachedMaterialsResp || (pollCount % 6 === 0); // every 6 polls (~30min at 5min interval)
     if (materialsStale) {
-      console.log(`[ItemPath] Poll #${pollCount} — fetching materials catalog...`);
+      console.log(`[ItemPath] Poll #${pollCount} — fetching materials catalog (paginated)...`);
       try {
-        cachedMaterialsResp = await ipFetch('/api/materials', { limit: 10000 }, { timeout: 120000 });
-        console.log(`[ItemPath] Materials loaded: ${(cachedMaterialsResp.materials || []).length} items`);
+        const PAGE_SIZE = 1000;
+        const MAX_PAGES = 20; // safety cap → 20k items
+        const allMaterials = [];
+        let page = 0;
+        while (page < MAX_PAGES) {
+          const resp = await ipFetch('/api/materials', { limit: PAGE_SIZE, page }, { timeout: 60000 });
+          const batch = resp.materials || resp.data || [];
+          allMaterials.push(...batch);
+          if (batch.length < PAGE_SIZE) break;
+          page++;
+        }
+        cachedMaterialsResp = { materials: allMaterials };
+        console.log(`[ItemPath] Materials loaded: ${allMaterials.length} items across ${page + 1} page(s)`);
       } catch (e) {
         console.error(`[ItemPath] Materials fetch failed: ${e.message} — will retry next poll`);
         cachedMaterialsResp = null;
