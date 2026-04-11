@@ -18,6 +18,43 @@ process.on('unhandledRejection', (reason) => {
   try { fs.appendFileSync(logFile, msg); } catch {}
 });
 
+// ── Startup guard ──────────────────────────────────────────────
+// Refuse to start if another oven-timer-server.js is already running.
+// On 2026-04-04 someone launched this file manually from Terminal.app on
+// the production Mac Studio alongside the launchd-managed instance. The
+// resulting PID 676 raced the real server on the SMB sync-state file,
+// corrupted dvi-sync for 6 days, doubled the ItemPath API load, and caused
+// the home page to flicker between oven state snapshots. It wasn't
+// discovered until 2026-04-10. Production is launchd-only:
+//   launchctl kickstart -k gui/$(id -u)/com.paireyewear.labassistant.server
+// Override with LAB_ALLOW_MULTIPLE=1 for dev/debug ONLY.
+try {
+  const { execSync } = require('child_process');
+  const raw = execSync('pgrep -fl "node.*oven-timer-server.js" || true', { encoding: 'utf8' });
+  const others = raw.split('\n')
+    .map(l => l.trim())
+    .filter(Boolean)
+    .map(l => {
+      const m = l.match(/^(\d+)\s+(.*)$/);
+      return m ? { pid: parseInt(m[1], 10), cmd: m[2] } : null;
+    })
+    .filter(p => p && p.pid && p.pid !== process.pid);
+  if (others.length > 0 && !process.env.LAB_ALLOW_MULTIPLE) {
+    console.error('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+    console.error('  REFUSING TO START — another oven-timer-server.js is already running');
+    for (const p of others) console.error(`    PID ${p.pid}  ${p.cmd}`);
+    console.error('');
+    console.error('  Production must be managed by launchd. To restart:');
+    console.error('    launchctl kickstart -k gui/$(id -u)/com.paireyewear.labassistant.server');
+    console.error('');
+    console.error('  To override (dev/debug only): LAB_ALLOW_MULTIPLE=1');
+    console.error('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
+    process.exit(1);
+  }
+} catch (e) {
+  console.warn('[startup-guard] pgrep check failed, allowing start:', e.message);
+}
+
 /**
  * oven-timer-server.js — Lab_Assistant Oven Timer Bridge
  * ───────────────────────────────────────────────────────
@@ -6308,6 +6345,112 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   res.end(JSON.stringify({ error: 'Not found', path: url.pathname }));
 
 });
+
+// ── Stale-data watchdog ──────────────────────────────────────
+// Fires a Slack alert when dvi_shipped_jobs is silently empty for a day
+// that should have had shipments. Exists because the 2026-04-10 incident
+// showed that a 6-day shipped-data cliff was only discovered when someone
+// happened to eyeball the Shipped History chart. Cliffs should scream,
+// not whisper.
+const STALE_ALERT_STATE_FILE = path.join(__dirname, '..', 'data', 'stale-alert-state.json');
+let staleAlertState = {};
+try {
+  if (fs.existsSync(STALE_ALERT_STATE_FILE)) {
+    staleAlertState = JSON.parse(fs.readFileSync(STALE_ALERT_STATE_FILE, 'utf8')) || {};
+  }
+} catch (e) { console.warn('[Stale-Alert] could not load state:', e.message); }
+
+function saveStaleAlertState() {
+  try {
+    fs.mkdirSync(path.dirname(STALE_ALERT_STATE_FILE), { recursive: true });
+    fs.writeFileSync(STALE_ALERT_STATE_FILE, JSON.stringify(staleAlertState, null, 2));
+  } catch (e) { console.warn('[Stale-Alert] could not save state:', e.message); }
+}
+
+async function sendStaleDataSlack(message) {
+  const webhook = process.env.SLACK_WEBHOOK || '';
+  if (!webhook) {
+    console.warn('[Stale-Alert]', message, '(SLACK_WEBHOOK not set — logging only)');
+    return;
+  }
+  try {
+    const resp = await fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: message }),
+    });
+    if (resp.ok) console.log('[Stale-Alert] Sent:', message);
+    else console.error('[Stale-Alert] Slack returned', resp.status);
+  } catch (e) {
+    console.error('[Stale-Alert] Slack send failed:', e.message);
+  }
+}
+
+function checkShippedStale() {
+  try {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const hour = now.getHours();
+    const dow = now.getDay(); // 0 = Sun, 6 = Sat
+
+    // Yesterday check: once it's past 10am local, flag if yesterday was a
+    // weekday (Mon–Fri) but has zero shipped rows in our DB. This is the
+    // exact "come in Monday and find no Friday data" scenario.
+    if (hour >= 10) {
+      const y = new Date(now);
+      y.setDate(y.getDate() - 1);
+      const yStr = y.toISOString().slice(0, 10);
+      const yDow = y.getDay();
+      const yIsWeekday = yDow >= 1 && yDow <= 5;
+      const ykey = `yesterday:${yStr}`;
+      if (yIsWeekday && staleAlertState[ykey] !== 'alerted') {
+        const row = labDb.db
+          .prepare(`SELECT COUNT(*) AS cnt FROM dvi_shipped_jobs WHERE is_hko = 0 AND ship_date = ?`)
+          .get(yStr);
+        if ((row?.cnt || 0) === 0) {
+          sendStaleDataSlack(
+            `⚠️ Lab_Assistant: zero shipped jobs recorded for ${yStr} (weekday). ` +
+            `dvi-sync or DVI XML ingestion may be broken. ` +
+            `Check /api/dvi-sync/status and the mtime of data/dvi/shipped/.`
+          );
+          staleAlertState[ykey] = 'alerted';
+          saveStaleAlertState();
+        }
+      }
+    }
+
+    // Today check: past noon local on a weekday with still-zero shipped.
+    const isWeekdayToday = dow >= 1 && dow <= 5;
+    const tkey = `today:${todayStr}`;
+    if (hour >= 12 && isWeekdayToday && staleAlertState[tkey] !== 'alerted') {
+      const row = labDb.db
+        .prepare(`SELECT COUNT(*) AS cnt FROM dvi_shipped_jobs WHERE is_hko = 0 AND ship_date = ?`)
+        .get(todayStr);
+      if ((row?.cnt || 0) === 0) {
+        sendStaleDataSlack(
+          `⚠️ Lab_Assistant: zero shipped jobs recorded so far today (${todayStr}), ` +
+          `but it's past noon on a weekday. Ingestion may be broken.`
+        );
+        staleAlertState[tkey] = 'alerted';
+        saveStaleAlertState();
+      }
+    }
+
+    // Garbage-collect state keys older than 14 days so it doesn't grow unbounded.
+    const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 14);
+    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    for (const k of Object.keys(staleAlertState)) {
+      const datePart = k.split(':')[1];
+      if (datePart && datePart < cutoffStr) delete staleAlertState[k];
+    }
+  } catch (e) {
+    console.error('[Stale-Alert] check failed:', e.message);
+  }
+}
+
+// Run once 30s after boot (let the DB settle), then every hour.
+setTimeout(checkShippedStale, 30000);
+setInterval(checkShippedStale, 3600000);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌡  Lab_Assistant Server`);
