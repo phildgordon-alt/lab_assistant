@@ -981,9 +981,12 @@ async function pickSync() {
     save();
 
     // Step 4: Advance cursor
-    // If we got a full page, advance to the last record's modifiedDate (more to catch next cycle)
-    // If partial page, advance to now (we're caught up)
-    if (lines.length >= 1000) {
+    // Full page → advance to last record's modifiedDate (more to catch next cycle).
+    // Partial page → advance to now (we're caught up).
+    // NB: limit is 500, not 1000 — the old `>= 1000` check meant full pages fell
+    // through to the "caught up" branch and silently dropped any picks past #500.
+    const PICK_SYNC_LIMIT = 500;
+    if (lines.length >= PICK_SYNC_LIMIT) {
       const lastDate = lines[lines.length - 1].modifiedDate || lines[lines.length - 1].creationDate;
       if (lastDate) lastPickSyncTime = lastDate;
     } else {
