@@ -296,9 +296,23 @@ async function getLocationsData() {
     console.log(`[ItemPath] Locations: using cache (${locationsCache.locations.length} locations, age ${Math.round(age/60000)}m)`);
     return locationsCache.locations;
   }
-  console.log(`[ItemPath] Locations: refreshing cache (age ${Math.round(age/60000)}m)`);
-  const resp = await ipFetch('/api/locations', { limit: 20000 });
-  locationsCache.locations = resp.locations || [];
+  console.log(`[ItemPath] Locations: refreshing cache (paginated, age ${Math.round(age/60000)}m)`);
+  // IT (2026-04) asked us to paginate heavy calls. A single limit=20000 call
+  // was hitting the same DB-timeout profile as the old limit=10000 materials
+  // call. Paginate with limit=1000 per page, cap pages as a safety net.
+  const PAGE_SIZE = 1000;
+  const MAX_PAGES = 25; // safety cap → 25k locations
+  const allLocations = [];
+  let page = 0;
+  while (page < MAX_PAGES) {
+    const resp = await ipFetch('/api/locations', { limit: PAGE_SIZE, page }, { timeout: 60000 });
+    const batch = resp.locations || resp.data || [];
+    allLocations.push(...batch);
+    if (batch.length < PAGE_SIZE) break;
+    page++;
+  }
+  console.log(`[ItemPath] Locations: loaded ${allLocations.length} across ${page + 1} page(s)`);
+  locationsCache.locations = allLocations;
   locationsCache.loadedAt = Date.now();
   return locationsCache.locations;
 }
@@ -624,14 +638,27 @@ async function poll() {
     const locationsData = await getLocationsData().catch(() => []);
     const locationsResp = { locations: locationsData };
 
-    // Location contents: startup only. Heavy call (20K records) — was crashing ItemPath.
+    // Location contents: startup only. Heavy call — was crashing ItemPath.
+    // IT (2026-04) asked us to paginate; a single limit=20000 call had the
+    // same DB-timeout profile as the materials limit=10000 call. Paginate.
     let locationContentsResp = { contents: cache.locationContents || [] };
     const lcStale = !(cache.locationContents && cache.locationContents.length > 0);
     if (lcStale) {
-      console.log(`[ItemPath] Poll #${pollCount} — fetching location contents...`);
+      console.log(`[ItemPath] Poll #${pollCount} — fetching location contents (paginated)...`);
       try {
-        locationContentsResp = await ipFetch('/api/location_contents', { limit: 20000 }, { timeout: 120000 });
-        console.log(`[ItemPath] Location contents loaded: ${(locationContentsResp.contents || []).length} records`);
+        const PAGE_SIZE = 1000;
+        const MAX_PAGES = 25; // safety cap → 25k records
+        const allContents = [];
+        let page = 0;
+        while (page < MAX_PAGES) {
+          const resp = await ipFetch('/api/location_contents', { limit: PAGE_SIZE, page }, { timeout: 60000 });
+          const batch = resp.contents || resp.data || [];
+          allContents.push(...batch);
+          if (batch.length < PAGE_SIZE) break;
+          page++;
+        }
+        locationContentsResp = { contents: allContents };
+        console.log(`[ItemPath] Location contents loaded: ${allContents.length} across ${page + 1} page(s)`);
       } catch (e) {
         console.error(`[ItemPath] Location contents fetch failed: ${e.message}`);
         locationContentsResp = { contents: [] };
