@@ -163,7 +163,7 @@ dviTrace.on('data', ({ count, file }) => {
         coating: xml?.coating || xml?.coatR || null,
         rush: xml?.rush || 'N',
         frameName: xml?.frameName || xml?.frame_name || null,
-        entryDate: j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null,
+        entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
       };
     });
     const today = new Date().toISOString().split('T')[0];
@@ -186,7 +186,7 @@ setTimeout(() => {
         coating: xml?.coating || xml?.coatR || null,
         rush: xml?.rush || 'N',
         frameName: xml?.frameName || xml?.frame_name || null,
-        entryDate: j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null,
+        entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
       };
     });
     const today = new Date().toISOString().split('T')[0];
@@ -382,6 +382,16 @@ function parseDviXml(xml) {
   };
 }
 
+// Convert DVI EntryDate (MM/DD/YY) to ISO date (YYYY-MM-DD)
+// Returns null if input is missing or unparseable
+function dviEntryDateToIso(entryDate) {
+  if (!entryDate) return null;
+  const parts = entryDate.split('/');
+  if (parts.length !== 3) return null;
+  const [mm, dd, yy] = parts;
+  return `20${yy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+}
+
 function loadDviJobIndex() {
   if (!fs.existsSync(DVI_JOBS_DIR)) return;
   const files = fs.readdirSync(DVI_JOBS_DIR).filter(f => f.endsWith('.xml'));
@@ -524,7 +534,7 @@ dviTrace.on('recovered', ({ reason }) => {
         coating: xml?.coating || xml?.coatR || null,
         rush: xml?.rush || 'N',
         frameName: xml?.frameName || xml?.frame_name || null,
-        entryDate: j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null,
+        entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
       };
     });
     const today = new Date().toISOString().split('T')[0];
