@@ -3783,21 +3783,39 @@ Respond with a structured batching plan in this format:
 
   if (req.method==='GET' && url.pathname==='/api/dvi/incoming') {
     const days = parseInt(url.searchParams.get('days') || '30');
-    // Combine active + shipped jobs, group by entry_date
-    const active = labDb.db.prepare(`
-      SELECT entry_date, COUNT(*) as count FROM dvi_jobs
-      WHERE entry_date IS NOT NULL AND archived = 0
-      GROUP BY entry_date
-    `).all();
-    const shipped = labDb.db.prepare(`
-      SELECT entry_date, COUNT(*) as count FROM dvi_jobs_history
-      WHERE entry_date IS NOT NULL
-      GROUP BY entry_date
-    `).all();
-    // Merge into a single map
+
+    // Build incoming count from ALL sources, deduped by job ID:
+    // 1. Active trace jobs (with XML EntryDate when available)
+    // 2. Shipped XML index (authoritative EntryDate)
+    // 3. SQLite dvi_jobs_history as fallback
+    const jobDates = new Map(); // jobId → ISO date
+
+    // Source 1: Active trace jobs enriched with XML EntryDate
+    for (const j of dviTrace.getJobs()) {
+      const xml = dviJobIndex.get(j.job_id);
+      const date = dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null);
+      if (date) jobDates.set(j.job_id, date);
+    }
+
+    // Source 2: Shipped XML index (has EntryDate from DVI)
+    for (const [jobNum, xml] of shippedJobIndex) {
+      if (jobDates.has(jobNum)) continue; // already counted from trace
+      const date = dviEntryDateToIso(xml.entryDate);
+      if (date) jobDates.set(jobNum, date);
+    }
+
+    // Source 3: DVI job XML index (unshipped, not in trace — queue jobs)
+    for (const [jobNum, xml] of dviJobIndex) {
+      if (jobDates.has(jobNum)) continue;
+      const date = dviEntryDateToIso(xml.entryDate);
+      if (date) jobDates.set(jobNum, date);
+    }
+
+    // Group by date
     const byDate = {};
-    for (const r of active) { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + r.count; }
-    for (const r of shipped) { byDate[r.entry_date] = (byDate[r.entry_date] || 0) + r.count; }
+    for (const date of jobDates.values()) {
+      byDate[date] = (byDate[date] || 0) + 1;
+    }
     // Sort descending, limit to N days
     const sorted = Object.entries(byDate)
       .map(([date, count]) => ({ date, count }))
