@@ -219,24 +219,38 @@ export function getToolsForAgent(agentName: string): any[] {
 export async function handleAgentToolCall(
   agentName: string,
   toolName: string,
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, unknown>,
+  userId?: string
 ): Promise<unknown> {
   // Apply agent defaults (e.g., department filter)
   const augmentedInput = applyAgentDefaults(agentName, toolName, toolInput as Record<string, any>);
   log.debug(`[MCP] Agent ${agentName} calling ${toolName}`, augmentedInput);
 
-  return handleToolCall(toolName, augmentedInput);
+  return handleToolCall(toolName, augmentedInput, userId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tool Handlers
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Operator allowlist for write/destructive tools
+const PHIL_SLACK_USER_ID = 'U01QDLWJU1F';
+const WRITE_TOOLS = new Set(['read_file', 'write_file', 'git_status', 'git_diff', 'git_commit', 'git_push', 'restart_service']);
+
+function requireOperator(userId: string | undefined, toolName: string): void {
+  if (!WRITE_TOOLS.has(toolName)) return;
+  if (userId !== PHIL_SLACK_USER_ID) {
+    throw new Error(`Tool '${toolName}' requires operator authorization. Only Phil can use code-write tools.`);
+  }
+}
+
 export async function handleToolCall(
   toolName: string,
-  toolInput: Record<string, unknown>
+  toolInput: Record<string, unknown>,
+  userId?: string
 ): Promise<unknown> {
   log.debug(`MCP tool call: ${toolName}`, toolInput);
+  requireOperator(userId, toolName);
 
   switch (toolName) {
     // ─────────────────────────────────────────────────────────────────────────
@@ -253,6 +267,30 @@ export async function handleToolCall(
 
     case 'get_job_by_shopify_id':
       return handleGetJobByShopifyId(toolInput.shopify_id as string);
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CODE TOOLS — operator-restricted (Phil only). Auth checked by requireOperator above.
+    // ─────────────────────────────────────────────────────────────────────────
+    case 'read_file':
+      return handleReadFile(toolInput.path as string);
+
+    case 'write_file':
+      return handleWriteFile(toolInput.path as string, toolInput.content as string);
+
+    case 'git_status':
+      return handleGitCmd(['status', '--short']);
+
+    case 'git_diff':
+      return handleGitCmd(toolInput.path ? ['diff', '--', toolInput.path as string] : ['diff']);
+
+    case 'git_commit':
+      return handleGitCommit(toolInput.message as string);
+
+    case 'git_push':
+      return handleGitCmd(['push']);
+
+    case 'restart_service':
+      return handleRestartService(toolInput.service as string);
 
     // ─────────────────────────────────────────────────────────────────────────
     // AGING & THROUGHPUT REPORTS
@@ -2001,5 +2039,98 @@ async function handleGenerateCsvReport(
     };
   } catch (e: any) {
     return { error: e.message };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CODE TOOL HANDLERS (operator-only — auth checked in requireOperator)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function getRepoRoot(): string {
+  // Gateway runs from /Users/Shared/lab_assistant/gateway, repo root is parent
+  return require('path').resolve(__dirname, '..', '..');
+}
+
+function safePath(repoRelPath: string): string {
+  const path = require('path');
+  const root = getRepoRoot();
+  const resolved = path.resolve(root, repoRelPath);
+  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+    throw new Error(`Path escapes repo root: ${repoRelPath}`);
+  }
+  const allowedPrefixes = ['server/', 'gateway/', 'src/', 'scripts/', 'standalone/', 'config/', 'public/'];
+  const rel = path.relative(root, resolved);
+  if (!allowedPrefixes.some(p => rel.startsWith(p))) {
+    throw new Error(`Path not in allowed roots (server/, gateway/, src/, scripts/, standalone/, config/, public/): ${rel}`);
+  }
+  return resolved;
+}
+
+function handleReadFile(repoRelPath: string): unknown {
+  try {
+    const fs = require('fs');
+    const fullPath = safePath(repoRelPath);
+    const stat = fs.statSync(fullPath);
+    if (stat.size > 100 * 1024) return { error: `File too large (${Math.round(stat.size / 1024)}KB > 100KB cap)` };
+    const content = fs.readFileSync(fullPath, 'utf8');
+    return { path: repoRelPath, size: stat.size, content };
+  } catch (e: any) {
+    return { error: e.message };
+  }
+}
+
+function handleWriteFile(repoRelPath: string, content: string): unknown {
+  try {
+    const fs = require('fs');
+    const path = require('path');
+    const fullPath = safePath(repoRelPath);
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const existed = fs.existsSync(fullPath);
+    fs.writeFileSync(fullPath, content, 'utf8');
+    return { path: repoRelPath, action: existed ? 'updated' : 'created', bytes: content.length };
+  } catch (e: any) {
+    return { error: e.message };
+  }
+}
+
+function handleGitCmd(args: string[]): unknown {
+  try {
+    const { execFileSync } = require('child_process');
+    const root = getRepoRoot();
+    const out = execFileSync('git', args, { cwd: root, encoding: 'utf8', timeout: 30000, maxBuffer: 50 * 1024 });
+    return { ok: true, command: 'git ' + args.join(' '), output: out };
+  } catch (e: any) {
+    return { ok: false, command: 'git ' + args.join(' '), error: e.message, stderr: e.stderr?.toString() };
+  }
+}
+
+function handleGitCommit(message: string): unknown {
+  try {
+    const { execFileSync } = require('child_process');
+    const root = getRepoRoot();
+    execFileSync('git', ['add', '-A'], { cwd: root, encoding: 'utf8', timeout: 30000 });
+    const fullMsg = `${message}\n\nCo-Authored-By: Claude (CodingAgent via Slack) <noreply@anthropic.com>`;
+    const out = execFileSync('git', ['commit', '-m', fullMsg], { cwd: root, encoding: 'utf8', timeout: 30000 });
+    return { ok: true, output: out };
+  } catch (e: any) {
+    return { ok: false, error: e.message, stderr: e.stderr?.toString() };
+  }
+}
+
+function handleRestartService(service: string): unknown {
+  try {
+    const { execFileSync } = require('child_process');
+    const labels: Record<string, string> = {
+      server: 'com.paireyewear.labassistant.server',
+      gateway: 'com.paireyewear.labassistant.gateway',
+    };
+    const label = labels[service];
+    if (!label) return { error: `Unknown service "${service}". Use "server" or "gateway".` };
+    const uid = process.getuid?.() ?? 501;
+    const out = execFileSync('launchctl', ['kickstart', '-k', `gui/${uid}/${label}`], { encoding: 'utf8', timeout: 15000 });
+    return { ok: true, service, label, output: out || '(restarted)' };
+  } catch (e: any) {
+    return { ok: false, error: e.message, stderr: e.stderr?.toString() };
   }
 }

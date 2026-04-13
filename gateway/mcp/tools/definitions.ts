@@ -1067,6 +1067,108 @@ export const OPERATIONS_TOOLS = [
   get_operator_leaderboard,
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CODE TOOLS — file edit, git, restart (operator-restricted to Phil only)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export const read_file = {
+  name: 'read_file',
+  description: `USE THIS to read the contents of a source file in the Lab_Assistant repo.
+WHAT: Returns the file contents as a string. Caps at 100KB.
+HOW: Provide path relative to repo root (e.g. "server/dvi-trace.js"). Allowed roots: server/, gateway/, src/, scripts/, standalone/, config/.
+NOT for binary files. NOT for paths outside the repo.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Relative path from repo root, e.g. "server/dvi-trace.js"' },
+    },
+    required: ['path'],
+  },
+};
+
+export const write_file = {
+  name: 'write_file',
+  description: `USE THIS to create or replace a source file. OPERATOR ONLY (Phil).
+WHAT: Writes the provided content to the file. Overwrites existing.
+HOW: Provide path relative to repo root and full file content.
+NOT for binary files. ALWAYS read the file first to confirm what you're replacing.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Relative path from repo root' },
+      content: { type: 'string', description: 'Full file content (overwrites existing)' },
+    },
+    required: ['path', 'content'],
+  },
+};
+
+export const git_status = {
+  name: 'git_status',
+  description: `USE THIS to see what files have changed. OPERATOR ONLY (Phil).
+WHAT: Returns git status output showing modified/untracked files.
+HOW: No params.`,
+  input_schema: { type: 'object', properties: {} },
+};
+
+export const git_diff = {
+  name: 'git_diff',
+  description: `USE THIS to see what changed in a file. OPERATOR ONLY (Phil).
+WHAT: Returns git diff output. If path provided, scopes to that file.
+HOW: Optional path param. Output capped at 50KB.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Optional file path to scope diff' },
+    },
+  },
+};
+
+export const git_commit = {
+  name: 'git_commit',
+  description: `USE THIS to commit staged changes. OPERATOR ONLY (Phil).
+WHAT: Stages all modified files and commits with the provided message. Auto-adds Co-Authored-By footer.
+HOW: Provide a clear commit message describing what changed and why.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      message: { type: 'string', description: 'Commit message' },
+    },
+    required: ['message'],
+  },
+};
+
+export const git_push = {
+  name: 'git_push',
+  description: `USE THIS to push commits to the remote. OPERATOR ONLY (Phil).
+WHAT: Runs git push. Returns output.
+HOW: No params. Pushes the current branch to origin.`,
+  input_schema: { type: 'object', properties: {} },
+};
+
+export const restart_service = {
+  name: 'restart_service',
+  description: `USE THIS to restart a launchd service on the Mac Studio. OPERATOR ONLY (Phil).
+WHAT: Runs launchctl kickstart -k on the named service.
+HOW: Provide service name: "server" (Lab Server) or "gateway" (Gateway). 'server' restarts oven-timer-server.js; 'gateway' restarts the AI gateway itself.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      service: { type: 'string', enum: ['server', 'gateway'], description: 'Which service to restart' },
+    },
+    required: ['service'],
+  },
+};
+
+export const CODE_TOOLS = [
+  read_file,
+  write_file,
+  git_status,
+  git_diff,
+  git_commit,
+  git_push,
+  restart_service,
+];
+
 // All tools (for backwards compatibility)
 export const ALL_TOOLS = [
   ...WIP_TOOLS,
@@ -1081,5 +1183,6 @@ export const ALL_TOOLS = [
   ...KNOWLEDGE_TOOLS,
   ...TIME_AT_LAB_TOOLS,
   ...OPERATIONS_TOOLS,
+  ...CODE_TOOLS,
 ];
 

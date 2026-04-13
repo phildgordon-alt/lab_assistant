@@ -52,6 +52,13 @@ import {
   get_dvi_operator_data,
   get_backlog_catchup,
   get_operator_leaderboard,
+  read_file,
+  write_file,
+  git_status,
+  git_diff,
+  git_commit,
+  git_push,
+  restart_service,
   ALL_TOOLS,
 } from '../tools/definitions.js';
 
@@ -455,22 +462,23 @@ export const PICKING_AGENT: AgentConfig = {
 
 export const CODING_AGENT: AgentConfig = {
   name: 'CodingAgent',
-  description: 'Lens marking/coding: laser engraving, data matrix codes, traceability',
+  description: 'Senior software engineer: React, Node.js, Java, JavaScript. Reads, edits, commits, pushes, and restarts services. Operator-restricted to Phil.',
   department: undefined,
   systemPrompt: '', // Loaded from CodingAgent.md
   tools: [
-    get_wip_snapshot,
-    get_wip_jobs,
-    get_job_detail,
-    get_aging_report,
-    get_breakage_summary,
-    get_breakage_events,
-    get_maintenance_summary,
-    get_settings,
+    // Read-only context tools (anyone can call)
     call_api,
     think_aloud,
     search_knowledge,
     get_knowledge_doc,
+    // Code tools — gated to Phil's Slack ID by requireOperator() in handleToolCall
+    read_file,
+    write_file,
+    git_status,
+    git_diff,
+    git_commit,
+    git_push,
+    restart_service,
   ],
   defaultFilters: {},
 };

@@ -331,7 +331,8 @@ export async function runAgent(
               const result = await handleAgentToolCall(
                 mcpAgentName,
                 toolUse.name,
-                toolUse.input as Record<string, unknown>
+                toolUse.input as Record<string, unknown>,
+                userId
               );
               toolResults.push({
                 type: 'tool_result',
@@ -492,7 +493,8 @@ export async function runAgentStreaming(
               const result = await handleAgentToolCall(
                 mcpAgentName,
                 toolUse.name,
-                toolUse.input as Record<string, unknown>
+                toolUse.input as Record<string, unknown>,
+                userId
               );
               toolResults.push({
                 type: 'tool_result',
