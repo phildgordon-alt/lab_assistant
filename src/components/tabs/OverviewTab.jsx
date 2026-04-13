@@ -1237,15 +1237,16 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                 const liveMin = Math.ceil(liveSec / 60);
                 const liveElapsed = run ? (run.elapsedSec || 0) + secSinceFetch : 0;
                 const timerPct = isRunning && run.targetSec > 0 ? Math.min(Math.round((liveElapsed / run.targetSec) * 100), 100) : 0;
-                // Fill % = actual loaded state from active run, not recommendation
-                const fillPct = isRunning ? (run.fillPct || 100) : 0;
-                const fillLens = isRunning ? (run.lensCount || run.fill || c.lensCapacity || '?') : 0;
-                const fillJobs = isRunning ? (run.orderCount || run.orders || '?') : 0;
+                // Fill: use active run data if running, otherwise fall back to intelligence coaterPlan (queue fill)
+                const plan = (intel?.coaterPlan || []).find(p => p.name === c.name || p.id === c.id);
+                const fillPct = isRunning ? (run.fillPct || 100) : (plan?.fillPct || 0);
+                const fillLens = isRunning ? (run.lensCount || run.fill || c.lensCapacity || '?') : (plan?.fill || 0);
+                const fillJobs = isRunning ? (run.orderCount || run.orders || '?') : (plan?.orders || 0);
                 const fillColor = fillPct >= 75 ? T.green : fillPct >= 50 ? T.amber : fillPct > 0 ? T.blue : T.textDim;
                 const mm = String(Math.floor(liveSec / 60)).padStart(2, '0');
                 const ss = String(liveSec % 60).padStart(2, '0');
                 return (
-                  <div key={c.name} style={{ background: T.surface, border: `1px solid ${isRunning ? T.green : T.border}`, borderRadius: 8, padding: 12 }}>
+                  <div key={c.name} style={{ background: T.surface, border: `1px solid ${isRunning ? T.green : fillPct > 0 ? T.amber : T.border}`, borderRadius: 8, padding: 12 }}>
                     {/* Header: name + coating type + time */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1254,6 +1255,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                       </div>
                       {isRunning ? (
                         <span style={{ fontSize: 20, fontWeight: 800, color: T.green, fontFamily: mono }}>{mm}:{ss}</span>
+                      ) : fillPct > 0 ? (
+                        <span style={{ fontSize: 12, color: T.amber, fontWeight: 700, fontFamily: mono }}>QUEUE {fillPct}%</span>
                       ) : (
                         <span style={{ fontSize: 12, color: T.textDim, fontFamily: mono }}>IDLE</span>
                       )}
