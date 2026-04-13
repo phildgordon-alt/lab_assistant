@@ -3857,7 +3857,7 @@ Respond with a structured batching plan in this format:
       readyToShip: readyToShip.length,
       operatorStats,
       pipeline: { assembly: assemblyWip, cutting: cuttingWip },
-      totalWip: activeWip.length,
+      totalWip: svWip + surfWip,
       // SLA-based dynamic target
       target: {
         daily: dailyShipTarget,
