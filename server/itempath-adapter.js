@@ -240,6 +240,12 @@ let cache = {
   lastSync:         null,
   syncStatus:       'pending',  // 'pending' | 'ok' | 'error' | 'mock'
   syncError:        null,
+  // Health tracking for self-healing
+  consecutiveErrors: 0,
+  prevSkuCount:     0,
+  prevLocationCount: 0,
+  partialPayloadAlerts: 0,  // counts polls with suspiciously small payloads
+  lastFreshnessAlert: 0,    // ms timestamp of last stale-data Slack alert (rate-limit)
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -916,6 +922,33 @@ async function poll() {
     const totalMs = Date.now() - pollStart;
     console.log(`[ItemPath] ✓ Sync: ${materials.length} SKUs, ${activePicks.length} active orders, ${alerts.length} alerts, ${normalizedLocations.length} locations | cache=${cacheSizeLabel} | ${totalMs}ms total`);
 
+    // Inventory gap detection: alert if SKU or location count drops sharply (>20%)
+    // Skip first sync (prevSkuCount=0) — establishes baseline
+    if (cache.prevSkuCount > 0) {
+      const skuDrop = cache.prevSkuCount - materials.length;
+      const skuDropPct = skuDrop / cache.prevSkuCount;
+      if (skuDrop > 50 && skuDropPct > 0.20) {
+        const msg = `[ItemPath] ⚠️ INVENTORY GAP: SKU count dropped ${cache.prevSkuCount} → ${materials.length} (-${Math.round(skuDropPct*100)}%). Possible partial payload from ItemPath.`;
+        console.warn(msg);
+        cache.partialPayloadAlerts++;
+        // Rate-limit Slack alerts to once per hour
+        if (Date.now() - cache.lastFreshnessAlert > 3600000) {
+          sendSlackInventoryAlert(msg);
+          cache.lastFreshnessAlert = Date.now();
+        }
+      }
+    }
+    if (cache.prevLocationCount > 0) {
+      const locDrop = cache.prevLocationCount - normalizedLocations.length;
+      const locDropPct = locDrop / cache.prevLocationCount;
+      if (locDrop > 100 && locDropPct > 0.20) {
+        console.warn(`[ItemPath] ⚠️ LOCATION GAP: location count dropped ${cache.prevLocationCount} → ${normalizedLocations.length} (-${Math.round(locDropPct*100)}%)`);
+      }
+    }
+    cache.prevSkuCount = materials.length;
+    cache.prevLocationCount = normalizedLocations.length;
+    cache.consecutiveErrors = 0; // Reset on success
+
     // Write to SQLite for AI agent queries
     try {
       const db = require('./db');
@@ -940,7 +973,13 @@ async function poll() {
   } catch (err) {
     cache.syncStatus = 'error';
     cache.syncError  = err.message;
-    console.error('[ItemPath] Poll failed:', err.message);
+    cache.consecutiveErrors++;
+    console.error(`[ItemPath] Poll failed (${cache.consecutiveErrors} consecutive): ${err.message}`);
+    // After 5 consecutive failures, escalate to Slack (rate-limited to once per hour)
+    if (cache.consecutiveErrors >= 5 && Date.now() - cache.lastFreshnessAlert > 3600000) {
+      sendSlackInventoryAlert(`[ItemPath] 🚨 ${cache.consecutiveErrors} consecutive sync failures. Last error: ${err.message.substring(0, 200)}`);
+      cache.lastFreshnessAlert = Date.now();
+    }
   } finally {
     pollRunning = false;
   }
@@ -1407,15 +1446,55 @@ function start() {
     setInterval(countReconciliation, 30 * 60 * 1000);
   }, 120000);
 
-  console.log('[ItemPath] Pick sync: every 5 min (30s delay). Reconciliation: every 30 min (2min delay).');
+  // Freshness watchdog: every 5 min, check if lastSync is too old
+  // ItemPath polls every 60s, so 90 min stale = ~90 missed polls
+  setInterval(() => freshnessCheck(), 5 * 60 * 1000);
+
+  console.log('[ItemPath] Pick sync: every 5 min (30s delay). Reconciliation: every 30 min (2min delay). Freshness watchdog: every 5 min.');
+}
+
+// Freshness watchdog — alert if data is stale
+function freshnessCheck() {
+  if (!cache.lastSync) return; // Not synced yet
+  const ageMs = Date.now() - new Date(cache.lastSync).getTime();
+  const ageMin = Math.round(ageMs / 60000);
+  if (ageMin > 90) {
+    const msg = `[ItemPath] 🚨 STALE DATA: last sync was ${ageMin} min ago. ItemPath may be unreachable or polling has stopped.`;
+    console.warn(msg);
+    if (Date.now() - cache.lastFreshnessAlert > 3600000) {
+      sendSlackInventoryAlert(msg);
+      cache.lastFreshnessAlert = Date.now();
+    }
+  }
+}
+
+// Send Slack alert for inventory issues (uses same webhook as low-stock alerts)
+async function sendSlackInventoryAlert(message) {
+  if (!CONFIG.slackWebhook) return;
+  try {
+    const fetchFn = typeof fetch !== 'undefined' ? fetch : require('node-fetch');
+    await fetchFn(CONFIG.slackWebhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: message })
+    });
+  } catch (e) {
+    console.error('[ItemPath] Slack alert failed:', e.message);
+  }
 }
 
 function getHealth() {
+  const ageMin = cache.lastSync ? Math.round((Date.now() - new Date(cache.lastSync).getTime()) / 60000) : null;
   return {
     connected: cache.syncStatus === 'ok',
     lastSync: cache.lastSync,
+    lastSyncAgeMin: ageMin,
+    isStale: ageMin !== null && ageMin > 90,
     lastError: cache.syncError,
     materials: cache.materials.length,
+    locations: cache.locations.length,
+    consecutiveErrors: cache.consecutiveErrors,
+    partialPayloadAlerts: cache.partialPayloadAlerts,
     status: cache.syncStatus,
   };
 }
