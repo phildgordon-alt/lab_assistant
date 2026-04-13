@@ -14,12 +14,10 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') ${LOG_TAG} $1"; }
 
 # Check if visdir is an active mount point
 if mount | grep -q "$MOUNT_POINT"; then
-    # Mount exists — verify it's responsive with a simple test
-    if [ -d "$TRACE_DIR" ] 2>/dev/null; then
-        # Mount is healthy — nothing to do
+    # Mount exists — verify it's responsive (5s timeout prevents hang on stale mount)
+    if /usr/bin/perl -e 'alarm 5; exec @ARGV' /bin/ls "$TRACE_DIR" >/dev/null 2>&1; then
         exit 0
     fi
-    # Mount exists but TRACE dir not accessible — stale mount
     log "Mount exists but TRACE not accessible — unmounting stale mount"
     diskutil unmount force "$MOUNT_POINT" 2>/dev/null || umount -f "$MOUNT_POINT" 2>/dev/null
     sleep 1

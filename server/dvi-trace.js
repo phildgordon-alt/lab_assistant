@@ -146,6 +146,7 @@ class DviTraceWatcher extends EventEmitter {
     this.seenJobIds = new Set(); // All job IDs ever seen (survives purge, capped at 500K)
     this.incomingByDate = {};    // { 'YYYY-MM-DD': count } — first appearance per job
     this.todayStats = freshTodayStats();
+    this._recovering = false;    // Blocks polls during recovery
 
     this.on('error', (err) => {
       console.error('[DVI-Trace] Error:', err.message || err);
@@ -311,7 +312,9 @@ class DviTraceWatcher extends EventEmitter {
     try {
       let files;
       if (this._useLocal) {
-        const allFiles = fs.readdirSync(this._localPath);
+        // Use ls in child process — readdirSync can hang on stale SMB mounts
+        const lsOutput = execFileSync('/bin/ls', [this._localPath], { timeout: 10000, encoding: 'utf8' });
+        const allFiles = lsOutput.split('\n').filter(f => f.trim());
         console.log(`[DVI-Trace] Local path ${this._localPath}: ${allFiles.length} total files`);
         files = allFiles.filter(f => !f.startsWith('.'));
       } else {
@@ -330,6 +333,7 @@ class DviTraceWatcher extends EventEmitter {
       console.log(`[DVI-Trace] Loading ${ltFiles.length} historical files...`);
 
       let consecutiveTimeouts = 0;
+      let filesRead = 0, filesFailed = 0;
       for (const file of ltFiles) {
         const remotePath = `${TRACE_DIR}\\${file}`;
         try {
@@ -356,15 +360,17 @@ class DviTraceWatcher extends EventEmitter {
             this.partialLine = '';
           }
 
+          filesRead++;
           console.log(`[DVI-Trace] ${file}: ${parsed} events, ${this.jobs.size} jobs total`);
         } catch (err) {
+          filesFailed++;
           const msg = err.message || '';
           if (msg.includes('STATUS_OBJECT_NAME_NOT_FOUND')) continue;
           if (msg.includes('ETIMEDOUT')) {
             consecutiveTimeouts++;
             console.warn(`[DVI-Trace] Timeout reading ${file} (${consecutiveTimeouts}/3): ${msg.substring(0, 60)}`);
             if (consecutiveTimeouts >= 3) {
-              console.error(`[DVI-Trace] 3 consecutive timeouts — aborting history load (${this.jobs.size} jobs loaded so far)`);
+              console.error(`[DVI-Trace] 3 consecutive timeouts — aborting history load (${filesRead}/${ltFiles.length} files read, ${this.jobs.size} jobs)`);
               break;
             }
             continue;
@@ -388,7 +394,7 @@ class DviTraceWatcher extends EventEmitter {
         lastEvent: this.todayStats.lastEvent
       };
 
-      console.log(`[DVI-Trace] History loaded — ${todayJobs} total jobs across all files`);
+      console.log(`[DVI-Trace] History loaded — ${todayJobs} jobs (${filesRead}/${ltFiles.length} files read, ${filesFailed} failed)`);
     } catch (err) {
       console.error(`[DVI-Trace] Failed to load history: ${err.message}`);
       // Still continue with live polling even if history fails
@@ -467,11 +473,14 @@ class DviTraceWatcher extends EventEmitter {
         console.warn(`[DVI-Trace] Skipped ${skippedCorrupt} corrupted rows (non-numeric job_id)`);
       }
 
-      // Sanity check: if SHIPPING jobs are >50% of total, the data is stale
-      // (normal WIP has <5% in SHIPPING at any time)
-      const shippingCount = [...this.jobs.values()].filter(j => j.stage === 'SHIPPING' || j.status === 'SHIPPED').length;
-      if (this.jobs.size > 100 && shippingCount / this.jobs.size > 0.5) {
-        console.warn(`[DVI-Trace] STALE DATA: ${shippingCount}/${this.jobs.size} jobs in SHIPPING/SHIPPED (${Math.round(100*shippingCount/this.jobs.size)}%). Clearing stale restore — will rebuild from trace files.`);
+      // Sanity check: if most recent event is >24h old, data is stale
+      let newestEvent = 0;
+      for (const job of this.jobs.values()) {
+        if (job.lastSeen > newestEvent) newestEvent = job.lastSeen;
+      }
+      const ageHours = newestEvent > 0 ? (Date.now() - newestEvent) / 3600000 : Infinity;
+      if (this.jobs.size > 100 && ageHours > 24) {
+        console.warn(`[DVI-Trace] STALE DATA: newest event is ${Math.round(ageHours)}h old. Clearing stale restore — will rebuild from trace files.`);
         this.jobs.clear();
         return 0;
       }
@@ -489,10 +498,10 @@ class DviTraceWatcher extends EventEmitter {
    * Can be called programmatically or via /api/dvi/trace/recover.
    */
   async recover() {
+    this._recovering = true;
     console.log(`[DVI-Trace] RECOVERY: clearing ${this.jobs.size} stale jobs, resetting state...`);
     const prevJobCount = this.jobs.size;
 
-    // Stop existing poll timer so we don't race with recovery
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
@@ -537,6 +546,7 @@ class DviTraceWatcher extends EventEmitter {
       currentFile: this.currentFile,
       byteOffset: this.byteOffset,
     };
+    this._recovering = false;
     console.log(`[DVI-Trace] RECOVERY complete: ${prevJobCount} → ${this.jobs.size} jobs, file=${this.currentFile}, offset=${this.byteOffset}, polling restarted`);
     return result;
   }
@@ -574,7 +584,7 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   async poll() {
-    if (!this.running) return;
+    if (!this.running || this._recovering) return;
     if (!this._useLocal && !this.client) return;
 
     const filename = getTodayFilename();
