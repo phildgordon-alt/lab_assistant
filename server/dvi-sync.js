@@ -146,20 +146,19 @@ class SmbClient {
     const client = await this.getClient(shareName);
 
     return new Promise((resolve, reject) => {
+      let settled = false; // Guard against SMB2 calling callback multiple times
       const fullPath = remotePath.replace(/^\//, '').replace(/\//g, '\\');
       client.readdir(fullPath, (err, files) => {
+        if (settled) return; settled = true;
         if (err) {
-          // Directory might not exist or path invalid
           if (err.code === 'STATUS_OBJECT_NAME_NOT_FOUND' || err.code === 'STATUS_OBJECT_NAME_INVALID') {
             return resolve([]);
           }
           return reject(err);
         }
 
-        // SMB2 readdir returns plain strings, not objects
         const fileNames = files.map(f => typeof f === 'string' ? f : f.name).filter(Boolean);
 
-        // Filter by patterns
         const filtered = fileNames.filter(name => {
           return patterns.some(pattern => {
             const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
@@ -169,7 +168,7 @@ class SmbClient {
 
         resolve(filtered.map(name => ({
           name,
-          size: 0,  // SMB2 readdir doesn't provide size; we get it on read
+          size: 0,
           mtime: null
         })));
       });
@@ -180,8 +179,10 @@ class SmbClient {
     const client = await this.getClient(shareName);
 
     return new Promise((resolve, reject) => {
+      let settled = false;
       const fullPath = remotePath.replace(/^\//, '').replace(/\//g, '\\');
       client.readFile(fullPath, (err, data) => {
+        if (settled) return; settled = true;
         if (err) return reject(err);
         resolve(data);
       });
@@ -221,10 +222,17 @@ class LocalClient {
     this.basePath = basePath;
   }
 
+  // Convert Windows-style backslash paths from config to forward slashes for macOS/Linux
+  _resolvePath(shareName, remotePath) {
+    const normalized = (remotePath || '').replace(/\\/g, '/');
+    return path.join(this.basePath, shareName, normalized);
+  }
+
   async listFiles(shareName, remotePath, patterns) {
-    const fullPath = path.join(this.basePath, shareName, remotePath);
+    const fullPath = this._resolvePath(shareName, remotePath);
 
     if (!fs.existsSync(fullPath)) {
+      console.warn(`[DVI-Sync] LocalClient: path not found: ${fullPath}`);
       return [];
     }
 
@@ -249,12 +257,12 @@ class LocalClient {
   }
 
   async readFile(shareName, remotePath) {
-    const fullPath = path.join(this.basePath, shareName, remotePath);
+    const fullPath = this._resolvePath(shareName, remotePath);
     return fs.readFileSync(fullPath);
   }
 
   async deleteFile(shareName, remotePath) {
-    const fullPath = path.join(this.basePath, shareName, remotePath);
+    const fullPath = this._resolvePath(shareName, remotePath);
     fs.unlinkSync(fullPath);
   }
 
@@ -446,7 +454,7 @@ class DviSyncService extends EventEmitter {
 
   async processFile(sync, file) {
     const syncState = state.syncs[sync.id];
-    // Use backslash for SMB remote path
+    // Build remote path — LocalClient handles backslash-to-forward conversion internally
     const remotePath = sync.source.path + '\\' + file.name;
     const localPath = path.join(sync.dest, file.name);
 
