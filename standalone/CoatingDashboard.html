@@ -407,8 +407,9 @@ function renderPipeline() {
   let html = '<div class="kpi-row">';
   html += kpi(q.total || 0, 'QUEUE', 'Jobs in coating stage', 'var(--teal)');
   html += kpi(bySubStage.IN_COATER || 0, 'IN COATER', 'Currently coating', 'var(--blue)');
-  html += kpi(bySubStage.IN_OVEN || 0, 'IN OVEN', ovens.racksInUse + ' racks active', 'var(--amber)');
-  html += kpi(d.stats ? d.stats.todayCoatingRuns : 0, 'DONE TODAY', 'Coating runs completed', 'var(--green)');
+  html += kpi(ovens.racksInUse || 0, 'IN OVEN', 'racks running now', 'var(--amber)');
+  const doneToday = (d.stats?.todayOvenRuns || 0) + (d.stats?.todayCoatingRuns || 0);
+  html += kpi(doneToday, 'DONE TODAY', 'oven + coater runs completed', 'var(--green)');
 
   // Action badge as KPI
   const action = rec.action || 'WAIT';
