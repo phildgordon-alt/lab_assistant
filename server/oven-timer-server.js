@@ -3895,7 +3895,9 @@ Respond with a structured batching plan in this format:
     }
     const svDailyTarget = Math.ceil(svWip * 0.5);    // 2-day SLA
     const surfDailyTarget = Math.ceil(surfWip * 0.33); // 3-day SLA
-    const dailyShipTarget = svDailyTarget + surfDailyTarget;
+    const dayOfWeek = new Date().getDay(); // 0=Sun, 6=Sat
+    const isWorkday = dayOfWeek >= 1 && dayOfWeek <= 5;
+    const dailyShipTarget = isWorkday ? svDailyTarget + surfDailyTarget : 0;
     const hoursRemaining = Math.max(0, 17 - (new Date().getHours() + new Date().getMinutes() / 60));
     const remainingTarget = Math.max(0, dailyShipTarget - sc.today);
     const requiredRate = hoursRemaining > 0 ? Math.ceil(remainingTarget / hoursRemaining) : 0;
