@@ -10,9 +10,10 @@
  */
 
 import { log } from '../logger.js';
-import { existsSync, readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { join, dirname, resolve, relative, sep } from 'path';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'child_process';
 import Database from 'better-sqlite3';
 
 // Import from new modular structure
@@ -2046,20 +2047,21 @@ async function handleGenerateCsvReport(
 // CODE TOOL HANDLERS (operator-only — auth checked in requireOperator)
 // ─────────────────────────────────────────────────────────────────────────────
 
+const _CODE_TOOL_DIRNAME = dirname(fileURLToPath(import.meta.url));
+
 function getRepoRoot(): string {
-  // Gateway runs from /Users/Shared/lab_assistant/gateway, repo root is parent
-  return require('path').resolve(__dirname, '..', '..');
+  // Gateway runs from /Users/Shared/lab_assistant/gateway/mcp, repo root is two levels up
+  return resolve(_CODE_TOOL_DIRNAME, '..', '..');
 }
 
 function safePath(repoRelPath: string): string {
-  const path = require('path');
   const root = getRepoRoot();
-  const resolved = path.resolve(root, repoRelPath);
-  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+  const resolved = resolve(root, repoRelPath);
+  if (!resolved.startsWith(root + sep) && resolved !== root) {
     throw new Error(`Path escapes repo root: ${repoRelPath}`);
   }
   const allowedPrefixes = ['server/', 'gateway/', 'src/', 'scripts/', 'standalone/', 'config/', 'public/'];
-  const rel = path.relative(root, resolved);
+  const rel = relative(root, resolved);
   if (!allowedPrefixes.some(p => rel.startsWith(p))) {
     throw new Error(`Path not in allowed roots (server/, gateway/, src/, scripts/, standalone/, config/, public/): ${rel}`);
   }
@@ -2068,11 +2070,10 @@ function safePath(repoRelPath: string): string {
 
 function handleReadFile(repoRelPath: string): unknown {
   try {
-    const fs = require('fs');
     const fullPath = safePath(repoRelPath);
-    const stat = fs.statSync(fullPath);
+    const stat = statSync(fullPath);
     if (stat.size > 100 * 1024) return { error: `File too large (${Math.round(stat.size / 1024)}KB > 100KB cap)` };
-    const content = fs.readFileSync(fullPath, 'utf8');
+    const content = readFileSync(fullPath, 'utf8');
     return { path: repoRelPath, size: stat.size, content };
   } catch (e: any) {
     return { error: e.message };
@@ -2081,13 +2082,11 @@ function handleReadFile(repoRelPath: string): unknown {
 
 function handleWriteFile(repoRelPath: string, content: string): unknown {
   try {
-    const fs = require('fs');
-    const path = require('path');
     const fullPath = safePath(repoRelPath);
-    const dir = path.dirname(fullPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const existed = fs.existsSync(fullPath);
-    fs.writeFileSync(fullPath, content, 'utf8');
+    const dir = dirname(fullPath);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    const existed = existsSync(fullPath);
+    writeFileSync(fullPath, content, 'utf8');
     return { path: repoRelPath, action: existed ? 'updated' : 'created', bytes: content.length };
   } catch (e: any) {
     return { error: e.message };
@@ -2096,7 +2095,6 @@ function handleWriteFile(repoRelPath: string, content: string): unknown {
 
 function handleGitCmd(args: string[]): unknown {
   try {
-    const { execFileSync } = require('child_process');
     const root = getRepoRoot();
     const out = execFileSync('git', args, { cwd: root, encoding: 'utf8', timeout: 30000, maxBuffer: 50 * 1024 });
     return { ok: true, command: 'git ' + args.join(' '), output: out };
@@ -2107,7 +2105,6 @@ function handleGitCmd(args: string[]): unknown {
 
 function handleGitCommit(message: string): unknown {
   try {
-    const { execFileSync } = require('child_process');
     const root = getRepoRoot();
     execFileSync('git', ['add', '-A'], { cwd: root, encoding: 'utf8', timeout: 30000 });
     const fullMsg = `${message}\n\nCo-Authored-By: Claude (CodingAgent via Slack) <noreply@anthropic.com>`;
@@ -2120,7 +2117,6 @@ function handleGitCommit(message: string): unknown {
 
 function handleRestartService(service: string): unknown {
   try {
-    const { execFileSync } = require('child_process');
     const labels: Record<string, string> = {
       server: 'com.paireyewear.labassistant.server',
       gateway: 'com.paireyewear.labassistant.gateway',
