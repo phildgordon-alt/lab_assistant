@@ -121,6 +121,10 @@ function stationToStage(station) {
   return 'OTHER';
 }
 
+function freshTodayStats() {
+  return { totalEvents: 0, uniqueJobs: 0, byStation: {}, byStage: {}, byOperator: {}, breakageCount: 0, firstEvent: null, lastEvent: null };
+}
+
 // ─────────────────────────────────────────────────────────────
 // Trace Watcher Service
 // ─────────────────────────────────────────────────────────────
@@ -138,18 +142,9 @@ class DviTraceWatcher extends EventEmitter {
     // In-memory state
     this.jobs = new Map();       // jobId → { last station, stage, timestamps, events }
     this.events = [];            // Recent events (ring buffer, last 5000)
-    this.seenJobIds = new Set(); // All job IDs ever seen (survives purge)
-    this.incomingByDate = {};    // { 'YYYY-MM-DD': count } — first appearance per job, never purged
-    this.todayStats = {
-      totalEvents: 0,
-      uniqueJobs: 0,
-      byStation: {},
-      byStage: {},
-      byOperator: {},
-      breakageCount: 0,
-      firstEvent: null,
-      lastEvent: null
-    };
+    this.seenJobIds = new Set(); // All job IDs ever seen (survives purge, capped at 500K)
+    this.incomingByDate = {};    // { 'YYYY-MM-DD': count } — first appearance per job
+    this.todayStats = freshTodayStats();
 
     this.on('error', (err) => {
       console.error('[DVI-Trace] Error:', err.message || err);
@@ -506,10 +501,7 @@ class DviTraceWatcher extends EventEmitter {
     this.partialLine = '';
     this._consecutiveErrors = 0;
     this._staleCount = 0;
-    this.todayStats = {
-      totalEvents: 0, uniqueJobs: 0, byStation: {}, byStage: {},
-      byOperator: {}, breakageCount: 0, firstEvent: null, lastEvent: null
-    };
+    this.todayStats = freshTodayStats();
 
     // Reconnect if using SMB
     if (!this._useLocal && this._connConfig) {
@@ -701,9 +693,8 @@ class DviTraceWatcher extends EventEmitter {
     // Update job state
     let job = this.jobs.get(evt.jobId);
     if (!job) {
-      // Track first appearance for incoming count (survives purge)
       if (!this.seenJobIds.has(evt.jobId) && evt.timestamp) {
-        this.seenJobIds.add(evt.jobId);
+        if (this.seenJobIds.size < 500000) this.seenJobIds.add(evt.jobId);
         const dateKey = new Date(evt.timestamp).toISOString().split('T')[0];
         this.incomingByDate[dateKey] = (this.incomingByDate[dateKey] || 0) + 1;
       }

@@ -153,19 +153,7 @@ dviTrace.on('data', ({ count, file }) => {
   try {
     const allJobs = dviTrace.getJobs();
     const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
-    // Enrich with XML index data (coating, rush, frame)
-    const enriched = activeJobs.map(j => {
-      const xml = dviJobIndex.get(j.job_id);
-      return {
-        ...j,
-        invoice: j.job_id,
-        daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
-        coating: xml?.coating || xml?.coatR || null,
-        rush: xml?.rush || 'N',
-        frameName: xml?.frameName || xml?.frame_name || null,
-        entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
-      };
-    });
+    const enriched = activeJobs.map(j => enrichJob(j, dviJobIndex));
     const today = new Date().toISOString().split('T')[0];
     labDb.upsertJobs(enriched, today);
     console.log(`[DB] Synced ${enriched.length} DVI jobs to SQLite`);
@@ -177,18 +165,7 @@ setTimeout(() => {
   try {
     const allJobs = dviTrace.getJobs();
     const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
-    const enriched = activeJobs.map(j => {
-      const xml = dviJobIndex.get(j.job_id);
-      return {
-        ...j,
-        invoice: j.job_id,
-        daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
-        coating: xml?.coating || xml?.coatR || null,
-        rush: xml?.rush || 'N',
-        frameName: xml?.frameName || xml?.frame_name || null,
-        entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
-      };
-    });
+    const enriched = activeJobs.map(j => enrichJob(j, dviJobIndex));
     const today = new Date().toISOString().split('T')[0];
     labDb.upsertJobs(enriched, today);
     console.log(`[DB] Initial sync: ${enriched.length} DVI jobs to SQLite`);
@@ -383,13 +360,52 @@ function parseDviXml(xml) {
 }
 
 // Convert DVI EntryDate (MM/DD/YY) to ISO date (YYYY-MM-DD)
-// Returns null if input is missing or unparseable
 function dviEntryDateToIso(entryDate) {
   if (!entryDate) return null;
   const parts = entryDate.split('/');
   if (parts.length !== 3) return null;
   const [mm, dd, yy] = parts;
   return `20${yy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+}
+
+// Enrich a trace job with XML index data for SQLite sync and dashboard display
+function enrichJob(j, xmlIndex) {
+  const xml = xmlIndex ? xmlIndex.get(j.job_id) : null;
+  return {
+    ...j,
+    invoice: j.job_id,
+    daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
+    coating: xml?.coating || xml?.coatR || '',
+    rush: xml?.rush || 'N',
+    frameName: xml?.frameName || xml?.frame_name || null,
+    lensStyle: xml?.lensStyle || '',
+    lensMat: xml?.lensMat || '',
+    frameStyle: xml?.frameStyle || '',
+    rxNum: xml?.rxNum || '',
+    isRush: xml?.rush === 'Y',
+    entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
+  };
+}
+
+// Get today's start timestamp (reusable across endpoints)
+function todayStartMs() {
+  const d = new Date(); d.setHours(0,0,0,0); return d.getTime();
+}
+
+// Build operator stats from trace events ring buffer (avoids N+1 getJobHistory)
+function buildOperatorStats(dviTrace, stationRegex) {
+  const todayMs = todayStartMs();
+  const stats = {};
+  for (const evt of dviTrace.getRecentEvents(5000)) {
+    if (evt.timestamp < todayMs) continue;
+    if (stationRegex.test(evt.station)) {
+      if (evt.operator) {
+        if (!stats[evt.operator]) stats[evt.operator] = { initials: evt.operator, jobs: 0 };
+        stats[evt.operator].jobs++;
+      }
+    }
+  }
+  return stats;
 }
 
 function loadDviJobIndex() {
@@ -521,22 +537,10 @@ dviTrace.on('recovered', ({ reason }) => {
   if (shippedJobIndex.size > 0) {
     dviTrace.purgeShippedJobs(shippedJobIndex);
   }
-  // Re-sync all trace jobs to SQLite so incoming counts and WIP queries are fresh
   try {
     const allJobs = dviTrace.getJobs();
     const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
-    const enriched = activeJobs.map(j => {
-      const xml = dviJobIndex.get(j.job_id);
-      return {
-        ...j,
-        invoice: j.job_id,
-        daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
-        coating: xml?.coating || xml?.coatR || null,
-        rush: xml?.rush || 'N',
-        frameName: xml?.frameName || xml?.frame_name || null,
-        entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
-      };
-    });
+    const enriched = activeJobs.map(j => enrichJob(j, dviJobIndex));
     const today = new Date().toISOString().split('T')[0];
     labDb.upsertJobs(enriched, today);
     console.log(`[DB] Post-recovery sync: ${enriched.length} DVI jobs to SQLite`);
@@ -3701,51 +3705,30 @@ Respond with a structured batching plan in this format:
     // Jobs actively in a coater (CCL, CCP)
     const activeJobs = coatingJobs.filter(j => /CCL|CCP/i.test(j.station));
 
-    // Today's coating completions — jobs that left COATING stage today
+    // Today's coating stats from events ring buffer (avoids N+1 getJobHistory)
+    const coatingStationRe = /CCL|CCP/i;
+    const operatorStats = buildOperatorStats(dviTrace, coatingStationRe);
     let completedToday = 0;
-    const byCoater = {}; // 'CCL 1' → { count, jobs }
-    const operatorStats = {};
-    for (const j of allJobs) {
-      const history = dviTrace.getJobHistory(j.job_id);
-      if (!history || !history.events) continue;
-      for (const e of history.events) {
-        if (e.timestamp < todayMs) continue;
-        if (/CCL|CCP/i.test(e.station)) {
-          if (!byCoater[e.station]) byCoater[e.station] = { station: e.station, count: 0, jobs: [] };
-          byCoater[e.station].count++;
-          byCoater[e.station].jobs.push(j.job_id);
-          if (e.operator) {
-            if (!operatorStats[e.operator]) operatorStats[e.operator] = { initials: e.operator, jobs: 0 };
-            operatorStats[e.operator].jobs++;
-          }
-          completedToday++;
-        }
+    const byCoater = {};
+    for (const evt of dviTrace.getRecentEvents(5000)) {
+      if (evt.timestamp < todayMs) continue;
+      if (coatingStationRe.test(evt.station)) {
+        if (!byCoater[evt.station]) byCoater[evt.station] = { station: evt.station, count: 0, jobs: [] };
+        byCoater[evt.station].count++;
+        byCoater[evt.station].jobs.push(evt.jobId);
+        completedToday++;
       }
     }
 
     // Group by coating type from XML
     const byCoatingType = {};
     for (const j of coatingJobs) {
-      const xml = dviJobIndex.get(j.job_id);
-      const ct = xml?.coating || xml?.coatR || 'UNKNOWN';
-      if (!byCoatingType[ct]) byCoatingType[ct] = 0;
-      byCoatingType[ct]++;
+      const e = enrichJob(j, dviJobIndex);
+      const ct = e.coating || 'UNKNOWN';
+      byCoatingType[ct] = (byCoatingType[ct] || 0) + 1;
     }
 
-    // Enrich jobs with XML data
-    const enriched = coatingJobs.map(j => {
-      const xml = dviJobIndex.get(j.job_id);
-      return {
-        id: j.job_id, tray: j.tray, station: j.station,
-        operator: j.operator, status: 'active',
-        coating: xml?.coating || xml?.coatR || '',
-        lensStyle: xml?.lensStyle || '', lensMat: xml?.lensMat || '',
-        rxNum: xml?.rxNum || '', isRush: (xml?.rush === 'Y'),
-        firstSeen: j.firstSeen, lastSeen: j.lastSeen,
-        minutesAtStation: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : null,
-        daysInLab: j.daysInLab || 0,
-      };
-    });
+    const enriched = coatingJobs.map(j => enrichJob(j, dviJobIndex));
 
     return json(res, {
       jobs: enriched,
@@ -3786,43 +3769,20 @@ Respond with a structured batching plan in this format:
     }
     for (const s of Object.values(byStation)) s.operators = [...s.operators];
 
-    // Today's cutting completions
+    // Today's cutting stats from events ring buffer
+    const cuttingStationRe = /EDGER|CUT|INHSE FIN/i;
+    const operatorStats = buildOperatorStats(dviTrace, cuttingStationRe);
     let completedToday = 0;
-    const operatorStats = {};
-    for (const j of allJobs) {
-      const history = dviTrace.getJobHistory(j.job_id);
-      if (!history || !history.events) continue;
-      for (const e of history.events) {
-        if (e.timestamp < todayMs) continue;
-        if (/EDGER|CUT|INHSE FIN/i.test(e.station) && !/LCU/i.test(e.station)) {
-          completedToday++;
-          if (e.operator) {
-            if (!operatorStats[e.operator]) operatorStats[e.operator] = { initials: e.operator, jobs: 0 };
-            operatorStats[e.operator].jobs++;
-          }
-        }
-      }
+    for (const evt of dviTrace.getRecentEvents(5000)) {
+      if (evt.timestamp < todayMs) continue;
+      if (cuttingStationRe.test(evt.station) && !/LCU/i.test(evt.station)) completedToday++;
     }
 
-    // Upstream pipeline: what's coming into cutting next
+    // Upstream pipeline
     const surfacingJobs = allJobs.filter(j => j.stage === 'SURFACING');
     const coatingJobs = allJobs.filter(j => j.stage === 'COATING');
 
-    // Enrich jobs with XML data
-    const enriched = cuttingJobs.map(j => {
-      const xml = dviJobIndex.get(j.job_id);
-      return {
-        id: j.job_id, tray: j.tray, station: j.station,
-        operator: j.operator, status: 'active',
-        coating: xml?.coating || xml?.coatR || '',
-        lensStyle: xml?.lensStyle || '', lensMat: xml?.lensMat || '',
-        frameStyle: xml?.frameStyle || '', rxNum: xml?.rxNum || '',
-        isRush: (xml?.rush === 'Y'),
-        firstSeen: j.firstSeen, lastSeen: j.lastSeen,
-        minutesAtStation: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : null,
-        daysInLab: j.daysInLab || 0,
-      };
-    });
+    const enriched = cuttingJobs.map(j => enrichJob(j, dviJobIndex));
 
     return json(res, {
       jobs: enriched,
@@ -3862,36 +3822,19 @@ Respond with a structured batching plan in this format:
     const readyToShip = shippingJobs.filter(j => j.status !== 'SHIPPED');
     const alreadyShipped = shippingJobs.filter(j => j.status === 'SHIPPED');
 
-    // Operator stats from shipping events today
-    const operatorStats = {};
+    // Operator stats from events ring buffer
+    const operatorStats = buildOperatorStats(dviTrace, /SH CONVEY|SHIP/i);
+
+    // Single pass: bucket by stage + classify SLA line
+    let assemblyWip = 0, cuttingWip = 0, svWip = 0, surfWip = 0;
     for (const j of allJobs) {
-      const history = dviTrace.getJobHistory(j.job_id);
-      if (!history || !history.events) continue;
-      for (const e of history.events) {
-        if (e.timestamp < todayMs) continue;
-        if (/SH CONVEY|SHIP/i.test(e.station) && e.station !== 'ASSEMBLY PASS') {
-          if (e.operator) {
-            if (!operatorStats[e.operator]) operatorStats[e.operator] = { initials: e.operator, jobs: 0 };
-            operatorStats[e.operator].jobs++;
-          }
-        }
+      if (j.stage === 'ASSEMBLY') assemblyWip++;
+      if (j.stage === 'CUTTING') cuttingWip++;
+      if (j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED') {
+        const xml = dviJobIndex.get(j.job_id);
+        if ((xml?.lensType || '').toUpperCase() === 'S') svWip++;
+        else surfWip++;
       }
-    }
-
-    // Pipeline: what's coming to shipping
-    const assemblyWip = allJobs.filter(j => j.stage === 'ASSEMBLY').length;
-    const cuttingWip = allJobs.filter(j => j.stage === 'CUTTING').length;
-
-    // SLA-based dynamic ship target
-    // SV (single vision, lens type S): 2-day SLA → ship 50% of SV WIP per day
-    // Surfacing (progressive P, bifocal B): 3-day SLA → ship 33% of WIP per day
-    const activeWip = allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED');
-    let svWip = 0, surfWip = 0;
-    for (const j of activeWip) {
-      const xml = dviJobIndex.get(j.job_id);
-      const lensType = (xml?.lensType || '').toUpperCase();
-      if (lensType === 'S') svWip++;
-      else surfWip++; // P, B, and unknown default to surfacing line (longer SLA)
     }
     const svDailyTarget = Math.ceil(svWip * 0.5);    // 2-day SLA
     const surfDailyTarget = Math.ceil(surfWip * 0.33); // 3-day SLA
@@ -3902,18 +3845,7 @@ Respond with a structured batching plan in this format:
     const remainingTarget = Math.max(0, dailyShipTarget - sc.today);
     const requiredRate = hoursRemaining > 0 ? Math.ceil(remainingTarget / hoursRemaining) : 0;
 
-    // Enrich shipping jobs with XML
-    const enriched = shippingJobs.map(j => {
-      const xml = dviJobIndex.get(j.job_id);
-      return {
-        id: j.job_id, tray: j.tray, station: j.station,
-        operator: j.operator, status: j.status,
-        coating: xml?.coating || xml?.coatR || '',
-        rxNum: xml?.rxNum || '', isRush: (xml?.rush === 'Y'),
-        firstSeen: j.firstSeen, lastSeen: j.lastSeen,
-        daysInLab: j.daysInLab || 0,
-      };
-    });
+    const enriched = shippingJobs.map(j => enrichJob(j, dviJobIndex));
 
     return json(res, {
       jobs: enriched,

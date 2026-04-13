@@ -11419,13 +11419,8 @@ function LabAssistantV2(){
           if(data.assembly){
             setAssemblyStats(data.assembly);
           }
-          // Fetch today's incoming count from trace (authoritative)
-          if(data.incomingToday!==undefined){
-            setIncomingToday(data.incomingToday);
-          }
         }
       }catch(e){ console.warn("DVI fetch:",e.message); }
-      // Also fetch incoming from dedicated endpoint as backup
       try{
         const incRes=await fetch(`http://${window.location.hostname}:3002/api/dvi/incoming?days=1`);
         if(incRes.ok){const incData=await incRes.json();if(incData.days&&incData.days.length>0)setIncomingToday(incData.days[0].count);}
