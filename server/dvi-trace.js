@@ -311,7 +311,7 @@ class DviTraceWatcher extends EventEmitter {
       // List all LT files in TRACE directory
       let files;
       if (this._useLocal) {
-        files = (await fs.promises.readdir(this._localPath)).filter(f => !f.startsWith('.'));
+        files = fs.readdirSync(this._localPath).filter(f => !f.startsWith('.'));
       } else {
         files = await new Promise((resolve, reject) => {
           this.client.readdir(TRACE_DIR, (err, list) => {
@@ -669,10 +669,13 @@ class DviTraceWatcher extends EventEmitter {
 
   readFile(remotePath) {
     if (this._useLocal) {
-      // Local mode: remotePath is like "TRACE\LT260404.DAT" — extract filename
       const filename = remotePath.split('\\').pop();
       const fullPath = path.join(this._localPath, filename);
-      return fs.promises.readFile(fullPath);
+      try {
+        return Promise.resolve(fs.readFileSync(fullPath));
+      } catch (err) {
+        return Promise.reject(err);
+      }
     }
     return new Promise((resolve, reject) => {
       // 15-second timeout — SMB reads can hang indefinitely on dead connections
