@@ -3851,7 +3851,7 @@ Respond with a structured batching plan in this format:
       jobs: enriched,
       shippedToday: sc.today,
       shippedYesterday: sc.yesterday,
-      shippedThisWeek: sc.week,
+      shippedThisWeek: sc.thisWeek,
       ratePerHour,
       shiftHours: Math.round(shiftH * 10) / 10,
       readyToShip: readyToShip.length,

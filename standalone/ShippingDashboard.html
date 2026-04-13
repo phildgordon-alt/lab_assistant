@@ -248,7 +248,7 @@ async function fetchData(){
 }
 
 async function manualSync(){
-  updateSrvDot('pending','SYNCING...');
+  updateSrvDot('mock','SYNCING');
   await fetchData();
   render();
   toast('Data refreshed','ok');

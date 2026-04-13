@@ -293,12 +293,12 @@ function switchTab(tab) {
 async function fetchAll() {
   try {
     const [intelRes, ovenRes] = await Promise.all([
-      fetch(serverUrl + '/api/coating/intelligence'),
-      fetch(serverUrl + '/api/oven-live'),
+      fetch(serverUrl + '/api/coating/intelligence', { signal: AbortSignal.timeout(8000) }),
+      fetch(serverUrl + '/api/oven-live', { signal: AbortSignal.timeout(8000) }),
     ]);
     if (intelRes.ok) intelData = await intelRes.json();
     if (ovenRes.ok) ovenData = await ovenRes.json();
-    srvOk = intelRes.ok;
+    srvOk = intelRes.ok && ovenRes.ok;
     setSrvDot(srvOk ? 'ok' : 'err');
   } catch (e) {
     console.warn('[Coating] Fetch error:', e);
