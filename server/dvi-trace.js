@@ -488,6 +488,12 @@ class DviTraceWatcher extends EventEmitter {
     console.log(`[DVI-Trace] RECOVERY: clearing ${this.jobs.size} stale jobs, resetting state...`);
     const prevJobCount = this.jobs.size;
 
+    // Stop existing poll timer so we don't race with recovery
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+
     // Clear in-memory state
     this.jobs.clear();
     this.events = [];
@@ -510,14 +516,25 @@ class DviTraceWatcher extends EventEmitter {
     await this.loadHistory();
     this.saveToDb();
 
+    // Restart polling loop so live events continue to flow
+    this.running = true;
+    this.poll();
+    this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
+    if (!this._checkpointTimer) {
+      this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
+    }
+    if (!this._healTimer) {
+      this._startSelfHealing();
+    }
+
     const result = {
       prevJobCount,
       newJobCount: this.jobs.size,
-      connected: this.running && this._consecutiveErrors < 3,
+      connected: true,
       currentFile: this.currentFile,
       byteOffset: this.byteOffset,
     };
-    console.log(`[DVI-Trace] RECOVERY complete: ${prevJobCount} → ${this.jobs.size} jobs, file=${this.currentFile}, offset=${this.byteOffset}`);
+    console.log(`[DVI-Trace] RECOVERY complete: ${prevJobCount} → ${this.jobs.size} jobs, file=${this.currentFile}, offset=${this.byteOffset}, polling restarted`);
     return result;
   }
 

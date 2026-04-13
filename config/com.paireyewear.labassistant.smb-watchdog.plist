@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paireyewear.labassistant.smb-watchdog</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/Shared/lab_assistant/scripts/smb-mount-watchdog.sh</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>60</integer>
+    <key>StandardOutPath</key>
+    <string>/Users/Shared/lab_assistant/server/data/smb-watchdog.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/Shared/lab_assistant/server/data/smb-watchdog.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/Shared/lab_assistant</string>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>

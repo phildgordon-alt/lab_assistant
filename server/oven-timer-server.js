@@ -505,12 +505,32 @@ setTimeout(() => {
   }
 }, 30000);
 
-// Log recovery events
+// Log recovery events and re-sync SQLite
 dviTrace.on('recovered', ({ reason }) => {
-  console.log(`[DVI-Trace] Recovery complete (${reason}) — purging shipped jobs...`);
+  console.log(`[DVI-Trace] Recovery complete (${reason}) — purging shipped jobs and syncing SQLite...`);
   if (shippedJobIndex.size > 0) {
     dviTrace.purgeShippedJobs(shippedJobIndex);
   }
+  // Re-sync all trace jobs to SQLite so incoming counts and WIP queries are fresh
+  try {
+    const allJobs = dviTrace.getJobs();
+    const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
+    const enriched = activeJobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      return {
+        ...j,
+        invoice: j.job_id,
+        daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
+        coating: xml?.coating || xml?.coatR || null,
+        rush: xml?.rush || 'N',
+        frameName: xml?.frameName || xml?.frame_name || null,
+        entryDate: j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null,
+      };
+    });
+    const today = new Date().toISOString().split('T')[0];
+    labDb.upsertJobs(enriched, today);
+    console.log(`[DB] Post-recovery sync: ${enriched.length} DVI jobs to SQLite`);
+  } catch (e) { console.warn('[DB] Post-recovery sync error:', e.message); }
 });
 
 // Demo mode: seed DVI trace + coating runs when SMB is unreachable
