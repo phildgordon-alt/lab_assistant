@@ -138,6 +138,8 @@ class DviTraceWatcher extends EventEmitter {
     // In-memory state
     this.jobs = new Map();       // jobId → { last station, stage, timestamps, events }
     this.events = [];            // Recent events (ring buffer, last 5000)
+    this.seenJobIds = new Set(); // All job IDs ever seen (survives purge)
+    this.incomingByDate = {};    // { 'YYYY-MM-DD': count } — first appearance per job, never purged
     this.todayStats = {
       totalEvents: 0,
       uniqueJobs: 0,
@@ -497,6 +499,8 @@ class DviTraceWatcher extends EventEmitter {
     // Clear in-memory state
     this.jobs.clear();
     this.events = [];
+    this.seenJobIds.clear();
+    this.incomingByDate = {};
     this.currentFile = null;
     this.byteOffset = 0;
     this.partialLine = '';
@@ -701,6 +705,12 @@ class DviTraceWatcher extends EventEmitter {
     // Update job state
     let job = this.jobs.get(evt.jobId);
     if (!job) {
+      // Track first appearance for incoming count (survives purge)
+      if (!this.seenJobIds.has(evt.jobId) && evt.timestamp) {
+        this.seenJobIds.add(evt.jobId);
+        const dateKey = new Date(evt.timestamp).toISOString().split('T')[0];
+        this.incomingByDate[dateKey] = (this.incomingByDate[dateKey] || 0) + 1;
+      }
       job = {
         jobId: evt.jobId,
         tray: evt.tray,
@@ -823,6 +833,21 @@ class DviTraceWatcher extends EventEmitter {
       byStage[job.stage] = (byStage[job.stage] || 0) + 1;
     }
     return byStage;
+  }
+
+  /**
+   * Get incoming counts by date — derived from trace LT files.
+   * This is the authoritative source: counts the first time each job_id
+   * appears in any LT file. Survives shipped job purges.
+   */
+  getIncomingByDate(days = 30) {
+    const sorted = Object.entries(this.incomingByDate)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, days);
+    const total = sorted.reduce((s, r) => s + r.count, 0);
+    const avg = sorted.length > 0 ? Math.round(total / sorted.length) : 0;
+    return { days: sorted, total, avg, dayCount: sorted.length, source: 'trace' };
   }
 
   /**
@@ -1117,4 +1142,5 @@ module.exports = {
   seedFromIndex(jobIndex) { watcher.seedFromIndex(jobIndex); },
   purgeShippedJobs(shippedIndex) { return watcher.purgeShippedJobs(shippedIndex); },
   recover() { return watcher.recover(); },
+  getIncomingByDate(days) { return watcher.getIncomingByDate(days); },
 };

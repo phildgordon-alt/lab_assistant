@@ -3784,34 +3784,32 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/dvi/incoming') {
     const days = parseInt(url.searchParams.get('days') || '30');
 
-    // Build incoming count from ALL sources, deduped by job ID:
-    // 1. Active trace jobs (with XML EntryDate when available)
-    // 2. Shipped XML index (authoritative EntryDate)
-    // 3. SQLite dvi_jobs_history as fallback
-    const jobDates = new Map(); // jobId → ISO date
+    // Authoritative source: trace LT files track the first time each job
+    // appears in any LT file. This survives shipped job purges and doesn't
+    // depend on XML file sync. The trace processes ALL historical LT files
+    // on startup, so this covers every job DVI has ever seen.
+    return json(res, dviTrace.getIncomingByDate(days));
+  }
 
-    // Source 1: Active trace jobs enriched with XML EntryDate
+  // Legacy incoming endpoint kept for debugging — uses XML files
+  if (req.method==='GET' && url.pathname==='/api/dvi/incoming-xml') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const jobDates = new Map();
     for (const j of dviTrace.getJobs()) {
       const xml = dviJobIndex.get(j.job_id);
       const date = dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null);
       if (date) jobDates.set(j.job_id, date);
     }
-
-    // Source 2: Shipped XML index (has EntryDate from DVI)
     for (const [jobNum, xml] of shippedJobIndex) {
-      if (jobDates.has(jobNum)) continue; // already counted from trace
+      if (jobDates.has(jobNum)) continue;
       const date = dviEntryDateToIso(xml.entryDate);
       if (date) jobDates.set(jobNum, date);
     }
-
-    // Source 3: DVI job XML index (unshipped, not in trace — queue jobs)
     for (const [jobNum, xml] of dviJobIndex) {
       if (jobDates.has(jobNum)) continue;
       const date = dviEntryDateToIso(xml.entryDate);
       if (date) jobDates.set(jobNum, date);
     }
-
-    // Group by date
     const byDate = {};
     for (const date of jobDates.values()) {
       byDate[date] = (byDate[date] || 0) + 1;
