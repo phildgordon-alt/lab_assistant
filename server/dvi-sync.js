@@ -236,24 +236,15 @@ class LocalClient {
       return [];
     }
 
-    const files = fs.readdirSync(fullPath, { withFileTypes: true });
+    // Use plain readdir (not withFileTypes) to avoid slow SMB stat calls.
+    // On network mounts, statSync on 25K+ files blocks the event loop for minutes.
+    const fileNames = fs.readdirSync(fullPath);
 
-    return files
-      .filter(f => f.isFile())
-      .filter(f => {
-        return patterns.some(pattern => {
-          const regex = new RegExp('^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
-          return regex.test(f.name);
-        });
-      })
-      .map(f => {
-        const stat = fs.statSync(path.join(fullPath, f.name));
-        return {
-          name: f.name,
-          size: stat.size,
-          mtime: stat.mtime
-        };
-      });
+    const regexes = patterns.map(p => new RegExp('^' + p.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i'));
+
+    return fileNames
+      .filter(name => regexes.some(r => r.test(name)))
+      .map(name => ({ name, size: 0, mtime: null }));
   }
 
   async readFile(shareName, remotePath) {
