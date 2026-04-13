@@ -308,10 +308,11 @@ class DviTraceWatcher extends EventEmitter {
     const todayFile = getTodayFilename();
 
     try {
-      // List all LT files in TRACE directory
       let files;
       if (this._useLocal) {
-        files = fs.readdirSync(this._localPath).filter(f => !f.startsWith('.'));
+        const allFiles = fs.readdirSync(this._localPath);
+        console.log(`[DVI-Trace] Local path ${this._localPath}: ${allFiles.length} total files`);
+        files = allFiles.filter(f => !f.startsWith('.'));
       } else {
         files = await new Promise((resolve, reject) => {
           this.client.readdir(TRACE_DIR, (err, list) => {
