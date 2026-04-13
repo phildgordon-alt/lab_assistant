@@ -319,12 +319,21 @@ function renderLive(){
   const pipeCutting      = pipeline.cutting    || 0;
   const pipeTotal        = pipeAssembly + pipeCutting;
 
+  // SLA-based target from API (falls back to manual config)
+  const tgt = d.target || {};
+  const slaTarget = tgt.daily || 0;
+  const effectiveTarget = slaTarget > 0 ? slaTarget : dailyTarget;
+  const svBreak = tgt.breakdown?.sv || {};
+  const surfBreak = tgt.breakdown?.surfacing || {};
+  const requiredRate = tgt.requiredRate || 0;
+  const hoursLeft = tgt.hoursLeft || 0;
+
   // Progress toward daily target
-  const pct = dailyTarget > 0 ? Math.min(150, Math.round(shippedToday / dailyTarget * 100)) : 0;
-  const pctDisplay = dailyTarget > 0 ? Math.round(shippedToday / dailyTarget * 100) : 0;
+  const pct = effectiveTarget > 0 ? Math.min(150, Math.round(shippedToday / effectiveTarget * 100)) : 0;
+  const pctDisplay = effectiveTarget > 0 ? Math.round(shippedToday / effectiveTarget * 100) : 0;
   const barWidth = Math.min(100, pct);
-  const overTarget = shippedToday >= dailyTarget;
-  const remaining = Math.max(0, dailyTarget - shippedToday);
+  const overTarget = shippedToday >= effectiveTarget;
+  const remaining = Math.max(0, effectiveTarget - shippedToday);
 
   // Projected end-of-shift
   const projectedEOS = ratePerHour > 0 && shiftH > 0 ? Math.round(shippedToday + ratePerHour * Math.max(0, 8.5 - shiftH)) : shippedToday;
@@ -366,7 +375,7 @@ function renderLive(){
   <!-- DAILY TARGET PROGRESS -->
   <div class="progress-wrap">
     <div class="progress-header">
-      <span class="progress-lbl">DAILY TARGET: ${commas(dailyTarget)}</span>
+      <span class="progress-lbl">SLA TARGET: ${commas(effectiveTarget)}${slaTarget > 0 ? '' : ' (manual)'}</span>
       <span class="progress-pct" style="color:${overTarget?'var(--green)':'var(--amber)'}">${pctDisplay}%</span>
     </div>
     <div class="progress-bar-bg">
@@ -376,6 +385,11 @@ function renderLive(){
       <span>${overTarget ? 'TARGET MET' : commas(remaining)+' remaining'}</span>
       <span>Projected EOD: ~${commas(projectedEOS)}</span>
     </div>
+    ${slaTarget > 0 ? `<div style="display:flex;gap:16px;margin-top:8px;font-family:var(--mono);font-size:10px;color:var(--dim);">
+      <span>SV: ${commas(svBreak.wip||0)} WIP → <span style="color:var(--teal)">${commas(svBreak.target||0)}/day</span> (2-day SLA)</span>
+      <span>SURF: ${commas(surfBreak.wip||0)} WIP → <span style="color:var(--teal)">${commas(surfBreak.target||0)}/day</span> (3-day SLA)</span>
+      ${requiredRate > 0 && !overTarget ? `<span style="color:var(--amber)">Need ${requiredRate}/hr for ${hoursLeft}h</span>` : ''}
+    </div>` : ''}
   </div>
 
   <!-- PIPELINE + INFO -->
