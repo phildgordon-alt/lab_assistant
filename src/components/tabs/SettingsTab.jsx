@@ -1842,6 +1842,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   const topBar = (
     <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:18,flexWrap:"wrap"}}>
       {[
+        {id:"dashboards",icon:"📊",label:"Dashboards"},
         {id:"connections",icon:"📡",label:"Connections"},
         {id:"agents",icon:"🧠",label:"Agents"},
         {id:"mcptools",icon:"🔧",label:"MCP Tools"},
@@ -1877,6 +1878,36 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
       </div>
 
       {topBar}
+
+      {/* ══ DASHBOARDS ══ */}
+      {sub==="dashboards"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:16}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700,color:T.text}}>Standalone Dashboards</div>
+            <div style={{fontSize:11,color:T.textMuted}}>Open on dedicated tablets or in a new browser window</div>
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
+            {[
+              {name:"Assembly Dashboard",icon:"🔧",desc:"Live assembly floor — stations, operators, leaderboard",path:"/standalone/AssemblyDashboard.html",color:T.purple},
+              {name:"Coating Dashboard",icon:"🧪",desc:"Coating pipeline — queue, coaters, throughput",path:"/standalone/CoatingDashboard.html",color:T.teal||"#06B6D4"},
+              {name:"Cutting Dashboard",icon:"✂️",desc:"Cutting/edging floor — stations, queue, pipeline",path:"/standalone/CuttingDashboard.html",color:T.blue},
+              {name:"Shipping Dashboard",icon:"📦",desc:"Shipped today, rate, pipeline — visible across the floor",path:"/standalone/ShippingDashboard.html",color:T.green},
+              {name:"Oven Timer",icon:"🔥",desc:"Coating oven rack timers — 6 racks per oven",path:"/standalone/OvenTimer.html",color:"#F59E0B"},
+              {name:"Coating Timer",icon:"⏱",desc:"Per-coater timer — single large display",path:"/standalone/CoatingTimer.html",color:"#06B6D4"},
+            ].map(d=>(
+              <a key={d.name} href={d.path} target="_blank" rel="noopener noreferrer"
+                style={{background:T.card,border:`2px solid ${T.border}`,borderRadius:14,padding:"20px 18px",
+                  textDecoration:"none",display:"block",transition:"border-color 0.15s",cursor:"pointer"}}
+                onMouseOver={e=>e.currentTarget.style.borderColor=d.color}
+                onMouseOut={e=>e.currentTarget.style.borderColor=T.border}>
+                <div style={{fontSize:28,marginBottom:8}}>{d.icon}</div>
+                <div style={{fontSize:14,fontWeight:700,color:T.text,marginBottom:4}}>{d.name}</div>
+                <div style={{fontSize:11,color:T.textMuted,lineHeight:1.4}}>{d.desc}</div>
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ══ CONNECTIONS ══ */}
       {sub==="connections"&&(
