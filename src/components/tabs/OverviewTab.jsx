@@ -342,7 +342,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     const dviByStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||'').toLowerCase().includes(stage.toLowerCase())).length;
 
     switch(kpiId){
-      case 'incoming_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('INITIATE')||s.includes('NEW WORK')||s.includes('INCOMING')||s.includes('FRAME LOGGED')||(j.stage||'').toUpperCase()==='INCOMING';}).length,sub:"incoming"};
+      case 'incoming_jobs': return {value:incomingToday||0,sub:"incoming"};
       case 'total_wip': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"in queues"};
       case 'nel_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('NE LENS')||s.includes('NEL')||s.includes('NOT ENOUGH');}).length,sub:"awaiting lens"};
       case 'at_kardex': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('AT KARDEX')||s.includes('MAN2KARDX');}).length,sub:"at pickup"};
@@ -814,7 +814,7 @@ function OverviewAICard({trays,batches,settings}){
 }
 
 // ── Main OverviewTab Component ────────────────────────────────
-export default function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[],dviJobs=[],wipJobs=[],shippedStats={},assemblyStats={},setView}){
+export default function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[],dviJobs=[],wipJobs=[],shippedStats={},assemblyStats={},incomingToday=0,setView}){
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
     return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;

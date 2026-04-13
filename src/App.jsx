@@ -11374,6 +11374,7 @@ function LabAssistantV2(){
   // DVI jobs from gateway + shipped stats
   const [dviJobs,setDviJobs]=useState([]);
   const [shippedStats,setShippedStats]=useState({today:0,yesterday:0,thisWeek:0});
+  const [incomingToday,setIncomingToday]=useState(0);
   const [assemblyStats,setAssemblyStats]=useState({assembledToday:0,passToday:0,failToday:0});
   const [wipJobs,setWipJobs]=useState([]);
 
@@ -11418,8 +11419,17 @@ function LabAssistantV2(){
           if(data.assembly){
             setAssemblyStats(data.assembly);
           }
+          // Fetch today's incoming count from trace (authoritative)
+          if(data.incomingToday!==undefined){
+            setIncomingToday(data.incomingToday);
+          }
         }
       }catch(e){ console.warn("DVI fetch:",e.message); }
+      // Also fetch incoming from dedicated endpoint as backup
+      try{
+        const incRes=await fetch(`http://${window.location.hostname}:3002/api/dvi/incoming?days=1`);
+        if(incRes.ok){const incData=await incRes.json();if(incData.days&&incData.days.length>0)setIncomingToday(incData.days[0].count);}
+      }catch{}
     };
     fetchDvi();
     const iv=setInterval(fetchDvi,10000); // 10s to match trace watcher cadence
@@ -11677,7 +11687,7 @@ function LabAssistantV2(){
         <VisionDashboard ovenServerUrl={ovenServerUrl} settings={settings} isTablet={isTablet}/>
       ):(
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto",position:"relative",zIndex:1}}>
-        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats} assemblyStats={assemblyStats}/>}
+        {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats} assemblyStats={assemblyStats} incomingToday={incomingToday}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events} wipJobs={wipJobs}/>}
         {view==="coating"&&<CoatingTab batches={batches} trays={trays} dviJobs={mergedJobs} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
