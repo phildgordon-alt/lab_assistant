@@ -489,6 +489,30 @@ loadShippedIndex();
 setInterval(loadDviJobIndex, 60000);
 setInterval(loadShippedIndex, 60000);
 
+// Purge shipped jobs from trace every 5 minutes
+// (the method exists in dvi-trace but was never being called)
+setInterval(() => {
+  if (shippedJobIndex.size > 0) {
+    dviTrace.purgeShippedJobs(shippedJobIndex);
+  }
+}, 5 * 60 * 1000);
+
+// Also purge once after startup (give trace 30s to load history)
+setTimeout(() => {
+  if (shippedJobIndex.size > 0) {
+    console.log(`[DVI-Trace] Initial purge: checking ${shippedJobIndex.size} shipped jobs against trace...`);
+    dviTrace.purgeShippedJobs(shippedJobIndex);
+  }
+}, 30000);
+
+// Log recovery events
+dviTrace.on('recovered', ({ reason }) => {
+  console.log(`[DVI-Trace] Recovery complete (${reason}) — purging shipped jobs...`);
+  if (shippedJobIndex.size > 0) {
+    dviTrace.purgeShippedJobs(shippedJobIndex);
+  }
+});
+
 // Demo mode: seed DVI trace + coating runs when SMB is unreachable
 if (process.env.DEMO_MODE === 'true') {
   setTimeout(() => {
@@ -3778,6 +3802,20 @@ Respond with a structured batching plan in this format:
     const history = dviTrace.getJobHistory(jobId);
     if (!history) return json(res, { error: 'Job not found' }, 404);
     return json(res, history);
+  }
+
+  // ── Trace recovery: clear stale state and rebuild from trace files ──
+  if (req.method==='POST' && url.pathname==='/api/dvi/trace/recover') {
+    try {
+      const result = await dviTrace.recover();
+      // Purge shipped jobs from fresh trace
+      if (shippedJobIndex.size > 0) {
+        result.purged = dviTrace.purgeShippedJobs(shippedJobIndex);
+      }
+      return json(res, { ok: true, ...result });
+    } catch (err) {
+      return json(res, { ok: false, error: err.message }, 500);
+    }
   }
 
   // ── Analytics: daily throughput from DVI trace ─────────────────

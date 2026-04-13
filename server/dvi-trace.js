@@ -222,12 +222,70 @@ class DviTraceWatcher extends EventEmitter {
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
       this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
+      this._startSelfHealing();
     }).catch(err => {
       console.error('[DVI-Trace] History load failed, starting live poll anyway:', err.message);
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
       this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
+      this._startSelfHealing();
     });
+  }
+
+  /**
+   * Self-healing: every 2 minutes, check if trace is healthy.
+   * If no events in 10+ minutes during business hours (6 AM – 10 PM),
+   * or if connected=false, trigger automatic recovery.
+   */
+  _startSelfHealing() {
+    if (this._healTimer) clearInterval(this._healTimer);
+    this._healTimer = setInterval(() => this._selfHealCheck(), 2 * 60 * 1000);
+    this._lastRecoveryAttempt = 0;
+  }
+
+  async _selfHealCheck() {
+    if (!this.running) return;
+
+    const now = Date.now();
+    const hour = new Date().getHours();
+    const isBusinessHours = hour >= 6 && hour <= 22;
+    const lastEvt = this.todayStats.lastEvent;
+    const eventAgeSec = lastEvt ? (now - lastEvt) / 1000 : null;
+    const connected = this._consecutiveErrors < 3;
+    const hasCurrentFile = !!this.currentFile;
+
+    // Don't attempt recovery more than once every 5 minutes
+    if (now - this._lastRecoveryAttempt < 5 * 60 * 1000) return;
+
+    let needsRecovery = false;
+    let reason = '';
+
+    // Case 1: Never connected (currentFile is null)
+    if (!hasCurrentFile && this.jobs.size > 0) {
+      needsRecovery = true;
+      reason = `trace never connected (currentFile=null, ${this.jobs.size} stale jobs from SQLite)`;
+    }
+    // Case 2: Connected but no events for 10+ min during business hours
+    else if (isBusinessHours && eventAgeSec !== null && eventAgeSec > 600 && connected) {
+      needsRecovery = true;
+      reason = `no trace events in ${Math.round(eventAgeSec)}s during business hours`;
+    }
+    // Case 3: Disconnected (consecutive errors)
+    else if (!connected && this._consecutiveErrors >= 3) {
+      needsRecovery = true;
+      reason = `disconnected (${this._consecutiveErrors} consecutive errors)`;
+    }
+
+    if (needsRecovery) {
+      console.warn(`[DVI-Trace] SELF-HEAL: ${reason} — triggering recovery`);
+      this._lastRecoveryAttempt = now;
+      try {
+        await this.recover();
+        this.emit('recovered', { reason });
+      } catch (err) {
+        console.error(`[DVI-Trace] SELF-HEAL failed: ${err.message}`);
+      }
+    }
   }
 
   _waitForMount(mountPath, timeoutMs) {
@@ -358,6 +416,10 @@ class DviTraceWatcher extends EventEmitter {
       clearInterval(this._checkpointTimer);
       this._checkpointTimer = null;
     }
+    if (this._healTimer) {
+      clearInterval(this._healTimer);
+      this._healTimer = null;
+    }
     if (this.client) {
       try { this.client.close(); } catch (e) {}
       this.client = null;
@@ -372,7 +434,14 @@ class DviTraceWatcher extends EventEmitter {
       const db = require('./db');
       const rows = db.db.prepare('SELECT * FROM dvi_trace_jobs').all();
       if (rows.length === 0) return 0;
+      let skippedCorrupt = 0;
       for (const row of rows) {
+        // Sanity check: job_id should be numeric (invoice number).
+        // Skip corrupted entries where station names leaked into job_id.
+        if (!/^\d+$/.test(row.job_id)) {
+          skippedCorrupt++;
+          continue;
+        }
         const events = row.events_json ? JSON.parse(row.events_json) : [];
         this.jobs.set(row.job_id, {
           jobId: row.job_id,
@@ -390,12 +459,66 @@ class DviTraceWatcher extends EventEmitter {
           events,
         });
       }
-      console.log(`[DVI-Trace] Restored ${rows.length} jobs from SQLite`);
-      return rows.length;
+      if (skippedCorrupt > 0) {
+        console.warn(`[DVI-Trace] Skipped ${skippedCorrupt} corrupted rows (non-numeric job_id)`);
+      }
+
+      // Sanity check: if SHIPPING jobs are >50% of total, the data is stale
+      // (normal WIP has <5% in SHIPPING at any time)
+      const shippingCount = [...this.jobs.values()].filter(j => j.stage === 'SHIPPING' || j.status === 'SHIPPED').length;
+      if (this.jobs.size > 100 && shippingCount / this.jobs.size > 0.5) {
+        console.warn(`[DVI-Trace] STALE DATA: ${shippingCount}/${this.jobs.size} jobs in SHIPPING/SHIPPED (${Math.round(100*shippingCount/this.jobs.size)}%). Clearing stale restore — will rebuild from trace files.`);
+        this.jobs.clear();
+        return 0;
+      }
+
+      console.log(`[DVI-Trace] Restored ${this.jobs.size} jobs from SQLite`);
+      return this.jobs.size;
     } catch (e) {
       console.error(`[DVI-Trace] Failed to load from SQLite: ${e.message}`);
       return 0;
     }
+  }
+
+  /**
+   * Full recovery: clear stale state and reload from trace files.
+   * Can be called programmatically or via /api/dvi/trace/recover.
+   */
+  async recover() {
+    console.log(`[DVI-Trace] RECOVERY: clearing ${this.jobs.size} stale jobs, resetting state...`);
+    const prevJobCount = this.jobs.size;
+
+    // Clear in-memory state
+    this.jobs.clear();
+    this.events = [];
+    this.currentFile = null;
+    this.byteOffset = 0;
+    this.partialLine = '';
+    this._consecutiveErrors = 0;
+    this._staleCount = 0;
+    this.todayStats = {
+      totalEvents: 0, uniqueJobs: 0, byStation: {}, byStage: {},
+      byOperator: {}, breakageCount: 0, firstEvent: null, lastEvent: null
+    };
+
+    // Reconnect if using SMB
+    if (!this._useLocal && this._connConfig) {
+      this._createClient();
+    }
+
+    // Reload all history from trace files
+    await this.loadHistory();
+    this.saveToDb();
+
+    const result = {
+      prevJobCount,
+      newJobCount: this.jobs.size,
+      connected: this.running && this._consecutiveErrors < 3,
+      currentFile: this.currentFile,
+      byteOffset: this.byteOffset,
+    };
+    console.log(`[DVI-Trace] RECOVERY complete: ${prevJobCount} → ${this.jobs.size} jobs, file=${this.currentFile}, offset=${this.byteOffset}`);
+    return result;
   }
 
   saveToDb() {
@@ -974,5 +1097,7 @@ module.exports = {
   getStatus() { return watcher.getStatus(); },
   getJobHistory(jobId) { return watcher.getJobHistory(jobId); },
   on(event, handler) { watcher.on(event, handler); },
-  seedFromIndex(jobIndex) { watcher.seedFromIndex(jobIndex); }
+  seedFromIndex(jobIndex) { watcher.seedFromIndex(jobIndex); },
+  purgeShippedJobs(shippedIndex) { return watcher.purgeShippedJobs(shippedIndex); },
+  recover() { return watcher.recover(); },
 };
