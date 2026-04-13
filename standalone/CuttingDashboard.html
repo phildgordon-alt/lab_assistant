@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Cutting Dashboard — Pair Eyewear</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#070A0F; --surface:#0D1117; --card:#111820;
+  --border:#1C2733; --borderLt:#2A3A4A;
+  --text:#E8EDF2; --dim:#8899AA; --dimmer:#445566;
+  --blue:#3B82F6; --blueDk:#1E3A5F; --blue2:#2E5FA3;
+  --green:#10B981; --greenDk:#052E1A;
+  --amber:#F59E0B; --amberDk:#451A00;
+  --red:#EF4444;   --redDk:#3F0A0A;
+  --purple:#8B5CF6; --purpleDk:#2D1B69;
+  --teal:#06B6D4;
+  --gold:#F59E0B; --silver:#94A3B8; --bronze:#B45309;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'DM Sans',sans-serif;
+  --disp:'Bebas Neue',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);}
+body{display:flex;flex-direction:column;overflow:hidden;}
+
+/* HEADER */
+.hdr{background:var(--surface);border-bottom:2px solid var(--border);
+  padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.hdr-brand{display:flex;align-items:center;gap:12px;}
+.logo{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,#3B82F6,#1E3A5F);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-weight:800;font-size:15px;color:#fff;}
+.brand-name{font-family:var(--disp);font-size:28px;letter-spacing:1px;}
+.brand-sub{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:2px;}
+.hdr-right{display:flex;align-items:center;gap:16px;}
+.date-badge{font-family:var(--mono);font-size:11px;color:var(--dim);}
+.clock{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--blue);letter-spacing:3px;}
+.srv-wrap{display:flex;align-items:center;gap:5px;cursor:pointer;}
+.srv-dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
+.srv-dot.ok{background:var(--green);box-shadow:0 0 8px var(--green);}
+.srv-dot.mock{background:var(--amber);}
+.srv-dot.err{background:var(--red);}
+.srv-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;}
+.hdr-btn{background:transparent;border:1px solid var(--border);border-radius:7px;
+  padding:7px 12px;font-family:var(--mono);font-size:10px;color:var(--dim);cursor:pointer;}
+.hdr-btn:active{border-color:var(--blue);color:var(--blue);}
+
+/* TABS */
+.tab-bar{background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;gap:0;padding:0 20px;flex-shrink:0;}
+.tab{padding:12px 20px;font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--dim);cursor:pointer;border-bottom:3px solid transparent;
+  transition:all .15s;letter-spacing:.5px;-webkit-user-select:none;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--blue);border-bottom-color:var(--blue);}
+
+/* MAIN */
+.main{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;display:flex;flex-direction:column;gap:14px;}
+
+/* KPI ROW */
+.kpi-row{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);}
+@media(max-width:900px){.kpi-row{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:600px){.kpi-row{grid-template-columns:repeat(2,1fr);}}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:14px 16px;display:flex;flex-direction:column;gap:4px;}
+.kpi-val{font-family:var(--mono);font-size:30px;font-weight:800;line-height:1;}
+.kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;}
+.kpi-sub{font-family:var(--mono);font-size:10px;color:var(--dimmer);margin-top:2px;}
+
+/* GRID LAYOUTS */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
+@media(max-width:900px){.two-col,.three-col{grid-template-columns:1fr;}}
+
+/* CARD */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
+.card-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--dim);
+  letter-spacing:2px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;}
+.card-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 8px;
+  border-radius:10px;background:var(--border);color:var(--dim);}
+
+/* STATION GRID */
+.station-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+@media(min-width:1200px){.station-grid{grid-template-columns:repeat(4,1fr);}}
+.station-card{background:var(--surface);border:2px solid var(--border);border-radius:12px;
+  padding:14px;display:flex;flex-direction:column;gap:8px;
+  transition:border-color .15s;}
+.station-card.active{border-color:var(--blue);}
+.station-card.idle{border-color:var(--border);opacity:.7;}
+.stn-top{display:flex;align-items:center;justify-content:space-between;}
+.stn-id{font-family:var(--mono);font-size:10px;color:var(--dim);font-weight:700;}
+.stn-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.s-active{background:var(--blue);box-shadow:0 0 8px var(--blue);}
+.s-idle{background:var(--dimmer);}
+.stn-stats{display:flex;gap:12px;}
+.stn-stat{text-align:center;}
+.stn-stat-val{font-family:var(--mono);font-size:15px;font-weight:700;color:var(--blue);}
+.stn-stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;}
+
+/* JOB QUEUE */
+.queue-controls{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
+.q-sort-btn{padding:6px 12px;border-radius:8px;border:1px solid var(--border);
+  background:transparent;color:var(--dim);font-family:var(--mono);font-size:10px;
+  cursor:pointer;font-weight:700;transition:all .15s;}
+.q-sort-btn.active{border-color:var(--blue);color:var(--blue);background:var(--blueDk);}
+.queue-list{display:flex;flex-direction:column;gap:5px;max-height:calc(100vh - 240px);overflow-y:auto;}
+.queue-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;}
+.queue-row.rush{border-color:var(--amber);background:#1A1500;}
+.q-id{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--blue);min-width:72px;}
+.q-station{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:80px;}
+.q-info{font-family:var(--mono);font-size:10px;color:var(--dim);flex:1;}
+.q-frame{font-family:var(--mono);font-size:10px;color:var(--purple);min-width:100px;}
+.q-lens{font-family:var(--mono);font-size:10px;color:var(--teal);min-width:100px;}
+.q-time{font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:50px;text-align:right;}
+.q-rush-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 6px;
+  border-radius:6px;background:var(--amberDk);color:var(--amber);white-space:nowrap;}
+.q-days{font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:40px;text-align:right;}
+
+/* OPERATOR CARDS */
+.op-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
+.op-avatar{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-family:var(--mono);font-weight:800;font-size:16px;
+  color:#fff;flex-shrink:0;}
+.op-stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px;}
+.op-stat{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:10px;text-align:center;}
+.op-stat-val{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--blue);}
+.op-stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:#00000090;z-index:200;
+  display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal{background:var(--surface);border:1px solid var(--borderLt);border-radius:16px;
+  padding:24px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;}
+.modal h3{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);letter-spacing:1px;}
+.m-field label{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;
+  display:block;margin-bottom:6px;}
+.m-inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:8px;
+  padding:11px 14px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;
+  -webkit-appearance:none;}
+.m-inp:focus{border-color:var(--blue);}
+.m-btns{display:flex;gap:8px;}
+.m-btns button{flex:1;padding:12px;border-radius:8px;border:none;
+  font-weight:700;font-size:14px;cursor:pointer;font-family:var(--sans);}
+
+/* TOAST */
+.toast-wrap{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:300;pointer-events:none;}
+.toast{background:#1A2540;border:1px solid var(--borderLt);border-radius:10px;
+  padding:10px 20px;font-family:var(--mono);font-size:13px;color:var(--text);
+  box-shadow:0 4px 24px #00000060;white-space:nowrap;}
+.toast.ok{border-color:var(--green);color:var(--green);}
+.toast.warn{border-color:var(--amber);color:var(--amber);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-brand">
+    <div class="logo">CU</div>
+    <div>
+      <div class="brand-name">CUTTING DASHBOARD</div>
+      <div class="brand-sub">LAB_ASSISTANT · PAIR EYEWEAR · CUTTING / EDGING ZONE</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="date-badge" id="dateBadge"></div>
+    <div class="srv-wrap" onclick="manualSync()" title="Click to refresh data">
+      <div class="srv-dot" id="srvDot"></div>
+      <span class="srv-lbl" id="srvLbl">SERVER</span>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+    <button class="hdr-btn" onclick="openSetup()">&#9881; SETUP</button>
+    <button class="hdr-btn" onclick="window.location.href='/'" title="Back to dashboards">&#9666; HOME</button>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tab-bar">
+  <div class="tab active" id="tab-floor"     onclick="switchTab('floor')">&#9881; FLOOR</div>
+  <div class="tab"        id="tab-queue"      onclick="switchTab('queue')">&#128203; JOB QUEUE</div>
+  <div class="tab"        id="tab-operators"  onclick="switchTab('operators')">&#128100; OPERATORS</div>
+</div>
+
+<div class="main" id="main"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal-bg" id="modal" style="display:none">
+  <div class="modal">
+    <h3 id="mTitle"></h3>
+    <div id="mBody"></div>
+    <div class="m-btns" id="mBtns"></div>
+  </div>
+</div>
+
+<script>
+// -----------------------------------------------------------------
+// CONFIG & STATE
+// -----------------------------------------------------------------
+let cfg = JSON.parse(localStorage.getItem('cut_cfg') || '{}');
+let serverUrl  = cfg.serverUrl  || 'http://localhost:3002';
+let shiftStart = cfg.shiftStart || '07:00';
+
+const AVATAR_COLORS = [
+  '#3B82F6','#8B5CF6','#10B981','#F59E0B','#EF4444',
+  '#EC4899','#06B6D4','#84CC16','#F97316','#A78BFA',
+];
+
+let dashData = null;
+let dataMode = 'offline';
+let lastSync = null;
+let activeTab = 'floor';
+let queueSort = 'station'; // station | wait | rush
+
+// -----------------------------------------------------------------
+// CLOCK + DATE
+// -----------------------------------------------------------------
+function tickClock(){
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  document.getElementById('dateBadge').textContent = now.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}).toUpperCase();
+}
+setInterval(tickClock,1000); tickClock();
+
+// -----------------------------------------------------------------
+// DATA FETCH
+// -----------------------------------------------------------------
+async function fetchData(){
+  try{
+    const resp = await fetch(`${serverUrl}/api/cutting/dashboard`, {
+      signal: AbortSignal.timeout(8000)
+    });
+    if(resp.ok){
+      dashData = await resp.json();
+      dataMode = 'live';
+      lastSync = new Date();
+      updateSrvDot('ok','LIVE');
+      return;
+    }
+  } catch(e){ console.warn('Cutting fetch failed:', e.message); }
+  dashData = null;
+  dataMode = 'offline';
+  lastSync = new Date();
+  updateSrvDot('err','OFFLINE');
+}
+
+async function manualSync(){
+  updateSrvDot('mock','SYNCING...');
+  await fetchData();
+  render();
+  toast('Data refreshed','ok');
+}
+
+function updateSrvDot(state, label){
+  const dot = document.getElementById('srvDot');
+  const lbl = document.getElementById('srvLbl');
+  dot.className = 'srv-dot ' + (state==='ok'?'ok':state==='mock'?'mock':'err');
+  lbl.textContent = label;
+}
+
+// -----------------------------------------------------------------
+// HELPERS
+// -----------------------------------------------------------------
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function pickColor(name){
+  let hash = 0;
+  for(const c of String(name)) hash = (hash*31 + c.charCodeAt(0)) & 0xFFFFFF;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function initials(name){
+  return String(name||'?').split(' ').map(p=>p[0]).join('').toUpperCase().slice(0,2);
+}
+
+function shiftHours(){
+  const [h,m] = shiftStart.split(':').map(Number);
+  const start = new Date();
+  start.setHours(h,m,0,0);
+  return Math.max(0,(Date.now()-start)/3600000);
+}
+
+function fmtMin(m){
+  if(m==null) return '--';
+  if(m<60) return m+'m';
+  return Math.floor(m/60)+'h '+Math.round(m%60)+'m';
+}
+
+function toast(msg,type=''){
+  const wrap=document.getElementById('toastWrap');
+  const el=document.createElement('div');
+  el.className=`toast ${type}`; el.textContent=msg;
+  wrap.innerHTML=''; wrap.appendChild(el);
+  setTimeout(()=>el.style.opacity='0',2800);
+  setTimeout(()=>el.remove(),3100);
+}
+
+// -----------------------------------------------------------------
+// TAB SWITCH
+// -----------------------------------------------------------------
+function switchTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tab)?.classList.add('active');
+  render();
+}
+
+// -----------------------------------------------------------------
+// RENDER
+// -----------------------------------------------------------------
+function render(){
+  const main = document.getElementById('main');
+  if(activeTab==='floor')      main.innerHTML = renderFloor();
+  if(activeTab==='queue')      main.innerHTML = renderQueue();
+  if(activeTab==='operators')  main.innerHTML = renderOperators();
+}
+
+// -----------------------------------------------------------------
+// FLOOR TAB
+// -----------------------------------------------------------------
+function renderFloor(){
+  const d = dashData || {};
+  const jobs       = d.jobs || [];
+  const cuttingWip = d.cuttingWip || 0;
+  const doneToday  = d.completedToday || 0;
+  const pipeline   = d.pipeline || {};
+  const pipelineTotal = (pipeline.surfacing || 0) + (pipeline.coating || 0);
+  const totalWip   = d.totalWip || 0;
+  const shipped    = d.shippedToday || 0;
+  const byStation  = d.byStation || {};
+  const rushCount  = jobs.filter(j=>j.isRush).length;
+
+  const shiftH = shiftHours();
+  const rate = shiftH > 0 ? (doneToday / shiftH).toFixed(1) : '--';
+
+  const kpis = `
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--blue)">${cuttingWip}</div>
+      <div class="kpi-lbl">CUTTING WIP</div>
+      <div class="kpi-sub">${rushCount} rush${rushCount!==1?'es':''}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--green)">${doneToday}</div>
+      <div class="kpi-lbl">DONE TODAY</div>
+      <div class="kpi-sub">${rate}/hr</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--teal)">${pipelineTotal}</div>
+      <div class="kpi-lbl">PIPELINE</div>
+      <div class="kpi-sub">surf ${pipeline.surfacing||0} + coat ${pipeline.coating||0}</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--dimmer)">${totalWip}</div>
+      <div class="kpi-lbl">TOTAL WIP</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--purple)">${shipped}</div>
+      <div class="kpi-lbl">SHIPPED TODAY</div>
+    </div>
+  </div>`;
+
+  // Station cards from byStation
+  const stationNames = Object.keys(byStation).sort();
+  const stationCards = stationNames.map(name => {
+    const stn = byStation[name];
+    const count = stn.count || 0;
+    const ops = stn.operators || [];
+    const stnJobs = stn.jobs || [];
+    const isActive = count > 0;
+
+    const opsHtml = ops.length
+      ? ops.map(op => {
+          const col = pickColor(op);
+          return `<div style="display:inline-flex;align-items:center;gap:4px;margin-right:8px;">
+            <div style="width:22px;height:22px;border-radius:50%;background:${col};display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800;font-size:9px;color:#fff;">${esc(op)}</div>
+          </div>`;
+        }).join('')
+      : '<span style="font-family:var(--mono);font-size:10px;color:var(--dimmer);">No operator</span>';
+
+    return `<div class="station-card ${isActive?'active':'idle'}">
+      <div class="stn-top">
+        <span class="stn-id">${esc(name)}</span>
+        <span class="stn-status-dot ${isActive?'s-active':'s-idle'}"></span>
+      </div>
+      <div style="margin:4px 0;">${opsHtml}</div>
+      <div class="stn-stats">
+        <div class="stn-stat"><div class="stn-stat-val">${count}</div><div class="stn-stat-lbl">JOBS</div></div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const noStations = stationNames.length === 0
+    ? '<div style="text-align:center;padding:30px;font-family:var(--mono);color:var(--dimmer);">No station data — waiting for server</div>'
+    : '';
+
+  const lastSyncStr = lastSync ? `Last sync: ${lastSync.toLocaleTimeString()}` : 'Not synced';
+
+  return `
+  ${kpis}
+  <div class="card">
+    <div class="card-title">
+      CUTTING FLOOR — ${stationNames.length} STATIONS
+      <span style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">${lastSyncStr} · ${dataMode.toUpperCase()}</span>
+    </div>
+    <div class="station-grid">${stationCards}${noStations}</div>
+  </div>`;
+}
+
+// -----------------------------------------------------------------
+// JOB QUEUE TAB
+// -----------------------------------------------------------------
+function setSort(s){ queueSort = s; render(); }
+
+function renderQueue(){
+  const d = dashData || {};
+  const jobs = [...(d.jobs || [])];
+
+  // Sort
+  if(queueSort === 'station'){
+    jobs.sort((a,b) => (a.station||'').localeCompare(b.station||''));
+  } else if(queueSort === 'wait'){
+    jobs.sort((a,b) => (b.minutesAtStation||0) - (a.minutesAtStation||0));
+  } else if(queueSort === 'rush'){
+    jobs.sort((a,b) => {
+      if(a.isRush && !b.isRush) return -1;
+      if(!a.isRush && b.isRush) return 1;
+      return (b.minutesAtStation||0) - (a.minutesAtStation||0);
+    });
+  }
+
+  const controls = `
+  <div class="queue-controls">
+    <button class="q-sort-btn ${queueSort==='station'?'active':''}" onclick="setSort('station')">BY STATION</button>
+    <button class="q-sort-btn ${queueSort==='wait'?'active':''}" onclick="setSort('wait')">BY WAIT TIME</button>
+    <button class="q-sort-btn ${queueSort==='rush'?'active':''}" onclick="setSort('rush')">RUSH FIRST</button>
+    <span style="font-family:var(--mono);font-size:10px;color:var(--dimmer);padding:6px 0;margin-left:auto;">${jobs.length} jobs</span>
+  </div>`;
+
+  const header = `
+  <div style="display:flex;gap:10px;padding:6px 12px;font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;">
+    <div style="min-width:72px;">ID / TRAY</div>
+    <div style="min-width:80px;">STATION</div>
+    <div style="min-width:100px;">FRAME</div>
+    <div style="min-width:100px;">LENS</div>
+    <div style="flex:1;">COATING</div>
+    <div style="min-width:50px;text-align:right;">WAIT</div>
+    <div style="min-width:40px;text-align:right;">DAYS</div>
+  </div>`;
+
+  const rows = jobs.map(j => {
+    const isRush = j.isRush;
+    const waitStr = j.minutesAtStation != null ? fmtMin(j.minutesAtStation) : '--';
+    const daysStr = j.daysInLab != null ? j.daysInLab + 'd' : '--';
+    const lensInfo = [j.lensMat, j.lensStyle].filter(Boolean).join(' ');
+
+    return `<div class="queue-row ${isRush?'rush':''}">
+      <div class="q-id">${isRush?'<span class="q-rush-badge">RUSH</span> ':''}${esc(j.tray || j.id)}</div>
+      <div class="q-station">${esc(j.station||'--')}</div>
+      <div class="q-frame">${esc(j.frameStyle||'--')}</div>
+      <div class="q-lens">${esc(lensInfo||'--')}</div>
+      <div class="q-info">${esc(j.coating||'--')}</div>
+      <div class="q-time">${waitStr}</div>
+      <div class="q-days">${daysStr}</div>
+    </div>`;
+  }).join('');
+
+  const empty = jobs.length === 0
+    ? '<div style="text-align:center;padding:40px;font-family:var(--mono);color:var(--dimmer);">No jobs in cutting queue — waiting for server data</div>'
+    : '';
+
+  return `
+  <div class="card">
+    <div class="card-title">CUTTING JOB QUEUE <span class="card-badge">${jobs.length}</span></div>
+    ${controls}
+    ${header}
+    <div class="queue-list">${rows}${empty}</div>
+  </div>`;
+}
+
+// -----------------------------------------------------------------
+// OPERATORS TAB
+// -----------------------------------------------------------------
+function renderOperators(){
+  const d = dashData || {};
+  const opStats = d.operatorStats || {};
+  const opEntries = Object.entries(opStats).sort((a,b) => (b[1].jobs||0) - (a[1].jobs||0));
+  const maxJobs = Math.max(1, ...opEntries.map(([,s]) => s.jobs||0));
+  const shiftH = shiftHours();
+
+  const cards = opEntries.map(([init, stats]) => {
+    const jobCount = stats.jobs || 0;
+    const jph = shiftH > 0 ? (jobCount / shiftH).toFixed(1) : '--';
+    const pct = Math.round((jobCount / maxJobs) * 100);
+    const col = pickColor(init);
+
+    return `<div class="op-card">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="op-avatar" style="background:${col}">${esc(init)}</div>
+        <div style="flex:1;">
+          <div style="font-family:var(--sans);font-size:16px;font-weight:700;">${esc(stats.initials || init)}</div>
+          <div style="font-family:var(--mono);font-size:9px;color:var(--dim);">CUTTING OPERATOR</div>
+        </div>
+      </div>
+      <div class="op-stat-grid">
+        <div class="op-stat"><div class="op-stat-val">${jobCount}</div><div class="op-stat-lbl">JOBS TODAY</div></div>
+        <div class="op-stat"><div class="op-stat-val">${jph}</div><div class="op-stat-lbl">JOBS / HR</div></div>
+      </div>
+      <div style="margin-top:10px;">
+        <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-bottom:4px;">
+          <span>DAILY PROGRESS</span><span>${pct}%</span>
+        </div>
+        <div style="width:100%;height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+          <div style="height:100%;border-radius:2px;background:var(--blue);transition:width .5s;width:${pct}%"></div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const empty = opEntries.length === 0
+    ? '<div style="grid-column:span 3;text-align:center;padding:40px;font-family:var(--mono);color:var(--dimmer);">No operator data — waiting for server</div>'
+    : '';
+
+  return `
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+    <div style="font-family:var(--mono);font-size:10px;color:var(--dim);">${opEntries.length} OPERATORS THIS SHIFT</div>
+    <span class="card-badge">${shiftH.toFixed(1)}H INTO SHIFT</span>
+  </div>
+  <div class="three-col">${cards}${empty}</div>`;
+}
+
+// -----------------------------------------------------------------
+// SETUP MODAL
+// -----------------------------------------------------------------
+function openSetup(){
+  document.getElementById('mTitle').textContent = 'DASHBOARD SETUP';
+  document.getElementById('mBody').innerHTML = `
+    <div class="m-field">
+      <label>LAB_ASSISTANT SERVER URL</label>
+      <input class="m-inp" id="s-srv" value="${esc(serverUrl)}" placeholder="http://192.168.x.x:3002"/>
+    </div>
+    <div class="m-field">
+      <label>SHIFT START TIME</label>
+      <input class="m-inp" id="s-shift" type="time" value="${esc(shiftStart)}"/>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);padding:6px 0;">
+      Polls GET /api/cutting/dashboard every 120s. All settings saved locally on this tablet.
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
+    <button style="background:var(--blue);color:#fff;" onclick="saveSetup()">Save</button>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+function saveSetup(){
+  serverUrl  = document.getElementById('s-srv')?.value.trim() || serverUrl;
+  shiftStart = document.getElementById('s-shift')?.value || shiftStart;
+  cfg = {serverUrl, shiftStart};
+  localStorage.setItem('cut_cfg', JSON.stringify(cfg));
+  closeModal(); fetchData().then(render); toast('Settings saved — refreshing data','ok');
+}
+
+function closeModal(){document.getElementById('modal').style.display='none';}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+
+// -----------------------------------------------------------------
+// INIT
+// -----------------------------------------------------------------
+fetchData().then(()=>{ render(); });
+setInterval(()=>fetchData().then(render), 120000);
+</script>
+</body>
+</html>

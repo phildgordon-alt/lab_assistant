@@ -880,6 +880,9 @@ function buildLandingPage() {
 
   const apps = [
     { name:'Assembly Dashboard', icon:'🔧', desc:'Live assembly floor — stations, operators, leaderboard', path:'/standalone/AssemblyDashboard.html', color:'#8B5CF6' },
+    { name:'Coating Dashboard', icon:'🧪', desc:'Coating pipeline — queue, coaters, throughput', path:'/standalone/CoatingDashboard.html', color:'#06B6D4' },
+    { name:'Cutting Dashboard', icon:'✂️', desc:'Cutting/edging floor — stations, queue, pipeline', path:'/standalone/CuttingDashboard.html', color:'#3B82F6' },
+    { name:'Shipping Dashboard', icon:'📦', desc:'Shipped today, rate, pipeline — visible across the floor', path:'/standalone/ShippingDashboard.html', color:'#10B981' },
     { name:'Oven Timer', icon:'🔥', desc:'Coating oven rack timers — 6 racks per oven', path:'/standalone/OvenTimer.html', color:'#F59E0B' },
     { name:'Coating Timer', icon:'⏱', desc:'Per-coater timer — single large display', path:'/standalone/CoatingTimer.html', color:'#06B6D4' },
   ];
@@ -3679,6 +3682,233 @@ Respond with a structured batching plan in this format:
       .sort((a, b) => b.date.localeCompare(a.date));
 
     return json(res, { history, days });
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ── COATING DASHBOARD ──────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  if (req.method==='GET' && url.pathname==='/api/coating/dashboard') {
+    const allJobs = dviTrace.getJobs();
+    const now = Date.now();
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayMs = todayStart.getTime();
+
+    // Coating jobs: currently at COATING stage
+    const coatingJobs = allJobs.filter(j => j.stage === 'COATING');
+
+    // Jobs waiting for coating (SENT TO COAT)
+    const queueJobs = coatingJobs.filter(j => /SENT TO COAT/i.test(j.station));
+    // Jobs actively in a coater (CCL, CCP)
+    const activeJobs = coatingJobs.filter(j => /CCL|CCP/i.test(j.station));
+
+    // Today's coating completions — jobs that left COATING stage today
+    let completedToday = 0;
+    const byCoater = {}; // 'CCL 1' → { count, jobs }
+    const operatorStats = {};
+    for (const j of allJobs) {
+      const history = dviTrace.getJobHistory(j.job_id);
+      if (!history || !history.events) continue;
+      for (const e of history.events) {
+        if (e.timestamp < todayMs) continue;
+        if (/CCL|CCP/i.test(e.station)) {
+          if (!byCoater[e.station]) byCoater[e.station] = { station: e.station, count: 0, jobs: [] };
+          byCoater[e.station].count++;
+          byCoater[e.station].jobs.push(j.job_id);
+          if (e.operator) {
+            if (!operatorStats[e.operator]) operatorStats[e.operator] = { initials: e.operator, jobs: 0 };
+            operatorStats[e.operator].jobs++;
+          }
+          completedToday++;
+        }
+      }
+    }
+
+    // Group by coating type from XML
+    const byCoatingType = {};
+    for (const j of coatingJobs) {
+      const xml = dviJobIndex.get(j.job_id);
+      const ct = xml?.coating || xml?.coatR || 'UNKNOWN';
+      if (!byCoatingType[ct]) byCoatingType[ct] = 0;
+      byCoatingType[ct]++;
+    }
+
+    // Enrich jobs with XML data
+    const enriched = coatingJobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      return {
+        id: j.job_id, tray: j.tray, station: j.station,
+        operator: j.operator, status: 'active',
+        coating: xml?.coating || xml?.coatR || '',
+        lensStyle: xml?.lensStyle || '', lensMat: xml?.lensMat || '',
+        rxNum: xml?.rxNum || '', isRush: (xml?.rush === 'Y'),
+        firstSeen: j.firstSeen, lastSeen: j.lastSeen,
+        minutesAtStation: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : null,
+        daysInLab: j.daysInLab || 0,
+      };
+    });
+
+    return json(res, {
+      jobs: enriched,
+      coatingWip: coatingJobs.length,
+      queueCount: queueJobs.length,
+      activeCount: activeJobs.length,
+      completedToday,
+      byCoater,
+      byCoatingType,
+      operatorStats,
+      totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
+      shippedToday: getShippedCounts().today,
+      source: 'dvi-trace',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ── CUTTING DASHBOARD ──────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  if (req.method==='GET' && url.pathname==='/api/cutting/dashboard') {
+    const allJobs = dviTrace.getJobs();
+    const now = Date.now();
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayMs = todayStart.getTime();
+
+    // Cutting jobs: currently at CUTTING stage
+    const cuttingJobs = allJobs.filter(j => j.stage === 'CUTTING');
+
+    // Break down by station
+    const byStation = {};
+    for (const j of cuttingJobs) {
+      const stn = j.station || 'UNKNOWN';
+      if (!byStation[stn]) byStation[stn] = { station: stn, count: 0, jobs: [], operators: new Set() };
+      byStation[stn].count++;
+      byStation[stn].jobs.push(j.job_id);
+      if (j.operator) byStation[stn].operators.add(j.operator);
+    }
+    for (const s of Object.values(byStation)) s.operators = [...s.operators];
+
+    // Today's cutting completions
+    let completedToday = 0;
+    const operatorStats = {};
+    for (const j of allJobs) {
+      const history = dviTrace.getJobHistory(j.job_id);
+      if (!history || !history.events) continue;
+      for (const e of history.events) {
+        if (e.timestamp < todayMs) continue;
+        if (/EDGER|LCU|CUT|INHSE FIN/i.test(e.station)) {
+          completedToday++;
+          if (e.operator) {
+            if (!operatorStats[e.operator]) operatorStats[e.operator] = { initials: e.operator, jobs: 0 };
+            operatorStats[e.operator].jobs++;
+          }
+        }
+      }
+    }
+
+    // Upstream pipeline: what's coming into cutting next
+    const surfacingJobs = allJobs.filter(j => j.stage === 'SURFACING');
+    const coatingJobs = allJobs.filter(j => j.stage === 'COATING');
+
+    // Enrich jobs with XML data
+    const enriched = cuttingJobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      return {
+        id: j.job_id, tray: j.tray, station: j.station,
+        operator: j.operator, status: 'active',
+        coating: xml?.coating || xml?.coatR || '',
+        lensStyle: xml?.lensStyle || '', lensMat: xml?.lensMat || '',
+        frameStyle: xml?.frameStyle || '', rxNum: xml?.rxNum || '',
+        isRush: (xml?.rush === 'Y'),
+        firstSeen: j.firstSeen, lastSeen: j.lastSeen,
+        minutesAtStation: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : null,
+        daysInLab: j.daysInLab || 0,
+      };
+    });
+
+    return json(res, {
+      jobs: enriched,
+      cuttingWip: cuttingJobs.length,
+      completedToday,
+      byStation,
+      operatorStats,
+      pipeline: { surfacing: surfacingJobs.length, coating: coatingJobs.length },
+      totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
+      shippedToday: getShippedCounts().today,
+      source: 'dvi-trace',
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════════
+  // ── SHIPPING DASHBOARD ─────────────────────────────────────
+  // ══════════════════════════════════════════════════════════════
+  if (req.method==='GET' && url.pathname==='/api/shipping/dashboard') {
+    const allJobs = dviTrace.getJobs();
+    const now = Date.now();
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const todayMs = todayStart.getTime();
+    const shiftStart = new Date(); shiftStart.setHours(7,0,0,0);
+    const shiftH = Math.max(0.5, (now - shiftStart.getTime()) / 3600000);
+
+    // Jobs at shipping stage
+    const shippingJobs = allJobs.filter(j => j.stage === 'SHIPPING');
+
+    // Shipped counts from authoritative source
+    const sc = getShippedCounts();
+
+    // Shipping rate
+    const ratePerHour = sc.today > 0 ? Math.round(sc.today / shiftH) : 0;
+
+    // Jobs waiting to ship (at ASSEMBLY PASS but not yet at SH CONVEY)
+    const readyToShip = shippingJobs.filter(j => j.status !== 'SHIPPED');
+    const alreadyShipped = shippingJobs.filter(j => j.status === 'SHIPPED');
+
+    // Operator stats from shipping events today
+    const operatorStats = {};
+    for (const j of allJobs) {
+      const history = dviTrace.getJobHistory(j.job_id);
+      if (!history || !history.events) continue;
+      for (const e of history.events) {
+        if (e.timestamp < todayMs) continue;
+        if (/SH CONVEY|SHIP/i.test(e.station) && e.station !== 'ASSEMBLY PASS') {
+          if (e.operator) {
+            if (!operatorStats[e.operator]) operatorStats[e.operator] = { initials: e.operator, jobs: 0 };
+            operatorStats[e.operator].jobs++;
+          }
+        }
+      }
+    }
+
+    // Pipeline: what's coming to shipping
+    const assemblyWip = allJobs.filter(j => j.stage === 'ASSEMBLY').length;
+    const cuttingWip = allJobs.filter(j => j.stage === 'CUTTING').length;
+
+    // Enrich shipping jobs with XML
+    const enriched = shippingJobs.map(j => {
+      const xml = dviJobIndex.get(j.job_id);
+      return {
+        id: j.job_id, tray: j.tray, station: j.station,
+        operator: j.operator, status: j.status,
+        coating: xml?.coating || xml?.coatR || '',
+        rxNum: xml?.rxNum || '', isRush: (xml?.rush === 'Y'),
+        firstSeen: j.firstSeen, lastSeen: j.lastSeen,
+        daysInLab: j.daysInLab || 0,
+      };
+    });
+
+    return json(res, {
+      jobs: enriched,
+      shippedToday: sc.today,
+      shippedYesterday: sc.yesterday,
+      shippedThisWeek: sc.week,
+      ratePerHour,
+      shiftHours: Math.round(shiftH * 10) / 10,
+      readyToShip: readyToShip.length,
+      operatorStats,
+      pipeline: { assembly: assemblyWip, cutting: cuttingWip },
+      totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
+      source: 'dvi-trace',
+      timestamp: new Date().toISOString()
+    });
   }
 
   // ── Assembly config (operator assignments + name map) ──────────

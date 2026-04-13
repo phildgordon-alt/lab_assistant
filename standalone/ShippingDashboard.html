@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<title>Shipping Dashboard — Pair Eyewear</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --bg:#070A0F; --surface:#0D1117; --card:#111820;
+  --border:#1C2733; --borderLt:#2A3A4A;
+  --text:#E8EDF2; --dim:#8899AA; --dimmer:#445566;
+  --blue:#3B82F6; --blueDk:#1E3A5F; --blue2:#2E5FA3;
+  --green:#10B981; --greenDk:#052E1A;
+  --amber:#F59E0B; --amberDk:#451A00;
+  --red:#EF4444;   --redDk:#3F0A0A;
+  --purple:#8B5CF6; --purpleDk:#2D1B69;
+  --teal:#06B6D4;
+  --gold:#F59E0B; --silver:#94A3B8; --bronze:#B45309;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'DM Sans',sans-serif;
+  --disp:'Bebas Neue',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);}
+body{display:flex;flex-direction:column;overflow:hidden;}
+
+/* HEADER */
+.hdr{background:var(--surface);border-bottom:2px solid var(--border);
+  padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.hdr-brand{display:flex;align-items:center;gap:12px;}
+.logo{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,#10B981,#059669);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);
+  font-weight:800;font-size:16px;color:#fff;}
+.brand-name{font-family:var(--disp);font-size:28px;letter-spacing:1px;}
+.brand-sub{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:2px;}
+.hdr-right{display:flex;align-items:center;gap:16px;}
+.date-badge{font-family:var(--mono);font-size:11px;color:var(--dim);}
+.clock{font-family:var(--mono);font-size:20px;font-weight:700;color:var(--green);letter-spacing:3px;}
+.srv-wrap{display:flex;align-items:center;gap:5px;cursor:pointer;}
+.srv-dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
+.srv-dot.ok{background:var(--green);box-shadow:0 0 8px var(--green);}
+.srv-dot.mock{background:var(--amber);}
+.srv-dot.err{background:var(--red);}
+.srv-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;}
+.hdr-btn{background:transparent;border:1px solid var(--border);border-radius:7px;
+  padding:7px 12px;font-family:var(--mono);font-size:10px;color:var(--dim);cursor:pointer;}
+.hdr-btn:active{border-color:var(--green);color:var(--green);}
+
+/* TABS */
+.tab-bar{background:var(--surface);border-bottom:1px solid var(--border);
+  display:flex;gap:0;padding:0 20px;flex-shrink:0;}
+.tab{padding:12px 20px;font-family:var(--mono);font-size:11px;font-weight:700;
+  color:var(--dim);cursor:pointer;border-bottom:3px solid transparent;
+  transition:all .15s;letter-spacing:.5px;-webkit-user-select:none;}
+.tab:hover{color:var(--text);}
+.tab.active{color:var(--green);border-bottom-color:var(--green);}
+
+/* MAIN */
+.main{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;display:flex;flex-direction:column;gap:14px;}
+
+/* HERO KPI — shipped today */
+.hero-kpi{background:var(--card);border:2px solid var(--green);border-radius:16px;
+  padding:24px 32px;text-align:center;position:relative;overflow:hidden;}
+.hero-kpi::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(16,185,129,0.06) 0%,transparent 70%);pointer-events:none;}
+.hero-val{font-family:var(--mono);font-size:72px;font-weight:800;color:var(--green);line-height:1;
+  text-shadow:0 0 40px rgba(16,185,129,0.3);}
+.hero-lbl{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:3px;margin-top:6px;}
+@media(min-width:800px){.hero-val{font-size:80px;}}
+
+/* KPI ROW */
+.kpi-row{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);}
+@media(max-width:1100px){.kpi-row{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:700px){.kpi-row{grid-template-columns:repeat(2,1fr);}}
+.kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;
+  padding:14px 16px;display:flex;flex-direction:column;gap:4px;}
+.kpi-val{font-family:var(--mono);font-size:30px;font-weight:800;line-height:1;}
+.kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;}
+.kpi-sub{font-family:var(--mono);font-size:10px;color:var(--dimmer);margin-top:2px;}
+
+/* PROGRESS BAR */
+.progress-wrap{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;}
+.progress-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+.progress-lbl{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:1px;}
+.progress-pct{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--green);}
+.progress-bar-bg{width:100%;height:20px;background:var(--border);border-radius:10px;overflow:hidden;position:relative;}
+.progress-bar-fill{height:100%;border-radius:10px;transition:width .8s cubic-bezier(.34,1.56,.64,1);
+  background:linear-gradient(90deg,#059669,#10B981,#34D399);}
+.progress-bar-fill.over{background:linear-gradient(90deg,#10B981,#06B6D4);}
+.progress-sub{display:flex;justify-content:space-between;margin-top:6px;}
+.progress-sub span{font-family:var(--mono);font-size:9px;color:var(--dimmer);}
+
+/* TWO-COL GRID */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:900px){.two-col{grid-template-columns:1fr;}}
+
+/* CARD */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;}
+.card-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--dim);
+  letter-spacing:2px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;}
+.card-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 8px;
+  border-radius:10px;background:var(--border);color:var(--dim);}
+
+/* PIPELINE ITEMS */
+.pipe-row{display:flex;align-items:center;gap:12px;padding:10px 14px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;margin-bottom:6px;}
+.pipe-icon{width:36px;height:36px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  font-size:18px;flex-shrink:0;}
+.pipe-info{flex:1;}
+.pipe-name{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);}
+.pipe-sub{font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-top:1px;}
+.pipe-count{font-family:var(--mono);font-size:22px;font-weight:800;min-width:60px;text-align:right;}
+
+/* OPERATOR TABLE */
+.op-list{display:flex;flex-direction:column;gap:6px;}
+.op-row{display:flex;align-items:center;gap:12px;padding:10px 14px;
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  transition:all .15s;}
+.op-avatar{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-family:var(--mono);font-weight:800;font-size:14px;
+  flex-shrink:0;color:#fff;}
+.op-info{flex:1;}
+.op-name{font-family:var(--sans);font-size:15px;font-weight:700;color:var(--text);}
+.op-detail{font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:1px;}
+.op-score{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--green);min-width:48px;text-align:right;}
+.op-score-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);text-align:right;margin-top:1px;}
+.op-bar-wrap{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden;min-width:80px;}
+.op-bar{height:100%;border-radius:3px;background:var(--green);transition:width .8s cubic-bezier(.34,1.56,.64,1);}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:#00000090;z-index:200;
+  display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal{background:var(--surface);border:1px solid var(--borderLt);border-radius:16px;
+  padding:24px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;}
+.modal h3{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);letter-spacing:1px;}
+.m-field label{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;
+  display:block;margin-bottom:6px;}
+.m-inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:8px;
+  padding:11px 14px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;
+  -webkit-appearance:none;}
+.m-inp:focus{border-color:var(--green);}
+.m-btns{display:flex;gap:8px;}
+.m-btns button{flex:1;padding:12px;border-radius:8px;border:none;
+  font-weight:700;font-size:14px;cursor:pointer;font-family:var(--sans);}
+
+/* TOAST */
+.toast-wrap{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:300;pointer-events:none;}
+.toast{background:#1A2540;border:1px solid var(--borderLt);border-radius:10px;
+  padding:10px 20px;font-family:var(--mono);font-size:13px;color:var(--text);
+  box-shadow:0 4px 24px #00000060;white-space:nowrap;}
+.toast.ok{border-color:var(--green);color:var(--green);}
+.toast.warn{border-color:var(--amber);color:var(--amber);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-brand">
+    <div class="logo">SH</div>
+    <div>
+      <div class="brand-name">SHIPPING DASHBOARD</div>
+      <div class="brand-sub">LAB_ASSISTANT · PAIR EYEWEAR · POWERED BY DVI</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="date-badge" id="dateBadge"></div>
+    <div class="srv-wrap" onclick="manualSync()" title="Click to refresh data">
+      <div class="srv-dot" id="srvDot"></div>
+      <span class="srv-lbl" id="srvLbl">SERVER</span>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+    <button class="hdr-btn" onclick="openSetup()">&#9881; SETUP</button>
+    <button class="hdr-btn" onclick="window.location.href='/'" title="Back to dashboards">&#9666; HOME</button>
+  </div>
+</div>
+
+<!-- TABS -->
+<div class="tab-bar">
+  <div class="tab active" id="tab-live"      onclick="switchTab('live')">&#9889; LIVE</div>
+  <div class="tab"        id="tab-operators"  onclick="switchTab('operators')">&#128100; OPERATORS</div>
+</div>
+
+<div class="main" id="main"></div>
+<div class="toast-wrap" id="toastWrap"></div>
+
+<div class="modal-bg" id="modal" style="display:none">
+  <div class="modal">
+    <h3 id="mTitle"></h3>
+    <div id="mBody"></div>
+    <div class="m-btns" id="mBtns"></div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------
+// CONFIG & STATE
+// ---------------------------------------------------------------
+let cfg = JSON.parse(localStorage.getItem('ship_cfg') || '{}');
+let serverUrl   = cfg.serverUrl   || 'http://localhost:3002';
+let dailyTarget = cfg.dailyTarget || 600;
+let shiftStart  = cfg.shiftStart  || '07:00';
+
+const AVATAR_COLORS = [
+  '#10B981','#3B82F6','#8B5CF6','#F59E0B','#EF4444',
+  '#EC4899','#06B6D4','#84CC16','#F97316','#A78BFA',
+];
+
+let dashData = null;
+let dataMode = 'offline';
+let lastSync = null;
+let activeTab = 'live';
+
+// ---------------------------------------------------------------
+// CLOCK + DATE
+// ---------------------------------------------------------------
+function tickClock(){
+  const now = new Date();
+  document.getElementById('clock').textContent = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  document.getElementById('dateBadge').textContent = now.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}).toUpperCase();
+}
+setInterval(tickClock,1000); tickClock();
+
+// ---------------------------------------------------------------
+// DATA FETCH
+// ---------------------------------------------------------------
+async function fetchData(){
+  try{
+    const resp = await fetch(`${serverUrl}/api/shipping/dashboard`, {
+      signal: AbortSignal.timeout(8000)
+    });
+    if(resp.ok){
+      dashData = await resp.json();
+      dataMode = 'live';
+      lastSync = new Date();
+      updateSrvDot('ok','LIVE');
+      return;
+    }
+  } catch(e){ console.warn('Shipping fetch failed:', e.message); }
+  dashData = null;
+  dataMode = 'offline';
+  lastSync = new Date();
+  updateSrvDot('err','OFFLINE');
+}
+
+async function manualSync(){
+  updateSrvDot('pending','SYNCING...');
+  await fetchData();
+  render();
+  toast('Data refreshed','ok');
+}
+
+function updateSrvDot(state, label){
+  const dot = document.getElementById('srvDot');
+  const lbl = document.getElementById('srvLbl');
+  dot.className = 'srv-dot ' + (state==='ok'?'ok':state==='mock'?'mock':'err');
+  lbl.textContent = label;
+}
+
+// ---------------------------------------------------------------
+// HELPERS
+// ---------------------------------------------------------------
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+function pickColor(name){
+  let hash = 0;
+  for(const c of String(name)) hash = (hash*31 + c.charCodeAt(0)) & 0xFFFFFF;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+
+function initials(name){
+  return String(name||'').split(' ').map(p=>p[0]).join('').toUpperCase().slice(0,2) || '??';
+}
+
+function shiftHours(){
+  const [h,m] = shiftStart.split(':').map(Number);
+  const start = new Date();
+  start.setHours(h,m,0,0);
+  return Math.max(0,(Date.now()-start)/3600000);
+}
+
+function commas(n){ return Number(n||0).toLocaleString(); }
+
+// ---------------------------------------------------------------
+// TAB SWITCH
+// ---------------------------------------------------------------
+function switchTab(tab){
+  activeTab = tab;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+tab)?.classList.add('active');
+  render();
+}
+
+// ---------------------------------------------------------------
+// RENDER
+// ---------------------------------------------------------------
+function render(){
+  const main = document.getElementById('main');
+  if(activeTab==='live')      main.innerHTML = renderLive();
+  if(activeTab==='operators') main.innerHTML = renderOperators();
+}
+
+// ---- LIVE TAB ------------------------------------------------
+function renderLive(){
+  const d = dashData || {};
+  const shippedToday     = d.shippedToday     || 0;
+  const ratePerHour      = d.ratePerHour      || 0;
+  const shippedYesterday = d.shippedYesterday  || 0;
+  const shippedThisWeek  = d.shippedThisWeek   || 0;
+  const readyToShip      = d.readyToShip       || 0;
+  const totalWip         = d.totalWip          || 0;
+  const shiftH           = d.shiftHours        || shiftHours();
+  const pipeline         = d.pipeline          || {};
+  const pipeAssembly     = pipeline.assembly   || 0;
+  const pipeCutting      = pipeline.cutting    || 0;
+  const pipeTotal        = pipeAssembly + pipeCutting;
+
+  // Progress toward daily target
+  const pct = dailyTarget > 0 ? Math.min(150, Math.round(shippedToday / dailyTarget * 100)) : 0;
+  const pctDisplay = dailyTarget > 0 ? Math.round(shippedToday / dailyTarget * 100) : 0;
+  const barWidth = Math.min(100, pct);
+  const overTarget = shippedToday >= dailyTarget;
+  const remaining = Math.max(0, dailyTarget - shippedToday);
+
+  // Projected end-of-shift
+  const projectedEOS = ratePerHour > 0 && shiftH > 0 ? Math.round(shippedToday + ratePerHour * Math.max(0, 8.5 - shiftH)) : shippedToday;
+
+  const lastSyncStr = lastSync ? `Last sync: ${lastSync.toLocaleTimeString()}` : 'Not synced';
+
+  return `
+  <!-- HERO: SHIPPED TODAY -->
+  <div class="hero-kpi">
+    <div class="hero-val">${commas(shippedToday)}</div>
+    <div class="hero-lbl">SHIPPED TODAY</div>
+  </div>
+
+  <!-- KPI ROW -->
+  <div class="kpi-row">
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--teal)">${ratePerHour}</div>
+      <div class="kpi-lbl">RATE / HOUR</div>
+      <div class="kpi-sub">${shiftH.toFixed(1)}h into shift</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--dim)">${commas(shippedYesterday)}</div>
+      <div class="kpi-lbl">SHIPPED YESTERDAY</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--blue)">${commas(shippedThisWeek)}</div>
+      <div class="kpi-lbl">SHIPPED THIS WEEK</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--amber)">${commas(readyToShip)}</div>
+      <div class="kpi-lbl">READY TO SHIP</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi-val" style="color:var(--purple)">${commas(totalWip)}</div>
+      <div class="kpi-lbl">TOTAL WIP</div>
+    </div>
+  </div>
+
+  <!-- DAILY TARGET PROGRESS -->
+  <div class="progress-wrap">
+    <div class="progress-header">
+      <span class="progress-lbl">DAILY TARGET: ${commas(dailyTarget)}</span>
+      <span class="progress-pct" style="color:${overTarget?'var(--green)':'var(--amber)'}">${pctDisplay}%</span>
+    </div>
+    <div class="progress-bar-bg">
+      <div class="progress-bar-fill ${overTarget?'over':''}" style="width:${barWidth}%"></div>
+    </div>
+    <div class="progress-sub">
+      <span>${overTarget ? 'TARGET MET' : commas(remaining)+' remaining'}</span>
+      <span>Projected EOD: ~${commas(projectedEOS)}</span>
+    </div>
+  </div>
+
+  <!-- PIPELINE + INFO -->
+  <div class="two-col">
+    <div class="card">
+      <div class="card-title">PIPELINE — INCOMING <span class="card-badge">${commas(pipeTotal)} JOBS</span></div>
+      <div class="pipe-row">
+        <div class="pipe-icon" style="background:var(--greenDk);color:var(--green);">&#9874;</div>
+        <div class="pipe-info">
+          <div class="pipe-name">Assembly</div>
+          <div class="pipe-sub">Jobs in assembly queue</div>
+        </div>
+        <div class="pipe-count" style="color:var(--green);">${commas(pipeAssembly)}</div>
+      </div>
+      <div class="pipe-row">
+        <div class="pipe-icon" style="background:var(--blueDk);color:var(--blue);">&#9881;</div>
+        <div class="pipe-info">
+          <div class="pipe-name">Cutting / Edging</div>
+          <div class="pipe-sub">Jobs in cutting queue</div>
+        </div>
+        <div class="pipe-count" style="color:var(--blue);">${commas(pipeCutting)}</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">SHIFT STATS <span class="card-badge">${dataMode.toUpperCase()}</span></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:24px;font-weight:800;color:var(--green);">${ratePerHour}</div>
+          <div style="font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;">JOBS/HOUR</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:24px;font-weight:800;color:var(--teal);">${shiftH.toFixed(1)}h</div>
+          <div style="font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;">SHIFT ELAPSED</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:24px;font-weight:800;color:var(--amber);">${commas(readyToShip)}</div>
+          <div style="font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;">QUEUE</div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;text-align:center;">
+          <div style="font-family:var(--mono);font-size:24px;font-weight:800;color:var(--dim);">~${commas(projectedEOS)}</div>
+          <div style="font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;">PROJECTED EOD</div>
+        </div>
+      </div>
+      <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-top:10px;text-align:right;">${lastSyncStr}</div>
+    </div>
+  </div>`;
+}
+
+// ---- OPERATORS TAB -------------------------------------------
+function renderOperators(){
+  const d = dashData || {};
+  const opStats = d.operatorStats || {};
+  const entries = Object.entries(opStats);
+
+  if(entries.length === 0){
+    return `<div class="card" style="text-align:center;padding:40px;">
+      <div style="font-family:var(--mono);font-size:14px;color:var(--dimmer);">No operator data available</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);margin-top:8px;">Data populates when the server returns operator stats</div>
+    </div>`;
+  }
+
+  // Sort by jobs shipped descending
+  const sorted = entries.map(([key, val]) => ({
+    initials: val.initials || key,
+    name: val.name || key,
+    jobs: val.jobs || 0
+  })).sort((a,b) => b.jobs - a.jobs);
+
+  const maxJobs = sorted.length > 0 ? sorted[0].jobs : 1;
+
+  const rows = sorted.map((op, idx) => {
+    const color = pickColor(op.name || op.initials);
+    const barPct = maxJobs > 0 ? Math.round(op.jobs / maxJobs * 100) : 0;
+    const rank = idx + 1;
+    const medal = rank === 1 ? '&#129351;' : rank === 2 ? '&#129352;' : rank === 3 ? '&#129353;' : '';
+    const rankStyle = rank === 1 ? 'border-color:var(--gold);background:#2A2200;' :
+                      rank === 2 ? 'border-color:var(--silver);background:#1A1F2A;' :
+                      rank === 3 ? 'border-color:var(--bronze);background:#2A1500;' : '';
+
+    return `<div class="op-row" style="${rankStyle}">
+      <div style="font-family:var(--disp);font-size:24px;width:30px;text-align:center;flex-shrink:0;color:var(--dim);">${medal || rank}</div>
+      <div class="op-avatar" style="background:${color}">${initials(op.name || op.initials)}</div>
+      <div class="op-info">
+        <div class="op-name">${esc(op.name || op.initials)}</div>
+        <div class="op-detail">${esc(op.initials)}</div>
+      </div>
+      <div class="op-bar-wrap"><div class="op-bar" style="width:${barPct}%"></div></div>
+      <div style="text-align:right;">
+        <div class="op-score">${op.jobs}</div>
+        <div class="op-score-lbl">SHIPPED</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  const totalOps = sorted.length;
+  const totalJobs = sorted.reduce((s,o) => s + o.jobs, 0);
+
+  return `
+  <div class="card">
+    <div class="card-title">OPERATOR SHIPPING STATS — TODAY <span class="card-badge">${totalOps} OPERATORS · ${commas(totalJobs)} SHIPPED</span></div>
+    <div class="op-list">${rows}</div>
+  </div>`;
+}
+
+// ---------------------------------------------------------------
+// SETUP MODAL
+// ---------------------------------------------------------------
+function openSetup(){
+  document.getElementById('mTitle').textContent = 'DASHBOARD SETUP';
+  document.getElementById('mBody').innerHTML = `
+    <div class="m-field">
+      <label>LAB_ASSISTANT SERVER URL</label>
+      <input class="m-inp" id="s-srv" value="${esc(serverUrl)}" placeholder="http://192.168.x.x:3002"/>
+    </div>
+    <div class="m-field">
+      <label>DAILY SHIPPING TARGET</label>
+      <input class="m-inp" id="s-target" type="number" value="${dailyTarget}" placeholder="600"/>
+    </div>
+    <div class="m-field">
+      <label>SHIFT START TIME</label>
+      <input class="m-inp" id="s-shift" type="time" value="${esc(shiftStart)}"/>
+    </div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);padding:6px 0;">
+      Server URL points to Lab_Assistant. All settings saved locally on this device.
+    </div>`;
+  document.getElementById('mBtns').innerHTML=`
+    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
+    <button style="background:var(--green);color:#000;" onclick="saveSetup()">Save</button>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+function saveSetup(){
+  serverUrl   = document.getElementById('s-srv')?.value.trim() || serverUrl;
+  dailyTarget = parseInt(document.getElementById('s-target')?.value) || dailyTarget;
+  shiftStart  = document.getElementById('s-shift')?.value || shiftStart;
+  cfg = {serverUrl, dailyTarget, shiftStart};
+  localStorage.setItem('ship_cfg', JSON.stringify(cfg));
+  closeModal(); fetchData().then(render); toast('Settings saved — refreshing data','ok');
+}
+
+function closeModal(){document.getElementById('modal').style.display='none';}
+document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+
+// ---------------------------------------------------------------
+// TOAST
+// ---------------------------------------------------------------
+function toast(msg,type=''){
+  const wrap=document.getElementById('toastWrap');
+  const el=document.createElement('div');
+  el.className=`toast ${type}`; el.textContent=msg;
+  wrap.innerHTML=''; wrap.appendChild(el);
+  setTimeout(()=>el.style.opacity='0',2800);
+  setTimeout(()=>el.remove(),3100);
+}
+
+// ---------------------------------------------------------------
+// INIT
+// ---------------------------------------------------------------
+fetchData().then(()=>{ render(); });
+setInterval(()=>fetchData().then(render), 120000);
+</script>
+</body>
+</html>
