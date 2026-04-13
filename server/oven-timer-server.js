@@ -3794,7 +3794,7 @@ Respond with a structured batching plan in this format:
       if (!history || !history.events) continue;
       for (const e of history.events) {
         if (e.timestamp < todayMs) continue;
-        if (/EDGER|LCU|CUT|INHSE FIN/i.test(e.station)) {
+        if (/EDGER|CUT|INHSE FIN/i.test(e.station) && !/LCU/i.test(e.station)) {
           completedToday++;
           if (e.operator) {
             if (!operatorStats[e.operator]) operatorStats[e.operator] = { initials: e.operator, jobs: 0 };

@@ -108,8 +108,8 @@ function stationToStage(station) {
   if (s.includes('NE LENS') || s.includes('NEL') || s.includes('NOT ENOUGH') || s.includes('NE FRMS') || s.includes('KRDX FAIL')) return 'NEL';
   if (s.includes('KARDEX') || s.includes('MAN2KARDX')) return 'AT_KARDEX';
   if (s.includes('DIGITAL CALC') || s.includes('GENERATOR') || s.includes('AUTO BLKER') || s.includes('POLISH') || s.includes('FINE') || s.includes('MANBLKER') || s.includes('CBOB - INHSE SF') || s.includes('CBOB - DIG')) return 'SURFACING';
-  if (s.includes('CCL') || s.includes('CCP') || s.includes('COAT') || s.includes('SENT TO COAT')) return 'COATING';
-  if (s.includes('EDGER') || s.includes('LCU') || s.includes('CUT') || s.includes('INHSE FIN')) return 'CUTTING';
+  if (s.includes('CCL') || s.includes('CCP') || s.includes('COAT') || s.includes('SENT TO COAT') || s.includes('LCU')) return 'COATING';
+  if (s.includes('EDGER') || s.includes('CUT') || s.includes('INHSE FIN')) return 'CUTTING';
   if (s === 'ASSEMBLY PASS') return 'SHIPPING';
   if (s === 'ASSEMBLY FAIL') return 'HOLD';
   if (s.includes('ASSEMBL') || s.includes('RECOMBOB')) return 'ASSEMBLY';
@@ -316,7 +316,7 @@ class DviTraceWatcher extends EventEmitter {
       // List all LT files in TRACE directory
       let files;
       if (this._useLocal) {
-        files = fs.readdirSync(this._localPath).filter(f => !f.startsWith('.'));
+        files = (await fs.promises.readdir(this._localPath)).filter(f => !f.startsWith('.'));
       } else {
         files = await new Promise((resolve, reject) => {
           this.client.readdir(TRACE_DIR, (err, list) => {
@@ -680,11 +680,7 @@ class DviTraceWatcher extends EventEmitter {
       // Local mode: remotePath is like "TRACE\LT260404.DAT" — extract filename
       const filename = remotePath.split('\\').pop();
       const fullPath = path.join(this._localPath, filename);
-      try {
-        return Promise.resolve(fs.readFileSync(fullPath));
-      } catch (err) {
-        return Promise.reject(err);
-      }
+      return fs.promises.readFile(fullPath);
     }
     return new Promise((resolve, reject) => {
       // 15-second timeout — SMB reads can hang indefinitely on dead connections

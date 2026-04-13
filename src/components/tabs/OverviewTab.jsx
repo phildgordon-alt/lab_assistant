@@ -348,7 +348,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
       case 'at_kardex': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('AT KARDEX')||s.includes('MAN2KARDX');}).length,sub:"at pickup"};
       case 'shipped_jobs': return {value:shippedStats.today||0,sub:"today"};
       case 'coating_wip': return {value:dviJobs.filter(j=>(j.stage||'').toUpperCase().includes('COAT')||(j.station||'').includes('CCL')||(j.station||'').includes('CCP')||(j.station||'').includes('SENT TO COAT')).length,sub:"in coating"};
-      case 'cutting_wip': return {value:dviJobs.filter(j=>(j.stage||'').toUpperCase().includes('CUT')||(j.station||'').includes('EDGER')||(j.station||'').includes('LCU')).length,sub:"in cutting"};
+      case 'cutting_wip': return {value:dviJobs.filter(j=>(j.stage||'').toUpperCase().includes('CUT')||(j.station||'').includes('EDGER')).length,sub:"in cutting"};
       case 'assembly_wip': return {value:dviByStage('ASSEMBL'),sub:"in assembly"};
       case 'assembled_today': { const as=data?.assemblyStats||{}; return {value:as.assembledToday||0,sub:`pass: ${as.passToday||0} · fail: ${as.failToday||0}`}; }
       case 'surfacing_wip': return {value:dviJobs.filter(j=>(j.stage||'').toUpperCase().includes('SURF')||(j.station||'').includes('GENERATOR')||(j.station||'').includes('AUTO BLKER')||(j.station||'').includes('DIGITAL CALC')).length,sub:"in surfacing"};
