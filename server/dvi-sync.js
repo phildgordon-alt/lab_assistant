@@ -231,14 +231,15 @@ class LocalClient {
   async listFiles(shareName, remotePath, patterns) {
     const fullPath = this._resolvePath(shareName, remotePath);
 
-    if (!fs.existsSync(fullPath)) {
+    try {
+      await fs.promises.access(fullPath);
+    } catch {
       console.warn(`[DVI-Sync] LocalClient: path not found: ${fullPath}`);
       return [];
     }
 
-    // Use plain readdir (not withFileTypes) to avoid slow SMB stat calls.
-    // On network mounts, statSync on 25K+ files blocks the event loop for minutes.
-    const fileNames = fs.readdirSync(fullPath);
+    // Use async readdir to avoid blocking the event loop on large directories (25K+ files over SMB)
+    const fileNames = await fs.promises.readdir(fullPath);
 
     const regexes = patterns.map(p => new RegExp('^' + p.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i'));
 
@@ -249,12 +250,12 @@ class LocalClient {
 
   async readFile(shareName, remotePath) {
     const fullPath = this._resolvePath(shareName, remotePath);
-    return fs.readFileSync(fullPath);
+    return fs.promises.readFile(fullPath);
   }
 
   async deleteFile(shareName, remotePath) {
     const fullPath = this._resolvePath(shareName, remotePath);
-    fs.unlinkSync(fullPath);
+    return fs.promises.unlink(fullPath);
   }
 
   async close() {
@@ -321,8 +322,9 @@ class DviSyncService extends EventEmitter {
 
     this.running = true;
 
-    // Start sync loops (stagger initial polls to avoid SMB connection race)
-    let staggerDelay = 0;
+    // Start sync loops — defer initial polls to let the server start accepting requests first.
+    // Listing 25K+ files on an SMB mount is slow and blocks the event loop.
+    let staggerDelay = 30000; // First sync starts 30s after boot
     for (const sync of this.config.syncs) {
       if (!sync.enabled) {
         console.log(`[DVI-Sync] Skipping disabled sync: ${sync.name}`);
@@ -338,20 +340,20 @@ class DviSyncService extends EventEmitter {
         status: 'starting'
       };
 
-      // Stagger initial polls by 2s each to avoid SMB connection races
+      // Stagger initial polls by 15s each so they don't all hit SMB at once
       const delay = staggerDelay;
       setTimeout(() => {
         this.pollSync(sync).catch(() => {});
       }, delay);
-      staggerDelay += 2000;
+      staggerDelay += 15000;
 
       // Set up interval
-      const interval = sync.pollInterval || 30000;
+      const interval = sync.pollInterval || 60000;
       this.intervals[sync.id] = setInterval(() => {
         this.pollSync(sync).catch(() => {});
       }, interval);
 
-      console.log(`[DVI-Sync] Started: ${sync.name} (every ${interval / 1000}s, initial delay ${delay / 1000}s)`);
+      console.log(`[DVI-Sync] Scheduled: ${sync.name} (every ${interval / 1000}s, first poll in ${delay / 1000}s)`);
     }
 
     console.log(`[DVI-Sync] Service started with ${Object.keys(this.intervals).length} syncs`);
@@ -404,8 +406,11 @@ class DviSyncService extends EventEmitter {
       // For copy mode, skip files we already have locally
       let toProcess = files;
       if (sync.action === 'copy') {
-        fs.mkdirSync(sync.dest, { recursive: true });
-        toProcess = files.filter(f => !fs.existsSync(path.join(sync.dest, f.name)));
+        await fs.promises.mkdir(sync.dest, { recursive: true });
+        // Read local directory once and use a Set for O(1) lookup instead of
+        // calling existsSync per file (25K+ calls blocks the event loop)
+        const localFiles = new Set(await fs.promises.readdir(sync.dest));
+        toProcess = files.filter(f => !localFiles.has(f.name));
       }
 
       if (toProcess.length === 0) {
@@ -451,13 +456,13 @@ class DviSyncService extends EventEmitter {
 
     try {
       // Ensure dest directory exists
-      fs.mkdirSync(sync.dest, { recursive: true });
+      await fs.promises.mkdir(sync.dest, { recursive: true });
 
       // Read file from remote
       const data = await this.client.readFile(sync.source.share, remotePath);
 
       // Write to local
-      fs.writeFileSync(localPath, data);
+      await fs.promises.writeFile(localPath, data);
 
       // Delete from remote if action is 'move'
       if (sync.action === 'move') {
