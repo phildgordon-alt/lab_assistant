@@ -13,7 +13,7 @@ LOG_TAG="[SMB-Watchdog]"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') ${LOG_TAG} $1"; }
 
 # Check if TRACE directory exists and has LT files
-if [ -d "$TRACE_DIR" ] && ls "$TRACE_DIR"/LT*.DAT >/dev/null 2>&1; then
+if [ -d "$TRACE_DIR" ] && find "$TRACE_DIR" -maxdepth 1 -name 'LT*.DAT' -print -quit | grep -q .; then
     # Mount is healthy — nothing to do
     exit 0
 fi
