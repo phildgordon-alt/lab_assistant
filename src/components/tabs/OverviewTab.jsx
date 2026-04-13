@@ -342,7 +342,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     const dviByStage=(stage)=>dviJobs.filter(j=>(j.stage||j.Stage||'').toLowerCase().includes(stage.toLowerCase())).length;
 
     switch(kpiId){
-      case 'incoming_jobs': return {value:incomingToday||0,sub:"incoming"};
+      case 'incoming_jobs': return {value:data?.incomingToday||dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('INITIATE')||s.includes('NEW WORK')||s.includes('INCOMING')||s.includes('FRAME LOGGED')||(j.stage||'').toUpperCase()==='INCOMING';}).length,sub:"incoming"};
       case 'total_wip': return {value:dviJobs.filter(j=>j.status!=='Completed'&&j.status!=='SHIPPED').length,sub:"in queues"};
       case 'nel_jobs': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('NE LENS')||s.includes('NEL')||s.includes('NOT ENOUGH');}).length,sub:"awaiting lens"};
       case 'at_kardex': return {value:dviJobs.filter(j=>{const s=(j.station||'').toUpperCase();return s.includes('AT KARDEX')||s.includes('MAN2KARDX');}).length,sub:"at pickup"};
@@ -1124,7 +1124,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     switch(card.type){
       case "kpi_row": return(
         <ConfigurableKPIRow
-          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats,assemblyStats,somOrders,pickStats}}
+          data={{trays,batches,dviJobs,breakage,maintenance:maintenanceData,wipJobs,shippedStats,assemblyStats,somOrders,pickStats,incomingToday}}
           settings={settings}
           cardConfig={card.config}
           onConfigChange={(cfg)=>updateCardConfig(card.id,cfg)}
