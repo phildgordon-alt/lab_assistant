@@ -21,6 +21,7 @@
 const { EventEmitter } = require('events');
 const fs = require('fs');
 const path = require('path');
+const { execFileSync, execFile } = require('child_process');
 
 let SMB2;
 try {
@@ -328,11 +329,13 @@ class DviTraceWatcher extends EventEmitter {
 
       console.log(`[DVI-Trace] Loading ${ltFiles.length} historical files...`);
 
+      let consecutiveTimeouts = 0;
       for (const file of ltFiles) {
         const remotePath = `${TRACE_DIR}\\${file}`;
         try {
-          const data = await this.readFile(remotePath);
+          const data = await this._readFileAsync(remotePath);
           if (!data || data.length === 0) continue;
+          consecutiveTimeouts = 0;
 
           const text = data.toString('utf8');
           const lines = text.split(/\r?\n/);
@@ -347,7 +350,6 @@ class DviTraceWatcher extends EventEmitter {
             parsed++;
           }
 
-          // If this is today's file, set byte offset so live poll picks up from here
           if (file === todayFile) {
             this.currentFile = todayFile;
             this.byteOffset = data.length;
@@ -358,15 +360,19 @@ class DviTraceWatcher extends EventEmitter {
         } catch (err) {
           const msg = err.message || '';
           if (msg.includes('STATUS_OBJECT_NAME_NOT_FOUND')) continue;
-          if (msg.includes('STATUS_PENDING') || msg.includes('ETIMEDOUT')) {
-            console.warn(`[DVI-Trace] Skipping ${file}: ${msg.substring(0, 60)}`);
+          if (msg.includes('ETIMEDOUT')) {
+            consecutiveTimeouts++;
+            console.warn(`[DVI-Trace] Timeout reading ${file} (${consecutiveTimeouts}/3): ${msg.substring(0, 60)}`);
+            if (consecutiveTimeouts >= 3) {
+              console.error(`[DVI-Trace] 3 consecutive timeouts — aborting history load (${this.jobs.size} jobs loaded so far)`);
+              break;
+            }
             continue;
           }
           console.warn(`[DVI-Trace] Error reading ${file}: ${msg.substring(0, 80)}`);
         }
 
-        // Small delay between files to avoid SMB connection issues
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 200));
       }
 
       // Reset today stats (history loaded stats from all days, we want today-only for stats)
@@ -668,18 +674,27 @@ class DviTraceWatcher extends EventEmitter {
     }
   }
 
+  // Sync read via cat child process — killable if SMB mount hangs.
+  // fs.readFileSync hangs forever on macOS SMB stalls; cat can be killed after timeout.
   readFile(remotePath) {
     if (this._useLocal) {
       const filename = remotePath.split('\\').pop();
       const fullPath = path.join(this._localPath, filename);
       try {
-        return Promise.resolve(fs.readFileSync(fullPath));
+        const data = execFileSync('/bin/cat', [fullPath], {
+          timeout: 10000,
+          maxBuffer: 5 * 1024 * 1024,
+          encoding: 'buffer',
+        });
+        return Promise.resolve(data);
       } catch (err) {
+        if (err.killed) {
+          return Promise.reject(new Error(`ETIMEDOUT: cat ${filename} killed after 10s (SMB mount hung)`));
+        }
         return Promise.reject(err);
       }
     }
     return new Promise((resolve, reject) => {
-      // 15-second timeout — SMB reads can hang indefinitely on dead connections
       const timeout = setTimeout(() => {
         reject(new Error('ETIMEDOUT: SMB readFile exceeded 15s'));
       }, 15000);
@@ -689,6 +704,28 @@ class DviTraceWatcher extends EventEmitter {
         resolve(data);
       });
     });
+  }
+
+  // Async read via cat child process — for loadHistory so event loop stays alive
+  _readFileAsync(remotePath) {
+    if (this._useLocal) {
+      const filename = remotePath.split('\\').pop();
+      const fullPath = path.join(this._localPath, filename);
+      return new Promise((resolve, reject) => {
+        execFile('/bin/cat', [fullPath], {
+          timeout: 15000,
+          maxBuffer: 5 * 1024 * 1024,
+          encoding: 'buffer',
+        }, (err, stdout) => {
+          if (err) {
+            if (err.killed) return reject(new Error(`ETIMEDOUT: cat ${filename} killed after 15s (SMB mount hung)`));
+            return reject(err);
+          }
+          resolve(stdout);
+        });
+      });
+    }
+    return this.readFile(remotePath);
   }
 
   processEvent(evt) {

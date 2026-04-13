@@ -19,6 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
+const { execFile } = require('child_process');
 
 // Try to load SMB2 library (optional - falls back to local mode)
 let SMB2;
@@ -250,7 +251,19 @@ class LocalClient {
 
   async readFile(shareName, remotePath) {
     const fullPath = this._resolvePath(shareName, remotePath);
-    return fs.promises.readFile(fullPath);
+    return new Promise((resolve, reject) => {
+      execFile('/bin/cat', [fullPath], {
+        timeout: 10000,
+        maxBuffer: 5 * 1024 * 1024,
+        encoding: 'buffer',
+      }, (err, stdout) => {
+        if (err) {
+          if (err.killed) return reject(new Error(`ETIMEDOUT: cat ${path.basename(fullPath)} killed after 10s`));
+          return reject(err);
+        }
+        resolve(stdout);
+      });
+    });
   }
 
   async deleteFile(shareName, remotePath) {
