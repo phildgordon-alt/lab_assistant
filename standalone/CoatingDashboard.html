@@ -31,7 +31,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 .hdr-brand{display:flex;align-items:center;gap:12px;}
 .logo{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,#06B6D4,#0891B2);
   display:flex;align-items:center;justify-content:center;font-family:var(--mono);
-  font-weight:800;font-size:15px;color:#fff;}
+  font-weight:800;font-size:14px;color:#fff;}
 .brand-name{font-family:var(--disp);font-size:28px;letter-spacing:1px;}
 .brand-sub{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:2px;}
 .hdr-right{display:flex;align-items:center;gap:16px;}
@@ -40,7 +40,6 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 .srv-wrap{display:flex;align-items:center;gap:5px;cursor:pointer;}
 .srv-dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
 .srv-dot.ok{background:var(--green);box-shadow:0 0 8px var(--green);}
-.srv-dot.mock{background:var(--amber);}
 .srv-dot.err{background:var(--red);}
 .srv-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;}
 .hdr-btn{background:transparent;border:1px solid var(--border);border-radius:7px;
@@ -61,8 +60,8 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 
 /* KPI ROW */
 .kpi-row{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);}
-@media(max-width:900px){.kpi-row{grid-template-columns:repeat(3,1fr);}}
-@media(max-width:600px){.kpi-row{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:1100px){.kpi-row{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:700px){.kpi-row{grid-template-columns:repeat(2,1fr);}}
 .kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;
   padding:14px 16px;display:flex;flex-direction:column;gap:4px;}
 .kpi-val{font-family:var(--mono);font-size:30px;font-weight:800;line-height:1;}
@@ -81,58 +80,102 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 .card-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:3px 8px;
   border-radius:10px;background:var(--border);color:var(--dim);}
 
+/* ACTION BADGE */
+.action-badge{font-family:var(--mono);font-size:11px;font-weight:800;padding:4px 12px;
+  border-radius:8px;letter-spacing:1px;white-space:nowrap;}
+.action-run-now{background:#052E1A;color:var(--green);border:1px solid var(--green);}
+.action-wait{background:var(--amberDk);color:var(--amber);border:1px solid var(--amber);}
+.action-run-partial{background:var(--blueDk);color:var(--blue);border:1px solid var(--blue);}
+
 /* COATER CARDS */
-.coater-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;}
 .coater-card{background:var(--surface);border:2px solid var(--border);border-radius:12px;
-  padding:16px;display:flex;flex-direction:column;gap:10px;transition:border-color .15s;}
-.coater-card:hover{border-color:var(--borderLt);}
+  padding:14px;display:flex;flex-direction:column;gap:8px;}
 .coater-card.active{border-color:var(--teal);}
-.coater-top{display:flex;align-items:center;justify-content:space-between;}
-.coater-name{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--teal);}
-.coater-count{font-family:var(--mono);font-size:28px;font-weight:800;color:var(--text);line-height:1;}
-.coater-count-lbl{font-family:var(--mono);font-size:9px;color:var(--dimmer);letter-spacing:1px;}
-.coater-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
-.cs-active{background:var(--teal);box-shadow:0 0 8px var(--teal);}
-.cs-idle{background:var(--dimmer);}
+.coater-name{font-family:var(--mono);font-size:14px;font-weight:700;color:var(--text);}
+.coater-cap{font-family:var(--mono);font-size:10px;color:var(--dim);}
+.coater-fill-wrap{width:100%;height:8px;background:var(--border);border-radius:4px;overflow:hidden;}
+.coater-fill{height:100%;border-radius:4px;transition:width .5s;background:var(--teal);}
+.coater-fill.high{background:var(--green);}
+.coater-fill.med{background:var(--amber);}
+.coater-fill.low{background:var(--dimmer);}
+.coater-stats{display:flex;gap:14px;}
+.coater-stat{text-align:center;}
+.coater-stat-val{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--teal);}
+.coater-stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;}
 
-/* COATING TYPE BARS */
-.ct-bar-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;}
-.ct-bar-label{font-family:var(--mono);font-size:10px;color:var(--dim);width:90px;text-align:right;flex-shrink:0;}
-.ct-bar-wrap{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden;}
-.ct-bar{height:100%;border-radius:4px;transition:width .5s;}
-.ct-bar-val{font-family:var(--mono);font-size:10px;color:var(--dimmer);min-width:32px;text-align:right;flex-shrink:0;}
+/* OVEN RACK GRID */
+.rack-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px;}
+.rack-tile{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;display:flex;flex-direction:column;gap:6px;}
+.rack-tile.running{border-color:var(--teal);}
+.rack-tile.paused{border-color:var(--amber);}
+.rack-top{display:flex;align-items:center;justify-content:space-between;}
+.rack-id{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text);}
+.rack-state{font-family:var(--mono);font-size:8px;font-weight:700;padding:2px 6px;
+  border-radius:6px;letter-spacing:1px;}
+.rack-state.running{background:var(--tealDk);color:var(--teal);}
+.rack-state.paused{background:var(--amberDk);color:var(--amber);}
+.rack-coating{font-family:var(--mono);font-size:10px;color:var(--dim);}
+.rack-time{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--text);}
+.rack-bar-wrap{width:100%;height:5px;background:var(--border);border-radius:3px;overflow:hidden;}
+.rack-bar{height:100%;border-radius:3px;transition:width .5s;background:var(--teal);}
+.rack-bar.warn{background:var(--amber);}
+.rack-bar.done{background:var(--green);}
 
-/* JOB QUEUE */
-.queue-controls{display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;}
-.q-sort-btn{padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:transparent;
-  font-family:var(--mono);font-size:10px;color:var(--dim);cursor:pointer;transition:all .15s;}
-.q-sort-btn.active{border-color:var(--teal);color:var(--teal);background:var(--tealDk);}
-.queue-list{display:flex;flex-direction:column;gap:5px;max-height:calc(100vh - 240px);overflow-y:auto;}
+/* COATING TYPE CHIPS */
+.type-chips{display:flex;flex-wrap:wrap;gap:6px;}
+.type-chip{background:var(--surface);border:1px solid var(--border);border-radius:8px;
+  padding:8px 12px;display:flex;flex-direction:column;align-items:center;gap:3px;min-width:80px;}
+.type-chip-name{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--teal);letter-spacing:1px;}
+.type-chip-count{font-family:var(--mono);font-size:20px;font-weight:800;color:var(--text);}
+.type-chip-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);}
+
+/* QUEUE LIST */
+.queue-list{display:flex;flex-direction:column;gap:5px;}
 .queue-row{display:flex;align-items:center;gap:10px;padding:9px 12px;
-  background:var(--surface);border:1px solid var(--border);border-radius:8px;transition:all .15s;}
-.queue-row.rush{border-color:var(--red);background:var(--redDk);}
-.q-job{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--teal);min-width:72px;}
-.q-rx{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:72px;}
-.q-coating{font-family:var(--mono);font-size:10px;color:var(--purple);min-width:80px;}
-.q-station{font-family:var(--mono);font-size:10px;color:var(--blue);min-width:60px;}
-.q-operator{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:40px;text-align:center;}
-.q-lens{font-family:var(--mono);font-size:9px;color:var(--dimmer);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.q-time{font-family:var(--mono);font-size:10px;color:var(--dimmer);min-width:48px;text-align:right;}
-.q-days{font-family:var(--mono);font-size:9px;min-width:36px;text-align:right;}
-.q-rush-badge{font-size:11px;margin-right:4px;}
+  background:var(--surface);border:1px solid var(--border);border-radius:8px;}
+.queue-row.rush{border-color:var(--red);}
+.q-job{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--teal);min-width:80px;}
+.q-coating{font-family:var(--mono);font-size:10px;color:var(--dim);min-width:70px;}
+.q-material{font-family:var(--mono);font-size:10px;color:var(--purple);min-width:50px;}
+.q-lens{font-family:var(--mono);font-size:10px;color:var(--dim);flex:1;}
+.q-wait{font-family:var(--mono);font-size:10px;color:var(--amber);min-width:60px;text-align:right;}
+.q-rush{font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 6px;
+  border-radius:6px;background:var(--redDk);color:var(--red);letter-spacing:1px;}
+.q-substage{font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 6px;
+  border-radius:6px;letter-spacing:1px;}
+.qs-queue{background:#1A2030;color:var(--dim);}
+.qs-coater{background:var(--tealDk);color:var(--teal);}
+.qs-oven{background:var(--amberDk);color:var(--amber);}
+.qs-qc{background:var(--purpleDk);color:var(--purple);}
 
-/* OPERATOR CARDS */
-.op-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px;}
-.op-card{background:var(--surface);border:2px solid var(--border);border-radius:12px;
-  padding:16px;display:flex;flex-direction:column;gap:10px;}
-.op-avatar{width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
-  justify-content:center;font-family:var(--mono);font-weight:800;font-size:16px;
-  flex-shrink:0;color:#fff;}
-.op-stat-row{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-.op-stat{background:var(--card);border:1px solid var(--border);border-radius:8px;
-  padding:10px;text-align:center;}
-.op-stat-val{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--teal);}
-.op-stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;}
+/* BATCH SUGGESTION CARDS */
+.batch-card{background:var(--surface);border:2px solid var(--border);border-radius:12px;
+  padding:14px;display:flex;flex-direction:column;gap:8px;}
+.batch-card.ready{border-color:var(--green);}
+.batch-header{display:flex;align-items:center;justify-content:space-between;}
+.batch-type{font-family:var(--mono);font-size:16px;font-weight:700;color:var(--teal);}
+.batch-material{font-family:var(--mono);font-size:11px;color:var(--purple);font-weight:700;}
+.batch-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.batch-stat{text-align:center;background:var(--card);border:1px solid var(--border);
+  border-radius:8px;padding:8px;}
+.batch-stat-val{font-family:var(--mono);font-size:18px;font-weight:700;color:var(--teal);}
+.batch-stat-lbl{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;}
+.batch-coater{font-family:var(--mono);font-size:10px;color:var(--dim);}
+.batch-fill-wrap{width:100%;height:6px;background:var(--border);border-radius:3px;overflow:hidden;}
+.batch-fill{height:100%;border-radius:3px;background:var(--teal);transition:width .5s;}
+.batch-fill.ready{background:var(--green);}
+.batch-ready-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 8px;
+  border-radius:6px;background:var(--greenDk);color:var(--green);letter-spacing:1px;}
+.batch-wait-badge{font-family:var(--mono);font-size:9px;font-weight:700;padding:2px 8px;
+  border-radius:6px;background:#1A2030;color:var(--dim);letter-spacing:1px;}
+
+/* SUMMARY BAR */
+.summary-bar{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 16px;font-family:var(--mono);font-size:11px;color:var(--dim);line-height:1.5;}
+
+/* EMPTY STATE */
+.empty{text-align:center;padding:40px;font-family:var(--mono);font-size:12px;color:var(--dimmer);}
 
 /* MODAL */
 .modal-bg{position:fixed;inset:0;background:#00000090;z-index:200;
@@ -146,10 +189,6 @@ body{display:flex;flex-direction:column;overflow:hidden;}
   padding:11px 14px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;
   -webkit-appearance:none;}
 .m-inp:focus{border-color:var(--teal);}
-.m-sel{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:8px;
-  padding:11px 14px;color:var(--text);font-family:var(--mono);font-size:13px;outline:none;
-  -webkit-appearance:none;}
-.m-sel:focus{border-color:var(--teal);}
 .m-btns{display:flex;gap:8px;}
 .m-btns button{flex:1;padding:12px;border-radius:8px;border:none;
   font-weight:700;font-size:14px;cursor:pointer;font-family:var(--sans);}
@@ -161,14 +200,6 @@ body{display:flex;flex-direction:column;overflow:hidden;}
   box-shadow:0 4px 24px #00000060;white-space:nowrap;}
 .toast.ok{border-color:var(--teal);color:var(--teal);}
 .toast.warn{border-color:var(--amber);color:var(--amber);}
-
-/* PIE CHART (CSS-only) */
-.pie-wrap{display:flex;align-items:center;gap:20px;}
-.pie-legend{display:flex;flex-direction:column;gap:5px;}
-.pie-leg-row{display:flex;align-items:center;gap:6px;}
-.pie-dot{width:10px;height:10px;border-radius:3px;flex-shrink:0;}
-.pie-leg-lbl{font-family:var(--mono);font-size:10px;color:var(--dim);}
-.pie-leg-val{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--text);margin-left:auto;min-width:28px;text-align:right;}
 
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
@@ -183,26 +214,26 @@ body{display:flex;flex-direction:column;overflow:hidden;}
     <div class="logo">CT</div>
     <div>
       <div class="brand-name">COATING DASHBOARD</div>
-      <div class="brand-sub">LAB_ASSISTANT · PAIR EYEWEAR · COATING ZONE</div>
+      <div class="brand-sub">LAB_ASSISTANT · PAIR EYEWEAR · COATING INTELLIGENCE</div>
     </div>
   </div>
   <div class="hdr-right">
     <div class="date-badge" id="dateBadge"></div>
-    <div class="srv-wrap" onclick="manualSync()" title="Click to refresh data">
+    <div class="srv-wrap" onclick="manualSync()" title="Click to refresh">
       <div class="srv-dot" id="srvDot"></div>
       <span class="srv-lbl" id="srvLbl">SERVER</span>
     </div>
     <div class="clock" id="clock">--:--:--</div>
-    <button class="hdr-btn" onclick="openSetup()">⚙ SETUP</button>
-    <button class="hdr-btn" onclick="window.location.href='/'" title="Back to dashboards">◂ HOME</button>
+    <button class="hdr-btn" onclick="openSetup()">&#9881; SETUP</button>
+    <button class="hdr-btn" onclick="window.location.href='/'" title="Back to dashboards">&#9666; HOME</button>
   </div>
 </div>
 
 <!-- TABS -->
 <div class="tab-bar">
-  <div class="tab active" id="tab-pipeline" onclick="switchTab('pipeline')">⚡ PIPELINE</div>
-  <div class="tab"        id="tab-queue"    onclick="switchTab('queue')">📋 JOB QUEUE</div>
-  <div class="tab"        id="tab-ops"      onclick="switchTab('ops')">👤 OPERATORS</div>
+  <div class="tab active" id="tab-pipeline" onclick="switchTab('pipeline')">PIPELINE</div>
+  <div class="tab"        id="tab-queue"    onclick="switchTab('queue')">QUEUE</div>
+  <div class="tab"        id="tab-batching" onclick="switchTab('batching')">BATCHING</div>
 </div>
 
 <div class="main" id="main"></div>
@@ -222,541 +253,496 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 // ─────────────────────────────────────────────────────────────────
 let cfg = JSON.parse(localStorage.getItem('coat_cfg') || '{}');
 let serverUrl = cfg.serverUrl || 'http://localhost:3002';
-let shiftStart = cfg.shiftStart || '07:00';
 
-const COATING_COLORS = {
-  'AR':         '#06B6D4',
-  'BLUE_CUT':   '#3B82F6',
-  'HARD_COAT':  '#10B981',
-  'MIRROR':     '#8B5CF6',
-  'POLARIZED':  '#F59E0B',
-  'TRANSITIONS':'#EC4899',
-  'UV':         '#84CC16',
-  'ANTI_FOG':   '#F97316',
-  'NONE':       '#445566',
-};
-const AVATAR_COLORS = [
-  '#06B6D4','#3B82F6','#10B981','#F59E0B','#EF4444',
-  '#EC4899','#8B5CF6','#84CC16','#F97316','#A78BFA',
-];
-
-// Dashboard data from server
-let dashData = null;
-let dataMode = 'offline';
-let lastSync = null;
-let activeTab = 'pipeline';
-let queueSort = 'station'; // station | coating | wait | rush
+let currentTab = 'pipeline';
+let intelData = null;   // /api/coating/intelligence response
+let ovenData = null;    // /api/oven-live response
+let srvOk = false;
+let pollTimer = null;
 
 // ─────────────────────────────────────────────────────────────────
-// CLOCK + DATE
+// CLOCK
 // ─────────────────────────────────────────────────────────────────
-function tickClock(){
+function tickClock() {
   const now = new Date();
-  document.getElementById('clock').textContent = now.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
-  document.getElementById('dateBadge').textContent = now.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}).toUpperCase();
+  const hh = String(now.getHours()).padStart(2,'0');
+  const mm = String(now.getMinutes()).padStart(2,'0');
+  const ss = String(now.getSeconds()).padStart(2,'0');
+  document.getElementById('clock').textContent = hh + ':' + mm + ':' + ss;
+  const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const months = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  document.getElementById('dateBadge').textContent =
+    days[now.getDay()] + ' ' + months[now.getMonth()] + ' ' + now.getDate();
 }
-setInterval(tickClock,1000); tickClock();
+tickClock();
+setInterval(tickClock, 1000);
 
 // ─────────────────────────────────────────────────────────────────
-// DATA FETCH
+// TABS
 // ─────────────────────────────────────────────────────────────────
-async function fetchData(){
-  try{
-    const resp = await fetch(`${serverUrl}/api/coating/dashboard`, {
-      signal: AbortSignal.timeout(8000)
-    });
-    if(resp.ok){
-      dashData = await resp.json();
-      dataMode = 'live';
-      lastSync = new Date();
-      updateSrvDot('ok','LIVE');
-      return;
-    }
-  } catch(e){ console.warn('Coating dashboard fetch failed:', e.message); }
-  // Generate mock data if server unavailable
-  dashData = generateMock();
-  dataMode = 'mock';
-  lastSync = new Date();
-  updateSrvDot('mock','MOCK DATA');
-}
-
-function generateMock(){
-  const coatingTypes = ['AR','BLUE_CUT','HARD_COAT','MIRROR','POLARIZED','TRANSITIONS'];
-  const coaters = ['CCL 1','CCL 2','CCL 3'];
-  const operators = ['EY','DB','AF','MR','JL','KT'];
-  const lensStyles = ['Progressive','Single Vision','Bifocal'];
-  const lensMats = ['CR-39','Polycarbonate','Trivex','Hi-Index 1.67'];
-  const stations = ['CCL 1','CCL 2','CCL 3','QUEUE','PREP'];
-
-  function rInt(a,b){ return Math.floor(Math.random()*(b-a+1))+a; }
-  function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
-
-  const jobs = [];
-  for(let i=0;i<80;i++){
-    jobs.push({
-      id: 'J' + (21000 + i),
-      tray: 'T-' + String(rInt(1,200)).padStart(3,'0'),
-      station: pick(stations),
-      operator: pick(operators),
-      coating: pick(coatingTypes),
-      lensStyle: pick(lensStyles),
-      lensMat: pick(lensMats),
-      rxNum: 'RX' + rInt(100000,999999),
-      isRush: Math.random() < 0.12,
-      minutesAtStation: rInt(2,180),
-      daysInLab: rInt(0,5),
-    });
-  }
-
-  const byCoater = {};
-  coaters.forEach(c => {
-    const cJobs = jobs.filter(j => j.station === c);
-    byCoater[c] = { station: c, count: cJobs.length, jobs: cJobs };
-  });
-
-  const byCoatingType = {};
-  coatingTypes.forEach(ct => {
-    byCoatingType[ct] = jobs.filter(j => j.coating === ct).length;
-  });
-
-  const operatorStats = {};
-  operators.forEach(op => {
-    const opJobs = jobs.filter(j => j.operator === op);
-    operatorStats[op] = { initials: op, jobs: opJobs.length };
-  });
-
-  return {
-    jobs,
-    coatingWip: 568,
-    queueCount: 200,
-    activeCount: 368,
-    completedToday: 150,
-    byCoater,
-    byCoatingType,
-    operatorStats,
-    totalWip: 3000,
-    shippedToday: 400,
-  };
-}
-
-async function manualSync(){
-  updateSrvDot('pending','SYNCING...');
-  await fetchData();
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
   render();
-  toast('Data refreshed','ok');
 }
 
-function updateSrvDot(state, label){
+// ─────────────────────────────────────────────────────────────────
+// DATA FETCHING — 30 second poll
+// ─────────────────────────────────────────────────────────────────
+async function fetchAll() {
+  try {
+    const [intelRes, ovenRes] = await Promise.all([
+      fetch(serverUrl + '/api/coating/intelligence'),
+      fetch(serverUrl + '/api/oven-live'),
+    ]);
+    if (intelRes.ok) intelData = await intelRes.json();
+    if (ovenRes.ok) ovenData = await ovenRes.json();
+    srvOk = intelRes.ok;
+    setSrvDot(srvOk ? 'ok' : 'err');
+  } catch (e) {
+    console.warn('[Coating] Fetch error:', e);
+    srvOk = false;
+    setSrvDot('err');
+  }
+  render();
+}
+
+function setSrvDot(state) {
   const dot = document.getElementById('srvDot');
-  const lbl = document.getElementById('srvLbl');
-  dot.className = 'srv-dot ' + (state==='ok'?'ok':state==='mock'?'mock':'err');
-  lbl.textContent = label;
+  dot.className = 'srv-dot ' + state;
+}
+
+function manualSync() {
+  showToast('Refreshing...', 'ok');
+  fetchAll();
+}
+
+function startPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  fetchAll();
+  pollTimer = setInterval(fetchAll, 30000);
 }
 
 // ─────────────────────────────────────────────────────────────────
 // HELPERS
 // ─────────────────────────────────────────────────────────────────
-function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-
-function shiftHours(){
-  const [h,m] = shiftStart.split(':').map(Number);
-  const start = new Date();
-  start.setHours(h,m,0,0);
-  return Math.max(0,(Date.now()-start)/3600000);
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function pickColor(name){
-  let hash = 0;
-  for(const c of String(name)) hash = (hash*31 + c.charCodeAt(0)) & 0xFFFFFF;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+function fmtTime(sec) {
+  if (sec == null || sec < 0) return '--:--';
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = Math.floor(sec % 60);
+  if (h > 0) return h + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
+  return String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0');
 }
 
-function initials(name){
-  return String(name||'').split(' ').map(p=>p[0]).join('').toUpperCase().slice(0,2);
+function fmtMin(min) {
+  if (min == null) return '--';
+  if (min < 60) return min + 'm';
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return h + 'h ' + m + 'm';
 }
 
-function coatingColor(type){
-  return COATING_COLORS[type] || COATING_COLORS[String(type).toUpperCase()] || '#445566';
+function actionClass(action) {
+  if (!action) return 'action-wait';
+  const a = action.toUpperCase();
+  if (a === 'RUN NOW') return 'action-run-now';
+  if (a === 'RUN PARTIAL') return 'action-run-partial';
+  return 'action-wait';
 }
 
-function formatCoatingName(type){
-  if(!type) return '—';
-  return String(type).replace(/_/g,' ');
+function fillClass(pct) {
+  if (pct >= 75) return 'high';
+  if (pct >= 50) return 'med';
+  return 'low';
 }
 
-function fmtMinutes(m){
-  if(m==null) return '—';
-  if(m < 60) return m + 'm';
-  const h = Math.floor(m/60);
-  const rm = m % 60;
-  return h + 'h' + (rm ? ' '+rm+'m' : '');
-}
-
-function daysColor(d){
-  if(d >= 4) return 'var(--red)';
-  if(d >= 2) return 'var(--amber)';
-  return 'var(--dimmer)';
-}
-
-// ─────────────────────────────────────────────────────────────────
-// TAB SWITCH
-// ─────────────────────────────────────────────────────────────────
-function switchTab(tab){
-  activeTab = tab;
-  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-  document.getElementById('tab-'+tab)?.classList.add('active');
-  render();
+function coatingColor(type) {
+  const colors = {
+    'AR': '#06B6D4', 'Blue Cut': '#3B82F6', 'Hard Coat': '#8B5CF6',
+    'Mirror': '#F59E0B', 'Polarized': '#10B981', 'Transitions': '#EC4899',
+  };
+  return colors[type] || '#8899AA';
 }
 
 // ─────────────────────────────────────────────────────────────────
-// RENDER
+// RENDER DISPATCH
 // ─────────────────────────────────────────────────────────────────
-function render(){
-  const main = document.getElementById('main');
-  if(!dashData){ main.innerHTML = '<div style="text-align:center;padding:60px;font-family:var(--mono);color:var(--dimmer);">Loading data...</div>'; return; }
-  if(activeTab==='pipeline') main.innerHTML = renderPipeline();
-  if(activeTab==='queue')    main.innerHTML = renderQueue();
-  if(activeTab==='ops')      main.innerHTML = renderOperators();
+function render() {
+  const el = document.getElementById('main');
+  if (!intelData) {
+    el.innerHTML = '<div class="empty">Connecting to server at ' + esc(serverUrl) + '...</div>';
+    return;
+  }
+  switch (currentTab) {
+    case 'pipeline': el.innerHTML = renderPipeline(); break;
+    case 'queue':    el.innerHTML = renderQueue(); break;
+    case 'batching': el.innerHTML = renderBatching(); break;
+  }
 }
 
-// ─── PIPELINE TAB ────────────────────────────────────────────────
-function renderPipeline(){
-  const d = dashData;
-  const shiftH = shiftHours();
-  const rate = shiftH > 0 ? (d.completedToday / shiftH).toFixed(1) : '—';
+// ─────────────────────────────────────────────────────────────────
+// TAB 1: PIPELINE
+// ─────────────────────────────────────────────────────────────────
+function renderPipeline() {
+  const d = intelData;
+  const q = d.queue || {};
+  const rec = d.recommendation || {};
+  const ovens = d.ovens || {};
+  const bySubStage = q.bySubStage || {};
+  const byType = q.byType || [];
+  const coaterPlan = rec.coaterPlan || [];
+  const runningRacks = ovens.racksRunning || [];
 
-  const kpis = `
-  <div class="kpi-row">
-    <div class="kpi">
-      <div class="kpi-val" style="color:var(--amber)">${d.queueCount}</div>
-      <div class="kpi-lbl">QUEUE</div>
-      <div class="kpi-sub">Waiting for coater</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-val" style="color:var(--teal)">${d.activeCount}</div>
-      <div class="kpi-lbl">IN COATER</div>
-      <div class="kpi-sub">${d.coatingWip} coating WIP</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-val" style="color:var(--green)">${d.completedToday}</div>
-      <div class="kpi-lbl">DONE TODAY</div>
-      <div class="kpi-sub">${rate}/hr avg</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-val" style="color:var(--blue)">${d.totalWip}</div>
-      <div class="kpi-lbl">TOTAL WIP</div>
-    </div>
-    <div class="kpi">
-      <div class="kpi-val" style="color:var(--purple)">${d.shippedToday}</div>
-      <div class="kpi-lbl">SHIPPED TODAY</div>
-    </div>
-  </div>`;
+  // Merge live oven timer data if available
+  const liveTimers = (ovenData && ovenData.timers) ? ovenData.timers : {};
 
-  // Coater cards
-  const byCoater = d.byCoater || {};
-  const coaterNames = Object.keys(byCoater).sort();
-  const coaterCards = coaterNames.map(name => {
-    const c = byCoater[name];
-    const count = c.count || 0;
-    const isActive = count > 0;
-    // Mini breakdown by coating type for this coater
-    const typeCounts = {};
-    (c.jobs || []).forEach(j => {
-      const ct = j.coating || 'UNKNOWN';
-      typeCounts[ct] = (typeCounts[ct] || 0) + 1;
-    });
-    const miniBreakdown = Object.entries(typeCounts)
-      .sort((a,b) => b[1]-a[1])
-      .slice(0,4)
-      .map(([ct,cnt]) => `<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px;"><span style="width:6px;height:6px;border-radius:2px;background:${coatingColor(ct)};display:inline-block;"></span><span style="font-family:var(--mono);font-size:9px;color:var(--dim);">${formatCoatingName(ct)} ${cnt}</span></span>`)
-      .join('');
+  // KPI row
+  let html = '<div class="kpi-row">';
+  html += kpi(q.total || 0, 'QUEUE', 'Jobs in coating stage', 'var(--teal)');
+  html += kpi(bySubStage.IN_COATER || 0, 'IN COATER', 'Currently coating', 'var(--blue)');
+  html += kpi(bySubStage.IN_OVEN || 0, 'IN OVEN', ovens.racksInUse + ' racks active', 'var(--amber)');
+  html += kpi(d.stats ? d.stats.todayCoatingRuns : 0, 'DONE TODAY', 'Coating runs completed', 'var(--green)');
 
-    return `
-    <div class="coater-card ${isActive?'active':''}">
-      <div class="coater-top">
-        <div>
-          <div class="coater-name">${esc(name)}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">${esc(c.station || name)}</div>
-        </div>
-        <div class="coater-status-dot ${isActive?'cs-active':'cs-idle'}"></div>
-      </div>
-      <div style="display:flex;align-items:baseline;gap:6px;">
-        <div class="coater-count">${count}</div>
-        <div class="coater-count-lbl">ACTIVE JOBS</div>
-      </div>
-      <div style="min-height:18px;">${miniBreakdown || '<span style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">No jobs</span>'}</div>
-    </div>`;
-  }).join('');
+  // Action badge as KPI
+  const action = rec.action || 'WAIT';
+  const reason = rec.reason || '';
+  html += '<div class="kpi" style="border-color:' + (action === 'RUN NOW' ? 'var(--green)' : action === 'RUN PARTIAL' ? 'var(--blue)' : 'var(--amber)') + '">';
+  html += '<span class="action-badge ' + actionClass(action) + '">' + esc(action) + '</span>';
+  html += '<span class="kpi-lbl">BATCH ACTION</span>';
+  html += '<span class="kpi-sub">' + esc(reason) + '</span>';
+  html += '</div>';
+  html += '</div>';
 
-  // Coating type breakdown bars
-  const byType = d.byCoatingType || {};
-  const typeEntries = Object.entries(byType).sort((a,b) => b[1]-a[1]);
-  const maxTypeCount = Math.max(1, ...typeEntries.map(e => e[1]));
-  const typeBars = typeEntries.map(([ct,cnt]) => {
-    const pct = Math.round((cnt / maxTypeCount) * 100);
-    const color = coatingColor(ct);
-    return `
-    <div class="ct-bar-row">
-      <div class="ct-bar-label">${formatCoatingName(ct)}</div>
-      <div class="ct-bar-wrap"><div class="ct-bar" style="width:${pct}%;background:${color}"></div></div>
-      <div class="ct-bar-val">${cnt}</div>
-    </div>`;
-  }).join('');
-
-  // Pie chart via SVG
-  const pieSize = 140;
-  const pieR = 55;
-  const pieCx = pieSize/2;
-  const pieCy = pieSize/2;
-  const totalForPie = typeEntries.reduce((s,e) => s+e[1], 0) || 1;
-  let pieAngle = -90;
-  const pieSlices = typeEntries.map(([ct,cnt]) => {
-    const sliceAngle = (cnt / totalForPie) * 360;
-    const startRad = pieAngle * Math.PI / 180;
-    const endRad = (pieAngle + sliceAngle) * Math.PI / 180;
-    const x1 = pieCx + pieR * Math.cos(startRad);
-    const y1 = pieCy + pieR * Math.sin(startRad);
-    const x2 = pieCx + pieR * Math.cos(endRad);
-    const y2 = pieCy + pieR * Math.sin(endRad);
-    const largeArc = sliceAngle > 180 ? 1 : 0;
-    const path = `M${pieCx},${pieCy} L${x1},${y1} A${pieR},${pieR} 0 ${largeArc} 1 ${x2},${y2} Z`;
-    pieAngle += sliceAngle;
-    return `<path d="${path}" fill="${coatingColor(ct)}" stroke="var(--card)" stroke-width="1.5"/>`;
-  }).join('');
-
-  const pieLegend = typeEntries.map(([ct,cnt]) => {
-    const pct = Math.round((cnt / totalForPie) * 100);
-    return `<div class="pie-leg-row">
-      <div class="pie-dot" style="background:${coatingColor(ct)}"></div>
-      <div class="pie-leg-lbl">${formatCoatingName(ct)}</div>
-      <div class="pie-leg-val">${cnt} <span style="color:var(--dimmer);font-size:9px;">(${pct}%)</span></div>
-    </div>`;
-  }).join('');
-
-  const lastSyncStr = lastSync ? `Last sync: ${lastSync.toLocaleTimeString()}` : 'Not synced';
-
-  return `
-  ${kpis}
-  <div class="card">
-    <div class="card-title">
-      COATERS
-      <span style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">${lastSyncStr} · ${dataMode.toUpperCase()}</span>
-    </div>
-    <div class="coater-grid">${coaterCards || '<div style="font-family:var(--mono);color:var(--dimmer);padding:20px;text-align:center;">No coater data</div>'}</div>
-  </div>
-  <div class="two-col">
-    <div class="card">
-      <div class="card-title">COATING TYPE DISTRIBUTION</div>
-      <div class="pie-wrap">
-        <svg width="${pieSize}" height="${pieSize}" viewBox="0 0 ${pieSize} ${pieSize}">
-          ${typeEntries.length > 0 ? pieSlices : `<circle cx="${pieCx}" cy="${pieCy}" r="${pieR}" fill="var(--border)"/>`}
-        </svg>
-        <div class="pie-legend">${pieLegend || '<div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);">No data</div>'}</div>
-      </div>
-    </div>
-    <div class="card">
-      <div class="card-title">COATING TYPE BREAKDOWN <span class="card-badge">${typeEntries.length} TYPES</span></div>
-      ${typeBars || '<div style="font-family:var(--mono);color:var(--dimmer);padding:20px;text-align:center;">No data</div>'}
-    </div>
-  </div>`;
-}
-
-// ─── JOB QUEUE TAB ───────────────────────────────────────────────
-function setQueueSort(s){ queueSort = s; render(); }
-
-function renderQueue(){
-  const d = dashData;
-  let allJobs = (d.jobs || []).slice();
-
-  // Sort
-  if(queueSort === 'station'){
-    allJobs.sort((a,b) => String(a.station||'').localeCompare(String(b.station||'')));
-  } else if(queueSort === 'coating'){
-    allJobs.sort((a,b) => String(a.coating||'').localeCompare(String(b.coating||'')));
-  } else if(queueSort === 'wait'){
-    allJobs.sort((a,b) => (b.minutesAtStation||0) - (a.minutesAtStation||0));
-  } else if(queueSort === 'rush'){
-    allJobs.sort((a,b) => {
-      if(a.isRush && !b.isRush) return -1;
-      if(!a.isRush && b.isRush) return 1;
-      return (b.minutesAtStation||0) - (a.minutesAtStation||0);
-    });
+  // Summary bar
+  if (d.recommendation && d.recommendation.reason) {
+    html += '<div class="summary-bar">' + esc(d.recommendation.reason);
+    if (d.upstream && d.upstream.surfacing) {
+      html += ' &mdash; ' + d.upstream.surfacing.count + ' jobs in surfacing (~' + d.upstream.surfacing.etaMin + 'min ETA)';
+    }
+    html += '</div>';
   }
 
-  const rushCount = allJobs.filter(j => j.isRush).length;
+  // Coater cards
+  html += '<div class="card-title">COATER PLAN <span class="card-badge">' + (rec.overallFillPct || 0) + '% OVERALL FILL</span></div>';
+  html += '<div class="three-col">';
+  for (const c of coaterPlan) {
+    const pct = c.fillPct || 0;
+    const isActive = pct > 0;
+    html += '<div class="coater-card' + (isActive ? ' active' : '') + '">';
+    html += '<div style="display:flex;align-items:center;justify-content:space-between">';
+    html += '<span class="coater-name">' + esc(c.name) + '</span>';
+    html += '<span class="coater-cap">' + c.lensCapacity + ' lens cap</span>';
+    html += '</div>';
+    html += '<div class="coater-fill-wrap"><div class="coater-fill ' + fillClass(pct) + '" style="width:' + Math.min(pct, 100) + '%"></div></div>';
+    html += '<div class="coater-stats">';
+    html += '<div class="coater-stat"><div class="coater-stat-val">' + (c.fill || 0) + '</div><div class="coater-stat-lbl">LENSES</div></div>';
+    html += '<div class="coater-stat"><div class="coater-stat-val">' + (c.orders || 0) + '</div><div class="coater-stat-lbl">ORDERS</div></div>';
+    html += '<div class="coater-stat"><div class="coater-stat-val">' + pct + '%</div><div class="coater-stat-lbl">FILL</div></div>';
+    html += '</div>';
+    html += '</div>';
+  }
+  html += '</div>';
 
-  const controls = `
-  <div class="queue-controls">
-    <button class="q-sort-btn ${queueSort==='station'?'active':''}" onclick="setQueueSort('station')">BY STATION</button>
-    <button class="q-sort-btn ${queueSort==='coating'?'active':''}" onclick="setQueueSort('coating')">BY COATING</button>
-    <button class="q-sort-btn ${queueSort==='wait'?'active':''}" onclick="setQueueSort('wait')">BY WAIT TIME</button>
-    <button class="q-sort-btn ${queueSort==='rush'?'active':''}" onclick="setQueueSort('rush')">RUSH FIRST</button>
-    <span style="font-family:var(--mono);font-size:10px;color:var(--dimmer);display:flex;align-items:center;margin-left:auto;">${allJobs.length} JOBS${rushCount > 0 ? ' · <span style="color:var(--red);margin-left:4px;">'+rushCount+' RUSH</span>' : ''}</span>
-  </div>`;
+  // Oven rack grid
+  html += '<div class="card-title">OVEN RACKS <span class="card-badge">';
+  html += (ovens.racksInUse || 0) + ' RUNNING / ' + (ovens.racksAvailable || 0) + ' AVAILABLE';
+  html += '</span></div>';
 
-  const header = `
-  <div style="display:flex;align-items:center;gap:10px;padding:6px 12px;border-bottom:1px solid var(--border);margin-bottom:4px;">
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:72px;">JOB</div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:72px;">RX</div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:80px;">COATING</div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:60px;">STATION</div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:40px;text-align:center;">OP</div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);flex:1;">LENS</div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:48px;text-align:right;">TIME</div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);min-width:36px;text-align:right;">DAYS</div>
-  </div>`;
+  if (runningRacks.length === 0 && Object.keys(liveTimers).length === 0) {
+    html += '<div class="empty">No oven racks currently running</div>';
+  } else {
+    // Build combined rack list: prefer live timer data, fall back to intelligence data
+    const rackMap = new Map();
 
-  const rows = allJobs.map(j => {
-    const isRush = j.isRush;
-    const lensInfo = [j.lensMat, j.lensStyle].filter(Boolean).join(' ');
-    return `
-    <div class="queue-row ${isRush?'rush':''}">
-      <div class="q-job">${isRush?'<span class="q-rush-badge">🚨</span>':''}${esc(j.id)}</div>
-      <div class="q-rx">${esc(j.rxNum || '')}</div>
-      <div class="q-coating" style="color:${coatingColor(j.coating)}">${esc(formatCoatingName(j.coating))}</div>
-      <div class="q-station">${esc(j.station || '—')}</div>
-      <div class="q-operator">${esc(j.operator || '—')}</div>
-      <div class="q-lens">${esc(lensInfo || '—')}</div>
-      <div class="q-time">${fmtMinutes(j.minutesAtStation)}</div>
-      <div class="q-days" style="color:${daysColor(j.daysInLab)}">${j.daysInLab != null ? j.daysInLab + 'd' : '—'}</div>
-    </div>`;
-  }).join('');
+    // First add intelligence running racks
+    for (const r of runningRacks) {
+      const key = (r.ovenId || '') + '::' + (r.rackLabel || r.rackIndex);
+      rackMap.set(key, r);
+    }
 
-  return `
-  <div class="card">
-    <div class="card-title">COATING JOB QUEUE <span class="card-badge">${allJobs.length} TOTAL</span></div>
-    ${controls}
-    ${header}
-    <div class="queue-list">${rows || '<div style="padding:40px;text-align:center;font-family:var(--mono);color:var(--dimmer);">No jobs in queue</div>'}</div>
-  </div>`;
+    // Overlay live timer data (more accurate elapsed times)
+    for (const [key, timer] of Object.entries(liveTimers)) {
+      if (timer.state === 'running' || timer.state === 'paused') {
+        const existing = rackMap.get(key);
+        rackMap.set(key, {
+          ovenId: timer.ovenName || timer.ovenId || (existing ? existing.ovenId : ''),
+          rackLabel: timer.rackLabel || (existing ? existing.rackLabel : key),
+          coating: timer.coating || (existing ? existing.coating : 'AR'),
+          state: timer.state,
+          elapsed: timer.elapsed || 0,
+          target: timer.target || 10800,
+          remainingSec: Math.max(0, (timer.target || 10800) - (timer.elapsed || 0)),
+          remainingMin: Math.round(Math.max(0, (timer.target || 10800) - (timer.elapsed || 0)) / 60),
+        });
+      }
+    }
+
+    const racks = Array.from(rackMap.values()).sort((a, b) => (a.remainingSec || 0) - (b.remainingSec || 0));
+    html += '<div class="rack-grid">';
+    for (const r of racks) {
+      const pct = r.target > 0 ? Math.min(100, Math.round((r.elapsed / r.target) * 100)) : 0;
+      const remaining = r.remainingSec || 0;
+      const barClass = remaining <= 0 ? 'done' : remaining < 600 ? 'warn' : '';
+      html += '<div class="rack-tile ' + (r.state || 'running') + '">';
+      html += '<div class="rack-top">';
+      html += '<span class="rack-id">' + esc(r.ovenId) + ' ' + esc(r.rackLabel) + '</span>';
+      html += '<span class="rack-state ' + (r.state || 'running') + '">' + (r.state || 'RUNNING').toUpperCase() + '</span>';
+      html += '</div>';
+      html += '<div class="rack-coating" style="color:' + coatingColor(r.coating) + '">' + esc(r.coating || 'AR') + '</div>';
+      html += '<div class="rack-time">' + fmtTime(r.elapsed) + ' / ' + fmtTime(r.target) + '</div>';
+      html += '<div class="rack-bar-wrap"><div class="rack-bar ' + barClass + '" style="width:' + pct + '%"></div></div>';
+      html += '<div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">' + fmtMin(r.remainingMin) + ' remaining</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  // Coating type breakdown
+  if (byType.length > 0) {
+    html += '<div class="card-title">QUEUE BY COATING TYPE</div>';
+    html += '<div class="type-chips">';
+    for (const t of byType) {
+      html += '<div class="type-chip">';
+      html += '<div class="type-chip-name" style="color:' + coatingColor(t.type) + '">' + esc(t.type) + '</div>';
+      html += '<div class="type-chip-count">' + t.count + '</div>';
+      html += '<div class="type-chip-lbl">JOBS' + (t.rushCount > 0 ? ' (' + t.rushCount + ' RUSH)' : '') + '</div>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+
+  return html;
 }
 
-// ─── OPERATORS TAB ───────────────────────────────────────────────
-function renderOperators(){
-  const d = dashData;
-  const opStats = d.operatorStats || {};
-  const opEntries = Object.entries(opStats).sort((a,b) => (b[1].jobs||0) - (a[1].jobs||0));
-  const maxJobs = Math.max(1, ...opEntries.map(e => e[1].jobs || 0));
-  const shiftH = shiftHours();
+function kpi(val, label, sub, color) {
+  return '<div class="kpi"><span class="kpi-val" style="color:' + color + '">' + val + '</span>'
+    + '<span class="kpi-lbl">' + esc(label) + '</span>'
+    + '<span class="kpi-sub">' + esc(sub) + '</span></div>';
+}
 
-  // Also compute per-operator coating type breakdown from jobs
-  const opCoatingBreakdown = {};
-  (d.jobs || []).forEach(j => {
-    if(!j.operator) return;
-    if(!opCoatingBreakdown[j.operator]) opCoatingBreakdown[j.operator] = {};
-    const ct = j.coating || 'UNKNOWN';
-    opCoatingBreakdown[j.operator][ct] = (opCoatingBreakdown[j.operator][ct] || 0) + 1;
-  });
+// ─────────────────────────────────────────────────────────────────
+// TAB 2: QUEUE
+// ─────────────────────────────────────────────────────────────────
+function renderQueue() {
+  const d = intelData;
+  const q = d.queue || {};
+  const jobs = q.jobs || [];
 
-  const cards = opEntries.map(([init, stats]) => {
-    const jobCount = stats.jobs || 0;
-    const jph = shiftH > 0 ? (jobCount / shiftH).toFixed(1) : '—';
-    const pct = Math.round((jobCount / maxJobs) * 100);
-    const color = pickColor(init);
-    const displayName = stats.initials || init;
+  let html = '<div class="card-title">COATING QUEUE <span class="card-badge">';
+  html += jobs.length + ' JOBS';
+  if (q.rushCount > 0) html += ' / ' + q.rushCount + ' RUSH';
+  html += '</span></div>';
 
-    // Coating breakdown for this operator
-    const breakdown = opCoatingBreakdown[init] || {};
-    const breakdownEntries = Object.entries(breakdown).sort((a,b) => b[1]-a[1]);
-    const breakdownHtml = breakdownEntries.slice(0,5).map(([ct,cnt]) =>
-      `<span style="display:inline-flex;align-items:center;gap:3px;margin-right:8px;margin-bottom:2px;">
-        <span style="width:6px;height:6px;border-radius:2px;background:${coatingColor(ct)};display:inline-block;"></span>
-        <span style="font-family:var(--mono);font-size:9px;color:var(--dim);">${formatCoatingName(ct)} ${cnt}</span>
-      </span>`
-    ).join('');
+  // Station breakdown row
+  const byStation = q.byStation || {};
+  const stationKeys = Object.keys(byStation);
+  if (stationKeys.length > 0) {
+    html += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;">';
+    for (const stn of stationKeys) {
+      html += '<div style="background:var(--surface);border:1px solid var(--border);border-radius:6px;'
+        + 'padding:4px 10px;font-family:var(--mono);font-size:10px;">';
+      html += '<span style="color:var(--dim)">' + esc(stn) + '</span> ';
+      html += '<span style="color:var(--text);font-weight:700">' + byStation[stn] + '</span>';
+      html += '</div>';
+    }
+    html += '</div>';
+  }
 
-    // Count rush jobs for this operator
-    const rushCount = (d.jobs || []).filter(j => j.operator === init && j.isRush).length;
+  if (jobs.length === 0) {
+    html += '<div class="empty">No jobs in coating queue</div>';
+    return html;
+  }
 
-    return `
-    <div class="op-card">
-      <div style="display:flex;align-items:center;gap:12px;">
-        <div class="op-avatar" style="background:${color}">${esc(displayName).slice(0,2)}</div>
-        <div style="flex:1">
-          <div style="font-family:var(--sans);font-size:16px;font-weight:700;">${esc(displayName)}</div>
-          <div style="font-family:var(--mono);font-size:9px;color:var(--dim);">COATING OPERATOR</div>
-        </div>
-      </div>
-      <div class="op-stat-row">
-        <div class="op-stat"><div class="op-stat-val">${jobCount}</div><div class="op-stat-lbl">JOBS TODAY</div></div>
-        <div class="op-stat"><div class="op-stat-val">${jph}</div><div class="op-stat-lbl">JOBS / HR</div></div>
-      </div>
-      <div class="op-stat-row">
-        <div class="op-stat"><div class="op-stat-val" style="color:var(--red)">${rushCount}</div><div class="op-stat-lbl">RUSH</div></div>
-        <div class="op-stat"><div class="op-stat-val" style="color:var(--purple)">${breakdownEntries.length}</div><div class="op-stat-lbl">COAT TYPES</div></div>
-      </div>
-      <div style="margin-top:4px;">
-        <div style="display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-bottom:4px;">
-          <span>DAILY PROGRESS</span><span>${pct}%</span>
-        </div>
-        <div style="width:100%;height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
-          <div style="height:100%;border-radius:2px;background:${color};width:${pct}%;transition:width .5s;"></div>
-        </div>
-      </div>
-      <div style="margin-top:6px;min-height:18px;display:flex;flex-wrap:wrap;">${breakdownHtml || '<span style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">No breakdown</span>'}</div>
-    </div>`;
-  }).join('');
+  // Column headers
+  html += '<div style="display:flex;align-items:center;gap:10px;padding:4px 12px;'
+    + 'font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;">';
+  html += '<span style="min-width:80px">JOB</span>';
+  html += '<span style="min-width:70px">COATING</span>';
+  html += '<span style="min-width:50px">MATERIAL</span>';
+  html += '<span style="min-width:60px">LENS</span>';
+  html += '<span style="min-width:70px">SUB-STAGE</span>';
+  html += '<span style="flex:1"></span>';
+  html += '<span style="min-width:60px;text-align:right">WAIT</span>';
+  html += '<span style="min-width:50px"></span>';
+  html += '</div>';
 
-  const totalOps = opEntries.length;
-  const totalJobsToday = opEntries.reduce((s,e) => s + (e[1].jobs||0), 0);
+  html += '<div class="queue-list" style="max-height:calc(100vh - 240px);overflow-y:auto;">';
+  for (const j of jobs) {
+    const isRush = j.rush;
+    html += '<div class="queue-row' + (isRush ? ' rush' : '') + '">';
+    html += '<span class="q-job">' + esc(j.jobId) + '</span>';
+    html += '<span class="q-coating" style="color:' + coatingColor(j.coating) + '">' + esc(j.coating || 'AR') + '</span>';
+    html += '<span class="q-material">' + esc(j.lensMat || '--') + '</span>';
+    html += '<span class="q-lens">' + esc(j.lensType || '--') + '</span>';
 
-  return `
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
-    <div style="font-family:var(--mono);font-size:10px;color:var(--dim);">${totalOps} OPERATORS · ${totalJobsToday} JOBS THIS SHIFT (${shiftH.toFixed(1)}H)</div>
-  </div>
-  <div class="op-grid">${cards || '<div style="grid-column:1/-1;text-align:center;padding:40px;font-family:var(--mono);color:var(--dimmer);">No operator data available</div>'}</div>`;
+    // Sub-stage badge
+    const ss = j.subStage || 'QUEUE';
+    let ssClass = 'qs-queue';
+    if (ss === 'IN_COATER') ssClass = 'qs-coater';
+    else if (ss === 'IN_OVEN') ssClass = 'qs-oven';
+    else if (ss === 'COAT_QC') ssClass = 'qs-qc';
+    html += '<span class="q-substage ' + ssClass + '">' + ss.replace('_', ' ') + '</span>';
+
+    html += '<span style="flex:1"></span>';
+    html += '<span class="q-wait">' + fmtMin(j.waitMin) + '</span>';
+    html += isRush ? '<span class="q-rush">RUSH</span>' : '<span style="min-width:50px"></span>';
+    html += '</div>';
+  }
+  html += '</div>';
+
+  return html;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// TAB 3: BATCHING
+// ─────────────────────────────────────────────────────────────────
+function renderBatching() {
+  const d = intelData;
+  const rec = d.recommendation || {};
+  const batches = rec.batchSuggestions || [];
+
+  let html = '<div class="card-title">BATCH SUGGESTIONS <span class="card-badge">';
+  html += batches.length + ' GROUPS';
+  html += '</span></div>';
+
+  // Overall recommendation bar
+  const action = rec.action || 'WAIT';
+  html += '<div class="summary-bar" style="display:flex;align-items:center;gap:12px;">';
+  html += '<span class="action-badge ' + actionClass(action) + '">' + esc(action) + '</span>';
+  html += '<span>' + esc(rec.reason || '') + '</span>';
+  html += '<span style="margin-left:auto;color:var(--teal);font-weight:700;">'
+    + (rec.lensCount || 0) + ' lenses / ' + (rec.jobCount || 0) + ' jobs total</span>';
+  html += '</div>';
+
+  if (batches.length === 0) {
+    html += '<div class="empty">No batch groups available -- queue is empty</div>';
+    return html;
+  }
+
+  html += '<div style="display:flex;flex-direction:column;gap:12px;">';
+  for (const b of batches) {
+    const isReady = b.ready;
+    html += '<div class="batch-card' + (isReady ? ' ready' : '') + '">';
+
+    // Header row
+    html += '<div class="batch-header">';
+    html += '<div style="display:flex;align-items:center;gap:10px;">';
+    html += '<span class="batch-type" style="color:' + coatingColor(b.coatingType) + '">' + esc(b.coatingType) + '</span>';
+    html += '<span class="batch-material">' + esc(b.material) + '</span>';
+    if (isReady) {
+      html += '<span class="batch-ready-badge">READY</span>';
+    } else {
+      html += '<span class="batch-wait-badge">ACCUMULATING</span>';
+    }
+    if (b.rushCount > 0) {
+      html += '<span class="q-rush">' + b.rushCount + ' RUSH</span>';
+    }
+    html += '</div>';
+    html += '<span class="batch-coater">Suggested: <strong>' + esc(b.suggestedCoater) + '</strong></span>';
+    html += '</div>';
+
+    // Stats grid
+    html += '<div class="batch-stats">';
+    html += batchStat(b.jobCount, 'JOBS');
+    html += batchStat(b.lensCount, 'LENSES');
+    html += batchStat(b.fillPct + '%', 'FILL');
+    html += batchStat(b.avgWaitMin != null ? fmtMin(b.avgWaitMin) : '--', 'AVG WAIT');
+    html += '</div>';
+
+    // Fill bar
+    html += '<div style="display:flex;align-items:center;gap:10px;">';
+    html += '<div class="batch-fill-wrap" style="flex:1"><div class="batch-fill' + (isReady ? ' ready' : '') + '" style="width:' + Math.min(b.fillPct, 100) + '%"></div></div>';
+    html += '<span style="font-family:var(--mono);font-size:10px;color:var(--dim)">' + b.fillPct + '% of ' + esc(b.suggestedCoater) + '</span>';
+    html += '</div>';
+
+    // Lens type breakdown if available
+    if (b.lensTypeBreakdown && Object.keys(b.lensTypeBreakdown).length > 0) {
+      html += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+      for (const [lt, count] of Object.entries(b.lensTypeBreakdown)) {
+        const label = lt === 'P' ? 'Progressive' : lt === 'S' ? 'Single Vision' : lt === 'B' ? 'Bifocal' : lt;
+        html += '<span style="font-family:var(--mono);font-size:9px;color:var(--dim);'
+          + 'background:var(--card);border:1px solid var(--border);border-radius:4px;padding:2px 6px;">'
+          + esc(label) + ': ' + count + '</span>';
+      }
+      html += '</div>';
+    }
+
+    // ETA to full
+    if (b.etaToFullMin != null) {
+      html += '<div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">'
+        + 'Estimated ' + fmtMin(b.etaToFullMin) + ' to fill ' + esc(b.suggestedCoater)
+        + ' (max wait: ' + fmtMin(b.maxWaitMin) + ')</div>';
+    }
+
+    html += '</div>';
+  }
+  html += '</div>';
+
+  return html;
+}
+
+function batchStat(val, label) {
+  return '<div class="batch-stat"><div class="batch-stat-val">' + val + '</div>'
+    + '<div class="batch-stat-lbl">' + esc(label) + '</div></div>';
 }
 
 // ─────────────────────────────────────────────────────────────────
 // SETUP MODAL
 // ─────────────────────────────────────────────────────────────────
-function openSetup(){
-  document.getElementById('mTitle').textContent = 'DASHBOARD SETUP';
-  document.getElementById('mBody').innerHTML = `
-    <div class="m-field">
-      <label>LAB_ASSISTANT SERVER URL</label>
-      <input class="m-inp" id="s-srv" value="${esc(serverUrl)}" placeholder="http://192.168.x.x:3002"/>
-    </div>
-    <div class="m-field">
-      <label>SHIFT START TIME</label>
-      <input class="m-inp" id="s-shift" type="time" value="${esc(shiftStart)}"/>
-    </div>
-    <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);padding:6px 0;">
-      Server URL points to Lab_Assistant. All settings saved locally on this tablet.
-      <br/>Polls GET /api/coating/dashboard every 120 seconds.
-    </div>`;
-  document.getElementById('mBtns').innerHTML=`
-    <button style="background:var(--border);color:var(--dim);" onclick="closeModal()">Cancel</button>
-    <button style="background:var(--teal);color:#000;" onclick="saveSetup()">Save</button>`;
-  document.getElementById('modal').style.display='flex';
+function openSetup() {
+  const m = document.getElementById('modal');
+  document.getElementById('mTitle').textContent = 'COATING DASHBOARD SETUP';
+  document.getElementById('mBody').innerHTML =
+    '<div class="m-field"><label>SERVER URL</label>'
+    + '<input class="m-inp" id="cfgServer" value="' + esc(serverUrl) + '" placeholder="http://localhost:3002"/>'
+    + '</div>';
+  document.getElementById('mBtns').innerHTML =
+    '<button style="background:var(--border);color:var(--text)" onclick="closeModal()">Cancel</button>'
+    + '<button style="background:var(--teal);color:#000" onclick="saveSetup()">Save</button>';
+  m.style.display = 'flex';
 }
 
-function saveSetup(){
-  serverUrl  = document.getElementById('s-srv')?.value.trim() || serverUrl;
-  shiftStart = document.getElementById('s-shift')?.value || shiftStart;
-  cfg = {serverUrl, shiftStart};
+function saveSetup() {
+  serverUrl = document.getElementById('cfgServer').value.replace(/\/+$/, '') || 'http://localhost:3002';
+  cfg.serverUrl = serverUrl;
   localStorage.setItem('coat_cfg', JSON.stringify(cfg));
-  closeModal(); fetchData().then(render); toast('Settings saved — refreshing data','ok');
+  closeModal();
+  showToast('Config saved', 'ok');
+  startPolling();
 }
 
-function closeModal(){document.getElementById('modal').style.display='none';}
-document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
+function closeModal() {
+  document.getElementById('modal').style.display = 'none';
+}
 
-function toast(msg,type=''){
-  const wrap=document.getElementById('toastWrap');
-  const el=document.createElement('div');
-  el.className=`toast ${type}`; el.textContent=msg;
-  wrap.innerHTML=''; wrap.appendChild(el);
-  setTimeout(()=>el.style.opacity='0',2800);
-  setTimeout(()=>el.remove(),3100);
+// Close modal on background click
+document.getElementById('modal').addEventListener('click', function(e) {
+  if (e.target === this) closeModal();
+});
+
+// ─────────────────────────────────────────────────────────────────
+// TOAST
+// ─────────────────────────────────────────────────────────────────
+function showToast(msg, type) {
+  const wrap = document.getElementById('toastWrap');
+  const t = document.createElement('div');
+  t.className = 'toast' + (type ? ' ' + type : '');
+  t.textContent = msg;
+  wrap.appendChild(t);
+  setTimeout(function() { t.remove(); }, 2500);
 }
 
 // ─────────────────────────────────────────────────────────────────
 // INIT
 // ─────────────────────────────────────────────────────────────────
-fetchData().then(()=>{ render(); });
-// Auto-refresh every 120 seconds
-setInterval(()=>fetchData().then(render), 120000);
+startPolling();
 </script>
 </body>
 </html>
