@@ -60,6 +60,7 @@ CRITICAL: Use these tools to get ALL data. NEVER invent data. NEVER say you "don
 - `get_wip_snapshot()` — Total WIP, rush count, avg days, by-stage breakdown
 - `get_wip_jobs()` — All jobs with status, stage, operator, Rx details
 - `get_job_detail(invoice="...")` — Full detail for one job including history and breakage
+- `get_job_by_shopify_id(shopify_id="...")` — Look up a job by Shopify order ID. **USE THIS when CX gives you a Shopify order number (typically 7 digits like 3171471) instead of a DVI invoice number.** Returns whether the job is active in WIP, already shipped, or still in Looker.
 - `get_aging_report()` — Jobs bucketed by age — find old/stuck orders
 
 ### Quality & Remake Tools

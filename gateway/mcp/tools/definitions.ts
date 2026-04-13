@@ -74,7 +74,8 @@ export const get_job_detail = {
   description: `USE THIS when you need the full record for a single job.
 WHAT: Returns everything: Rx params (if available), frame, material, coating, breakage events, stage history, entry/ship dates.
 HOW: Requires invoice number. One job, full depth.
-NOT for bulk queries — use get_wip_jobs() with filters for that.`,
+NOT for bulk queries — use get_wip_jobs() with filters for that.
+NOT for Shopify order ID lookups — use get_job_by_shopify_id() for that.`,
   input_schema: {
     type: 'object',
     properties: {
@@ -84,6 +85,25 @@ NOT for bulk queries — use get_wip_jobs() with filters for that.`,
       },
     },
     required: ['invoice'],
+  },
+};
+
+export const get_job_by_shopify_id = {
+  name: 'get_job_by_shopify_id',
+  description: `USE THIS when CX (customer service) gives you a Shopify order ID instead of an invoice number.
+WHAT: Looks up a job by its Shopify order ID (the Reference field in DVI). Returns whether the job is active in WIP, already shipped, or only in Looker. Includes status summary, current stage/station, ship date if shipped, days in lab.
+HOW: Requires shopify_id (the Shopify order number, typically 7 digits like 3171471).
+NOT for invoice number lookups — use get_job_detail() for that.
+NOT for bulk queries — this is a single-job lookup.`,
+  input_schema: {
+    type: 'object',
+    properties: {
+      shopify_id: {
+        type: 'string',
+        description: 'Shopify order ID (Reference field), e.g. "3171471"',
+      },
+    },
+    required: ['shopify_id'],
   },
 };
 
@@ -593,6 +613,7 @@ export const WIP_TOOLS = [
   get_wip_snapshot,
   get_wip_jobs,
   get_job_detail,
+  get_job_by_shopify_id,
 ];
 
 export const REPORT_TOOLS = [

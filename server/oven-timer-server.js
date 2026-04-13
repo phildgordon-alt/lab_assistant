@@ -374,6 +374,7 @@ function enrichJob(j, xmlIndex) {
   return {
     ...j,
     invoice: j.job_id,
+    reference: xml?.reference || null, // Shopify order ID
     daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
     coating: xml?.coating || xml?.coatR || '',
     rush: xml?.rush || 'N',
@@ -2267,6 +2268,65 @@ Respond with a structured batching plan in this format:
     const lookerRows = dbRow?.reference ? labDb.db.prepare('SELECT * FROM looker_jobs WHERE order_number = ?').all(dbRow.reference) : [];
     const histRow = labDb.db.prepare('SELECT * FROM dvi_jobs_history WHERE job_id = ? ORDER BY shipped_at DESC LIMIT 1').get(invoice);
     return json(res, { invoice, found: !!dbRow, labXml: dbRow, looker: lookerRows, dviHistory: histRow, inMemory: !!memData });
+  }
+
+  // ── Job lookup by Shopify order ID (Reference field) ──────────
+  // CX uses Shopify order IDs to look up jobs. Searches active WIP first, then shipped history.
+  if (req.method==='GET' && url.pathname==='/api/jobs/by-shopify') {
+    const shopifyId = url.searchParams.get('shopify_id') || url.searchParams.get('reference');
+    if (!shopifyId) return json(res, { error: 'shopify_id (or reference) param required' }, 400);
+
+    // 1. Check shipped jobs (SQLite — fastest, most authoritative for shipped)
+    const shippedRow = labDb.db.prepare('SELECT * FROM dvi_shipped_jobs WHERE reference = ?').get(shopifyId);
+
+    // 2. Check active WIP via XML index (the Reference is in DVI XML)
+    let activeMatch = null;
+    for (const [invoice, xml] of dviJobIndex) {
+      if (xml.reference === shopifyId) {
+        const traceJob = dviTrace.getJobs().find(j => j.job_id === invoice);
+        activeMatch = {
+          invoice,
+          shopifyId: xml.reference,
+          rxNumber: xml.rxNum,
+          stage: traceJob?.stage || 'IN_QUEUE',
+          station: traceJob?.station || 'NEW',
+          coating: xml.coating,
+          rush: xml.rush,
+          entryDate: xml.entryDate,
+          daysInLab: traceJob?.daysInLab || null,
+          tray: traceJob?.tray || null,
+          shippedAt: null,
+        };
+        break;
+      }
+    }
+
+    // 3. Check looker for additional context (POMS data)
+    const lookerRows = labDb.db.prepare('SELECT * FROM looker_jobs WHERE order_number = ?').all(shopifyId);
+
+    // Build summary
+    if (activeMatch) {
+      return json(res, {
+        shopifyId, found: true, status: 'active', summary: `Active in ${activeMatch.stage} at ${activeMatch.station}`,
+        active: activeMatch, shipped: shippedRow ? { invoice: shippedRow.invoice, shipDate: shippedRow.ship_date, shipTime: shippedRow.ship_time } : null,
+        looker: lookerRows,
+      });
+    }
+    if (shippedRow) {
+      return json(res, {
+        shopifyId, found: true, status: 'shipped',
+        summary: `Shipped on ${shippedRow.ship_date} at ${shippedRow.ship_time} (invoice ${shippedRow.invoice}, ${shippedRow.days_in_lab} days in lab)`,
+        shipped: shippedRow, looker: lookerRows,
+      });
+    }
+    if (lookerRows.length > 0) {
+      return json(res, {
+        shopifyId, found: true, status: 'in_looker_only',
+        summary: 'Found in Looker but not yet in lab — order may not have been picked up by lab',
+        looker: lookerRows,
+      });
+    }
+    return json(res, { shopifyId, found: false, summary: `No job found with Shopify order ID ${shopifyId}` }, 404);
   }
 
   // ── Shipped job detail — single day or date range ──────────

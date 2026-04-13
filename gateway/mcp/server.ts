@@ -141,7 +141,7 @@ export function getAllToolDefinitions(): Array<{
   custom?: boolean;
 }> {
   const categories: Record<string, string[]> = {
-    'WIP & Jobs': ['get_wip_snapshot', 'get_wip_jobs', 'get_job_detail'],
+    'WIP & Jobs': ['get_wip_snapshot', 'get_wip_jobs', 'get_job_detail', 'get_job_by_shopify_id'],
     'Reports': ['get_aging_report', 'get_throughput_trend', 'get_remake_rate'],
     'Breakage': ['get_breakage_summary', 'get_breakage_events', 'get_breakage_by_position'],
     'Coating': ['get_coating_queue', 'get_coating_wait_summary'],
@@ -250,6 +250,9 @@ export async function handleToolCall(
 
     case 'get_job_detail':
       return handleGetJobDetail(toolInput.invoice as string);
+
+    case 'get_job_by_shopify_id':
+      return handleGetJobByShopifyId(toolInput.shopify_id as string);
 
     // ─────────────────────────────────────────────────────────────────────────
     // AGING & THROUGHPUT REPORTS
@@ -663,6 +666,45 @@ function handleGetJobDetail(invoice: string): unknown {
       status: 'not_found',
       source: 'sqlite'
     };
+  } catch (e: any) {
+    return { error: e.message, source: 'sqlite' };
+  }
+}
+
+function handleGetJobByShopifyId(shopifyId: string): unknown {
+  try {
+    const database = getDb();
+
+    // Shipped: dvi_shipped_jobs.reference is the Shopify order ID
+    const shipped = database.prepare(`SELECT * FROM dvi_shipped_jobs WHERE reference = ?`).get(shopifyId);
+    if (shipped) {
+      const s = shipped as any;
+      return {
+        shopifyId,
+        status: 'shipped',
+        invoice: s.invoice,
+        summary: `Shipped ${s.ship_date} ${s.ship_time} (invoice ${s.invoice}, ${s.days_in_lab} days in lab, coating ${s.coating || 'N/A'})`,
+        job: shipped,
+        source: 'sqlite'
+      };
+    }
+
+    // Active: dvi_jobs may have reference if XML enrichment populated it (not yet — fall back to API)
+    const labServerUrl = process.env.LAB_SERVER_URL || 'http://localhost:3002';
+    // Use sync HTTP (the tool handler is sync). Use synchronous XHR-like approach via execSync.
+    const { execSync } = require('child_process');
+    try {
+      const out = execSync(`curl -s --max-time 5 '${labServerUrl}/api/jobs/by-shopify?shopify_id=${encodeURIComponent(shopifyId)}'`, { encoding: 'utf8' });
+      const result = JSON.parse(out);
+      return { ...result, source: 'lab-server' };
+    } catch (apiErr: any) {
+      return {
+        shopifyId,
+        status: 'not_found',
+        summary: `No job found with Shopify order ID ${shopifyId}`,
+        source: 'sqlite+api'
+      };
+    }
   } catch (e: any) {
     return { error: e.message, source: 'sqlite' };
   }
