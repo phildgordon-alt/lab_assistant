@@ -343,8 +343,8 @@ function renderLive(){
   return `
   <!-- HERO: SHIPPED TODAY -->
   <div class="hero-kpi">
-    <div class="hero-val">${commas(shippedToday)}</div>
-    <div class="hero-lbl">SHIPPED TODAY</div>
+    <div class="hero-val">${commas(shippedToday)}<span style="font-size:32px;color:var(--dim);font-weight:400"> / ${commas(effectiveTarget)}</span></div>
+    <div class="hero-lbl">SHIPPED TODAY${effectiveTarget > 0 ? ` — ${pctDisplay}%` : ''}</div>
   </div>
 
   <!-- KPI ROW -->
