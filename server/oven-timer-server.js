@@ -3882,6 +3882,24 @@ Respond with a structured batching plan in this format:
     const assemblyWip = allJobs.filter(j => j.stage === 'ASSEMBLY').length;
     const cuttingWip = allJobs.filter(j => j.stage === 'CUTTING').length;
 
+    // SLA-based dynamic ship target
+    // SV (single vision, lens type S): 2-day SLA → ship 50% of SV WIP per day
+    // Surfacing (progressive P, bifocal B): 3-day SLA → ship 33% of WIP per day
+    const activeWip = allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED');
+    let svWip = 0, surfWip = 0;
+    for (const j of activeWip) {
+      const xml = dviJobIndex.get(j.job_id);
+      const lensType = (xml?.lensType || '').toUpperCase();
+      if (lensType === 'S') svWip++;
+      else surfWip++; // P, B, and unknown default to surfacing line (longer SLA)
+    }
+    const svDailyTarget = Math.ceil(svWip * 0.5);    // 2-day SLA
+    const surfDailyTarget = Math.ceil(surfWip * 0.33); // 3-day SLA
+    const dailyShipTarget = svDailyTarget + surfDailyTarget;
+    const hoursRemaining = Math.max(0, 17 - (new Date().getHours() + new Date().getMinutes() / 60));
+    const remainingTarget = Math.max(0, dailyShipTarget - sc.today);
+    const requiredRate = hoursRemaining > 0 ? Math.ceil(remainingTarget / hoursRemaining) : 0;
+
     // Enrich shipping jobs with XML
     const enriched = shippingJobs.map(j => {
       const xml = dviJobIndex.get(j.job_id);
@@ -3905,7 +3923,19 @@ Respond with a structured batching plan in this format:
       readyToShip: readyToShip.length,
       operatorStats,
       pipeline: { assembly: assemblyWip, cutting: cuttingWip },
-      totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
+      totalWip: activeWip.length,
+      // SLA-based dynamic target
+      target: {
+        daily: dailyShipTarget,
+        remaining: remainingTarget,
+        requiredRate,
+        hoursLeft: Math.round(hoursRemaining * 10) / 10,
+        pctComplete: dailyShipTarget > 0 ? Math.round(sc.today / dailyShipTarget * 100) : 0,
+        breakdown: {
+          sv: { wip: svWip, target: svDailyTarget, sla: '2 days' },
+          surfacing: { wip: surfWip, target: surfDailyTarget, sla: '3 days' },
+        }
+      },
       source: 'dvi-trace',
       timestamp: new Date().toISOString()
     });
