@@ -12,21 +12,31 @@ LOG_TAG="[SMB-Watchdog]"
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') ${LOG_TAG} $1"; }
 
-# Check if TRACE directory exists and has LT files
-if [ -d "$TRACE_DIR" ] && find "$TRACE_DIR" -maxdepth 1 -name 'LT*.DAT' -print -quit | grep -q .; then
-    # Mount is healthy — nothing to do
-    exit 0
+# Check if visdir is an active mount point
+if mount | grep -q "$MOUNT_POINT"; then
+    # Mount exists — verify it's responsive with a simple test
+    if [ -d "$TRACE_DIR" ] 2>/dev/null; then
+        # Mount is healthy — nothing to do
+        exit 0
+    fi
+    # Mount exists but TRACE dir not accessible — stale mount
+    log "Mount exists but TRACE not accessible — unmounting stale mount"
+    diskutil unmount force "$MOUNT_POINT" 2>/dev/null || umount -f "$MOUNT_POINT" 2>/dev/null
+    sleep 1
 fi
 
-log "TRACE directory missing or empty — remounting SMB share"
+# No active mount — check if mount point is clear
+if mount | grep -q "$MOUNT_POINT"; then
+    log "ERROR: could not unmount stale mount at $MOUNT_POINT"
+    exit 1
+fi
 
-# Unmount stale mount if present
-umount "$MOUNT_POINT" 2>/dev/null
+log "TRACE directory missing — mounting SMB share"
 
 # Ensure mount point exists
-mkdir -p "$MOUNT_POINT"
+mkdir -p "$MOUNT_POINT" 2>/dev/null
 
-# Remount
+# Mount
 mount -t smbfs "$SMB_URL" "$MOUNT_POINT" 2>&1
 MOUNT_RC=$?
 
@@ -47,11 +57,5 @@ log "Mount restored. Triggering trace recovery..."
 sleep 2
 
 # Trigger trace recovery via Lab Server API
-curl -s -X POST "${LAB_SERVER}/api/dvi/trace/recover" -o /dev/null -w "HTTP %{http_code}" 2>&1
-CURL_RC=$?
-
-if [ $CURL_RC -eq 0 ]; then
-    log "Recovery triggered successfully"
-else
-    log "WARNING: recovery API call failed (rc=$CURL_RC) — server may not be running"
-fi
+RESULT=$(curl -s -X POST "${LAB_SERVER}/api/dvi/trace/recover" -o /dev/null -w "%{http_code}" 2>&1)
+log "Recovery triggered (HTTP $RESULT)"
