@@ -1212,7 +1212,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         const intel = ci?.intel;
         const ovenRuns = ci?.ovenRuns || [];
         const coaterRuns = ci?.coaterRuns || [];
-        const coaters = intel?.coaters || [];
+        const coaters = intel?.coaterPlan || intel?.coaters || [];
         const queue = intel?.queue || {};
         const ovens = intel?.ovens || {};
         const rec = intel?.recommendation || {};
@@ -1237,11 +1237,10 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                 const liveMin = Math.ceil(liveSec / 60);
                 const liveElapsed = run ? (run.elapsedSec || 0) + secSinceFetch : 0;
                 const timerPct = isRunning && run.targetSec > 0 ? Math.min(Math.round((liveElapsed / run.targetSec) * 100), 100) : 0;
-                // Fill: use active run data if running, otherwise fall back to intelligence coaterPlan (queue fill)
-                const plan = (intel?.coaterPlan || []).find(p => p.name === c.name || p.id === c.id);
-                const fillPct = isRunning ? (run.fillPct || 100) : (plan?.fillPct || 0);
-                const fillLens = isRunning ? (run.lensCount || run.fill || c.lensCapacity || '?') : (plan?.fill || 0);
-                const fillJobs = isRunning ? (run.orderCount || run.orders || '?') : (plan?.orders || 0);
+                // Fill: use active run data if running, otherwise use coaterPlan data (queue fill)
+                const fillPct = isRunning ? (run.fillPct || 100) : (c.fillPct || 0);
+                const fillLens = isRunning ? (run.lensCount || run.fill || c.lensCapacity || '?') : (c.fill || 0);
+                const fillJobs = isRunning ? (run.orderCount || run.orders || '?') : (c.orders || 0);
                 const fillColor = fillPct >= 75 ? T.green : fillPct >= 50 ? T.amber : fillPct > 0 ? T.blue : T.textDim;
                 const mm = String(Math.floor(liveSec / 60)).padStart(2, '0');
                 const ss = String(liveSec % 60).padStart(2, '0');
