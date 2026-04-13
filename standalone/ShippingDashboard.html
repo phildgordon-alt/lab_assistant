@@ -343,8 +343,18 @@ function renderLive(){
   return `
   <!-- HERO: SHIPPED TODAY -->
   <div class="hero-kpi">
-    <div class="hero-val">${commas(shippedToday)}<span style="font-size:32px;color:var(--dim);font-weight:400"> / ${commas(effectiveTarget)}</span></div>
-    <div class="hero-lbl">SHIPPED TODAY${effectiveTarget > 0 ? ` — ${pctDisplay}%` : ''}</div>
+    <div style="display:flex;align-items:baseline;justify-content:center;gap:20px;">
+      <div style="text-align:center;">
+        <div class="hero-val" style="color:var(--green)">${commas(shippedToday)}</div>
+        <div class="hero-lbl">SHIPPED</div>
+      </div>
+      <div style="font-size:40px;color:var(--dimmer);font-family:var(--mono)">/</div>
+      <div style="text-align:center;">
+        <div class="hero-val" style="color:var(--amber)">${commas(effectiveTarget)}</div>
+        <div class="hero-lbl">TARGET</div>
+      </div>
+    </div>
+    <div class="hero-lbl" style="margin-top:8px">${effectiveTarget > 0 ? `${pctDisplay}% COMPLETE` : ''}</div>
   </div>
 
   <!-- KPI ROW -->
