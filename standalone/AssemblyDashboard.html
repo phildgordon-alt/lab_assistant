@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>Assembly Dashboard — Pair Eyewear</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="tv-shell.css"/>
 <style>
 :root{
   --bg:#070A0F; --surface:#0D1117; --card:#111820;
@@ -348,6 +349,7 @@ setInterval(tickClock,1000); tickClock();
 // ─────────────────────────────────────────────────────────────────
 // Live assembly data from lab server
 let assemblyData = null; // full response from /api/assembly/jobs
+let lastSuccessfulFetch = Date.now(); // For staleness watchdog
 
 async function fetchDVI(){
   try{
@@ -359,6 +361,7 @@ async function fetchDVI(){
       jobs = normalizeAssembly(assemblyData);
       dataMode = 'live';
       lastSync = new Date();
+      lastSuccessfulFetch = Date.now();
       updateSrvDot('ok','DVI LIVE');
       reconcileOperatorStats();
       return;
@@ -372,6 +375,23 @@ async function fetchDVI(){
   updateSrvDot('err','OFFLINE — Check server URL in Setup');
   reconcileOperatorStats();
 }
+
+// ──────────────────────────────────────────────────────────
+// SELF-HEALING WATCHDOG — for unattended TV displays
+// ──────────────────────────────────────────────────────────
+// Every minute, check if last successful fetch was >5 min ago. If so, reload page.
+// Browsers can drift, throttle setInterval on background tabs, leak memory, or
+// hit JS errors that silently break polling. Reload restores known-good state.
+setInterval(() => {
+  const stalenessSec = (Date.now() - lastSuccessfulFetch) / 1000;
+  if (stalenessSec > 300) {
+    console.warn(`[Watchdog] Data ${Math.round(stalenessSec)}s stale — reloading page`);
+    location.reload();
+  }
+}, 60 * 1000);
+
+// Force-reload every 6 hours to clear any accumulated browser state on unattended TVs
+setTimeout(() => location.reload(), 6 * 60 * 60 * 1000);
 
 function normalizeAssembly(data){
   const result = [];
@@ -1233,5 +1253,6 @@ fetchDVI().then(()=>{ render(); });
 // Auto-refresh DVI every 2 minutes
 setInterval(()=>fetchDVI().then(render), 120000);
 </script>
+<script src="tv-shell.js"></script>
 </body>
 </html>

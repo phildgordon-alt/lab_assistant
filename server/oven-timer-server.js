@@ -5522,12 +5522,14 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
   // ── Serve standalone HTML apps ──────────────────────────────
   if (req.method==='GET' && url.pathname.startsWith('/standalone/')) {
     const safeName = path.basename(url.pathname);
-    if (!safeName.endsWith('.html')) { cors(res); res.writeHead(404); res.end('Not found'); return; }
+    const ext = path.extname(safeName).toLowerCase();
+    const mimes = { '.html': 'text/html', '.css': 'text/css', '.js': 'application/javascript' };
+    if (!mimes[ext]) { cors(res); res.writeHead(404); res.end('Not found'); return; }
     const filePath = path.join(__dirname, '..', 'standalone', safeName);
     try {
       const content = fs.readFileSync(filePath, 'utf8');
       cors(res);
-      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.writeHead(200, { 'Content-Type': `${mimes[ext]}; charset=utf-8` });
       res.end(content);
     } catch (e) {
       cors(res); res.writeHead(404); res.end('Not found');

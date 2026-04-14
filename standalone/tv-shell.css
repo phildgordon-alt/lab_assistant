@@ -1,0 +1,169 @@
+/* ─────────────────────────────────────────────────────────────────────
+   tv-shell.css — Universal viewport, scaling, and safe-area for all
+   standalone dashboards. Loaded BEFORE each dashboard's inline <style>
+   so the dashboard's per-element styles can still override.
+
+   Targets:
+   - Wall TVs (50-65", 1080p or 4K) with browser kiosk
+   - Samsung Galaxy tablets (10")
+   - Mac mini / Pi browser displays
+
+   Solves:
+   - Consumer TVs overscan 2-5% — content gets cut at edges
+   - Same dashboard needs to fit 10" tablet AND 55" 4K TV
+   - Fixed-px media queries break at non-standard TV resolutions
+   - Hardcoded font sizes don't scale to viewing distance
+
+   Strategy: viewport-locked grid shell + safe-area inset + fluid type
+   via clamp() + auto-fit grids replacing fixed media queries.
+   ─────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Fluid root font scales 14px (small tablet) → 28px (4K TV) */
+  font-size: clamp(14px, calc(0.5vw + 0.5vh + 8px), 28px);
+
+  /* Spacing scale — all derived from rem so they scale with root font */
+  --s1: 0.25rem;
+  --s2: 0.5rem;
+  --s3: 0.75rem;
+  --s4: 1rem;
+  --s5: 1.5rem;
+  --s6: 2rem;
+  --s7: 3rem;
+
+  /* Safe-area insets to dodge TV overscan (2-5% on consumer TVs).
+     Use clamp so we don't waste space on tablets that don't overscan. */
+  --safe-x: clamp(0px, 2vw, 24px);
+  --safe-y: clamp(0px, 1.5vh, 16px);
+
+  /* Type ramp keyed off root font-size */
+  --t-micro: 0.625rem;     /* ~9px small/14px root → ~17px/28px root */
+  --t-small: 0.75rem;
+  --t-body:  0.875rem;
+  --t-label: 0.625rem;
+  --t-kpi:   2rem;          /* KPI numbers */
+  --t-kpi-big: clamp(2.5rem, 6vw, 6rem);  /* Hero KPI */
+  --t-clock: 1.25rem;
+  --t-brand: 1.75rem;
+
+  /* Min touch target (Samsung Galaxy / iPad) */
+  --tap: max(44px, 5vh);
+}
+
+/* Viewport lock — prevent any scroll. Content that doesn't fit gets
+   compressed by the auto-fit grids, not pushed offscreen. */
+html, body {
+  height: 100vh;
+  width: 100vw;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Safe-area wrapper — applies the overscan padding to the root flex
+   container that each dashboard already builds. */
+body {
+  padding: var(--safe-y) var(--safe-x);
+  box-sizing: border-box;
+}
+
+/* App shell — header / main / footer rows that don't push siblings */
+body > .hdr,
+body > .tab-bar { flex-shrink: 0; }
+
+body > .main {
+  /* Already flex:1 in dashboards. Keep that, but ensure it doesn't
+     overflow and force the body to scroll. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* Smaller padding inside main so the safe-area wrapper handles edges */
+  padding: var(--s4) !important;
+}
+
+/* HEADER scaling */
+.hdr {
+  padding: var(--s2) var(--s4) !important;
+}
+.hdr .clock { font-size: var(--t-clock) !important; }
+.hdr .brand-name { font-size: var(--t-brand) !important; }
+.hdr .logo {
+  width: calc(var(--t-brand) * 1.4);
+  height: calc(var(--t-brand) * 1.4);
+}
+
+/* TABS scaling */
+.tab-bar { padding: 0 var(--s4) !important; }
+.tab {
+  padding: var(--s3) var(--s4) !important;
+  font-size: var(--t-small) !important;
+}
+
+/* KPI ROW — auto-fit replaces media queries. Min 10rem per tile. */
+.kpi-row {
+  display: grid !important;
+  gap: var(--s3) !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)) !important;
+}
+.kpi {
+  padding: var(--s3) var(--s4) !important;
+  border-radius: var(--s3) !important;
+}
+.kpi-val {
+  font-size: var(--t-kpi) !important;
+}
+.kpi-lbl {
+  font-size: var(--t-label) !important;
+}
+.kpi-sub {
+  font-size: var(--t-micro) !important;
+}
+
+/* GRID layouts — auto-fit replaces hard 1fr 1fr breakpoints */
+.two-col,
+.three-col {
+  display: grid !important;
+  gap: var(--s4) !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr)) !important;
+}
+
+/* CARDS */
+.card {
+  padding: var(--s4) !important;
+  border-radius: var(--s4) !important;
+}
+
+/* SECTION HEADER inside cards */
+.card-title { font-size: var(--t-small) !important; }
+.card-badge { font-size: var(--t-micro) !important; }
+
+/* STATION GRID (Assembly, Cutting) — auto-fit replaces fixed cols */
+.station-grid {
+  display: grid !important;
+  gap: var(--s3) !important;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)) !important;
+}
+
+/* DENSE class — toggled by JS overflow sentinel to tighten layout
+   when content would clip. Reduces spacing and label text. */
+body.dense {
+  --s3: 0.5rem;
+  --s4: 0.625rem;
+  --s5: 1rem;
+  font-size: clamp(13px, calc(0.4vw + 0.4vh + 8px), 24px);
+}
+body.dense .kpi-sub { display: none; }
+
+/* Buttons — keep tap targets large */
+.hdr-btn {
+  padding: var(--s2) var(--s3) !important;
+  font-size: var(--t-micro) !important;
+  min-height: var(--tap);
+  min-width: var(--tap);
+}
+
+/* Print/screen reflow safety */
+@media (max-width: 480px) {
+  /* Tablet portrait — stack everything */
+  .hdr { flex-wrap: wrap; }
+}

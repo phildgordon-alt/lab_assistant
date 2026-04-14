@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
 <title>Cutting Dashboard — Pair Eyewear</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="tv-shell.css"/>
 <style>
 :root{
   --bg:#070A0F; --surface:#0D1117; --card:#111820;
@@ -576,5 +577,6 @@ document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.cu
 fetchData().then(()=>{ render(); });
 setInterval(()=>fetchData().then(render), 120000);
 </script>
+<script src="tv-shell.js"></script>
 </body>
 </html>
