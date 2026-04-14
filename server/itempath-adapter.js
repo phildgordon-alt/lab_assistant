@@ -1001,11 +1001,18 @@ async function pickSync() {
   try {
     const db = require('./db');
 
-    // Fetch completed picks since last sync (skip count check — was timing out)
-    console.log(`[pickSync] Fetching picks since ${lastPickSyncTime}...`);
+    // Cap the sync window at 24h so ItemPath isn't asked for multi-day backlogs
+    // (causes 504s, which block the cursor and make it worse on the next attempt)
+    const windowStart = new Date(lastPickSyncTime);
+    const maxWindowMs = 24 * 60 * 60 * 1000;
+    const windowEnd = new Date(Math.min(windowStart.getTime() + maxWindowMs, Date.now()));
+    const windowCapped = windowEnd.getTime() < Date.now() - 60000; // true if we're >1 min behind
+
+    console.log(`[pickSync] Fetching picks from ${windowStart.toISOString()} to ${windowEnd.toISOString()}${windowCapped ? ' (window capped — catching up)' : ''}...`);
     const data = await ipFetch('/api/order_lines', {
       directionType: 2, status: 'processed',
-      'modifiedDate[gte]': lastPickSyncTime,
+      'modifiedDate[gte]': windowStart.toISOString(),
+      'modifiedDate[lte]': windowEnd.toISOString(),
       limit: 500, page: 0,
     }, { timeout: 120000 });
 
@@ -1048,7 +1055,7 @@ async function pickSync() {
 
     // Step 4: Advance cursor
     // Full page → advance to last record's modifiedDate (more to catch next cycle).
-    // Partial page → advance to now (we're caught up).
+    // Partial page → advance to windowEnd (we're caught up through that window).
     // NB: limit is 500, not 1000 — the old `>= 1000` check meant full pages fell
     // through to the "caught up" branch and silently dropped any picks past #500.
     const PICK_SYNC_LIMIT = 500;
@@ -1056,21 +1063,36 @@ async function pickSync() {
       const lastDate = lines[lines.length - 1].modifiedDate || lines[lines.length - 1].creationDate;
       if (lastDate) lastPickSyncTime = lastDate;
     } else {
-      lastPickSyncTime = new Date().toISOString();
+      // Advance to the windowEnd so the next run picks up from there (not always "now")
+      lastPickSyncTime = windowEnd.toISOString();
     }
     saveDailyTotals();
 
     pickSyncStatus.lastRun = new Date().toISOString();
     pickSyncStatus.lastSuccess = new Date().toISOString();
     pickSyncStatus.picksRecorded += inserted;
+    pickSyncStatus.consecutiveErrors = 0;
     console.log(`[pickSync] ✓ ${lines.length} fetched, ${inserted} new picks recorded (cursor: ${lastPickSyncTime.substring(11, 19)})`);
 
   } catch (e) {
     pickSyncStatus.errors++;
     pickSyncStatus.lastError = e.message;
     pickSyncStatus.lastRun = new Date().toISOString();
+    pickSyncStatus.consecutiveErrors = (pickSyncStatus.consecutiveErrors || 0) + 1;
+
+    // After 5 consecutive failures, advance cursor by 1 hour to escape stuck ranges.
+    // Better to skip an hour than stay broken for days. Reconciliation will catch gaps.
+    if (pickSyncStatus.consecutiveErrors >= 5) {
+      const skipTo = new Date(new Date(lastPickSyncTime).getTime() + 60 * 60 * 1000);
+      if (skipTo < new Date()) {
+        console.warn(`[pickSync] ${pickSyncStatus.consecutiveErrors} consecutive errors — skipping cursor forward by 1h: ${lastPickSyncTime} → ${skipTo.toISOString()}`);
+        lastPickSyncTime = skipTo.toISOString();
+        saveDailyTotals();
+        pickSyncStatus.consecutiveErrors = 0;
+      }
+    }
+
     console.error(`[pickSync] ERROR: ${e.message} — will retry from ${lastPickSyncTime}`);
-    // Don't advance lastPickSyncTime — retry from same point
   } finally {
     pickSyncRunning = false;
   }
