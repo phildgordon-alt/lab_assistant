@@ -992,84 +992,6 @@ async function poll() {
 let pickSyncRunning = false;
 let pickSyncStatus = { lastRun: null, lastSuccess: null, picksRecorded: 0, errors: 0, reconciliation: null };
 
-// Backfill a specific time range — chunks the window into N-hour pieces to avoid 504s.
-// Returns { chunks, totalFetched, totalInserted, errors, gaps }
-async function pickBackfill(fromIso, toIso, chunkHours = 2) {
-  if (CONFIG.mockMode) return { error: 'mock mode' };
-  const db = require('./db');
-  const result = { chunks: 0, totalFetched: 0, totalInserted: 0, errors: 0, gaps: [], details: [] };
-
-  const fromMs = new Date(fromIso).getTime();
-  const toMs = new Date(toIso).getTime();
-  if (isNaN(fromMs) || isNaN(toMs) || fromMs >= toMs) return { error: 'invalid range' };
-
-  const chunkMs = chunkHours * 60 * 60 * 1000;
-  let cursor = fromMs;
-
-  while (cursor < toMs) {
-    const chunkEnd = Math.min(cursor + chunkMs, toMs);
-    const chunkStartIso = new Date(cursor).toISOString();
-    const chunkEndIso = new Date(chunkEnd).toISOString();
-    result.chunks++;
-
-    try {
-      console.log(`[pickBackfill] Chunk ${result.chunks}: ${chunkStartIso} → ${chunkEndIso}`);
-      const data = await ipFetch('/api/order_lines', {
-        directionType: 2, status: 'processed',
-        'modifiedDate[gte]': chunkStartIso,
-        'modifiedDate[lte]': chunkEndIso,
-        limit: 500, page: 0,
-      }, { timeout: 120000 });
-
-      const lines = data.order_lines || [];
-      let inserted = 0;
-      const stmt = db.db.prepare(`
-        INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `);
-      const save = db.db.transaction(() => {
-        for (const line of lines) {
-          const sku = line.materialName || '';
-          const orderName = line.orderName || line.orderId || '';
-          const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
-          if (!sku || qty <= 0) continue;
-          let wh = line.warehouseName || line.costCenterName || '';
-          if (/kitchen/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
-          else if (/wh2/i.test(wh)) wh = 'WH2';
-          else if (/wh1/i.test(wh)) wh = 'WH1';
-          const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
-          const pickId = `hist-${line.id || line.orderLineId || ''}`;
-          const r = stmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt);
-          if (r.changes > 0) inserted++;
-        }
-      });
-      save();
-
-      result.totalFetched += lines.length;
-      result.totalInserted += inserted;
-      result.details.push({ from: chunkStartIso, to: chunkEndIso, fetched: lines.length, inserted });
-
-      // If we got back exactly 500, the chunk had >500 records — flag it
-      if (lines.length >= 500) {
-        console.warn(`[pickBackfill] Chunk hit 500-row limit, may be missing records`);
-      }
-
-      // Throttle between chunks
-      await new Promise(r => setTimeout(r, 1000));
-    } catch (err) {
-      result.errors++;
-      result.gaps.push({ from: chunkStartIso, to: chunkEndIso, error: err.message });
-      console.error(`[pickBackfill] Chunk failed: ${err.message}`);
-      // Skip this chunk and continue
-    }
-
-    cursor = chunkEnd;
-  }
-
-  console.log(`[pickBackfill] Complete: ${result.chunks} chunks, ${result.totalFetched} fetched, ${result.totalInserted} new picks, ${result.errors} errors, ${result.gaps.length} gaps`);
-  return result;
-}
-
 async function pickSync() {
   if (CONFIG.mockMode) return;
   if (pickSyncRunning) { console.log('[pickSync] Already running — skipping'); return; }
@@ -1642,4 +1564,4 @@ function getLocationContents() {
   return cache.locationContents || [];
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock, getLocationContents, getPickSyncStatus, pickBackfill };
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock, getLocationContents, getPickSyncStatus };
