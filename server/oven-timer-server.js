@@ -3507,55 +3507,56 @@ Respond with a structured batching plan in this format:
     // Assembly jobs: currently at ASSEMBLY stage
     const assemblyJobs = allJobs.filter(j => j.stage === 'ASSEMBLY');
 
-    // Scan all jobs for assembly completions today.
-    // For each ASSEMBLY PASS/FAIL event, find the preceding ASSEMBLY #N
-    // event to determine which station completed the job.
+    // Count assembly completions today from the events ring buffer.
+    // The ring buffer survives shipped-job purges, unlike per-job getJobHistory
+    // which loses data once a job is purged from the trace's in-memory map.
+    // This is critical: most assembly-completed jobs DO ship, so per-job lookup
+    // misses them entirely (bug fixed 2026-04-14: was undercounting by ~85%).
     const completedToday = [];
     const passFailToday = { pass: 0, fail: 0 };
     const stationCompletions = {}; // 'ASSEMBLY #7' → count
+    const seenJobs = new Map(); // jobId → last pass/fail event today (dedup)
 
-    for (const j of allJobs) {
-      const history = dviTrace.getJobHistory(j.job_id);
-      if (!history || !history.events) continue;
-      const events = history.events;
-      // Find the LAST assembly pass/fail event today for this job (one count per job)
-      let lastAssemblyEvent = null;
-      let lastAssemblyIdx = -1;
-      for (let i = 0; i < events.length; i++) {
-        const e = events[i];
-        if (e.timestamp < todayMs) continue;
-        if (e.station === 'ASSEMBLY PASS' || e.station === 'ASSEMBLY FAIL') {
-          lastAssemblyEvent = e;
-          lastAssemblyIdx = i;
-        }
-      }
-      if (!lastAssemblyEvent) continue;
+    // Pull a deep slice of events; the ring buffer holds up to 5000 most recent.
+    const allEvents = dviTrace.getRecentEvents(5000);
+    // Reverse to chronological so the "last event today" wins per job
+    const chronological = [...allEvents].reverse();
 
+    for (let i = 0; i < chronological.length; i++) {
+      const e = chronological[i];
+      if (e.timestamp < todayMs) continue;
+      if (e.station !== 'ASSEMBLY PASS' && e.station !== 'ASSEMBLY FAIL') continue;
+      // Dedup: keep only the LAST pass/fail event per job today
+      seenJobs.set(e.jobId, { event: e, idx: i });
+    }
+
+    // Now process unique pass/fail events
+    for (const [jobId, { event: lastAssemblyEvent, idx }] of seenJobs) {
       if (lastAssemblyEvent.station === 'ASSEMBLY PASS') passFailToday.pass++;
       if (lastAssemblyEvent.station === 'ASSEMBLY FAIL') passFailToday.fail++;
 
-      // Look backward for the ASSEMBLY #N station this job came from
+      // Look backward in the events stream for the ASSEMBLY #N station this job came from
       let fromStation = null;
       let fromOperator = lastAssemblyEvent.operator || null;
-      for (let k = lastAssemblyIdx - 1; k >= 0; k--) {
-        if (/^ASSEMBLY #\d+/.test(events[k].station)) {
-          fromStation = events[k].station;
-          if (!fromOperator && events[k].operator) fromOperator = events[k].operator;
+      for (let k = idx - 1; k >= 0; k--) {
+        const prev = chronological[k];
+        if (prev.jobId !== jobId) continue; // only this job's events
+        if (/^ASSEMBLY #\d+/.test(prev.station)) {
+          fromStation = prev.station;
+          if (!fromOperator && prev.operator) fromOperator = prev.operator;
           break;
         }
-        // Only grab operator from ASSEMBLY-stage events (not shipping/QC)
-        if (!fromOperator && events[k].operator && /ASSEMBL|RECOMBOB/i.test(events[k].station)) {
-          fromOperator = events[k].operator;
+        if (!fromOperator && prev.operator && /ASSEMBL|RECOMBOB/i.test(prev.station)) {
+          fromOperator = prev.operator;
         }
       }
-      // Do NOT fall back to j.operator — that could be a shipping/QC operator
 
       if (fromStation) {
         stationCompletions[fromStation] = (stationCompletions[fromStation] || 0) + 1;
       }
 
       completedToday.push({
-        id: j.job_id,
+        id: jobId,
         result: lastAssemblyEvent.station,
         operator: fromOperator,
         fromStation,

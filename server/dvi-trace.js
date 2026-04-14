@@ -142,7 +142,7 @@ class DviTraceWatcher extends EventEmitter {
 
     // In-memory state
     this.jobs = new Map();       // jobId → { last station, stage, timestamps, events }
-    this.events = [];            // Recent events (ring buffer, last 5000)
+    this.events = [];            // Recent events (ring buffer, last 50000 ~ full day)
     this.seenJobIds = new Set(); // All job IDs ever seen (survives purge, capped at 500K)
     this.incomingByDate = {};    // { 'YYYY-MM-DD': count } — first appearance per job
     this.todayStats = freshTodayStats();
@@ -796,8 +796,8 @@ class DviTraceWatcher extends EventEmitter {
     // Add to recent events ring buffer (include stage for API consumers)
     evt.stage = stage;
     this.events.push(evt);
-    if (this.events.length > 5000) {
-      this.events = this.events.slice(-5000);
+    if (this.events.length > 50000) {
+      this.events = this.events.slice(-50000);
     }
 
     // Update stats
@@ -952,21 +952,41 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   /**
-   * Get job history (all events for a specific job)
+   * Get job history (all events for a specific job).
+   * Falls back to the events ring buffer when the job has been purged from
+   * this.jobs (shipped jobs get purged every 5 min). This is critical for
+   * "today's events" calculations — most jobs that completed assembly today
+   * have already shipped and would otherwise return null.
    */
   getJobHistory(jobId) {
     const job = this.jobs.get(jobId);
-    if (!job) return null;
+    if (job) {
+      return {
+        jobId: job.jobId,
+        tray: job.tray,
+        status: job.status,
+        currentStation: job.station,
+        currentStage: job.stage,
+        hasBreakage: job.hasBreakage || false,
+        firstSeen: job.firstSeen,
+        lastSeen: job.lastSeen,
+        events: job.events
+      };
+    }
+    // Fallback: scan the events ring buffer for this job's events
+    const events = this.events.filter(e => e.jobId === jobId);
+    if (events.length === 0) return null;
     return {
-      jobId: job.jobId,
-      tray: job.tray,
-      status: job.status,
-      currentStation: job.station,
-      currentStage: job.stage,
-      hasBreakage: job.hasBreakage || false,
-      firstSeen: job.firstSeen,
-      lastSeen: job.lastSeen,
-      events: job.events
+      jobId,
+      tray: events[events.length - 1].tray,
+      status: 'PURGED', // job is no longer in this.jobs (shipped/cleaned up)
+      currentStation: events[events.length - 1].station,
+      currentStage: events[events.length - 1].stage,
+      hasBreakage: events.some(e => e.stage === 'BREAKAGE'),
+      firstSeen: events[0].timestamp,
+      lastSeen: events[events.length - 1].timestamp,
+      events,
+      _fromBuffer: true
     };
   }
   /**
