@@ -218,18 +218,20 @@ function formatSlackResponse(result: AgentResponse | SlackResponse): SlackRespon
 
   const { agentName, response, durationMs } = result;
   const durationSec = (durationMs / 1000).toFixed(1);
+  // CodingAgent responses are private (file content, diffs, code edits) — only the asker sees them
+  const responseType = agentName === 'CodingAgent' ? 'ephemeral' : 'in_channel';
 
   // Short responses: simple text
   if (response.length < 300) {
     return {
-      response_type: 'in_channel',
+      response_type: responseType,
       text: `🔬 *${agentName}* | ${durationSec}s\n\n${response}`,
     };
   }
 
   // Longer responses: use blocks for better formatting
   return {
-    response_type: 'in_channel',
+    response_type: responseType,
     blocks: [
       {
         type: 'context',
