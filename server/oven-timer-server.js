@@ -397,7 +397,7 @@ function todayStartMs() {
 function buildOperatorStats(dviTrace, stationRegex) {
   const todayMs = todayStartMs();
   const stats = {};
-  for (const evt of dviTrace.getRecentEvents(5000)) {
+  for (const evt of dviTrace.getRecentEvents(50000)) {
     if (evt.timestamp < todayMs) continue;
     if (stationRegex.test(evt.station)) {
       if (evt.operator) {
@@ -3518,7 +3518,7 @@ Respond with a structured batching plan in this format:
     const seenJobs = new Map(); // jobId → last pass/fail event today (dedup)
 
     // Pull a deep slice of events; the ring buffer holds up to 5000 most recent.
-    const allEvents = dviTrace.getRecentEvents(5000);
+    const allEvents = dviTrace.getRecentEvents(50000);
     // Reverse to chronological so the "last event today" wins per job
     const chronological = [...allEvents].reverse();
 
@@ -3771,7 +3771,7 @@ Respond with a structured batching plan in this format:
     const operatorStats = buildOperatorStats(dviTrace, coatingStationRe);
     let completedToday = 0;
     const byCoater = {};
-    for (const evt of dviTrace.getRecentEvents(5000)) {
+    for (const evt of dviTrace.getRecentEvents(50000)) {
       if (evt.timestamp < todayMs) continue;
       if (coatingStationRe.test(evt.station)) {
         if (!byCoater[evt.station]) byCoater[evt.station] = { station: evt.station, count: 0, jobs: [] };
@@ -3834,7 +3834,7 @@ Respond with a structured batching plan in this format:
     const cuttingStationRe = /EDGER|CUT|INHSE FIN/i;
     const operatorStats = buildOperatorStats(dviTrace, cuttingStationRe);
     let completedToday = 0;
-    for (const evt of dviTrace.getRecentEvents(5000)) {
+    for (const evt of dviTrace.getRecentEvents(50000)) {
       if (evt.timestamp < todayMs) continue;
       if (cuttingStationRe.test(evt.station) && !/LCU/i.test(evt.station)) completedToday++;
     }
@@ -4234,7 +4234,7 @@ Respond with a structured batching plan in this format:
     // Operator leaderboard (by station completions today)
     const operatorStats = {};
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const recentEvents = dviTrace.getRecentEvents(5000);
+    const recentEvents = dviTrace.getRecentEvents(50000);
     for (const ev of recentEvents) {
       if (ev.timestamp < todayStart.getTime()) continue;
       const op = ev.operator || '?';
