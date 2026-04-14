@@ -130,6 +130,19 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
     go(); const iv=setInterval(go,15000); return()=>clearInterval(iv);
   },[ovenServerUrl]);
 
+  // Fetch shipping performance (target vs actual history)
+  const [shipPerf,setShipPerf]=useState(null);
+  useEffect(()=>{
+    if(!ovenServerUrl)return;
+    const go=async()=>{
+      try{
+        const r=await fetch(`${ovenServerUrl}/api/shipping/performance?days=${daysMap[range]}`,{signal:AbortSignal.timeout(5000)});
+        if(r.ok){const d=await r.json();setShipPerf(d);}
+      }catch{}
+    };
+    go(); const iv=setInterval(go,60000); return()=>clearInterval(iv);
+  },[ovenServerUrl,range]);
+
   const cutoff=Date.now()-daysMap[range]*86400000;
   const of_=ovenRuns.filter(r=>r.startedAt>=cutoff);
 
@@ -264,6 +277,46 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
               ))}
             </div>
           </Card>
+
+          {/* Shipping Target vs Actual */}
+          {shipPerf && shipPerf.days && shipPerf.days.length > 0 && (
+            <Card>
+              <SectionHeader right={
+                <span style={{fontFamily:mono,fontSize:9,color:T.textDim}}>
+                  {shipPerf.summary?.onTarget||0}/{shipPerf.summary?.workdays||0} on target ({shipPerf.summary?.onTargetPct||0}%) · avg variance {(shipPerf.summary?.avgVariance>=0?'+':'')}{shipPerf.summary?.avgVariance||0}
+                </span>
+              }>Shipping Target vs Actual</SectionHeader>
+              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:10}}>
+                {shipPerf.days.slice(0,14).reverse().map((d,i)=>{
+                  const variance=d.variance||0, pct=d.variance_pct||0;
+                  const isWeekend=!d.is_workday;
+                  const color=!d.is_workday||d.total_target===0 ? T.textDim
+                    : pct >= -5 ? T.green
+                    : pct >= -20 ? T.amber
+                    : T.red;
+                  return(
+                    <div key={i} style={{textAlign:"center",padding:"10px 6px",background:T.bg,borderRadius:8,border:`1px solid ${isWeekend?"transparent":T.border}`,opacity:isWeekend?0.5:1}}>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginBottom:4}}>{d.date.slice(5)}</div>
+                      <div style={{fontSize:18,fontWeight:800,color:color,fontFamily:mono,lineHeight:1}}>
+                        {d.shipped_actual||0}
+                      </div>
+                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginTop:2}}>/ {d.total_target||0}</div>
+                      <div style={{fontSize:9,color:color,fontFamily:mono,marginTop:2,fontWeight:700}}>
+                        {d.total_target>0 ? `${pct>=0?'+':''}${Math.round(pct)}%` : (isWeekend?'—':'—')}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              {shipPerf.summary && (
+                <div style={{display:"flex",gap:24,marginTop:14,paddingTop:12,borderTop:`1px solid ${T.border}`,fontFamily:mono,fontSize:11}}>
+                  <span style={{color:T.textDim}}>Best: <span style={{color:T.green,fontWeight:700}}>{shipPerf.summary.bestDay?`+${shipPerf.summary.bestDay.variance} (${shipPerf.summary.bestDay.date})`:'—'}</span></span>
+                  <span style={{color:T.textDim}}>Worst: <span style={{color:T.red,fontWeight:700}}>{shipPerf.summary.worstDay?`${shipPerf.summary.worstDay.variance} (${shipPerf.summary.worstDay.date})`:'—'}</span></span>
+                  <span style={{color:T.textDim}}>Below 80%: <span style={{color:T.red,fontWeight:700}}>{shipPerf.summary.below80||0} days</span></span>
+                </div>
+              )}
+            </Card>
+          )}
 
           {/* Cycle time + operators */}
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
