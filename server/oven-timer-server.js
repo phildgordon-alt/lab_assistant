@@ -1809,6 +1809,20 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/pick-sync-status') {
     return json(res, itempath.getPickSyncStatus());
   }
+  // POST /api/inventory/picks/backfill — fill picks_history gap from ItemPath
+  // Body: { from: ISO, to: ISO, chunkHours?: 2 }
+  if (req.method==='POST' && url.pathname==='/api/inventory/picks/backfill') {
+    try {
+      const body = await readBody(req);
+      const { from, to, chunkHours } = body;
+      if (!from || !to) return json(res, { error: 'from and to (ISO timestamps) required' }, 400);
+      // Run async and stream — but for simplicity, await and return result
+      const result = await itempath.pickBackfill(from, to, chunkHours || 2);
+      return json(res, result);
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
   // GET /api/inventory/picks/history?days=30 — daily pick totals from picks_history
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
