@@ -5512,16 +5512,22 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
   const [search,setSearch]=useState('');
   const [shippedHistory,setShippedHistory]=useState([]);
 
-  // Fetch shipped history
+  // Fetch shipped history + today's shipped jobs detail
+  const [todayShippedJobs,setTodayShippedJobs]=useState([]);
   useEffect(()=>{
-    const fetchHistory=async()=>{
+    const fetchAll=async()=>{
       try{
-        const res=await fetch(`${ovenServerUrl}/api/shipping/history?days=14`);
-        if(res.ok){ const d=await res.json(); setShippedHistory(d.history||[]); }
+        const today = new Date().toISOString().slice(0,10);
+        const [histRes, todayRes] = await Promise.all([
+          fetch(`${ovenServerUrl}/api/shipping/history?days=14`),
+          fetch(`${ovenServerUrl}/api/shipping/detail?date=${today}`),
+        ]);
+        if(histRes.ok){ const d=await histRes.json(); setShippedHistory(d.history||[]); }
+        if(todayRes.ok){ const d=await todayRes.json(); setTodayShippedJobs(d.jobs||[]); }
       }catch{}
     };
-    fetchHistory();
-    const iv=setInterval(fetchHistory,60000);
+    fetchAll();
+    const iv=setInterval(fetchAll,60000);
     return()=>clearInterval(iv);
   },[ovenServerUrl]);
 
@@ -5536,7 +5542,7 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
   }, [dviJobs]);
 
   // Shipped jobs today — from server API (dviJobs has shipped filtered out for WIP display)
-  const shippedJobs = shippedStats.todayJobs || [];
+  const shippedJobs = todayShippedJobs;
 
   // Search filter
   const filteredJobs = useMemo(() => {
