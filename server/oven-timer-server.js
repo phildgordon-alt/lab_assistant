@@ -3935,6 +3935,41 @@ Respond with a structured batching plan in this format:
     });
   }
 
+  // ── Ship target vs actual performance history ─────────────────
+  if (req.method==='GET' && url.pathname==='/api/shipping/performance') {
+    const days = parseInt(url.searchParams.get('days') || '30');
+    const rows = labDb.db.prepare(`
+      SELECT date, is_workday, sv_wip, surf_wip, sv_target, surf_target,
+             total_target, shipped_actual, variance, variance_pct, captured_at, finalized_at
+      FROM daily_ship_targets
+      WHERE date >= date('now', '-' || ? || ' days')
+      ORDER BY date DESC
+    `).all(days);
+
+    // Summary stats (only workdays with target > 0)
+    const workdays = rows.filter(r => r.is_workday && r.total_target > 0);
+    const onTargetCount = workdays.filter(r => r.variance_pct >= -5).length; // within 5% counts as on-target
+    const below80Count = workdays.filter(r => r.variance_pct < -20).length;
+    const totalVariance = workdays.reduce((s, r) => s + r.variance, 0);
+    const avgVariance = workdays.length > 0 ? Math.round(totalVariance / workdays.length) : 0;
+    const bestDay = workdays.length > 0 ? workdays.reduce((a,b) => a.variance > b.variance ? a : b) : null;
+    const worstDay = workdays.length > 0 ? workdays.reduce((a,b) => a.variance < b.variance ? a : b) : null;
+
+    return json(res, {
+      days: rows,
+      summary: {
+        totalDays: rows.length,
+        workdays: workdays.length,
+        onTarget: onTargetCount,
+        onTargetPct: workdays.length > 0 ? Math.round((onTargetCount / workdays.length) * 100) : 0,
+        below80: below80Count,
+        avgVariance,
+        bestDay: bestDay ? { date: bestDay.date, variance: bestDay.variance, pct: bestDay.variance_pct } : null,
+        worstDay: worstDay ? { date: worstDay.date, variance: worstDay.variance, pct: worstDay.variance_pct } : null,
+      }
+    });
+  }
+
   // ── Assembly config (operator assignments + name map) ──────────
   // Synced from standalone AssemblyDashboard.html so main app can read them
   // ── Shipped history — daily shipped counts from trace + shipped XML ─────
@@ -6789,6 +6824,68 @@ function checkShippedStale() {
 // Run once 30s after boot (let the DB settle), then every hour.
 setTimeout(checkShippedStale, 30000);
 setInterval(checkShippedStale, 3600000);
+
+// ──────────────────────────────────────────────────────────
+// Daily Ship Target snapshot — runs once per hour. On the first run of each
+// workday, captures the SLA target from current WIP. On every run, updates
+// shipped_actual + variance so the history reflects in-progress days.
+// ──────────────────────────────────────────────────────────
+function captureDailyShipTarget() {
+  try {
+    const now = new Date();
+    const date = now.toISOString().slice(0, 10);
+    const dow = now.getDay();
+    const isWorkday = dow >= 1 && dow <= 5 ? 1 : 0;
+
+    const allJobs = dviTrace.getJobs();
+    let svWip = 0, surfWip = 0;
+    for (const j of allJobs) {
+      if (j.stage === 'SHIPPING' || j.stage === 'CANCELED' || j.status === 'SHIPPED') continue;
+      const xml = dviJobIndex.get(j.job_id);
+      if ((xml?.lensType || '').toUpperCase() === 'S') svWip++;
+      else surfWip++;
+    }
+    const svTarget = Math.ceil(svWip * 0.5);
+    const surfTarget = Math.ceil(surfWip * 0.33);
+    const totalTarget = isWorkday ? svTarget + surfTarget : 0;
+    const shipped = getShippedCounts().today;
+    const variance = shipped - totalTarget;
+    const variancePct = totalTarget > 0 ? Math.round((variance / totalTarget) * 10000) / 100 : 0;
+
+    const existing = labDb.db.prepare('SELECT date FROM daily_ship_targets WHERE date = ?').get(date);
+    if (existing) {
+      // Already captured today — just update actual + variance as more jobs ship
+      labDb.db.prepare(`
+        UPDATE daily_ship_targets
+        SET shipped_actual = ?, variance = ?, variance_pct = ?
+        WHERE date = ?
+      `).run(shipped, variance, variancePct, date);
+    } else {
+      labDb.db.prepare(`
+        INSERT INTO daily_ship_targets
+        (date, is_workday, sv_wip, surf_wip, sv_target, surf_target, total_target, shipped_actual, variance, variance_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(date, isWorkday, svWip, surfWip, svTarget, surfTarget, totalTarget, shipped, variance, variancePct);
+      console.log(`[ShipTarget] Captured ${date}: target=${totalTarget} (SV ${svTarget} + Surf ${surfTarget}), shipped=${shipped}`);
+    }
+
+    // At 11 PM or later, mark yesterday as finalized if not already
+    if (now.getHours() >= 23) {
+      const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+      labDb.db.prepare(`
+        UPDATE daily_ship_targets
+        SET finalized_at = datetime('now')
+        WHERE date = ? AND finalized_at IS NULL
+      `).run(yesterday);
+    }
+  } catch (e) {
+    console.error('[ShipTarget] capture failed:', e.message);
+  }
+}
+
+// First capture 2 min after boot (let trace finish loading), then hourly
+setTimeout(captureDailyShipTarget, 2 * 60 * 1000);
+setInterval(captureDailyShipTarget, 60 * 60 * 1000);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌡  Lab_Assistant Server`);

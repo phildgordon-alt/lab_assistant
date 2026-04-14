@@ -516,6 +516,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_dsj_dept ON dvi_shipped_jobs(department);
   CREATE INDEX IF NOT EXISTS idx_dsj_op ON dvi_shipped_jobs(operator);
 
+  -- Daily ship targets — SLA-based target snapshot + actual shipped, captured once/day
+  CREATE TABLE IF NOT EXISTS daily_ship_targets (
+    date TEXT PRIMARY KEY,           -- YYYY-MM-DD
+    is_workday INTEGER DEFAULT 1,    -- 0 for weekends
+    sv_wip INTEGER DEFAULT 0,        -- SV WIP at snapshot time (start of day)
+    surf_wip INTEGER DEFAULT 0,      -- Surfacing WIP at snapshot time
+    sv_target INTEGER DEFAULT 0,
+    surf_target INTEGER DEFAULT 0,
+    total_target INTEGER DEFAULT 0,
+    shipped_actual INTEGER DEFAULT 0,
+    variance INTEGER DEFAULT 0,       -- actual - target
+    variance_pct REAL DEFAULT 0,      -- variance / target * 100
+    captured_at TEXT DEFAULT (datetime('now')),
+    finalized_at TEXT                 -- when end-of-day shipped count was locked in
+  );
+
   -- DVI Trace persistence — survives server restarts
   CREATE TABLE IF NOT EXISTS dvi_trace_jobs (
     job_id TEXT PRIMARY KEY,

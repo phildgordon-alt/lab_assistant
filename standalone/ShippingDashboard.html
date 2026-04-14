@@ -182,6 +182,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 <!-- TABS -->
 <div class="tab-bar">
   <div class="tab active" id="tab-live"      onclick="switchTab('live')">&#9889; LIVE</div>
+  <div class="tab"        id="tab-history"    onclick="switchTab('history')">&#128197; HISTORY</div>
   <div class="tab"        id="tab-operators"  onclick="switchTab('operators')">&#128100; OPERATORS</div>
 </div>
 
@@ -301,7 +302,17 @@ function switchTab(tab){
 function render(){
   const main = document.getElementById('main');
   if(activeTab==='live')      main.innerHTML = renderLive();
+  if(activeTab==='history')   { main.innerHTML = '<div style="padding:40px;text-align:center;color:var(--dim);font-family:var(--mono)">Loading history...</div>'; fetchHistory().then(()=>{ main.innerHTML = renderHistory(); }); }
   if(activeTab==='operators') main.innerHTML = renderOperators();
+}
+
+// History data + fetch
+let historyData = null;
+async function fetchHistory(){
+  try {
+    const resp = await fetch(cfg.serverUrl + '/api/shipping/performance?days=60', { signal: AbortSignal.timeout(8000) });
+    if (resp.ok) historyData = await resp.json();
+  } catch(e) { historyData = null; }
 }
 
 // ---- LIVE TAB ------------------------------------------------
@@ -446,6 +457,78 @@ function renderLive(){
       <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);margin-top:10px;text-align:right;">${lastSyncStr}</div>
     </div>
   </div>`;
+}
+
+// ---- HISTORY TAB ---------------------------------------------
+function renderHistory(){
+  if (!historyData || !historyData.days) {
+    return `<div class="card" style="text-align:center;padding:40px;">
+      <div style="font-family:var(--mono);font-size:14px;color:var(--dimmer);">No history data available yet</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);margin-top:8px;">Daily targets are captured starting from today. Check back after 24h for first data point.</div>
+    </div>`;
+  }
+
+  const days = historyData.days || [];
+  const summary = historyData.summary || {};
+
+  if (days.length === 0) {
+    return `<div class="card" style="text-align:center;padding:40px;">
+      <div style="font-family:var(--mono);font-size:14px;color:var(--dimmer);">No history captured yet</div>
+      <div style="font-family:var(--mono);font-size:10px;color:var(--dimmer);margin-top:8px;">First snapshot captures on server startup. Data builds day by day going forward.</div>
+    </div>`;
+  }
+
+  // Summary KPIs
+  let html = '<div class="kpi-row">';
+  html += `<div class="kpi"><div class="kpi-val" style="color:var(--green)">${summary.onTarget || 0}/${summary.workdays || 0}</div><div class="kpi-lbl">ON TARGET</div><div class="kpi-sub">${summary.onTargetPct || 0}% of workdays</div></div>`;
+  html += `<div class="kpi"><div class="kpi-val" style="color:var(--amber)">${summary.avgVariance > 0 ? '+' : ''}${summary.avgVariance || 0}</div><div class="kpi-lbl">AVG VARIANCE</div><div class="kpi-sub">jobs/day off target</div></div>`;
+  html += `<div class="kpi"><div class="kpi-val" style="color:var(--red)">${summary.below80 || 0}</div><div class="kpi-lbl">BELOW 80%</div><div class="kpi-sub">days &gt;20% off</div></div>`;
+  if (summary.bestDay) {
+    html += `<div class="kpi"><div class="kpi-val" style="color:var(--green)">+${summary.bestDay.variance}</div><div class="kpi-lbl">BEST DAY</div><div class="kpi-sub">${summary.bestDay.date}</div></div>`;
+  }
+  if (summary.worstDay) {
+    html += `<div class="kpi"><div class="kpi-val" style="color:var(--red)">${summary.worstDay.variance}</div><div class="kpi-lbl">WORST DAY</div><div class="kpi-sub">${summary.worstDay.date}</div></div>`;
+  }
+  html += '</div>';
+
+  // Daily table
+  html += '<div class="card" style="margin-top:16px;">';
+  html += '<div class="card-title">DAILY PERFORMANCE</div>';
+  html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:11px;">';
+  html += '<thead><tr style="border-bottom:1px solid var(--border);color:var(--dim);">';
+  html += '<th style="padding:8px 6px;text-align:left;">DATE</th>';
+  html += '<th style="padding:8px 6px;text-align:left;">DAY</th>';
+  html += '<th style="padding:8px 6px;text-align:right;">TARGET</th>';
+  html += '<th style="padding:8px 6px;text-align:right;">SHIPPED</th>';
+  html += '<th style="padding:8px 6px;text-align:right;">+/-</th>';
+  html += '<th style="padding:8px 6px;text-align:right;">%</th>';
+  html += '<th style="padding:8px 6px;text-align:center;">STATUS</th>';
+  html += '</tr></thead><tbody>';
+
+  for (const d of days) {
+    const dt = new Date(d.date + 'T12:00:00');
+    const dayName = ['SUN','MON','TUE','WED','THU','FRI','SAT'][dt.getDay()];
+    const isWeekend = !d.is_workday;
+    let statusColor = 'var(--dimmer)', statusLabel = '—';
+    if (d.is_workday && d.total_target > 0) {
+      if (d.variance_pct >= -5) { statusColor = 'var(--green)'; statusLabel = '✓ ON TARGET'; }
+      else if (d.variance_pct >= -20) { statusColor = 'var(--amber)'; statusLabel = '⚠ NEAR'; }
+      else { statusColor = 'var(--red)'; statusLabel = '✗ BELOW'; }
+    } else if (isWeekend) { statusLabel = 'WEEKEND'; }
+    const vColor = d.variance >= 0 ? 'var(--green)' : d.variance >= -100 ? 'var(--amber)' : 'var(--red)';
+    const rowBg = isWeekend ? 'background:rgba(255,255,255,0.02);' : '';
+    html += `<tr style="border-bottom:1px solid var(--border);${rowBg}">`;
+    html += `<td style="padding:7px 6px;color:var(--text);">${d.date}</td>`;
+    html += `<td style="padding:7px 6px;color:var(--dim);">${dayName}</td>`;
+    html += `<td style="padding:7px 6px;text-align:right;color:var(--text);">${commas(d.total_target)}</td>`;
+    html += `<td style="padding:7px 6px;text-align:right;color:var(--text);">${commas(d.shipped_actual)}</td>`;
+    html += `<td style="padding:7px 6px;text-align:right;color:${vColor};font-weight:700;">${d.variance >= 0 ? '+' : ''}${commas(d.variance)}</td>`;
+    html += `<td style="padding:7px 6px;text-align:right;color:${vColor};">${d.total_target > 0 ? ((d.variance_pct >= 0 ? '+' : '') + d.variance_pct + '%') : '—'}</td>`;
+    html += `<td style="padding:7px 6px;text-align:center;color:${statusColor};font-weight:700;font-size:9px;letter-spacing:1px;">${statusLabel}</td>`;
+    html += '</tr>';
+  }
+  html += '</tbody></table></div></div>';
+  return html;
 }
 
 // ---- OPERATORS TAB -------------------------------------------
