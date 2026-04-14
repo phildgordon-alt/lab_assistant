@@ -442,6 +442,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_jobs_days ON dvi_jobs(days_in_lab);
   CREATE INDEX IF NOT EXISTS idx_jobs_archived ON dvi_jobs(archived);
   CREATE INDEX IF NOT EXISTS idx_jobs_shipped ON dvi_jobs(shipped_at);
+  CREATE INDEX IF NOT EXISTS idx_jobs_entry ON dvi_jobs(entry_date);
 
   -- DVI Jobs history (append-only for completed/shipped jobs)
   CREATE TABLE IF NOT EXISTS dvi_jobs_history (
@@ -509,6 +510,7 @@ db.exec(`
     recorded_at TEXT DEFAULT (datetime('now'))
   );
   CREATE INDEX IF NOT EXISTS idx_dsj_ship ON dvi_shipped_jobs(ship_date);
+  CREATE INDEX IF NOT EXISTS idx_dsj_entry ON dvi_shipped_jobs(entry_date);
   CREATE INDEX IF NOT EXISTS idx_dsj_ref ON dvi_shipped_jobs(reference);
   CREATE INDEX IF NOT EXISTS idx_dsj_opc_r ON dvi_shipped_jobs(lens_opc_r);
   CREATE INDEX IF NOT EXISTS idx_dsj_opc_l ON dvi_shipped_jobs(lens_opc_l);

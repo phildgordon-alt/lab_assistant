@@ -744,10 +744,11 @@ class DviTraceWatcher extends EventEmitter {
     // Update job state
     let job = this.jobs.get(evt.jobId);
     if (!job) {
+      // Note: incoming-by-date counting moved to SQL (dvi_jobs + dvi_shipped_jobs UNION
+      // by entry_date). The old in-memory incomingByDate map was corrupted by trace
+      // recoveries replaying history. seenJobIds kept only for legacy callers.
       if (!this.seenJobIds.has(evt.jobId) && evt.timestamp) {
         if (this.seenJobIds.size < 500000) this.seenJobIds.add(evt.jobId);
-        const dateKey = new Date(evt.timestamp).toISOString().split('T')[0];
-        this.incomingByDate[dateKey] = (this.incomingByDate[dateKey] || 0) + 1;
       }
       job = {
         jobId: evt.jobId,
@@ -875,17 +876,13 @@ class DviTraceWatcher extends EventEmitter {
 
   /**
    * Get incoming counts by date — derived from trace LT files.
-   * This is the authoritative source: counts the first time each job_id
-   * appears in any LT file. Survives shipped job purges.
+   * DEPRECATED — Use the SQL UNION query in /api/dvi/incoming instead.
+   * This in-memory map gets corrupted on every trace recovery (replays history
+   * and credits all "first sightings" to whatever LT file is replayed first).
+   * Kept as a stub so nothing breaks if a stale caller exists.
    */
   getIncomingByDate(days = 30) {
-    const sorted = Object.entries(this.incomingByDate)
-      .map(([date, count]) => ({ date, count }))
-      .sort((a, b) => b.date.localeCompare(a.date))
-      .slice(0, days);
-    const total = sorted.reduce((s, r) => s + r.count, 0);
-    const avg = sorted.length > 0 ? Math.round(total / sorted.length) : 0;
-    return { days: sorted, total, avg, dayCount: sorted.length, source: 'trace' };
+    return { days: [], total: 0, avg: 0, dayCount: 0, source: 'deprecated — use SQL UNION on dvi_jobs+dvi_shipped_jobs entry_date' };
   }
 
   /**

@@ -5440,55 +5440,73 @@ function IncomingTab({ ovenServerUrl, settings }) {
   const today = new Date().toISOString().slice(0, 10);
   const todayCount = daysList.find(d => d.date === today)?.count || 0;
 
+  // Weekday average (exclude weekends from baseline calc)
+  const weekdayDays = daysList.filter(d => {
+    const dow = new Date(d.date + 'T12:00:00').getDay();
+    return dow !== 0 && dow !== 6;
+  });
+  const weekdayAvg = weekdayDays.length > 0 ? Math.round(weekdayDays.reduce((s, d) => s + d.count, 0) / weekdayDays.length) : 0;
+  const todayDelta = todayCount - weekdayAvg;
+  const todayDeltaPct = weekdayAvg > 0 ? Math.round((todayDelta / weekdayAvg) * 100) : 0;
+  const isTodayWeekend = [0, 6].includes(new Date().getDay());
+
   return (
-    <ProductionStageTab domain="incoming" contextData={{ incomingToday: todayCount, avg: data?.avg || 0 }} serverUrl={ovenServerUrl} settings={settings}>
+    <ProductionStageTab domain="incoming" contextData={{ incomingToday: todayCount, avg: weekdayAvg }} serverUrl={ovenServerUrl} settings={settings}>
+      {/* Header with range selector */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 24, fontWeight: 800, color: T.text }}>Incoming Work</h2>
-          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 13 }}>Daily incoming job count from DVI</p>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: T.text }}>Incoming Work</h2>
+          <p style={{ margin: "4px 0 0", color: T.textMuted, fontSize: 12 }}>DVI XML EntryDate · jobs entering the lab</p>
         </div>
-        <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TODAY</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.blue, fontFamily: mono }}>{todayCount}</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>DAILY AVG</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{data?.avg || 0}</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TOTAL ({data?.dayCount || 0}d)</div>
-            <div style={{ fontSize: 20, fontWeight: 700, color: T.textMuted, fontFamily: mono }}>{(data?.total || 0).toLocaleString()}</div>
-          </div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {[14, 30, 60, 90].map(d => (
-              <button key={d} onClick={() => setDays(d)} style={{
-                padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
-                background: days === d ? T.blue : 'transparent',
-                color: days === d ? '#fff' : T.textMuted,
-                border: `1px solid ${days === d ? T.blue : T.border}`
-              }}>{d}d</button>
-            ))}
-          </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[14, 30, 60, 90].map(d => (
+            <button key={d} onClick={() => setDays(d)} style={{
+              padding: "6px 12px", borderRadius: 6, fontSize: 11, fontWeight: 600, fontFamily: mono, cursor: "pointer",
+              background: days === d ? T.blue : 'transparent',
+              color: days === d ? '#fff' : T.textMuted,
+              border: `1px solid ${days === d ? T.blue : T.border}`
+            }}>{d}d</button>
+          ))}
         </div>
       </div>
 
-      {/* Bar Chart */}
-      <Card style={{ marginBottom: 20 }}>
-        <SectionHeader right={`${daysList.length} days`}>Incoming Jobs by Day</SectionHeader>
+      {/* HERO: Today + delta */}
+      <Card style={{ marginBottom: 20, padding: '32px 28px', textAlign: 'center' }}>
+        <div style={{ fontSize: 11, color: T.textDim, fontFamily: mono, letterSpacing: 2, marginBottom: 8 }}>INCOMING TODAY</div>
+        <div style={{ fontSize: 120, fontWeight: 800, color: T.blue, fontFamily: 'Bebas Neue, sans-serif', lineHeight: 1, letterSpacing: 2 }}>
+          {todayCount.toLocaleString()}
+        </div>
+        {weekdayAvg > 0 && !isTodayWeekend && (
+          <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 12, padding: '8px 16px', borderRadius: 20, background: todayDelta >= 0 ? `${T.green}15` : `${T.amber}15`, border: `1px solid ${todayDelta >= 0 ? T.green : T.amber}40` }}>
+            <span style={{ fontSize: 16, fontWeight: 800, color: todayDelta >= 0 ? T.green : T.amber, fontFamily: mono }}>
+              {todayDelta >= 0 ? '▲' : '▼'} {todayDelta >= 0 ? '+' : ''}{todayDeltaPct}%
+            </span>
+            <span style={{ fontSize: 12, color: T.textMuted, fontFamily: mono }}>vs {days}-day weekday avg ({weekdayAvg.toLocaleString()})</span>
+          </div>
+        )}
+        {isTodayWeekend && (
+          <div style={{ marginTop: 12, fontSize: 12, color: T.textDim, fontFamily: mono }}>Weekend — reduced operations</div>
+        )}
+      </Card>
+
+      {/* DAILY BREAKDOWN */}
+      <Card>
+        <SectionHeader right={`${days} days · weekday avg ${weekdayAvg.toLocaleString()}`}>Daily Incoming</SectionHeader>
         <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
           {daysList.map(d => {
-            const dayName = new Date(d.date + 'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+            const dt = new Date(d.date + 'T12:00:00');
+            const dayName = dt.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
             const barPct = Math.round((d.count / maxCount) * 100);
             const isToday = d.date === today;
-            const isWeekend = [0, 6].includes(new Date(d.date + 'T12:00:00').getDay());
+            const isWeekend = [0, 6].includes(dt.getDay());
+            const barColor = isToday ? T.blue : isWeekend ? T.textDim : d.count >= weekdayAvg ? T.green : T.amber;
             return (
-              <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 12px', background: isToday ? `${T.blue}15` : T.bg, borderRadius: 6, border: `1px solid ${isToday ? T.blue : T.border}` }}>
+              <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '6px 12px', background: isToday ? `${T.blue}15` : T.bg, borderRadius: 6, border: `1px solid ${isToday ? T.blue : T.border}`, opacity: isWeekend ? 0.6 : 1 }}>
                 <div style={{ width: 120, fontSize: 11, fontWeight: isToday ? 700 : 600, color: isToday ? T.blue : isWeekend ? T.textDim : T.textMuted, fontFamily: mono }}>{isToday ? 'TODAY' : dayName}</div>
                 <div style={{ flex: 1, height: 8, background: T.surface, borderRadius: 4, overflow: 'hidden' }}>
-                  <div style={{ width: `${barPct}%`, height: '100%', background: isToday ? T.blue : d.count >= (data?.avg || 0) ? T.green : T.amber, borderRadius: 4, transition: 'width 0.5s' }} />
+                  <div style={{ width: `${barPct}%`, height: '100%', background: barColor, borderRadius: 4, transition: 'width 0.5s' }} />
                 </div>
-                <div style={{ minWidth: 50, textAlign: 'right', fontSize: 16, fontWeight: 800, color: isToday ? T.blue : d.count > 0 ? T.text : T.textDim, fontFamily: mono }}>{d.count}</div>
+                <div style={{ minWidth: 60, textAlign: 'right', fontSize: 16, fontWeight: 800, color: isToday ? T.blue : d.count > 0 ? T.text : T.textDim, fontFamily: mono }}>{d.count.toLocaleString()}</div>
               </div>
             );
           })}
@@ -5497,8 +5515,6 @@ function IncomingTab({ ovenServerUrl, settings }) {
           <div style={{ padding: 20, textAlign: "center", color: T.textDim }}>No incoming data available</div>
         )}
       </Card>
-
-      <StageHistory serverUrl={ovenServerUrl} stage="INCOMING" stageLabel="Incoming" color="#06B6D4" />
     </ProductionStageTab>
   );
 }

@@ -2353,8 +2353,22 @@ module.exports = {
       for (const row of stageRows) {
         const stage = (row.to_stage || '').toUpperCase();
         if (stage === 'SHIPPING') continue;
+        if (stage === 'INCOMING') continue; // INCOMING is the entry stage — counted from DVI XML EntryDate below, not stage_transitions
         if (STAGES.includes(stage)) totals[stage] = row.cnt;
       }
+
+      // INCOMING — single source of truth: dvi_jobs + dvi_shipped_jobs union by EntryDate
+      // The stage_transitions to_stage='INCOMING' counter was structurally broken (counted
+      // re-entries from CUTTING/SHIPPING/etc., not new arrivals). DVI XML EntryDate is
+      // the authoritative day the lab "owns" the job (when DVI books the RX).
+      const incomingRow = db.prepare(`
+        SELECT COUNT(DISTINCT job_id) AS cnt FROM (
+          SELECT id AS job_id FROM dvi_jobs WHERE entry_date = ? AND archived = 0
+          UNION
+          SELECT invoice AS job_id FROM dvi_shipped_jobs WHERE entry_date = ?
+        )
+      `).get(dateStr, dateStr);
+      totals.INCOMING = incomingRow?.cnt || 0;
 
       // Picks (normalized to jobs)
       const pickStats = db.prepare(`

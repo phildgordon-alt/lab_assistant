@@ -4073,12 +4073,23 @@ Respond with a structured batching plan in this format:
 
   if (req.method==='GET' && url.pathname==='/api/dvi/incoming') {
     const days = parseInt(url.searchParams.get('days') || '30');
-
-    // Authoritative source: trace LT files track the first time each job
-    // appears in any LT file. This survives shipped job purges and doesn't
-    // depend on XML file sync. The trace processes ALL historical LT files
-    // on startup, so this covers every job DVI has ever seen.
-    return json(res, dviTrace.getIncomingByDate(days));
+    // Single source of truth: dvi_jobs (still in lab) UNION dvi_shipped_jobs (already shipped),
+    // grouped by DVI XML EntryDate. This is the date DVI booked the RX — the moment the lab
+    // owns the job — and matches DVI's own dashboard.
+    const rows = labDb.db.prepare(`
+      SELECT entry_date AS date, COUNT(DISTINCT job_id) AS count
+      FROM (
+        SELECT id AS job_id, entry_date FROM dvi_jobs WHERE entry_date IS NOT NULL AND archived = 0
+        UNION
+        SELECT invoice AS job_id, entry_date FROM dvi_shipped_jobs WHERE entry_date IS NOT NULL
+      )
+      WHERE date >= date('now', '-' || ? || ' days')
+      GROUP BY date
+      ORDER BY date DESC
+    `).all(days);
+    const total = rows.reduce((s, r) => s + r.count, 0);
+    const avg = rows.length > 0 ? Math.round(total / rows.length) : 0;
+    return json(res, { days: rows, total, avg, dayCount: rows.length, source: 'dvi_jobs+shipped union by entry_date' });
   }
 
   // Legacy incoming endpoint kept for debugging — uses XML files
