@@ -1888,6 +1888,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:12}}>
             {[
+              {name:"Maintenance Dashboard",icon:"🛠",desc:"Machine health, tool life, throughput, pushes — for maintenance TV",path:"/standalone/MaintenanceDashboard.html",color:T.cyan},
               {name:"Assembly Dashboard",icon:"🔧",desc:"Live assembly floor — stations, operators, leaderboard",path:"/standalone/AssemblyDashboard.html",color:T.purple},
               {name:"Coating Dashboard",icon:"🧪",desc:"Coating pipeline — queue, coaters, throughput",path:"/standalone/CoatingDashboard.html",color:T.teal||"#06B6D4"},
               {name:"Cutting Dashboard",icon:"✂️",desc:"Cutting/edging floor — stations, queue, pipeline",path:"/standalone/CuttingDashboard.html",color:T.blue},

@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no"/>
+<title>Maintenance TV — Pair Eyewear</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=JetBrains+Mono:wght@400;700;800&family=DM+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="tv-shell.css"/>
+<script src="tv-shell.js"></script>
+<style>
+:root{
+  --bg:#070A0F; --surface:#0D1117; --card:#111820;
+  --border:#1C2733; --borderLt:#2A3A4A;
+  --text:#E8EDF2; --dim:#8899AA; --dimmer:#445566;
+  --blue:#3B82F6; --green:#10B981; --greenDk:#052E1A;
+  --amber:#F59E0B; --amberDk:#451A00;
+  --red:#EF4444;   --redDk:#3F0A0A;
+  --purple:#8B5CF6; --teal:#06B6D4; --cyan:#06B6D4;
+  --mono:'JetBrains Mono',monospace;
+  --sans:'DM Sans',sans-serif;
+  --disp:'Bebas Neue',sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--sans);font-variant-numeric:tabular-nums;}
+body{display:flex;flex-direction:column;overflow:hidden;}
+
+/* HEADER 72px */
+.hdr{background:var(--surface);border-bottom:2px solid var(--border);
+  padding:10px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;height:72px;}
+.hdr-brand{display:flex;align-items:center;gap:12px;}
+.logo{width:40px;height:40px;border-radius:8px;background:linear-gradient(135deg,#06B6D4,#0891B2);
+  display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-weight:800;font-size:14px;color:#fff;}
+.brand-name{font-family:var(--disp);font-size:28px;letter-spacing:1px;}
+.brand-sub{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:2px;}
+.hdr-right{display:flex;align-items:center;gap:16px;}
+.clock{font-family:var(--mono);font-size:22px;font-weight:700;color:var(--cyan);letter-spacing:3px;}
+.date-badge{font-family:var(--mono);font-size:11px;color:var(--dim);}
+.dots-wrap{display:flex;align-items:center;gap:10px;}
+.dot-grp{display:flex;align-items:center;gap:4px;}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--dimmer);transition:all .3s;}
+.dot.ok{background:var(--green);box-shadow:0 0 8px var(--green);}
+.dot.stale{background:var(--amber);}
+.dot.err{background:var(--red);}
+.dot.mock{background:var(--amber);}
+.dot-lbl{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;}
+.hdr-btn{background:transparent;border:1px solid var(--border);border-radius:7px;
+  padding:7px 12px;font-family:var(--mono);font-size:10px;color:var(--dim);cursor:pointer;}
+.hdr-btn:active{border-color:var(--cyan);color:var(--cyan);}
+
+/* ATTENTION RAIL 56px */
+.attn{flex-shrink:0;height:56px;background:#0A0D12;border-bottom:1px solid var(--border);
+  display:flex;align-items:center;overflow:hidden;position:relative;}
+.attn-lbl{font-family:var(--mono);font-size:10px;font-weight:800;color:var(--red);
+  letter-spacing:2px;padding:0 16px;border-right:1px solid var(--border);flex-shrink:0;height:100%;display:flex;align-items:center;}
+.attn-track{display:flex;gap:14px;padding:0 16px;white-space:nowrap;overflow:hidden;flex:1;
+  animation:scrollx 60s linear infinite;}
+.attn:hover .attn-track{animation-play-state:paused;}
+@keyframes scrollx{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+.attn-item{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:13px;
+  padding:6px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);}
+.attn-item.critical{border-color:var(--red);color:var(--red);background:#1A0808;}
+.attn-item.warning{border-color:var(--amber);color:var(--amber);background:#1A1208;}
+.attn-item.overdue{border-color:var(--purple);color:#C4B5FD;background:#14102A;}
+.attn-kind{font-size:9px;font-weight:800;letter-spacing:1px;opacity:.8;}
+.attn-item.empty{color:var(--dim);border-color:var(--border);}
+
+/* MAIN padding 56/16/16/16 (overscan defense) */
+.main{flex:1;overflow:hidden;padding:56px 16px 16px 16px;display:grid;
+  grid-template-columns:minmax(0,54fr) minmax(0,46fr);
+  grid-template-rows:minmax(0,56fr) minmax(0,44fr);
+  gap:14px;min-height:0;}
+.zone{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:14px;
+  display:flex;flex-direction:column;gap:10px;min-height:0;overflow:hidden;position:relative;}
+.zone-grid{grid-row:span 2;}
+.zone-title{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--dim);
+  letter-spacing:2px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.z-badge{font-family:var(--mono);font-size:8px;font-weight:700;padding:3px 7px;
+  border-radius:8px;background:var(--border);color:var(--dim);letter-spacing:1px;}
+.z-badge.ok{background:var(--greenDk);color:var(--green);}
+.z-badge.stale{background:var(--amberDk);color:var(--amber);}
+.z-badge.err{background:var(--redDk);color:var(--red);}
+.z-badge.mock{background:var(--amberDk);color:var(--amber);}
+
+/* MACHINE GRID — 14 machines = 2 cols x 7 rows */
+.mgrid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(7,1fr);
+  gap:8px;flex:1;min-height:0;}
+.mcard{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 12px;display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;min-height:0;}
+.mcard.healthy{border-left:4px solid var(--green);}
+.mcard.warning{border-left:4px solid var(--amber);}
+.mcard.critical{border-left:4px solid var(--red);background:#170A0A;}
+.mcard.offline{border-left:4px solid var(--dimmer);opacity:.6;}
+.mc-id{font-family:var(--mono);font-size:13px;font-weight:800;color:var(--text);}
+.mc-type{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;margin-top:1px;}
+.mc-mid{min-width:0;display:flex;flex-direction:column;gap:3px;}
+.mc-bars{display:flex;gap:6px;}
+.mc-bar-wrap{flex:1;min-width:0;}
+.mc-bar-lbl{font-family:var(--mono);font-size:7px;color:var(--dimmer);letter-spacing:1px;display:flex;justify-content:space-between;}
+.mc-bar-bg{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:2px;}
+.mc-bar{height:100%;border-radius:3px;transition:width .6s;}
+.mc-bar.g{background:var(--green);} .mc-bar.a{background:var(--amber);} .mc-bar.r{background:var(--red);}
+.mc-right{text-align:right;min-width:54px;}
+.mc-tp{font-family:var(--mono);font-size:18px;font-weight:800;line-height:1;color:var(--cyan);}
+.mc-tp-lbl{font-family:var(--mono);font-size:7px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;}
+.mc-err{font-family:var(--mono);font-size:9px;color:var(--red);margin-top:2px;font-weight:700;}
+
+/* THROUGHPUT — small multiples */
+.tp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;flex:1;min-height:0;}
+.tp-cell{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px;display:flex;flex-direction:column;gap:6px;min-height:0;}
+.tp-head{display:flex;justify-content:space-between;align-items:baseline;}
+.tp-name{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--text);letter-spacing:1px;}
+.tp-total{font-family:var(--mono);font-size:16px;font-weight:800;color:var(--cyan);}
+.tp-spark{flex:1;min-height:32px;}
+.tp-foot{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;}
+
+/* PUSHES FLOW */
+.flow-row{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;flex:1;min-height:0;align-items:stretch;}
+.flow-cell{background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:10px 8px;display:flex;flex-direction:column;gap:4px;justify-content:center;align-items:center;
+  position:relative;min-width:0;}
+.flow-cell.in{border-color:var(--teal);}
+.flow-cell.out{border-color:var(--green);}
+.flow-stage{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;font-weight:700;}
+.flow-val{font-family:var(--mono);font-size:36px;font-weight:800;line-height:1;color:var(--text);}
+.flow-cell.in .flow-val{color:var(--teal);}
+.flow-cell.out .flow-val{color:var(--green);}
+.flow-sub{font-family:var(--mono);font-size:8px;color:var(--dimmer);letter-spacing:1px;text-align:center;}
+.flow-arrow{position:absolute;right:-8px;top:50%;transform:translate(50%,-50%);z-index:2;
+  font-family:var(--mono);font-size:14px;color:var(--dimmer);background:var(--card);padding:0 2px;}
+
+/* FOOTER 88px */
+.foot{flex-shrink:0;height:88px;background:var(--surface);border-top:2px solid var(--border);
+  padding:10px 20px;display:grid;grid-template-columns:repeat(6,1fr);gap:14px;align-items:center;}
+.kpi{display:flex;flex-direction:column;gap:3px;}
+.kpi-val{font-family:var(--mono);font-size:28px;font-weight:800;line-height:1;color:var(--text);}
+.kpi-val.g{color:var(--green);} .kpi-val.a{color:var(--amber);} .kpi-val.r{color:var(--red);}
+.kpi-lbl{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1.5px;}
+.kpi-sub{font-family:var(--mono);font-size:9px;color:var(--dimmer);}
+
+/* MODAL */
+.modal-bg{position:fixed;inset:0;background:#00000090;z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;}
+.modal{background:var(--surface);border:1px solid var(--borderLt);border-radius:16px;padding:24px;width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px;}
+.modal h3{font-family:var(--mono);font-size:12px;font-weight:700;color:var(--text);letter-spacing:1px;}
+.m-field label{font-family:var(--mono);font-size:9px;color:var(--dim);letter-spacing:1px;display:block;margin-bottom:6px;}
+.m-inp{width:100%;background:var(--bg);border:2px solid var(--border);border-radius:8px;padding:11px 14px;color:var(--text);font-family:var(--mono);font-size:14px;outline:none;}
+.m-inp:focus{border-color:var(--cyan);}
+.m-btns{display:flex;gap:8px;}
+.m-btns button{flex:1;padding:12px;border-radius:8px;border:none;font-weight:700;font-size:14px;cursor:pointer;font-family:var(--sans);}
+
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-track{background:var(--bg);}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="hdr">
+  <div class="hdr-brand">
+    <div class="logo">MX</div>
+    <div>
+      <div class="brand-name">MAINTENANCE TV</div>
+      <div class="brand-sub">LAB_ASSISTANT · PAIR EYEWEAR · SOM + LIMBLE + DVI</div>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="date-badge" id="dateBadge"></div>
+    <div class="dots-wrap">
+      <div class="dot-grp" title="SOM"><div class="dot" id="dotSOM"></div><span class="dot-lbl">SOM</span></div>
+      <div class="dot-grp" title="Limble"><div class="dot" id="dotLIM"></div><span class="dot-lbl">LIM</span></div>
+      <div class="dot-grp" title="DVI"><div class="dot" id="dotDVI"></div><span class="dot-lbl">DVI</span></div>
+      <div class="dot-grp" title="Shipping"><div class="dot" id="dotSHP"></div><span class="dot-lbl">SHP</span></div>
+    </div>
+    <div class="clock" id="clock">--:--:--</div>
+    <button class="hdr-btn" onclick="openSetup()">&#9881; SETUP</button>
+    <button class="hdr-btn" onclick="window.location.href='/'" title="Home">&#9666; HOME</button>
+  </div>
+</div>
+
+<!-- ATTENTION RAIL -->
+<div class="attn">
+  <div class="attn-lbl">&#9888; ATTENTION</div>
+  <div class="attn-track" id="attnTrack"><div class="attn-item empty">— initializing —</div></div>
+</div>
+
+<!-- MAIN 5-zone grid -->
+<div class="main">
+  <div class="zone zone-grid" id="zMachines">
+    <div class="zone-title">
+      <span>MACHINE HEALTH · 14 ASSETS</span>
+      <span class="z-badge" id="bMach">—</span>
+    </div>
+    <div class="mgrid" id="mgrid"></div>
+  </div>
+
+  <div class="zone" id="zThroughput">
+    <div class="zone-title">
+      <span>THROUGHPUT · LAST 24H · LENSES/HR</span>
+      <span class="z-badge" id="bTp">—</span>
+    </div>
+    <div class="tp-grid" id="tpGrid"></div>
+  </div>
+
+  <div class="zone" id="zFlow">
+    <div class="zone-title">
+      <span>WIP FLOW · IN PROCESS BY STAGE</span>
+      <span class="z-badge" id="bFlow">—</span>
+    </div>
+    <div class="flow-row" id="flowRow"></div>
+  </div>
+</div>
+
+<!-- FOOTER KPIs -->
+<div class="foot" id="foot"></div>
+
+<div class="modal-bg" id="modal" style="display:none">
+  <div class="modal">
+    <h3>SETUP — MAINTENANCE TV</h3>
+    <div class="m-field">
+      <label>SERVER URL</label>
+      <input class="m-inp" id="mSrv" placeholder="http://192.168.0.224:3002"/>
+    </div>
+    <div class="m-btns">
+      <button id="mCancel" style="background:var(--border);color:var(--text)">CANCEL</button>
+      <button id="mSave" style="background:var(--cyan);color:#fff">SAVE</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────────────────────
+const CFG_KEY = 'maint_cfg';
+let cfg = JSON.parse(localStorage.getItem(CFG_KEY) || '{}');
+const qs = new URLSearchParams(location.search);
+const KIOSK = qs.get('kiosk') === '1';
+
+// If served from same origin as Lab Server, default to empty (relative URLs).
+// Otherwise, default to a blank that triggers mock or setup.
+function serverUrl(){
+  return (cfg.serverUrl || '').replace(/\/$/,'');
+}
+
+// ─────────────────────────────────────────────────────────────
+// CLOCK (Header, 1s)
+// ─────────────────────────────────────────────────────────────
+function tickClock(){
+  const n = new Date();
+  document.getElementById('clock').textContent = n.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false});
+  document.getElementById('dateBadge').textContent = n.toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}).toUpperCase();
+}
+setInterval(tickClock,1000); tickClock();
+
+// ─────────────────────────────────────────────────────────────
+// FETCH HELPER
+// ─────────────────────────────────────────────────────────────
+async function fetchJson(path, {timeout=8000} = {}){
+  const base = serverUrl();
+  // If no serverUrl, use relative (if served from Lab Server it works; otherwise fails → mock).
+  const url  = (base || '') + path;
+  const ctrl = new AbortController();
+  const t = setTimeout(()=>ctrl.abort(), timeout);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    return await r.json();
+  } finally { clearTimeout(t); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────
+const zoneState = {
+  machines:    { status:'loading', lastOk:0, data:null, intervalMs:30000 },
+  alerts:      { status:'loading', lastOk:0, data:null, intervalMs:15000 },
+  tasks:       { status:'loading', lastOk:0, data:null, intervalMs:15000 },
+  throughput:  { status:'loading', lastOk:0, data:null, intervalMs:60000 },
+  flow:        { status:'loading', lastOk:0, data:null, intervalMs:60000 },
+  incoming:    { status:'loading', lastOk:0, data:null, intervalMs:60000 },
+  shipping:    { status:'loading', lastOk:0, data:null, intervalMs:60000 },
+  stats:       { status:'loading', lastOk:0, data:null, intervalMs:300000 },
+};
+
+function markStale(){
+  const now = Date.now();
+  Object.entries(zoneState).forEach(([k,s]) => {
+    if (s.status === 'ok' && now - s.lastOk > 2 * s.intervalMs) s.status = 'stale';
+  });
+}
+setInterval(()=>{ markStale(); renderDots(); renderBadges(); }, 5000);
+
+// ─────────────────────────────────────────────────────────────
+// MOCK FIXTURES (when cfg.serverUrl unset AND relative fetch fails)
+// ─────────────────────────────────────────────────────────────
+const MOCK = {
+  machines: {
+    isLive:false, machines: Array.from({length:14},(_,i)=>{
+      const types = ['polishing','polishing','polishing','polishing','generator','generator','generator','generator','generator','generator','generator','generator','generator','generator'];
+      const ids = ['CP1001','CP1002','CP1003','CP1004','HSQ001','HSQ002','HSQ003','HSQ004','HSQ005','HSQ006','HSQ007','HXS001','HXS002','HXS003'];
+      const st = ['warning','critical','healthy','critical','warning','warning','healthy','warning','warning','warning','warning','critical','healthy','critical'][i];
+      return {id:ids[i],name:ids[i],type:types[i],status:st,
+        worstTool:{pct:Math.random(),state:'ok'},
+        polishPad:types[i]==='polishing'?{pct:Math.random(),state:'ok'}:null,
+        errorsToday:Math.floor(Math.random()*3),throughputToday:Math.floor(Math.random()*400),throughputUnit:'lenses'};
+    })
+  },
+  alerts: { alerts: [
+    {key:'CP1002:polishing',device:'CP1002',category:'polishing',status:'critical',worstToolRemainingPct:0.66,worstPolishPct:0},
+    {key:'HXS001:generator',device:'HXS001',category:'generator',status:'critical',worstToolRemainingPct:-0.36,worstPolishPct:null},
+  ]},
+  tasks: { tasks: [
+    {id:1,title:'Example overdue PM — replace bearings',dueDate:new Date(Date.now()-2*86400000).toISOString(),status:'open',priority:'high'},
+  ]},
+  throughput: { series: ['Blocker','FSE','LMU','Polisher','Laser','LensLogic'].map(n=>({
+    name:n, data:Array.from({length:24},(_,h)=>({hour:String(h),lenses:Math.floor(Math.random()*150)}))
+  }))},
+  flow: { stages: [
+    {stage_id:'blocking',label:'Blocking',current_count:0},
+    {stage_id:'surfacing',label:'Surfacing',current_count:81},
+    {stage_id:'coating',label:'Coating (CCL)',current_count:898},
+    {stage_id:'cutting',label:'Cutting/Edging',current_count:842},
+    {stage_id:'assembly',label:'Assembly',current_count:6},
+  ]},
+  incoming: { todayCount: 772 },
+  shipping: { count: 0 },
+  stats: { uptimePercent:99.63, oePercent:99, mtbfHrs:880, mttrHrs:1, pmCompliancePercent:100, openTaskCount:53, overdueTaskCount:42 }
+};
+
+// ─────────────────────────────────────────────────────────────
+// POLLERS
+// ─────────────────────────────────────────────────────────────
+const pollers = [];
+function schedule(key, path, build, intervalMs, render){
+  zoneState[key].intervalMs = intervalMs;
+  let mock = false;
+  async function tick(){
+    if (document.visibilityState === 'hidden') return;
+    try {
+      const base = serverUrl();
+      if (!base) { throw new Error('no server configured'); }
+      const data = await fetchJson(path);
+      zoneState[key].data = build(data);
+      zoneState[key].status = 'ok';
+      zoneState[key].lastOk = Date.now();
+      mock = false;
+    } catch (e) {
+      // Fallback to mock when no server is configured OR fetch fails repeatedly.
+      if (!serverUrl() || zoneState[key].data == null) {
+        zoneState[key].data = build(MOCK[key]);
+        zoneState[key].status = 'mock';
+        mock = true;
+      } else {
+        zoneState[key].status = 'err';
+      }
+    }
+    render();
+    renderDots(); renderBadges();
+  }
+  tick();
+  const id = setInterval(tick, intervalMs);
+  pollers.push(id);
+  return tick;
+}
+
+document.addEventListener('visibilitychange', ()=>{
+  if (document.visibilityState === 'visible') refreshAll();
+});
+function refreshAll(){ pollers.forEach(id=>clearInterval(id)); pollers.length=0; startPollers(); }
+
+// ─────────────────────────────────────────────────────────────
+// BADGES & DOTS
+// ─────────────────────────────────────────────────────────────
+function badgeClass(s){ return s==='ok'?'ok':s==='mock'?'mock':s==='stale'?'stale':s==='err'?'err':''; }
+function badgeText(s){ return s==='ok'?'LIVE':s==='mock'?'MOCK':s==='stale'?'STALE':s==='err'?'ERR':'…'; }
+
+function renderBadges(){
+  const map = [['bMach','machines'],['bTp','throughput'],['bFlow','flow']];
+  for (const [el,key] of map){
+    const b = document.getElementById(el); if (!b) continue;
+    const s = zoneState[key].status;
+    b.className = 'z-badge ' + badgeClass(s);
+    b.textContent = badgeText(s);
+  }
+}
+
+function renderDots(){
+  function setDot(id, s){
+    const d = document.getElementById(id); if (!d) return;
+    d.className = 'dot ' + (s==='ok'?'ok':s==='mock'?'mock':s==='stale'?'stale':'err');
+  }
+  // SOM = machines + alerts + throughput worst
+  const somS = worstOf([zoneState.machines.status, zoneState.alerts.status, zoneState.throughput.status]);
+  setDot('dotSOM', somS);
+  setDot('dotLIM', worstOf([zoneState.tasks.status, zoneState.stats.status]));
+  setDot('dotDVI', worstOf([zoneState.incoming.status, zoneState.flow.status]));
+  setDot('dotSHP', zoneState.shipping.status);
+}
+function worstOf(arr){
+  if (arr.includes('err')) return 'err';
+  if (arr.includes('stale')) return 'stale';
+  if (arr.includes('mock')) return 'mock';
+  if (arr.every(s=>s==='ok')) return 'ok';
+  return 'stale';
+}
+
+// ─────────────────────────────────────────────────────────────
+// ATTENTION RAIL
+// ─────────────────────────────────────────────────────────────
+function renderAttention(){
+  const alerts = zoneState.alerts.data || [];
+  const tasks  = zoneState.tasks.data || [];
+  const items = [];
+
+  // Critical SOM alerts — sort: critical first, then by worst tool pct asc
+  const crit = alerts.filter(a=>a.status==='critical')
+    .sort((a,b)=>(a.worstToolRemainingPct ?? 1) - (b.worstToolRemainingPct ?? 1));
+  const warn = alerts.filter(a=>a.status==='warning')
+    .sort((a,b)=>(a.worstToolRemainingPct ?? 1) - (b.worstToolRemainingPct ?? 1));
+
+  for (const a of crit) items.push({
+    kind:'critical',
+    text:`${a.device} · ${a.category.toUpperCase()} · TOOL ${pct(a.worstToolRemainingPct)}${a.worstPolishPct!=null?` · PAD ${pct(a.worstPolishPct)}`:''}`
+  });
+  for (const a of warn) items.push({
+    kind:'warning',
+    text:`${a.device} · ${a.category.toUpperCase()} · TOOL ${pct(a.worstToolRemainingPct)}`
+  });
+
+  // Overdue PMs
+  const now = Date.now();
+  const overdue = tasks
+    .filter(t=>t.status!=='completed' && t.dueDate && new Date(t.dueDate).getTime() < now)
+    .map(t=>({
+      kind:'overdue',
+      days: Math.floor((now - new Date(t.dueDate).getTime())/86400000),
+      title: t.title
+    }))
+    .sort((a,b)=>b.days - a.days)
+    .slice(0,30);
+  for (const o of overdue) items.push({ kind:'overdue', text:`PM OVERDUE ${o.days}d · ${truncate(o.title,60)}` });
+
+  const capped = items.slice(0, 50);
+  const track = document.getElementById('attnTrack');
+  if (capped.length === 0){
+    track.innerHTML = `<div class="attn-item empty">All systems within tolerance · no overdue PMs</div>`;
+    track.style.animation = 'none';
+    return;
+  }
+  // Duplicate content for seamless scroll
+  const once = capped.map(renderAttnItem).join('');
+  track.innerHTML = once + once;
+  // Re-enable animation (cleared above)
+  track.style.animation = '';
+}
+function renderAttnItem(it){
+  return `<div class="attn-item ${it.kind}"><span class="attn-kind">${it.kind.toUpperCase()}</span>${esc(it.text)}</div>`;
+}
+function pct(x){ if (x==null || isNaN(x)) return '—'; return Math.round(x*100)+'%'; }
+function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function truncate(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
+
+// ─────────────────────────────────────────────────────────────
+// MACHINE GRID
+// ─────────────────────────────────────────────────────────────
+function renderMachineGrid(){
+  const g = document.getElementById('mgrid');
+  const machines = zoneState.machines.data || [];
+  if (!machines.length){ g.innerHTML = `<div style="color:var(--dim);font-family:var(--mono);font-size:10px;padding:16px">No machine data.</div>`; return; }
+  // Ensure 14 cards; fill by id order
+  g.innerHTML = machines.slice(0,14).map(renderMCard).join('');
+}
+function renderMCard(m){
+  const status = m.status || 'healthy';
+  const toolPct = m.worstTool && typeof m.worstTool.pct === 'number' ? Math.max(0,Math.min(1,m.worstTool.pct)) : null;
+  const padPct  = m.polishPad && typeof m.polishPad.pct  === 'number' ? Math.max(0,Math.min(1,m.polishPad.pct)) : null;
+  const toolCls = toolPct==null ? '' : toolPct < 0.15 ? 'r' : toolPct < 0.3 ? 'a' : 'g';
+  const padCls  = padPct==null  ? '' : padPct  < 0.15 ? 'r' : padPct  < 0.3 ? 'a' : 'g';
+  const tp = m.throughputToday ?? 0;
+  const err = m.errorsToday ?? 0;
+  return `<div class="mcard ${status}">
+    <div>
+      <div class="mc-id">${esc(m.id)}</div>
+      <div class="mc-type">${esc((m.type||'').toUpperCase())}</div>
+    </div>
+    <div class="mc-mid">
+      <div class="mc-bars">
+        <div class="mc-bar-wrap">
+          <div class="mc-bar-lbl"><span>TOOL</span><span>${toolPct==null?'—':Math.round(toolPct*100)+'%'}</span></div>
+          <div class="mc-bar-bg"><div class="mc-bar ${toolCls}" style="width:${toolPct==null?0:Math.round(toolPct*100)}%"></div></div>
+        </div>
+        ${padPct!=null?`<div class="mc-bar-wrap">
+          <div class="mc-bar-lbl"><span>PAD</span><span>${Math.round(padPct*100)}%</span></div>
+          <div class="mc-bar-bg"><div class="mc-bar ${padCls}" style="width:${Math.round(padPct*100)}%"></div></div>
+        </div>`:''}
+      </div>
+    </div>
+    <div class="mc-right">
+      <div class="mc-tp">${tp}</div>
+      <div class="mc-tp-lbl">LENS/DAY</div>
+      ${err>0?`<div class="mc-err">${err} ERR</div>`:''}
+    </div>
+  </div>`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// THROUGHPUT SPARKLINES (small multiples)
+// ─────────────────────────────────────────────────────────────
+function renderThroughput(){
+  const tp = zoneState.throughput.data || [];
+  const host = document.getElementById('tpGrid');
+  if (!tp.length){ host.innerHTML = `<div style="color:var(--dim);font-family:var(--mono);font-size:10px">No throughput data.</div>`; return; }
+  host.innerHTML = tp.slice(0,6).map(cell => {
+    const data = cell.data || [];
+    const vals = data.map(d=>d.lenses||0);
+    const total = vals.reduce((a,b)=>a+b,0);
+    const last = vals.length?vals[vals.length-1]:0;
+    return `<div class="tp-cell">
+      <div class="tp-head">
+        <div class="tp-name">${esc(cell.name)}</div>
+        <div class="tp-total">${total}</div>
+      </div>
+      <svg class="tp-spark" viewBox="0 0 100 32" preserveAspectRatio="none">${sparkPath(vals,100,32)}</svg>
+      <div class="tp-foot">LAST HOUR · ${last}</div>
+    </div>`;
+  }).join('');
+}
+function sparkPath(vals,w,h){
+  if (!vals.length) return '';
+  const max = Math.max(1, ...vals);
+  const step = w / Math.max(1, vals.length - 1);
+  const pts = vals.map((v,i)=>[i*step, h - (v/max)*h*0.9 - 1]);
+  const line = pts.map((p,i)=>(i===0?'M':'L')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
+  const area = line + ` L ${w} ${h} L 0 ${h} Z`;
+  return `<path d="${area}" fill="#06B6D422"/><path d="${line}" fill="none" stroke="#06B6D4" stroke-width="1.4"/>`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// PUSHES FLOW — WIP per stage (v1)
+// ─────────────────────────────────────────────────────────────
+const FLOW_CHAIN = [
+  {key:'_in',       label:'IN',         sub:'DVI TODAY',       cls:'in'},
+  {key:'surfacing', label:'SURFACING',  sub:'WIP'},
+  {key:'cutting',   label:'CUTTING',    sub:'WIP'},
+  {key:'coating',   label:'COATING',    sub:'WIP'},
+  {key:'assembly',  label:'ASSEMBLY',   sub:'WIP'},
+  {key:'_ship',     label:'SHIPPED',    sub:'TODAY',           cls:'out'},
+];
+function renderFlow(){
+  const stages = zoneState.flow.data || [];
+  const byId = {}; stages.forEach(s=>{ byId[s.stage_id]=s.current_count; });
+  const inToday = (zoneState.incoming.data && zoneState.incoming.data.todayCount) || 0;
+  const shipToday = (zoneState.shipping.data && zoneState.shipping.data.count) || 0;
+  const row = document.getElementById('flowRow');
+  row.innerHTML = FLOW_CHAIN.map((c,i)=>{
+    let v = 0;
+    if (c.key==='_in') v = inToday;
+    else if (c.key==='_ship') v = shipToday;
+    else v = byId[c.key] ?? 0;
+    const arrow = i < FLOW_CHAIN.length-1 ? `<div class="flow-arrow">&#9654;</div>` : '';
+    return `<div class="flow-cell ${c.cls||''}">
+      <div class="flow-stage">${c.label}</div>
+      <div class="flow-val">${Number(v).toLocaleString()}</div>
+      <div class="flow-sub">${c.sub}</div>
+      ${arrow}
+    </div>`;
+  }).join('');
+}
+
+// ─────────────────────────────────────────────────────────────
+// FOOTER KPIs
+// ─────────────────────────────────────────────────────────────
+function renderFoot(){
+  const s = zoneState.stats.data || {};
+  const items = [
+    { val: fmtPct(s.uptimePercent), lbl:'UPTIME', cls: kpiCls(s.uptimePercent,95,98), sub:`MTBF ${s.mtbfHrs??'—'}h` },
+    { val: fmtPct(s.oePercent),     lbl:'OEE',    cls: kpiCls(s.oePercent,80,90),    sub:`MTTR ${s.mttrHrs??'—'}h` },
+    { val: fmtNum(s.mtbfHrs),       lbl:'MTBF',   cls:'',                             sub:'HOURS' },
+    { val: fmtNum(s.mttrHrs),       lbl:'MTTR',   cls: s.mttrHrs>4?'a':'g',           sub:'HOURS' },
+    { val: fmtPct(s.pmCompliancePercent), lbl:'PM COMPLIANCE', cls: kpiCls(s.pmCompliancePercent,80,95), sub:'30 DAY' },
+    { val: fmtNum(s.openTaskCount), lbl:'OPEN WO', cls: s.overdueTaskCount>0?'a':'',  sub:`${s.overdueTaskCount??0} OVERDUE` },
+  ];
+  document.getElementById('foot').innerHTML = items.map(i => `
+    <div class="kpi">
+      <div class="kpi-val ${i.cls}">${i.val}</div>
+      <div class="kpi-lbl">${i.lbl}</div>
+      <div class="kpi-sub">${i.sub}</div>
+    </div>`).join('');
+}
+function fmtPct(x){ return (x==null||isNaN(x))?'—':Math.round(x)+'%'; }
+function fmtNum(x){ return (x==null||isNaN(x))?'—':Number(x).toLocaleString(); }
+function kpiCls(v, warn, good){ if (v==null) return ''; if (v>=good) return 'g'; if (v>=warn) return 'a'; return 'r'; }
+
+// ─────────────────────────────────────────────────────────────
+// START POLLERS — staggered by 2s
+// ─────────────────────────────────────────────────────────────
+function startPollers(){
+  // Machine grid — 30s
+  setTimeout(()=>schedule('machines','/api/som/machines/summary', d=>d.machines||[], 30000, renderMachineGrid), 0);
+  // Alerts — 15s (for Attention rail)
+  setTimeout(()=>schedule('alerts','/api/som/alerts/active', d=>d.alerts||[], 15000, renderAttention), 2000);
+  // Tasks — 15s (overdue PMs)
+  setTimeout(()=>schedule('tasks','/api/maintenance/tasks', d=>d.tasks||[], 15000, renderAttention), 4000);
+  // Throughput — 60s
+  setTimeout(()=>schedule('throughput','/api/som/lens-per-hour?hours=24', d=>d.series||[], 60000, renderThroughput), 6000);
+  // Flow snapshot — 60s
+  setTimeout(()=>schedule('flow','/api/flow/snapshot', d=>d.stages||[], 60000, renderFlow), 8000);
+  // Incoming — 60s
+  setTimeout(()=>schedule('incoming','/api/dvi/incoming?days=2', d=>({todayCount:d.todayCount||0}), 60000, renderFlow), 10000);
+  // Shipping today — 60s
+  setTimeout(()=>schedule('shipping','/api/shipping/detail?date=today', d=>({count:d.count||0}), 60000, renderFlow), 12000);
+  // Footer — 5min
+  setTimeout(()=>schedule('stats','/api/maintenance/stats', d=>d, 300000, renderFoot), 14000);
+}
+
+// ─────────────────────────────────────────────────────────────
+// SETUP MODAL
+// ─────────────────────────────────────────────────────────────
+function openSetup(){
+  document.getElementById('mSrv').value = cfg.serverUrl || '';
+  document.getElementById('modal').style.display = 'flex';
+}
+function closeSetup(){ document.getElementById('modal').style.display = 'none'; }
+document.getElementById('mCancel').onclick = closeSetup;
+document.getElementById('mSave').onclick = () => {
+  const v = document.getElementById('mSrv').value.trim().replace(/\/$/,'');
+  cfg.serverUrl = v;
+  localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+  closeSetup();
+  refreshAll();
+};
+
+// ─────────────────────────────────────────────────────────────
+// BOOT
+// ─────────────────────────────────────────────────────────────
+// Kiosk: if ?kiosk=1 and no serverUrl, assume same-origin (Lab Server serves this file).
+if (KIOSK && !cfg.serverUrl){
+  cfg.serverUrl = location.origin;
+  localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+}
+// If not kiosk and no serverUrl, but we're on http(s) (not file://), default to same-origin.
+if (!cfg.serverUrl && location.protocol !== 'file:'){
+  cfg.serverUrl = location.origin;
+}
+startPollers();
+</script>
+</body>
+</html>
