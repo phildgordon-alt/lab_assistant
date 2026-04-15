@@ -28,7 +28,8 @@ if (!ITEMPATH_TOKEN) {
 const TOKEN = process.env.ITEMPATH_TOKEN || ITEMPATH_TOKEN;
 if (!TOKEN) { console.error('No ITEMPATH_TOKEN found'); process.exit(1); }
 
-const PAGE_SIZE = 1000;
+// ItemPath /api/order_lines times out above limit~50 (empirically verified 2026-04-15).
+const PAGE_SIZE = 50;
 const DELAY_MS = 2000; // 2 seconds between API calls
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
@@ -99,7 +100,7 @@ async function main() {
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const dayStr = d.toISOString().slice(0, 10);
 
-    // Skip weekends (no picks on Sat/Sun typically)
+    // Skip Sundays only (Saturdays often have 200-1500 picks)
     const dow = d.getDay();
     if (dow === 0) { console.log(`${dayStr}: Sunday — skipping`); continue; }
 
@@ -130,7 +131,7 @@ async function main() {
             else if (/wh1/i.test(wh)) wh = 'WH1';
 
             const completedAt = line.modifiedDate || line.creationDate || `${dayStr}T12:00:00`;
-            const pickId = `ol-${line.id || line.orderLineId || ''}`;
+            const pickId = `hist-${line.id || line.orderLineId || ''}`; // unified with live pickSync
             const orderId = line.orderId || '';
 
             const result = insertStmt.run(pickId, orderId, sku, name, qty, qty, wh, completedAt);
