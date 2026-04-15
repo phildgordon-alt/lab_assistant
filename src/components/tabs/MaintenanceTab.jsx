@@ -5,9 +5,29 @@ import { Card, SectionHeader, Pill, KPICard } from '../shared';
 
 // Local wrapper to avoid circular import with App.jsx
 function ProductionStageWrapper({ children }) {
+  // Overview content on Maintenance now runs ~1200px (KPI strip + stats
+  // row + dual cards + Machine Health strip). On a typical 900px laptop
+  // viewport with 160px of app chrome, the inner div must scroll. macOS
+  // hides scrollbars by default — force them visible so users see the
+  // affordance and know content continues below the fold.
   return (
     <div style={{ display: "flex", height: "calc(100vh - 160px)", overflow: "hidden" }}>
-      <div style={{ flex: 1, overflow: "auto", padding: "22px 28px" }}>
+      <div
+        className="production-stage-scroll"
+        style={{
+          flex: 1,
+          overflow: "auto",
+          padding: "22px 28px 40px",
+          scrollbarWidth: "thin",
+          scrollbarColor: `${T.border} transparent`,
+        }}
+      >
+        <style>{`
+          .production-stage-scroll::-webkit-scrollbar{width:10px;height:10px;}
+          .production-stage-scroll::-webkit-scrollbar-thumb{background:${T.border};border-radius:5px;}
+          .production-stage-scroll::-webkit-scrollbar-thumb:hover{background:${T.textDim};}
+          .production-stage-scroll::-webkit-scrollbar-track{background:transparent;}
+        `}</style>
         {children}
       </div>
     </div>
@@ -150,7 +170,7 @@ function MachineHealthStrip({machines,onSelect,selectedId}){
         return (
           <div key={m.id}
             onClick={()=>onSelect&&onSelect(m.id)}
-            style={{display:'grid',gridTemplateColumns:'24px 90px 90px 1fr 1fr 70px 90px 80px 20px',gap:10,alignItems:'center',padding:'10px 8px',cursor:'pointer',borderBottom:`1px solid ${T.border}22`,background:isSelected?`${T.blue}14`:'transparent',transition:'background .15s'}}
+            style={{display:'grid',gridTemplateColumns:'24px 90px 90px 1fr 1fr 70px 90px 80px 20px',gap:10,alignItems:'center',padding:'6px 8px',cursor:'pointer',borderBottom:`1px solid ${T.border}22`,background:isSelected?`${T.blue}14`:'transparent',transition:'background .15s'}}
             onMouseEnter={e=>{if(!isSelected)e.currentTarget.style.background=`${T.border}18`;}}
             onMouseLeave={e=>{if(!isSelected)e.currentTarget.style.background='transparent';}}>
             <span style={{width:10,height:10,borderRadius:'50%',background:statusC,boxShadow:`0 0 8px ${statusC}88`}}/>
