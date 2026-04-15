@@ -101,9 +101,15 @@ let oee = [];
 let orders = { byDepartment: [], today: [], total: 0, todayTotal: 0 };
 let activeJobs = []; // Individual WIP jobs with department + DVI job#
 let alerts = [];
-let tools = { milling: [], cutting: [], polish: [], edger: [], lastUpdated: null };
-let toolAlerts = []; // Active threshold-crossing alerts
-let lastSlackAlertByTool = {}; // { toolKey: timestamp } — rate limits Slack to 1/day/tool
+// Per-machine aggregated summaries, one row per device from the aggregated SQL query.
+// Shape: { device, category, worst_tool_remaining_pct, worst_tool_status, tool_count,
+//          critical_tool_count, warning_tool_count, heads_up_tool_count,
+//          worst_polish_pct, worst_polish_status, throughput_today, errors_today,
+//          last_update }
+let machineSummaries = [];
+let machineSummariesLastUpdated = null;
+let toolAlerts = []; // One alert per machine where roll-up status !== 'healthy'
+let lastSlackAlertByMachine = {}; // key=`${device}:${category}` → 24h rate-limit
 
 // Department mappings (Schneider LMS department IDs)
 const DEPARTMENTS = {
@@ -315,131 +321,186 @@ async function reconnect() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Tool life / polish liquid polling
+// Per-machine aggregated summary polling (single query, ~400ms)
 // ─────────────────────────────────────────────────────────────────────────────
-async function pollTools() {
+
+// Build the 25-branch UNION ALL for tools CTE programmatically rather than
+// pasting 25 near-identical SELECT statements. Tool_{i}SN / Tool_{i}C / Tool_{i}M
+// are the per-slot serial, cumulative count, and max-life columns.
+function buildToolsCte() {
+  const branches = [];
+  for (let i = 0; i <= 24; i++) {
+    branches.push(
+      `    SELECT Device, Time, Tool_${i}SN sn, Tool_${i}C c, Tool_${i}M m FROM latest ` +
+      `WHERE Tool_${i}SN IS NOT NULL AND Tool_${i}M > 0`
+    );
+  }
+  return branches.join('\n    UNION ALL\n');
+}
+
+const MACHINE_SUMMARY_SQL = `
+WITH latest AS (
+  SELECT t.* FROM production_tool_usage_current t
+  JOIN (SELECT Device, Side, MAX(Time) mx FROM production_tool_usage_current
+        WHERE Device IS NOT NULL GROUP BY Device, Side) m
+    ON m.Device=t.Device AND m.Side=t.Side AND m.mx=t.Time
+),
+tools AS (
+${buildToolsCte()}
+),
+tool_agg AS (
+  SELECT Device, MAX(Time) last_tool_update, COUNT(*) tool_count,
+    MIN((m-c)/m) worst_tool_remaining_pct,
+    SUM(CASE WHEN (m-c)/m <= 0.05 THEN 1 ELSE 0 END) critical_tool_count,
+    SUM(CASE WHEN (m-c)/m >  0.05 AND (m-c)/m <= 0.10 THEN 1 ELSE 0 END) warning_tool_count,
+    SUM(CASE WHEN (m-c)/m >  0.10 AND (m-c)/m <= 0.25 THEN 1 ELSE 0 END) heads_up_tool_count
+  FROM tools GROUP BY Device
+),
+pads AS (
+  SELECT Device,
+    GREATEST(0, (CASE padType WHEN 'B_0' THEN 1200 WHEN 'S+_0' THEN 8000 ELSE 5000 END - Value))
+      / (CASE padType WHEN 'B_0' THEN 1200 WHEN 'S+_0' THEN 8000 ELSE 5000 END) rem_pct
+  FROM production_tool_usage_current_ccp
+),
+pad_agg AS (SELECT Device, MIN(rem_pct) worst_polish_pct FROM pads GROUP BY Device),
+throughput AS (
+  SELECT DeviceID Device, SUM(Lenses) throughput_today FROM view_som_oee
+  WHERE TimeUnit='H' AND DATE(Time)=CURDATE() GROUP BY DeviceID
+),
+devices AS (SELECT Device FROM tool_agg UNION SELECT Device FROM pad_agg)
+SELECT d.Device device,
+  CASE WHEN d.Device LIKE 'CP%' THEN 'polishing'
+       WHEN d.Device LIKE 'HXS%' OR d.Device LIKE 'HSQ%' THEN 'generator'
+       WHEN d.Device LIKE 'D2H%' THEN 'deblocking'
+       WHEN d.Device LIKE 'CCL%' THEN 'coating'
+       WHEN d.Device LIKE 'MIL%' THEN 'milling'
+       WHEN d.Device LIKE 'CUT%' THEN 'cutting' ELSE 'other' END category,
+  ROUND(ta.worst_tool_remaining_pct,4) worst_tool_remaining_pct,
+  CASE WHEN ta.worst_tool_remaining_pct IS NULL THEN NULL
+       WHEN ta.worst_tool_remaining_pct <= 0.05 THEN 'critical'
+       WHEN ta.worst_tool_remaining_pct <= 0.10 THEN 'warning'
+       WHEN ta.worst_tool_remaining_pct <= 0.25 THEN 'heads_up' ELSE 'ok' END worst_tool_status,
+  COALESCE(ta.tool_count,0) tool_count,
+  COALESCE(ta.critical_tool_count,0) critical_tool_count,
+  COALESCE(ta.warning_tool_count,0) warning_tool_count,
+  COALESCE(ta.heads_up_tool_count,0) heads_up_tool_count,
+  ROUND(pa.worst_polish_pct,4) worst_polish_pct,
+  CASE WHEN pa.worst_polish_pct IS NULL THEN NULL
+       WHEN pa.worst_polish_pct <= 0.05 THEN 'critical'
+       WHEN pa.worst_polish_pct <= 0.10 THEN 'warning'
+       WHEN pa.worst_polish_pct <= 0.25 THEN 'heads_up' ELSE 'ok' END worst_polish_status,
+  COALESCE(tp.throughput_today,0) throughput_today,
+  0 errors_today,
+  ta.last_tool_update last_update
+FROM devices d
+LEFT JOIN tool_agg ta ON ta.Device=d.Device
+LEFT JOIN pad_agg pa ON pa.Device=d.Device
+LEFT JOIN throughput tp ON tp.Device=d.Device
+ORDER BY d.Device`;
+
+// Roll the worst tool state + polish state into a single machine-level status.
+// heads_up is bucketed into "warning" per HID spec (only 3 row colors).
+function rollupMachineStatus(worstToolState, worstPolishState) {
+  const states = [worstToolState, worstPolishState].filter(s => s != null);
+  if (states.length === 0) return 'offline';
+  if (states.includes('critical')) return 'critical';
+  if (states.includes('warning') || states.includes('heads_up')) return 'warning';
+  return 'healthy';
+}
+
+async function pollMachineSummaries() {
   if (!connection) return false;
   try {
-    const nowIso = new Date().toISOString();
+    const [rows] = await connection.query(MACHINE_SUMMARY_SQL);
+    machineSummaries = rows.map(r => ({
+      device: (r.device || '').trim(),
+      category: r.category,
+      worst_tool_remaining_pct: r.worst_tool_remaining_pct != null ? Number(r.worst_tool_remaining_pct) : null,
+      worst_tool_status: r.worst_tool_status,
+      tool_count: Number(r.tool_count) || 0,
+      critical_tool_count: Number(r.critical_tool_count) || 0,
+      warning_tool_count: Number(r.warning_tool_count) || 0,
+      heads_up_tool_count: Number(r.heads_up_tool_count) || 0,
+      worst_polish_pct: r.worst_polish_pct != null ? Number(r.worst_polish_pct) : null,
+      worst_polish_status: r.worst_polish_status,
+      throughput_today: Number(r.throughput_today) || 0,
+      errors_today: Number(r.errors_today) || 0,
+      last_update: r.last_update,
+    }));
+    machineSummariesLastUpdated = new Date().toISOString();
 
-    // Milling / cutting tools: one row per Device/Side, up to 25 tool slots wide
-    const [toolRows] = await connection.query(`
-      SELECT * FROM production_tool_usage_current
-    `);
-
-    const milling = [];
-    const cutting = [];
-    for (const row of toolRows) {
-      const device = (row.Device || '').trim();
-      const side = row.Side;
-      // Route by device model via existing categorization
-      const devMeta = devices.find(d => d.id === device);
-      const category = devMeta?.category || categorizeDevice('', '', device);
-      const bucket = category === 'cutters' ? cutting : milling;
-
-      for (let i = 0; i <= 24; i++) {
-        const sn = row[`Tool_${i}SN`];
-        const used = Number(row[`Tool_${i}C`]);
-        const max = Number(row[`Tool_${i}M`]);
-        if (!sn || !max || max <= 0) continue;
-        const remaining = Math.max(0, max - used);
-        const remainingPct = max > 0 ? remaining / max : 0;
-        const status = classifyTool(remainingPct, 'tool_life');
-        bucket.push({
-          device,
-          side,
-          slot: i,
-          serialNumber: String(sn).trim(),
-          used, max, remaining, remainingPct,
-          status,
-          ordnumb: (row.Ordnumb || '').trim(),
-          time: row.Time,
-        });
-      }
-    }
-
-    // Polish pads (CCP)
-    const polish = [];
-    try {
-      const [ccpRows] = await connection.query(`
-        SELECT Device, padType, Side, SN, Value, OldSN, OldValue
-        FROM production_tool_usage_current_ccp
-      `);
-      // padType max values — treat "Value" as remaining life (0..100)% or absolute.
-      // SOM CCP stores pad "Value" as remaining life percent (0–100).
-      for (const r of ccpRows) {
-        const val = Number(r.Value);
-        if (!r.SN || isNaN(val)) continue;
-        const remainingPct = val > 1 ? val / 100 : val; // normalize
-        const status = classifyTool(remainingPct, 'polish_liquid');
-        polish.push({
-          device: (r.Device || '').trim(),
-          side: r.Side,
-          padType: r.padType,
-          serialNumber: String(r.SN).trim(),
-          remainingPct,
-          valueRaw: val,
-          status,
-        });
-      }
-    } catch (e) {
-      // Table may not exist on all installs
-    }
-
-    tools = { milling, cutting, polish, edger: [], lastUpdated: nowIso };
-
-    // Build active alerts list + fire Slack for new criticals (rate-limited)
-    checkToolAlerts();
+    checkMachineAlerts();
     return true;
   } catch (e) {
-    console.warn('[SOM] pollTools error:', e.message);
+    console.warn('[SOM] pollMachineSummaries error:', e.message);
     return false;
   }
 }
 
-function toolKey(t) {
-  return `${t.device}|${t.side ?? ''}|${t.slot ?? t.padType ?? ''}|${t.serialNumber}`;
-}
-
-function checkToolAlerts() {
+// Build one alert per machine whose rolled-up status is not healthy.
+// Slack is rate-limited per `${device}:${category}` on a 24h window.
+function checkMachineAlerts() {
   const now = Date.now();
   const rateMs = (ALERT_THRESHOLDS.slack_rate_limit_hours || 24) * 3600 * 1000;
+  const nowIso = new Date().toISOString();
   const newAlerts = [];
-  const all = [
-    ...tools.milling.map(t => ({ ...t, kind: 'milling' })),
-    ...tools.cutting.map(t => ({ ...t, kind: 'cutting' })),
-    ...tools.polish.map(t => ({ ...t, kind: 'polish' })),
-  ];
-  for (const t of all) {
-    if (t.status === 'ok') continue;
-    const key = toolKey(t);
+
+  for (const m of machineSummaries) {
+    const status = rollupMachineStatus(m.worst_tool_status, m.worst_polish_status);
+    if (status === 'healthy' || status === 'offline') continue;
+
+    const key = `${m.device}:${m.category}`;
     newAlerts.push({
       key,
-      kind: t.kind,
-      device: t.device,
-      side: t.side,
-      slot: t.slot ?? t.padType,
-      serialNumber: t.serialNumber,
-      remainingPct: t.remainingPct,
-      status: t.status, // heads_up | warning | critical
-      timestamp: new Date().toISOString(),
+      device: m.device,
+      category: m.category,
+      status, // 'critical' | 'warning'
+      worstToolRemainingPct: m.worst_tool_remaining_pct,
+      worstPolishPct: m.worst_polish_pct,
+      timestamp: nowIso,
     });
 
-    // Slack only on critical, rate-limited per tool
-    if (t.status === 'critical') {
-      const last = lastSlackAlertByTool[key] || 0;
+    // Slack only on critical, rate-limited per machine+category
+    if (status === 'critical') {
+      const last = lastSlackAlertByMachine[key] || 0;
       if (now - last > rateMs) {
-        lastSlackAlertByTool[key] = now;
-        const pct = (t.remainingPct * 100).toFixed(1);
-        const label = t.kind === 'polish' ? 'Polish pad' : 'Tool';
-        const slot = t.slot != null ? ` slot ${t.slot}` : (t.padType ? ` ${t.padType}` : '');
+        lastSlackAlertByMachine[key] = now;
+        const parts = [];
+        if (m.worst_tool_status === 'critical' && m.worst_tool_remaining_pct != null) {
+          parts.push(`worst tool at ${(m.worst_tool_remaining_pct * 100).toFixed(1)}%`);
+        }
+        if (m.worst_polish_status === 'critical' && m.worst_polish_pct != null) {
+          parts.push(`worst polish pad at ${(m.worst_polish_pct * 100).toFixed(1)}%`);
+        }
+        const detail = parts.length ? ` — ${parts.join(', ')}` : '';
         postSlackAlert(
-          `:rotating_light: *${label} critical* — ${t.device}${slot} (SN ${t.serialNumber}) at *${pct}%* remaining`
+          `:rotating_light: *${m.device} critical* (${m.category})${detail}`
         ).catch(() => {});
       }
     }
   }
+
+  // Sort: critical first, then warning; within a bucket lowest remaining first
+  const order = { critical: 0, warning: 1 };
+  newAlerts.sort((a, b) => {
+    const s = (order[a.status] ?? 9) - (order[b.status] ?? 9);
+    if (s !== 0) return s;
+    const aPct = Math.min(a.worstToolRemainingPct ?? 1, a.worstPolishPct ?? 1);
+    const bPct = Math.min(b.worstToolRemainingPct ?? 1, b.worstPolishPct ?? 1);
+    return aPct - bPct;
+  });
+
   toolAlerts = newAlerts;
+}
+
+// Map SQL category → HID-spec machine type. SQL already emits HID-friendly values
+// for CP/HXS/HSQ/D2H/CCL/MIL/CUT; blocking/surfacing/edging/other fall through.
+function hidMachineType(sqlCategory) {
+  const allowed = new Set([
+    'polishing', 'cutting', 'milling', 'blocking', 'surfacing',
+    'edging', 'coating', 'generator', 'deblocking', 'other'
+  ]);
+  return allowed.has(sqlCategory) ? sqlCategory : 'other';
 }
 
 async function poll() {
@@ -698,8 +759,8 @@ async function poll() {
       return (severityOrder[a.severity] || 4) - (severityOrder[b.severity] || 4);
     });
 
-    // Tool life / polish liquid (runs on same poll cadence)
-    await pollTools();
+    // Per-machine aggregated summary (single query — replaces pollTools)
+    await pollMachineSummaries();
 
     lastSuccessfulPoll = lastPoll;
     isLive = true;
@@ -708,7 +769,7 @@ async function poll() {
     // Persist to disk
     saveToDisk();
 
-    console.log(`[SOM] Poll #${pollCount} - LIVE: ${devices.length} devices, ${conveyors.length} conveyors, ${orders.todayTotal} jobs today, ${alerts.length} alerts, ${toolAlerts.length} tool alerts`);
+    console.log(`[SOM] Poll #${pollCount} - LIVE: ${devices.length} devices, ${conveyors.length} conveyors, ${orders.todayTotal} jobs today, ${alerts.length} alerts, ${machineSummaries.length} machine summaries, ${toolAlerts.length} machine alerts`);
     return true;
 
   } catch (err) {
@@ -937,62 +998,171 @@ module.exports = {
   },
 
   /**
-   * Get tool life + polish pad snapshot for Maintenance → Machines section
+   * Machine summary for HID — one entry per machine with rolled-up status dot.
+   * Matches the per-machine aggregation contract (HID spec).
    */
-  getTools() {
+  getMachineSummary() {
+    const machines = machineSummaries.map(m => {
+      const type = hidMachineType(m.category);
+      const status = rollupMachineStatus(m.worst_tool_status, m.worst_polish_status);
+      const worstTool = m.worst_tool_status
+        ? { pct: m.worst_tool_remaining_pct, state: m.worst_tool_status }
+        : null;
+      const polishPad = m.worst_polish_status
+        ? { pct: m.worst_polish_pct, state: m.worst_polish_status }
+        : null;
+      return {
+        id: m.device,
+        name: m.device,
+        type,
+        status,
+        worstTool,
+        polishPad,
+        errorsToday: m.errors_today,
+        throughputToday: m.throughput_today,
+        throughputUnit: 'lenses',
+        lastUpdate: m.last_update ? new Date(m.last_update).toISOString() : null,
+      };
+    });
+
     return {
-      ...tools,
-      thresholds: ALERT_THRESHOLDS,
+      updatedAt: machineSummariesLastUpdated || new Date().toISOString(),
       isLive,
-      lastPoll,
-      lastSuccessfulPoll,
-      connectionError,
-      summary: {
-        milling: tools.milling.length,
-        cutting: tools.cutting.length,
-        polish: tools.polish.length,
-        critical: toolAlerts.filter(a => a.status === 'critical').length,
-        warning: toolAlerts.filter(a => a.status === 'warning').length,
-        headsUp: toolAlerts.filter(a => a.status === 'heads_up').length,
-      },
+      machines,
     };
   },
 
   /**
-   * Get active tool-life threshold alerts (Attention Rail feed)
+   * Per-machine detail for HID drawer — lazy, only queried on drawer open.
+   * Not on hot polling path.
+   */
+  async getMachineDetail(machineId) {
+    if (!connection) {
+      return { machineId, error: 'offline', isLive: false };
+    }
+    const id = String(machineId || '').trim();
+    if (!id) return { error: 'machineId required' };
+
+    const [latestRows] = await connection.query(
+      `SELECT t.* FROM production_tool_usage_current t
+       JOIN (SELECT Device, Side, MAX(Time) mx FROM production_tool_usage_current
+             WHERE Device = ? GROUP BY Device, Side) m
+         ON m.Device=t.Device AND m.Side=t.Side AND m.mx=t.Time`,
+      [id]
+    );
+
+    const tools = [];
+    let lastUpdate = null;
+    for (const row of latestRows) {
+      if (row.Time && (!lastUpdate || row.Time > lastUpdate)) lastUpdate = row.Time;
+      for (let i = 0; i <= 24; i++) {
+        const sn = row[`Tool_${i}SN`];
+        const used = Number(row[`Tool_${i}C`]);
+        const max = Number(row[`Tool_${i}M`]);
+        if (!sn || !max || max <= 0) continue;
+        const remaining = Math.max(0, max - used);
+        const remainingPct = remaining / max;
+        let status;
+        if (remainingPct <= 0.05) status = 'critical';
+        else if (remainingPct <= 0.10) status = 'warning';
+        else if (remainingPct <= 0.25) status = 'heads_up';
+        else status = 'ok';
+        tools.push({
+          slot: i,
+          side: row.Side,
+          serialNumber: String(sn).trim(),
+          used, max, remaining,
+          remainingPct: Number(remainingPct.toFixed(4)),
+          status,
+        });
+      }
+    }
+
+    // Polish pads — compute remainingPct using the same pad-type max map as the SQL
+    const polishPads = [];
+    try {
+      const [padRows] = await connection.query(
+        `SELECT Device, padType, Side, SN, Value,
+           GREATEST(0, (CASE padType WHEN 'B_0' THEN 1200 WHEN 'S+_0' THEN 8000 ELSE 5000 END - Value))
+             / (CASE padType WHEN 'B_0' THEN 1200 WHEN 'S+_0' THEN 8000 ELSE 5000 END) rem_pct
+         FROM production_tool_usage_current_ccp
+         WHERE Device = ?`,
+        [id]
+      );
+      for (const p of padRows) {
+        const pct = p.rem_pct != null ? Number(p.rem_pct) : null;
+        let status = null;
+        if (pct != null) {
+          if (pct <= 0.05) status = 'critical';
+          else if (pct <= 0.10) status = 'warning';
+          else if (pct <= 0.25) status = 'heads_up';
+          else status = 'ok';
+        }
+        polishPads.push({
+          side: p.Side,
+          padType: p.padType,
+          serialNumber: p.SN ? String(p.SN).trim() : null,
+          remainingPct: pct != null ? Number(pct.toFixed(4)) : null,
+          status,
+        });
+      }
+    } catch (_) {
+      // Table may not exist on all installs
+    }
+
+    // 24 hourly throughput buckets for today from view_som_oee
+    let throughput24h = [];
+    try {
+      const [oeeRows] = await connection.query(
+        `SELECT HOUR(Time) hr, SUM(Lenses) lenses
+         FROM view_som_oee
+         WHERE TimeUnit='H' AND DATE(Time)=CURDATE() AND DeviceID = ?
+         GROUP BY HOUR(Time)`,
+        [id]
+      );
+      const byHour = new Map(oeeRows.map(r => [Number(r.hr), Number(r.lenses) || 0]));
+      throughput24h = Array.from({ length: 24 }, (_, h) => ({
+        hour: h,
+        lenses: byHour.get(h) || 0,
+      }));
+    } catch (e) {
+      throughput24h = [];
+    }
+
+    return {
+      machineId: id,
+      tools,
+      polishPads,
+      throughput24h,
+      lastUpdate: lastUpdate ? new Date(lastUpdate).toISOString() : null,
+    };
+  },
+
+  /**
+   * Active per-machine alerts (one row per machine with status !== healthy).
    */
   getToolAlerts() {
-    // Sort: critical first, then warning, then heads_up; within a bucket lowest remaining first
-    const order = { critical: 0, warning: 1, heads_up: 2 };
-    const sorted = [...toolAlerts].sort((a, b) =>
-      (order[a.status] - order[b.status]) || (a.remainingPct - b.remainingPct)
-    );
     return {
-      alerts: sorted,
+      alerts: toolAlerts,
       isLive,
       lastPoll,
       thresholds: ALERT_THRESHOLDS,
       summary: {
-        total: sorted.length,
-        critical: sorted.filter(a => a.status === 'critical').length,
-        warning: sorted.filter(a => a.status === 'warning').length,
-        headsUp: sorted.filter(a => a.status === 'heads_up').length,
+        total: toolAlerts.length,
+        critical: toolAlerts.filter(a => a.status === 'critical').length,
+        warning: toolAlerts.filter(a => a.status === 'warning').length,
       },
     };
   },
 
   /**
-   * Reload alert thresholds from disk (hot-reload without restarting server)
+   * Reload alert thresholds from disk (hot-reload without restarting server).
+   * Thresholds are currently embedded in the aggregated SQL; reloading re-evaluates
+   * the in-memory alert rollup against the latest snapshot.
    */
   reloadThresholds() {
     loadThresholds();
-    // Re-evaluate current snapshot against new thresholds
-    for (const bucket of ['milling', 'cutting', 'polish']) {
-      for (const t of tools[bucket] || []) {
-        t.status = classifyTool(t.remainingPct, bucket === 'polish' ? 'polish_liquid' : 'tool_life');
-      }
-    }
-    checkToolAlerts();
+    checkMachineAlerts();
     return ALERT_THRESHOLDS;
   },
 
