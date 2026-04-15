@@ -4111,7 +4111,10 @@ Respond with a structured batching plan in this format:
     `).all(days);
     const total = rows.reduce((s, r) => s + r.count, 0);
     const avg = rows.length > 0 ? Math.round(total / rows.length) : 0;
-    return json(res, { days: rows, total, avg, dayCount: rows.length, source: 'dvi_jobs+shipped union by entry_date' });
+    // Lab-local today (America/Los_Angeles) — don't trust UTC after 5 PM PT
+    const today = labDateFromMs(Date.now());
+    const todayCount = rows.find(r => r.date === today)?.count || 0;
+    return json(res, { days: rows, total, avg, dayCount: rows.length, today, todayCount, source: 'dvi_jobs+shipped union by entry_date' });
   }
 
   // Legacy incoming endpoint kept for debugging — uses XML files

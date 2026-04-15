@@ -5437,8 +5437,9 @@ function IncomingTab({ ovenServerUrl, settings }) {
 
   const daysList = data?.days || [];
   const maxCount = Math.max(1, ...daysList.map(d => d.count));
-  const today = new Date().toISOString().slice(0, 10);
-  const todayCount = daysList.find(d => d.date === today)?.count || 0;
+  // Server returns lab-local today (America/Los_Angeles) — don't derive from UTC
+  const today = data?.today || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+  const todayCount = (data?.todayCount ?? daysList.find(d => d.date === today)?.count) || 0;
 
   // Weekday average (exclude weekends from baseline calc)
   const weekdayDays = daysList.filter(d => {
@@ -11444,8 +11445,8 @@ function LabAssistantV2(){
         }
       }catch(e){ console.warn("DVI fetch:",e.message); }
       try{
-        const incRes=await fetch(`http://${window.location.hostname}:3002/api/dvi/incoming?days=1`);
-        if(incRes.ok){const incData=await incRes.json();if(incData.days&&incData.days.length>0)setIncomingToday(incData.days[0].count);}
+        const incRes=await fetch(`http://${window.location.hostname}:3002/api/dvi/incoming?days=2`);
+        if(incRes.ok){const incData=await incRes.json();setIncomingToday(incData.todayCount||0);}
       }catch{}
     };
     fetchDvi();
