@@ -169,6 +169,40 @@ body.dense .hero-val{font-size:clamp(2rem,4vw,3.5rem);}
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-track{background:var(--bg);}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+/* 1080p TV COMPACTION
+   At 1920x1080: root font = calc(0.5vw + 0.5vh + 8px) = 23px, which pushes
+   the hero clamp to its 92px ceiling and blows the vertical budget. The main
+   scroll container (overflow-y:auto) hides that overflow from the shell's
+   dense sentinel, so content silently gets clipped below the fold on the TV.
+   These overrides fit the full stack within ~880px of vertical headroom
+   (1080 - header 56 - tabs 43 - safe-y 32 - main-pad 48 = 901px) while
+   keeping the overscan-safe 48px top pad on .main. Preserves the hero as
+   the dominant element — hero-val still ~64px, ~2.7x larger than kpi-val.
+   Does NOT affect tablets (they sit at root=14-18px and fit without this). */
+@media (min-width: 1600px) and (max-height: 1100px){
+  .main{ padding:48px 16px 12px !important; gap:10px !important; }
+  .hero-kpi{ padding:14px 24px !important; }
+  .hero-val{ font-size:clamp(2rem, 3.2vw, 3.25rem) !important; line-height:1.05 !important; }
+  .hero-lbl{ margin-top:4px !important; }
+  .kpi{ padding:10px 14px !important; }
+  .kpi-val{ font-size:clamp(1.5rem, 1.6vw, 1.75rem) !important; }
+  .kpi-sub{ display:none; }  /* secondary label — drop at 1080p to save ~14px */
+  .progress-wrap{ padding:10px 14px !important; }
+  .progress-header{ margin-bottom:6px !important; }
+  .progress-bar-bg{ height:14px !important; }
+  .two-col{ gap:10px !important; }
+  .card{ padding:12px !important; }
+  .card-title{ margin-bottom:8px !important; }
+  .pipe-row{ padding:8px 12px !important; margin-bottom:4px !important; }
+  .pipe-icon{ width:30px; height:30px; font-size:15px; }
+  .pipe-count{ font-size:18px !important; }
+}
+/* Dense-mode (triggered by sentinel) — tighten further if content still spills */
+body.dense .hero-val{ font-size:clamp(1.75rem, 2.8vw, 2.75rem) !important; }
+body.dense .main{ gap:8px !important; padding-top:44px !important; }
+body.dense .kpi-val{ font-size:1.4rem !important; }
+body.dense .progress-bar-bg{ height:12px !important; }
 </style>
 </head>
 <body>

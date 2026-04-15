@@ -5,9 +5,14 @@
   //    Tightens spacing and hides secondary labels in tv-shell.css.
   let resizeTimer;
   function checkOverflow() {
-    const overflowing = document.documentElement.scrollHeight > window.innerHeight + 4
+    // Check documentElement AND the .main scroll container — main has
+    // overflow-y:auto, which hides its internal overflow from documentElement.
+    // Without this, content clipped inside main never triggers dense mode.
+    const docOverflow = document.documentElement.scrollHeight > window.innerHeight + 4
                      || document.documentElement.scrollWidth  > window.innerWidth + 4;
-    document.body.classList.toggle('dense', overflowing);
+    const main = document.querySelector('body > .main');
+    const mainOverflow = !!main && (main.scrollHeight > main.clientHeight + 4);
+    document.body.classList.toggle('dense', docOverflow || mainOverflow);
   }
   // Debounced check on resize and content change
   const ro = new ResizeObserver(() => {
