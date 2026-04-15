@@ -536,20 +536,21 @@ async function fetchOpenPOs() {
     const CLASS_MAP = { '1': 'Frames', '2': 'Frames', '3': 'Lenses', '4': 'Lenses', '5': 'Tops', '6': 'Tops', '7': 'Tops', '9': 'Tops' };
     const STATUS_MAP = { 'A': 'Pending Approval', 'B': 'Pending Receipt', 'C': 'Partially Received', 'D': 'Pending Bill', 'E': 'Partially Approved', 'F': 'Pending Billing', 'G': 'Fully Billed', 'H': 'Closed' };
 
-    // Query Item Receipts linked to these POs — shows shipment splits
+    // Query Item Receipts linked to these POs — shows shipment splits.
+    // NOTE: NetSuite's `createdfrom` field lives on transactionLine, not transaction
+    // (confirmed 2026-04-15 via probe — t.createdFrom returns "Field not found").
     const receiptsByPO = {};
     try {
       const poIds = headers.map(h => h.id);
-      // Item Receipts reference PO via createdFrom
       const receipts = await suiteql(`
         SELECT t.id, t.tranId AS receiptNumber, t.tranDate AS receiptDate,
-               t.createdFrom AS poId, t.status,
+               tl.createdfrom AS poId, t.status,
                SUM(tl.quantity) AS totalQty
         FROM transaction t
         JOIN transactionLine tl ON tl.transaction = t.id
-        WHERE t.type = 'ItemRcpt' AND t.createdFrom IN (${poIds.join(',') || '0'})
+        WHERE t.type = 'ItemRcpt' AND tl.createdfrom IN (${poIds.join(',') || '0'})
           AND tl.quantity > 0
-        GROUP BY t.id, t.tranId, t.tranDate, t.createdFrom, t.status
+        GROUP BY t.id, t.tranId, t.tranDate, tl.createdfrom, t.status
         ORDER BY t.tranDate
       `);
       for (const r of receipts) {
