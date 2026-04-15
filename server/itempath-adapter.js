@@ -1418,7 +1418,7 @@ function start() {
   poll();
   setInterval(poll, CONFIG.pollInterval);
 
-  // Pick sync: 30s delay then every 5 minutes (separate from poll to control API load)
+  // Pick sync: 30s delay then every 30 minutes (separate from poll to control API load)
   setTimeout(() => {
     pickSync();
     setInterval(pickSync, 30 * 60 * 1000);
@@ -1434,7 +1434,7 @@ function start() {
   // ItemPath polls every 60s, so 90 min stale = ~90 missed polls
   setInterval(() => freshnessCheck(), 5 * 60 * 1000);
 
-  console.log('[ItemPath] Pick sync: every 5 min (30s delay). Reconciliation: every 30 min (2min delay). Freshness watchdog: every 5 min.');
+  console.log('[ItemPath] Pick sync: every 30 min (30s delay). Reconciliation: every 30 min (2min delay). Freshness watchdog: every 5 min.');
 }
 
 // Freshness watchdog — alert if data is stale
