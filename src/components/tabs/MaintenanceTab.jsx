@@ -70,7 +70,11 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
   );
 }
 
-// ─── Machines Section: tool life, polish pads, attention rail ──────────────
+// ─── Machines Section: machine health strip + detail drawer ───────────────
+// Rebuild 2026-04-14: teardown of AttentionRail / ToolLifeGrid / PolishPadBars /
+// MachinesSection. Replaced with MachineHealthStrip (fed by
+// /api/som/machines/summary) and MachineDetailDrawer (fed by
+// /api/som/machines/:id/detail). Drawer opens on row click.
 function statusToColor(status){
   if(status==='critical')return T.red;
   if(status==='warning')return T.amber;
@@ -81,222 +85,272 @@ function statusLabel(s){
   return s==='critical'?'CRITICAL':s==='warning'?'WARNING':s==='heads_up'?'HEADS-UP':'OK';
 }
 
-function ToolLifeBar({remainingPct,status}){
-  const pct=Math.max(0,Math.min(1,remainingPct));
-  const color=statusToColor(status);
+// Backend worstTool.pct can be NEGATIVE when a tool ran past max-life
+// (e.g. HXS001: -0.3537). Clamp for display; keep raw in state for drawer.
+function clampPctForDisplay(pct){
+  if(pct==null||Number.isNaN(pct))return 0;
+  return Math.max(0,Math.min(1,pct));
+}
+
+function LifeBar({pct,state,height=8}){
+  const display=clampPctForDisplay(pct);
+  const color=statusToColor(state);
   return (
-    <div style={{position:'relative',height:8,background:`${T.border}40`,borderRadius:4,overflow:'hidden'}}>
-      <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${pct*100}%`,background:color,transition:'width .4s, background .4s'}}/>
+    <div style={{position:'relative',height,background:`${T.border}40`,borderRadius:4,overflow:'hidden'}}>
+      <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${display*100}%`,background:color,transition:'width .4s, background .4s'}}/>
     </div>
   );
 }
 
-function AttentionRail({alerts,summary}){
-  if(!alerts||alerts.length===0){
-    return (
-      <Card style={{padding:'14px 18px',display:'flex',alignItems:'center',gap:12}}>
-        <span style={{width:10,height:10,borderRadius:'50%',background:T.green}}/>
-        <div style={{fontSize:13,color:T.text,fontWeight:700}}>All tools & pads within thresholds</div>
-        <div style={{marginLeft:'auto',fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>NO ACTIVE ALERTS</div>
-      </Card>
-    );
-  }
-  const top=alerts.slice(0,6);
-  return (
-    <Card style={{padding:'12px 14px'}}>
-      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
-        <div style={{fontSize:11,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>ATTENTION RAIL</div>
-        {summary.critical>0&&<Pill color={T.red}>{summary.critical} critical</Pill>}
-        {summary.warning>0&&<Pill color={T.amber}>{summary.warning} warning</Pill>}
-        {summary.headsUp>0&&<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{summary.headsUp} heads-up</span>}
-        <div style={{marginLeft:'auto',fontSize:10,color:T.textDim,fontFamily:mono}}>{alerts.length} total</div>
-      </div>
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:8}}>
-        {top.map(a=>{
-          const color=statusToColor(a.status);
-          return (
-            <div key={a.key} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:`${color}12`,border:`1px solid ${color}40`,borderRadius:6}}>
-              <div style={{width:6,height:28,background:color,borderRadius:3}}/>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontSize:12,fontWeight:700,color:T.text,fontFamily:mono,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                  {a.device}{a.slot!=null?` · slot ${a.slot}`:''}
-                </div>
-                <div style={{fontSize:10,color:T.textDim,fontFamily:mono,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                  SN {a.serialNumber} · {a.kind}
-                </div>
-              </div>
-              <div style={{textAlign:'right'}}>
-                <div style={{fontSize:16,fontWeight:800,color,fontFamily:mono,lineHeight:1}}>{(a.remainingPct*100).toFixed(0)}%</div>
-                <div style={{fontSize:9,color,fontFamily:mono,letterSpacing:1}}>{statusLabel(a.status)}</div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      {alerts.length>top.length&&(
-        <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginTop:8,textAlign:'right'}}>+{alerts.length-top.length} more — see full grid below</div>
-      )}
-    </Card>
-  );
-}
-
-function ToolLifeGrid({title,items,emptyLabel}){
-  if(!items||items.length===0){
+// ─── MachineHealthStrip ───────────────────────────────────────────────────
+// One row per machine. Columns: status dot · id · type pill · worst tool bar
+// · polish pad bar · errors today · throughput today · last update.
+// Sparkline column intentionally omitted (no spark24h in summary payload —
+// don't fan out extra requests from the hot path).
+function MachineHealthStrip({machines,onSelect,selectedId}){
+  if(!machines||machines.length===0){
     return (
       <Card>
-        <SectionHeader>{title}</SectionHeader>
-        <div style={{padding:'16px 4px',fontSize:12,color:T.textDim,fontFamily:mono}}>{emptyLabel||'No data'}</div>
+        <SectionHeader>Machines</SectionHeader>
+        <div style={{padding:'16px 4px',fontSize:12,color:T.textDim,fontFamily:mono}}>No machines reporting</div>
       </Card>
     );
   }
-  // Sort: lowest remaining first so operators see the urgent ones on top
-  const sorted=[...items].sort((a,b)=>a.remainingPct-b.remainingPct);
-  // Group by device
-  const byDevice={};
-  sorted.forEach(t=>{
-    if(!byDevice[t.device])byDevice[t.device]=[];
-    byDevice[t.device].push(t);
+  // Sort: critical → warning → heads_up → healthy; then by id
+  const order={critical:0,warning:1,heads_up:2,healthy:3,ok:3};
+  const sorted=[...machines].sort((a,b)=>{
+    const d=(order[a.status]??9)-(order[b.status]??9);
+    return d!==0?d:a.id.localeCompare(b.id);
   });
+  const typeColor=t=>t==='polishing'?T.cyan:t==='generator'?T.purple:T.blue;
   return (
-    <Card>
-      <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{items.length} tools</span>}>{title}</SectionHeader>
-      <div style={{display:'flex',flexDirection:'column',gap:14,maxHeight:440,overflowY:'auto',paddingRight:4}}>
-        {Object.entries(byDevice).map(([device,tools])=>(
-          <div key={device}>
-            <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:6,borderBottom:`1px solid ${T.border}40`,paddingBottom:4}}>
-              {device} <span style={{color:T.textDim,fontWeight:400}}>· {tools.length} tool{tools.length!==1?'s':''}</span>
+    <Card style={{padding:'10px 12px'}}>
+      {/* Header row */}
+      <div style={{display:'grid',gridTemplateColumns:'24px 90px 90px 1fr 1fr 70px 90px 80px 20px',gap:10,alignItems:'center',padding:'6px 8px',borderBottom:`1px solid ${T.border}40`,fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>
+        <span></span>
+        <span>MACHINE</span>
+        <span>TYPE</span>
+        <span>WORST TOOL</span>
+        <span>POLISH PAD</span>
+        <span style={{textAlign:'right'}}>ERRORS</span>
+        <span style={{textAlign:'right'}}>THROUGHPUT</span>
+        <span style={{textAlign:'right'}}>UPDATED</span>
+        <span></span>
+      </div>
+      {sorted.map(m=>{
+        const statusC=statusToColor(m.status);
+        const worstPct=m.worstTool?.pct;
+        const worstState=m.worstTool?.state||'ok';
+        const padPct=m.polishPad?.pct;
+        const padState=m.polishPad?.state||'ok';
+        const worstDisplay=(clampPctForDisplay(worstPct)*100).toFixed(0);
+        const padDisplay=m.polishPad==null?'—':`${(clampPctForDisplay(padPct)*100).toFixed(0)}%`;
+        const upd=m.lastUpdate?new Date(m.lastUpdate).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
+        const isSelected=selectedId===m.id;
+        return (
+          <div key={m.id}
+            onClick={()=>onSelect&&onSelect(m.id)}
+            style={{display:'grid',gridTemplateColumns:'24px 90px 90px 1fr 1fr 70px 90px 80px 20px',gap:10,alignItems:'center',padding:'10px 8px',cursor:'pointer',borderBottom:`1px solid ${T.border}22`,background:isSelected?`${T.blue}14`:'transparent',transition:'background .15s'}}
+            onMouseEnter={e=>{if(!isSelected)e.currentTarget.style.background=`${T.border}18`;}}
+            onMouseLeave={e=>{if(!isSelected)e.currentTarget.style.background='transparent';}}>
+            <span style={{width:10,height:10,borderRadius:'50%',background:statusC,boxShadow:`0 0 8px ${statusC}88`}}/>
+            <span style={{fontSize:13,fontWeight:800,color:T.text,fontFamily:mono}}>{m.id}</span>
+            <span style={{fontSize:10,fontFamily:mono,color:typeColor(m.type),letterSpacing:1,padding:'2px 6px',border:`1px solid ${typeColor(m.type)}40`,borderRadius:4,textAlign:'center',background:`${typeColor(m.type)}12`,justifySelf:'start'}}>
+              {(m.type||'').toUpperCase()}
+            </span>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <div style={{flex:1}}><LifeBar pct={worstPct} state={worstState}/></div>
+              <span style={{fontSize:11,fontWeight:700,color:statusToColor(worstState),fontFamily:mono,minWidth:34,textAlign:'right'}}>{worstDisplay}%</span>
             </div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
-              {tools.map(t=>{
-                const color=statusToColor(t.status);
-                const pct=(t.remainingPct*100).toFixed(0);
-                return (
-                  <div key={`${device}-${t.side}-${t.slot}-${t.serialNumber}`} style={{padding:'8px 10px',background:T.card,border:`1px solid ${color}30`,borderRadius:6}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
-                      <div style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono}}>
-                        Slot {t.slot}{t.side?` · ${t.side}`:''}
-                      </div>
-                      <div style={{fontSize:14,fontWeight:800,color,fontFamily:mono}}>{pct}%</div>
-                    </div>
-                    <ToolLifeBar remainingPct={t.remainingPct} status={t.status}/>
-                    <div style={{display:'flex',justifyContent:'space-between',marginTop:4,fontSize:9,color:T.textDim,fontFamily:mono}}>
-                      <span>SN {t.serialNumber}</span>
-                      <span>{t.used.toLocaleString()}/{t.max.toLocaleString()}</span>
-                    </div>
-                  </div>
-                );
-              })}
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              {m.polishPad==null?(
+                <span style={{fontSize:10,color:T.textDim,fontFamily:mono,fontStyle:'italic'}}>n/a</span>
+              ):(
+                <>
+                  <div style={{flex:1}}><LifeBar pct={padPct} state={padState}/></div>
+                  <span style={{fontSize:11,fontWeight:700,color:statusToColor(padState),fontFamily:mono,minWidth:34,textAlign:'right'}}>{padDisplay}</span>
+                </>
+              )}
             </div>
+            <span style={{fontSize:12,fontWeight:700,fontFamily:mono,color:m.errorsToday>0?T.red:T.textDim,textAlign:'right'}}>{m.errorsToday||0}</span>
+            <span style={{fontSize:12,fontWeight:700,fontFamily:mono,color:T.text,textAlign:'right'}}>
+              {m.throughputToday||0}<span style={{fontSize:9,color:T.textDim,marginLeft:3}}>{m.throughputUnit||''}</span>
+            </span>
+            <span style={{fontSize:10,fontFamily:mono,color:T.textDim,textAlign:'right'}}>{upd}</span>
+            <span style={{fontSize:14,color:T.textDim,textAlign:'right'}}>›</span>
           </div>
-        ))}
-      </div>
+        );
+      })}
     </Card>
   );
 }
 
-function PolishPadBars({items}){
-  if(!items||items.length===0){
-    return (
-      <Card>
-        <SectionHeader>Polish Pad Liquid Levels</SectionHeader>
-        <div style={{padding:'16px 4px',fontSize:12,color:T.textDim,fontFamily:mono}}>No polish pad data available</div>
-      </Card>
-    );
-  }
-  const sorted=[...items].sort((a,b)=>a.remainingPct-b.remainingPct);
+// ─── MachineDetailDrawer ──────────────────────────────────────────────────
+// Right-side drawer. Fetches /api/som/machines/:id/detail on open.
+function MachineDetailDrawer({machineId,summary,ovenServerUrl,onClose}){
+  const [detail,setDetail]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+  useEffect(()=>{
+    if(!machineId||!ovenServerUrl)return;
+    let cancelled=false;
+    setLoading(true);setErr(null);setDetail(null);
+    const go=async()=>{
+      try{
+        const r=await fetch(`${ovenServerUrl}/api/som/machines/${encodeURIComponent(machineId)}/detail`,{signal:AbortSignal.timeout(7000)});
+        if(!r.ok)throw new Error(`HTTP ${r.status}`);
+        const j=await r.json();
+        if(!cancelled){setDetail(j);setLoading(false);}
+      }catch(e){
+        if(!cancelled){setErr(e.message||'failed to load');setLoading(false);}
+      }
+    };
+    go();
+    const iv=setInterval(go,30000);
+    return()=>{cancelled=true;clearInterval(iv);};
+  },[machineId,ovenServerUrl]);
+
+  if(!machineId)return null;
+  const tools=detail?.tools||[];
+  const pads=detail?.polishPads||[];
+  const tp=detail?.throughput24h||[];
+  const maxTp=Math.max(1,...tp.map(x=>x.lenses||0));
+  const typeColor=t=>t==='polishing'?T.cyan:t==='generator'?T.purple:T.blue;
+  const statusC=statusToColor(summary?.status);
+  const updated=detail?.lastUpdate?new Date(detail.lastUpdate).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
   return (
-    <Card>
-      <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{items.length} pads</span>}>Polish Pad Liquid Levels</SectionHeader>
-      <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:440,overflowY:'auto',paddingRight:4}}>
-        {sorted.map(p=>{
-          const color=statusToColor(p.status);
-          const pct=(p.remainingPct*100).toFixed(0);
-          return (
-            <div key={`${p.device}-${p.side}-${p.serialNumber}`} style={{display:'grid',gridTemplateColumns:'180px 1fr 60px 80px',gap:10,alignItems:'center',padding:'6px 8px',borderBottom:`1px solid ${T.border}22`}}>
-              <div style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                {p.device}{p.side?` · ${p.side}`:''}
-              </div>
-              <ToolLifeBar remainingPct={p.remainingPct} status={p.status}/>
-              <div style={{fontSize:13,fontWeight:800,color,fontFamily:mono,textAlign:'right'}}>{pct}%</div>
-              <div style={{fontSize:9,color:T.textDim,fontFamily:mono,textAlign:'right',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
-                {p.padType||''} SN {p.serialNumber}
-              </div>
+    <div style={{position:'fixed',top:0,right:0,bottom:0,width:520,maxWidth:'100vw',background:T.surface,borderLeft:`1px solid ${T.border}`,zIndex:1000,display:'flex',flexDirection:'column',boxShadow:'-4px 0 24px #00000055'}}>
+      {/* Header */}
+      <div style={{padding:'16px 20px',borderBottom:`1px solid ${T.border}`,display:'flex',alignItems:'center',gap:12}}>
+        <span style={{width:12,height:12,borderRadius:'50%',background:statusC,boxShadow:`0 0 10px ${statusC}`}}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:20,fontWeight:800,color:T.text,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:1}}>{machineId}</div>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginTop:2}}>
+            {summary?.type&&(
+              <span style={{fontSize:10,fontFamily:mono,color:typeColor(summary.type),letterSpacing:1,padding:'2px 6px',border:`1px solid ${typeColor(summary.type)}40`,borderRadius:4,background:`${typeColor(summary.type)}12`}}>{summary.type.toUpperCase()}</span>
+            )}
+            <Pill color={statusC}>{statusLabel(summary?.status)}</Pill>
+            <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>Updated {updated}</span>
+          </div>
+        </div>
+        <button onClick={onClose} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:6,padding:'6px 12px',color:T.textMuted,cursor:'pointer',fontSize:12}}>✕ Close</button>
+      </div>
+
+      <div style={{flex:1,overflowY:'auto',padding:20,display:'flex',flexDirection:'column',gap:18}}>
+        {loading&&<div style={{fontSize:12,color:T.textDim,fontFamily:mono}}>Loading machine detail…</div>}
+        {err&&<div style={{fontSize:12,color:T.red,fontFamily:mono}}>Error: {err}</div>}
+
+        {!loading&&!err&&summary&&(
+          <>
+            {/* Summary KPIs */}
+            <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+              <KPICard label="Errors Today" value={summary.errorsToday||0} sub="count" accent={summary.errorsToday>0?T.red:T.green}/>
+              <KPICard label="Throughput Today" value={summary.throughputToday||0} sub={summary.throughputUnit||''} accent={T.blue}/>
+              <KPICard label="Status" value={statusLabel(summary.status)} sub="rollup" accent={statusC}/>
             </div>
-          );
-        })}
+
+            {/* 24h throughput sparkline (inline) */}
+            <Card>
+              <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{tp.reduce((s,x)=>s+(x.lenses||0),0)} lenses · last 24h</span>}>Throughput · 24h</SectionHeader>
+              {tp.length===0?(
+                <div style={{padding:'10px 4px',fontSize:11,color:T.textDim,fontFamily:mono}}>No throughput data</div>
+              ):(
+                <div style={{display:'flex',alignItems:'flex-end',gap:2,height:72,padding:'8px 0 0'}}>
+                  {tp.map(h=>{
+                    const v=h.lenses||0;
+                    const hPct=v/maxTp;
+                    return (
+                      <div key={h.hour} title={`${String(h.hour).padStart(2,'0')}:00 — ${v} lenses`}
+                        style={{flex:1,height:`${Math.max(2,hPct*100)}%`,background:v>0?T.blue:`${T.border}60`,borderRadius:'2px 2px 0 0',minWidth:4}}/>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+
+            {/* Tools */}
+            <Card>
+              <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{tools.length} tools</span>}>Tool Life</SectionHeader>
+              {tools.length===0?(
+                <div style={{padding:'10px 4px',fontSize:11,color:T.textDim,fontFamily:mono}}>No tools reporting</div>
+              ):(
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {[...tools].sort((a,b)=>a.remainingPct-b.remainingPct).map(t=>{
+                    const pastLife=t.remainingPct<0;
+                    const displayPct=(clampPctForDisplay(t.remainingPct)*100).toFixed(0);
+                    const color=statusToColor(t.status);
+                    return (
+                      <div key={`${t.side}-${t.slot}-${t.serialNumber}`} style={{display:'grid',gridTemplateColumns:'90px 1fr 55px 90px',gap:10,alignItems:'center',padding:'6px 4px',borderBottom:`1px solid ${T.border}22`}}>
+                        <div style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono}}>Slot {t.slot}{t.side?` · ${t.side}`:''}</div>
+                        <LifeBar pct={t.remainingPct} state={t.status}/>
+                        <div style={{fontSize:13,fontWeight:800,color,fontFamily:mono,textAlign:'right'}}>
+                          {displayPct}%
+                          {pastLife&&<div style={{fontSize:8,color:T.red,fontFamily:mono,letterSpacing:1}}>PAST LIFE</div>}
+                        </div>
+                        <div style={{fontSize:9,color:T.textDim,fontFamily:mono,textAlign:'right',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                          SN {t.serialNumber}<br/>{t.used?.toLocaleString()}/{t.max?.toLocaleString()}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+
+            {/* Polish pads (only if present) */}
+            {pads.length>0&&(
+              <Card>
+                <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{pads.length} pads</span>}>Polish Pad Liquid Levels</SectionHeader>
+                <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                  {[...pads].sort((a,b)=>a.remainingPct-b.remainingPct).map(p=>{
+                    const displayPct=(clampPctForDisplay(p.remainingPct)*100).toFixed(0);
+                    const color=statusToColor(p.status);
+                    return (
+                      <div key={`${p.side}-${p.serialNumber}`} style={{display:'grid',gridTemplateColumns:'90px 1fr 55px 90px',gap:10,alignItems:'center',padding:'6px 4px',borderBottom:`1px solid ${T.border}22`}}>
+                        <div style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono}}>{p.padType||'pad'}{p.side?` · ${p.side}`:''}</div>
+                        <LifeBar pct={p.remainingPct} state={p.status}/>
+                        <div style={{fontSize:13,fontWeight:800,color,fontFamily:mono,textAlign:'right'}}>{displayPct}%</div>
+                        <div style={{fontSize:9,color:T.textDim,fontFamily:mono,textAlign:'right',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>SN {p.serialNumber}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </Card>
+            )}
+          </>
+        )}
       </div>
-    </Card>
-  );
-}
-
-function MachinesSection({tools,toolAlerts,ovenServerUrl}){
-  const sum=tools.summary||{};
-  const lastPoll=tools.lastPoll?new Date(tools.lastPoll).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
-  const statusDot=tools.isLive?T.green:T.red;
-  const statusTxt=tools.isLive?'SOM LIVE':'SOM OFFLINE';
-  return (
-    <div style={{display:'flex',flexDirection:'column',gap:16}}>
-      {/* Header strip */}
-      <div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
-        <div>
-          <div style={{fontSize:18,fontWeight:800,color:T.text,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:1}}>MACHINES</div>
-          <div style={{fontSize:11,color:T.textDim}}>Tool life & polish pad liquid levels — Schneider SOM</div>
-        </div>
-        <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
-          <span style={{width:8,height:8,borderRadius:'50%',background:statusDot}}/>
-          <span style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>{statusTxt}</span>
-          <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Updated {lastPoll}</span>
-        </div>
-      </div>
-
-      {/* KPI strip */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10}}>
-        <KPICard label="Cutting Tools" value={sum.cutting||0} sub="tracked" accent={T.cyan}/>
-        <KPICard label="Milling Tools" value={sum.milling||0} sub="tracked" accent={T.purple}/>
-        <KPICard label="Polish Pads" value={sum.polish||0} sub="tracked" accent={T.blue}/>
-        <KPICard label="Critical" value={sum.critical||0} sub="≤ 5% remaining" accent={(sum.critical||0)>0?T.red:T.green}/>
-        <KPICard label="Warning" value={sum.warning||0} sub="≤ 10% remaining" accent={(sum.warning||0)>0?T.amber:T.green}/>
-        <KPICard label="Heads-up" value={sum.headsUp||0} sub="≤ 25% remaining" accent={(sum.headsUp||0)>0?(T.orange||'#F97316'):T.green}/>
-      </div>
-
-      {/* Attention Rail */}
-      <AttentionRail alerts={toolAlerts.alerts||[]} summary={toolAlerts.summary||{}}/>
-
-      {/* Tool Life Grids — cutting + milling side by side, polish pads below */}
-      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(420px,1fr))',gap:16}}>
-        <ToolLifeGrid title="Cutting Tool Life" items={tools.cutting} emptyLabel="No cutting tools reporting"/>
-        <ToolLifeGrid title="Milling Tool Life" items={tools.milling} emptyLabel="No milling tools reporting"/>
-      </div>
-
-      <PolishPadBars items={tools.polish}/>
     </div>
   );
 }
+
+// Legacy AttentionRail / ToolLifeGrid / PolishPadBars / MachinesSection
+// removed 2026-04-14 — replaced by MachineHealthStrip + MachineDetailDrawer.
 
 export default function MaintenanceTab({ovenServerUrl,settings}){
-  const [sub,setSub]=useState("machines");
+  const [sub,setSub]=useState("equipment");
   const [maintenance,setMaintenance]=useState({assets:[],tasks:[],downtime:[],parts:[],stats:{},lastSync:null,status:'pending'});
   const [loading,setLoading]=useState(true);
   const [selectedTask,setSelectedTask]=useState(null);  // For work order detail modal
   const [selectedPart,setSelectedPart]=useState(null);  // For spare part detail panel
 
-  // SOM machine monitoring (tool life + polish pads)
-  const [somTools,setSomTools]=useState({milling:[],cutting:[],polish:[],summary:{},isLive:false,lastPoll:null});
-  const [somToolAlerts,setSomToolAlerts]=useState({alerts:[],summary:{}});
+  // SOM machine monitoring — new summary endpoint (one row per machine)
+  const [machines,setMachines]=useState({machines:[],isLive:false,updatedAt:null});
+  const [selectedMachineId,setSelectedMachineId]=useState(null);
   useEffect(()=>{
     if(!ovenServerUrl)return;
     const go=async()=>{
       try{
-        const [tR,aR]=await Promise.all([
-          fetch(`${ovenServerUrl}/api/som/tools`,{signal:AbortSignal.timeout(5000)}),
-          fetch(`${ovenServerUrl}/api/som/alerts/active`,{signal:AbortSignal.timeout(5000)}),
-        ]);
-        if(tR.ok)setSomTools(await tR.json());
-        if(aR.ok)setSomToolAlerts(await aR.json());
+        const r=await fetch(`${ovenServerUrl}/api/som/machines/summary`,{signal:AbortSignal.timeout(5000)});
+        if(r.ok)setMachines(await r.json());
       }catch(e){/* silent — banner will show offline */}
     };
     go(); const iv=setInterval(go,30000); return()=>clearInterval(iv);
   },[ovenServerUrl]);
+  const selectedMachineSummary=useMemo(
+    ()=>(machines.machines||[]).find(m=>m.id===selectedMachineId)||null,
+    [machines,selectedMachineId]
+  );
 
   // Fetch maintenance data from server
   useEffect(()=>{
@@ -377,7 +431,7 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
   // Top bar navigation
   const topBar=(
     <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:18,flexWrap:"wrap"}}>
-      {[{id:"machines",icon:"🛠",label:"Machines"},{id:"overview",icon:"◉",label:"Overview"},{id:"equipment",icon:"⚙️",label:"Equipment"},
+      {[{id:"overview",icon:"◉",label:"Overview"},{id:"equipment",icon:"⚙️",label:"Equipment"},
         {id:"tasks",icon:"📋",label:"Work Orders"},{id:"downtime",icon:"⏱️",label:"Downtime"},
         {id:"parts",icon:"🔩",label:"Spare Parts"}].map(n=>(
         <button key={n.id} onClick={()=>setSub(n.id)}
@@ -420,11 +474,7 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
     <div>
       {topBar}
 
-      {/* ══ MACHINES (SOM tool life + polish pads) ══ */}
-      {sub==="machines"&&(
-        <MachinesSection tools={somTools} toolAlerts={somToolAlerts} ovenServerUrl={ovenServerUrl}/>
-      )}
-
+      {/* ══ MACHINES — one row per machine, click for detail drawer ══ */}
       {/* ══ OVERVIEW ══ */}
       {sub==="overview"&&(
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
@@ -550,7 +600,13 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
       )}
 
       {/* ══ EQUIPMENT ══ */}
-      {sub==="equipment"&&(
+      {sub==="equipment"&&(() => {
+        const list=machines.machines||[];
+        const counts=list.reduce((a,m)=>{a[m.status]=(a[m.status]||0)+1;return a;},{});
+        const somLast=machines.updatedAt?new Date(machines.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
+        const somDot=machines.isLive?T.green:T.red;
+        const somTxt=machines.isLive?'SOM LIVE':'SOM OFFLINE';
+        return (
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           {Object.entries(assetsByCategory).map(([cat,assets])=>(
             <Card key={cat} style={{borderLeft:`4px solid ${T.blue}`}}>
@@ -590,8 +646,42 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
               </div>
             </Card>
           ))}
+
+          {/* ══ Machine Health Overview — live from SOM ══ */}
+          <Card style={{borderTop:`4px solid ${T.cyan}`,marginTop:6}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+              <span style={{fontSize:14,fontWeight:800,color:T.text,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:1}}>MACHINE HEALTH — LIVE</span>
+              <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
+                <span style={{width:8,height:8,borderRadius:'50%',background:somDot}}/>
+                <span style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>{somTxt}</span>
+                <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Updated {somLast}</span>
+              </div>
+            </div>
+            {/* Compact counts strip */}
+            <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:10,fontSize:11,fontFamily:mono}}>
+              <span style={{color:T.textDim}}><span style={{color:T.text,fontWeight:800}}>{list.length}</span> machines</span>
+              {(counts.critical||0)>0&&<span style={{color:T.red,fontWeight:700}}>{counts.critical} critical</span>}
+              {(counts.warning||0)>0&&<span style={{color:T.amber,fontWeight:700}}>{counts.warning} warning</span>}
+              {(counts.healthy||0)>0&&<span style={{color:T.green}}>{counts.healthy} healthy</span>}
+            </div>
+            <MachineHealthStrip
+              machines={list}
+              selectedId={selectedMachineId}
+              onSelect={setSelectedMachineId}
+            />
+          </Card>
+
+          {selectedMachineId&&(
+            <MachineDetailDrawer
+              machineId={selectedMachineId}
+              summary={selectedMachineSummary}
+              ovenServerUrl={ovenServerUrl}
+              onClose={()=>setSelectedMachineId(null)}
+            />
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* ══ WORK ORDERS ══ */}
       {sub==="tasks"&&(
