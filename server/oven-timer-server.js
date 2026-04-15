@@ -368,6 +368,19 @@ function dviEntryDateToIso(entryDate) {
   return `20${yy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
 }
 
+// Lab-local (America/Los_Angeles) YYYY-MM-DD for a given ms-since-epoch. Used as a
+// fallback when DVI XML hasn't been indexed yet — toISOString() would return the UTC
+// day, which flips to "tomorrow" after 5 PM PT and double-counts into the next day.
+function labDateFromMs(ms) {
+  if (!ms) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(ms));
+  const get = (t) => parts.find(p => p.type === t)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
 // Enrich a trace job with XML index data for SQLite sync and dashboard display
 function enrichJob(j, xmlIndex) {
   const xml = xmlIndex ? xmlIndex.get(j.job_id) : null;
@@ -384,7 +397,7 @@ function enrichJob(j, xmlIndex) {
     frameStyle: xml?.frameStyle || '',
     rxNum: xml?.rxNum || '',
     isRush: xml?.rush === 'Y',
-    entryDate: dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null),
+    entryDate: dviEntryDateToIso(xml?.entryDate) || labDateFromMs(j.firstSeen),
   };
 }
 
@@ -4107,7 +4120,7 @@ Respond with a structured batching plan in this format:
     const jobDates = new Map();
     for (const j of dviTrace.getJobs()) {
       const xml = dviJobIndex.get(j.job_id);
-      const date = dviEntryDateToIso(xml?.entryDate) || (j.firstSeen ? new Date(j.firstSeen).toISOString().split('T')[0] : null);
+      const date = dviEntryDateToIso(xml?.entryDate) || labDateFromMs(j.firstSeen);
       if (date) jobDates.set(j.job_id, date);
     }
     for (const [jobNum, xml] of shippedJobIndex) {
