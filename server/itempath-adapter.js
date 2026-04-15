@@ -996,9 +996,11 @@ const db = require('./db');
 let pickSyncRunning = false;
 let pickSyncStatus = { lastRun: null, lastSuccess: null, picksRecorded: 0, errors: 0, reconciliation: null };
 
-const PICK_SYNC_PAGE_SIZE = 500;
-const PICK_SYNC_PAGE_PAUSE_MS = 2000;
-const PICK_SYNC_MAX_PAGES = 20; // safety: 500 × 20 = 10k rows/run; real days are ~3k
+// ItemPath /api/order_lines times out above limit~50 (empirically verified
+// 2026-04-15 via probe_limit_size.js — limit=50 returns fine, limit=100 times out).
+const PICK_SYNC_PAGE_SIZE = 50;
+const PICK_SYNC_PAGE_PAUSE_MS = 3000;
+const PICK_SYNC_MAX_PAGES = 80; // safety: 50 × 80 = 4000 rows/run; typical day ~2500–3000
 const PICK_SYNC_LOOKBACK_MS = 25 * 60 * 60 * 1000; // 25h (1h overlap margin)
 
 async function pickSync() {
