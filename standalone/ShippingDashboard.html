@@ -60,14 +60,19 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 /* MAIN */
 .main{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px;display:flex;flex-direction:column;gap:14px;}
 
-/* HERO KPI — shipped today */
+/* HERO KPI — shipped today
+   NOTE: extra top padding on the card + modest hero size keep the digit
+   tops inside the TV's overscan-safe area. TV hardware can crop 3–5% of
+   the signal; the shell's --safe-y caps at 16px, so the hero itself
+   provides the rest of the cushion. Don't remove .hero-kpi's top padding
+   or shrink .hero-val without re-testing on a wall TV. */
 .hero-kpi{background:var(--card);border:2px solid var(--green);border-radius:16px;
-  padding:var(--s5,1.5rem) var(--s6,2rem);text-align:center;position:relative;overflow:hidden;}
+  padding:var(--s6,2rem) var(--s6,2rem) var(--s5,1.5rem);text-align:center;position:relative;overflow:hidden;}
 .hero-kpi::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,rgba(16,185,129,0.06) 0%,transparent 70%);pointer-events:none;}
-.hero-val{font-family:var(--mono);font-size:clamp(3rem,7vw,7rem);font-weight:800;color:var(--green);line-height:1.15;
-  padding-top:0.08em;text-shadow:0 0 40px rgba(16,185,129,0.3);}
+.hero-val{font-family:var(--mono);font-size:clamp(2.5rem,5vw,4.5rem);font-weight:800;color:var(--green);line-height:1.25;
+  padding-top:0.12em;text-shadow:0 0 40px rgba(16,185,129,0.3);}
 .hero-lbl{font-family:var(--mono);font-size:var(--t-label,0.625rem);color:var(--dim);letter-spacing:3px;margin-top:6px;}
-body.dense .hero-val{font-size:clamp(2.5rem,5.5vw,5rem);}
+body.dense .hero-val{font-size:clamp(2rem,4vw,3.5rem);}
 
 /* KPI ROW */
 .kpi-row{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);}
