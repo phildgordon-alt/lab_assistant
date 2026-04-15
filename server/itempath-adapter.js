@@ -1000,9 +1000,8 @@ let pickSyncStatus = { lastRun: null, lastSuccess: null, picksRecorded: 0, error
 // 2026-04-15 via probe_limit_size.js — limit=50 returns fine, limit=100 times out).
 const PICK_SYNC_PAGE_SIZE = 50;
 const PICK_SYNC_PAGE_PAUSE_MS = 1000;
-const PICK_SYNC_MAX_PAGES = 30;                      // cap per run: 30 × 50 = 1500 rows; next run catches remainder
-const PICK_SYNC_MAX_LOOKBACK_MS = 25 * 60 * 60 * 1000; // absolute ceiling (25h, 1h overlap)
-const PICK_SYNC_OVERLAP_MS = 60 * 60 * 1000;         // steady-state: re-scan last hour for safety (INSERT OR IGNORE dedups)
+const PICK_SYNC_MAX_PAGES = 80;                      // 80 × 50 = 4000 rows; typical day ~2500–3000
+const PICK_SYNC_MAX_LOOKBACK_MS = 25 * 60 * 60 * 1000; // always 25h (narrow windows are broken upstream)
 
 async function pickSync() {
   if (CONFIG.mockMode) return;
@@ -1010,24 +1009,11 @@ async function pickSync() {
   if (isConservationMode()) { console.log('[pickSync] Conservation mode — skipping'); return; }
   pickSyncRunning = true;
 
-  // Dynamic window: scan from max(MAX(recorded_at) - 1h, now - 25h) to now.
-  // Once picks_history catches up, each run scans a small delta (≈1h of picks).
-  // Until then, runs scan the full 25h backlog and MAX_PAGES caps runtime.
+  // Always 25h window. ItemPath /api/order_lines regressed on sub-day
+  // modifiedDate filters (2026-03-30) — narrow windows return 0 even for
+  // active lab hours. 25h always works; INSERT OR IGNORE dedups repeated rows.
   const windowEnd = new Date();
-  const absoluteFloor = new Date(windowEnd.getTime() - PICK_SYNC_MAX_LOOKBACK_MS);
-  let windowStart = absoluteFloor;
-  try {
-    const row = db.db.prepare(`SELECT MAX(completed_at) AS m FROM picks_history`).get();
-    if (row && row.m) {
-      const lastCompleted = new Date(row.m);
-      if (!isNaN(lastCompleted.getTime())) {
-        const candidate = new Date(lastCompleted.getTime() - PICK_SYNC_OVERLAP_MS);
-        if (candidate.getTime() > absoluteFloor.getTime()) windowStart = candidate;
-      }
-    }
-  } catch (e) {
-    console.warn('[pickSync] Could not read MAX(completed_at), using absolute floor:', e.message);
-  }
+  const windowStart = new Date(windowEnd.getTime() - PICK_SYNC_MAX_LOOKBACK_MS);
   let totalFetched = 0, totalInserted = 0, page = 0;
 
   try {
