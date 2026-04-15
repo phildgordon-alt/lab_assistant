@@ -328,7 +328,7 @@ function MachineDetailDrawer({machineId,summary,ovenServerUrl,onClose}){
 // removed 2026-04-14 — replaced by MachineHealthStrip + MachineDetailDrawer.
 
 export default function MaintenanceTab({ovenServerUrl,settings}){
-  const [sub,setSub]=useState("equipment");
+  const [sub,setSub]=useState("overview");
   const [maintenance,setMaintenance]=useState({assets:[],tasks:[],downtime:[],parts:[],stats:{},lastSync:null,status:'pending'});
   const [loading,setLoading]=useState(true);
   const [selectedTask,setSelectedTask]=useState(null);  // For work order detail modal
@@ -596,17 +596,52 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
               </div>
             </Card>
           </div>
+
+          {/* ══ Machine Health Overview — live from SOM ══ */}
+          {(() => {
+            const list=machines.machines||[];
+            const counts=list.reduce((a,m)=>{a[m.status]=(a[m.status]||0)+1;return a;},{});
+            const somLast=machines.updatedAt?new Date(machines.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
+            const somDot=machines.isLive?T.green:T.red;
+            const somTxt=machines.isLive?'SOM LIVE':'SOM OFFLINE';
+            return (
+              <Card style={{borderTop:`4px solid ${T.cyan}`,marginTop:6}}>
+                <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+                  <span style={{fontSize:14,fontWeight:800,color:T.text,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:1}}>MACHINE HEALTH — LIVE</span>
+                  <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
+                    <span style={{width:8,height:8,borderRadius:'50%',background:somDot}}/>
+                    <span style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>{somTxt}</span>
+                    <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Updated {somLast}</span>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:10,fontSize:11,fontFamily:mono}}>
+                  <span style={{color:T.textDim}}><span style={{color:T.text,fontWeight:800}}>{list.length}</span> machines</span>
+                  {(counts.critical||0)>0&&<span style={{color:T.red,fontWeight:700}}>{counts.critical} critical</span>}
+                  {(counts.warning||0)>0&&<span style={{color:T.amber,fontWeight:700}}>{counts.warning} warning</span>}
+                  {(counts.healthy||0)>0&&<span style={{color:T.green}}>{counts.healthy} healthy</span>}
+                </div>
+                <MachineHealthStrip
+                  machines={list}
+                  selectedId={selectedMachineId}
+                  onSelect={setSelectedMachineId}
+                />
+              </Card>
+            );
+          })()}
+
+          {selectedMachineId&&(
+            <MachineDetailDrawer
+              machineId={selectedMachineId}
+              summary={selectedMachineSummary}
+              ovenServerUrl={ovenServerUrl}
+              onClose={()=>setSelectedMachineId(null)}
+            />
+          )}
         </div>
       )}
 
       {/* ══ EQUIPMENT ══ */}
-      {sub==="equipment"&&(() => {
-        const list=machines.machines||[];
-        const counts=list.reduce((a,m)=>{a[m.status]=(a[m.status]||0)+1;return a;},{});
-        const somLast=machines.updatedAt?new Date(machines.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
-        const somDot=machines.isLive?T.green:T.red;
-        const somTxt=machines.isLive?'SOM LIVE':'SOM OFFLINE';
-        return (
+      {sub==="equipment"&&(
         <div style={{display:"flex",flexDirection:"column",gap:14}}>
           {Object.entries(assetsByCategory).map(([cat,assets])=>(
             <Card key={cat} style={{borderLeft:`4px solid ${T.blue}`}}>
@@ -646,42 +681,8 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
               </div>
             </Card>
           ))}
-
-          {/* ══ Machine Health Overview — live from SOM ══ */}
-          <Card style={{borderTop:`4px solid ${T.cyan}`,marginTop:6}}>
-            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
-              <span style={{fontSize:14,fontWeight:800,color:T.text,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:1}}>MACHINE HEALTH — LIVE</span>
-              <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
-                <span style={{width:8,height:8,borderRadius:'50%',background:somDot}}/>
-                <span style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>{somTxt}</span>
-                <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Updated {somLast}</span>
-              </div>
-            </div>
-            {/* Compact counts strip */}
-            <div style={{display:'flex',gap:14,flexWrap:'wrap',marginBottom:10,fontSize:11,fontFamily:mono}}>
-              <span style={{color:T.textDim}}><span style={{color:T.text,fontWeight:800}}>{list.length}</span> machines</span>
-              {(counts.critical||0)>0&&<span style={{color:T.red,fontWeight:700}}>{counts.critical} critical</span>}
-              {(counts.warning||0)>0&&<span style={{color:T.amber,fontWeight:700}}>{counts.warning} warning</span>}
-              {(counts.healthy||0)>0&&<span style={{color:T.green}}>{counts.healthy} healthy</span>}
-            </div>
-            <MachineHealthStrip
-              machines={list}
-              selectedId={selectedMachineId}
-              onSelect={setSelectedMachineId}
-            />
-          </Card>
-
-          {selectedMachineId&&(
-            <MachineDetailDrawer
-              machineId={selectedMachineId}
-              summary={selectedMachineSummary}
-              ovenServerUrl={ovenServerUrl}
-              onClose={()=>setSelectedMachineId(null)}
-            />
-          )}
         </div>
-        );
-      })()}
+      )}
 
       {/* ══ WORK ORDERS ══ */}
       {sub==="tasks"&&(
