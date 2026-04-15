@@ -2344,10 +2344,14 @@ Respond with a structured batching plan in this format:
 
   // ── Shipped job detail — single day or date range ──────────
   if (req.method==='GET' && url.pathname==='/api/shipping/detail') {
-    const date = url.searchParams.get('date');
+    let date = url.searchParams.get('date');
     const from = url.searchParams.get('from');
     const to = url.searchParams.get('to');
     const days = parseInt(url.searchParams.get('days') || '0');
+
+    // Accept 'today' / 'yesterday' as lab-local (America/Los_Angeles) aliases
+    if (date === 'today') date = labDateFromMs(Date.now());
+    else if (date === 'yesterday') date = labDateFromMs(Date.now() - 86400000);
 
     // Build set of dates to match (MM/DD/YY format)
     const matchDates = new Set();
