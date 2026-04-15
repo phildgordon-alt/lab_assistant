@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pickSync Health</title>
+<style>
+  :root {
+    --bg:#070A0F; --surface:#0D1117; --surface2:#161B22; --border:#21262D;
+    --text:#E6EDF3; --text-dim:#8B949E; --accent:#58A6FF;
+    --good:#3FB950; --warn:#D29922; --bad:#F85149; --neutral:#484F58;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    padding: 24px; min-height: 100vh;
+  }
+  h1 { font-size: 24px; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .sub { color: var(--text-dim); font-size: 13px; margin-bottom: 24px; font-family: var(--mono); }
+  .grid-top {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px;
+  }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .card .label { color: var(--text-dim); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+  .card .value { font-size: 28px; font-family: var(--mono); font-weight: 600; }
+  .card .value.small { font-size: 16px; }
+  .card .meta { color: var(--text-dim); font-size: 12px; font-family: var(--mono); margin-top: 4px; }
+  .pill {
+    display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 11px;
+    font-family: var(--mono); letter-spacing: 0.05em; text-transform: uppercase;
+  }
+  .pill.good { background: rgba(63,185,80,0.15); color: var(--good); }
+  .pill.warn { background: rgba(210,153,34,0.15); color: var(--warn); }
+  .pill.bad { background: rgba(248,81,73,0.15); color: var(--bad); }
+  .pill.neutral { background: rgba(139,148,158,0.15); color: var(--text-dim); }
+
+  .error-banner {
+    background: rgba(248,81,73,0.08); border: 1px solid rgba(248,81,73,0.3);
+    border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; display: none;
+  }
+  .error-banner.active { display: block; }
+  .error-banner .label { color: var(--bad); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+  .error-banner .msg { font-family: var(--mono); font-size: 13px; color: var(--text); }
+
+  .days-section { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+  .days-section h2 { font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); margin-bottom: 16px; }
+  .day-row {
+    display: grid; grid-template-columns: 100px 80px 1fr 90px;
+    align-items: center; gap: 12px; padding: 8px 0;
+    border-bottom: 1px solid var(--surface2); font-family: var(--mono); font-size: 13px;
+  }
+  .day-row:last-child { border-bottom: none; }
+  .day-date { color: var(--text-dim); }
+  .day-count { color: var(--text); text-align: right; }
+  .bar-wrap { height: 10px; background: var(--surface2); border-radius: 5px; overflow: hidden; }
+  .bar { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
+  .bar.good { background: var(--good); }
+  .bar.warn { background: var(--warn); }
+  .bar.bad { background: var(--bad); }
+  .bar.neutral { background: var(--neutral); }
+  .day-pct { text-align: right; color: var(--text-dim); font-size: 12px; }
+  .day-pct.good { color: var(--good); }
+  .day-pct.warn { color: var(--warn); }
+  .day-pct.bad { color: var(--bad); }
+
+  .footer { margin-top: 20px; color: var(--text-dim); font-size: 12px; font-family: var(--mono); text-align: center; }
+  .loading { color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<h1>pickSync Health</h1>
+<div class="sub">Self-healing gap-fill for ItemPath <code>picks_history</code></div>
+
+<div class="error-banner" id="errBanner">
+  <div class="label">Last error</div>
+  <div class="msg" id="errMsg"></div>
+</div>
+
+<div class="grid-top">
+  <div class="card">
+    <div class="label">ItemPath</div>
+    <div class="value small"><span class="pill" id="pillHealth">—</span></div>
+    <div class="meta" id="metaHealth">checking…</div>
+  </div>
+  <div class="card">
+    <div class="label">Mode</div>
+    <div class="value small"><span class="pill" id="pillMode">—</span></div>
+    <div class="meta" id="metaGap">—</div>
+  </div>
+  <div class="card">
+    <div class="label">Healed</div>
+    <div class="value" id="healedPct">—</div>
+    <div class="meta" id="healedMeta">—</div>
+  </div>
+  <div class="card">
+    <div class="label">Last / Next Run</div>
+    <div class="value small" id="lastRun">—</div>
+    <div class="meta" id="nextRun">—</div>
+  </div>
+</div>
+
+<div class="days-section">
+  <h2>Daily Coverage — Last 30 Days</h2>
+  <div id="dayList" class="loading">Loading…</div>
+</div>
+
+<div class="footer" id="footer">—</div>
+
+<script>
+const SERVER = location.origin; // lab server hosts this page + the API
+
+function ago(iso) {
+  if (!iso) return '—';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 60000) return Math.round(ms/1000) + 's ago';
+  if (ms < 3600000) return Math.round(ms/60000) + 'm ago';
+  if (ms < 86400000) return Math.round(ms/3600000) + 'h ago';
+  return Math.round(ms/86400000) + 'd ago';
+}
+function toLocal(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+function barClass(pct) {
+  if (pct === null) return 'neutral';
+  if (pct >= 80) return 'good';
+  if (pct >= 10) return 'warn';
+  return 'bad';
+}
+
+async function refresh() {
+  try {
+    const r = await fetch(SERVER + '/api/itempath/picksync-health');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+
+    // Health pill
+    const hp = document.getElementById('pillHealth');
+    if (d.itempathHealthy === true) { hp.textContent = 'HEALTHY'; hp.className = 'pill good'; }
+    else if (d.itempathHealthy === false) { hp.textContent = 'UNHEALTHY'; hp.className = 'pill bad'; }
+    else { hp.textContent = 'UNKNOWN'; hp.className = 'pill neutral'; }
+    document.getElementById('metaHealth').textContent = 'asOf ' + toLocal(d.asOf);
+
+    // Mode pill
+    const mp = document.getElementById('pillMode');
+    if (d.mode === 'GAP') { mp.textContent = 'GAP'; mp.className = 'pill warn'; }
+    else if (d.mode === 'STEADY') { mp.textContent = 'STEADY'; mp.className = 'pill good'; }
+    else { mp.textContent = d.mode || '—'; mp.className = 'pill neutral'; }
+    document.getElementById('metaGap').textContent =
+      d.gapHours !== null ? d.gapHours.toFixed(1) + 'h behind · last row ' + toLocal(d.maxCompletedAt) : '—';
+
+    // Healed %: weighted fraction of expected rows covered across 30d
+    const cov = d.perDayCoverage || [];
+    let totalExpected = 0, totalCovered = 0;
+    cov.forEach(c => {
+      if (c.expected > 0) {
+        totalExpected += c.expected;
+        totalCovered += Math.min(c.count, c.expected);
+      }
+    });
+    const healedPct = totalExpected ? Math.round((totalCovered / totalExpected) * 1000) / 10 : null;
+    document.getElementById('healedPct').textContent = healedPct === null ? '—' : healedPct + '%';
+    document.getElementById('healedMeta').textContent =
+      d.totalRows.toLocaleString() + ' rows · ' + cov.length + ' days tracked';
+
+    // Last/next run
+    document.getElementById('lastRun').textContent = d.lastRun ? toLocal(d.lastRun) + ' (' + ago(d.lastRun) + ')' : 'never';
+    document.getElementById('nextRun').textContent = d.nextRunAt ? 'next: ' + toLocal(d.nextRunAt) : '—';
+
+    // Error banner
+    const eb = document.getElementById('errBanner');
+    if (d.lastError && d.consecutiveErrors > 0) {
+      eb.classList.add('active');
+      document.getElementById('errMsg').textContent = '[' + d.consecutiveErrors + 'x] ' + d.lastError + ' · ' + (d.lastErrorAt ? ago(d.lastErrorAt) : '');
+    } else {
+      eb.classList.remove('active');
+    }
+
+    // Per-day list
+    const list = document.getElementById('dayList');
+    if (cov.length === 0) { list.innerHTML = '<div class="loading">No data</div>'; return; }
+    list.innerHTML = '';
+    list.classList.remove('loading');
+    for (const c of cov) {
+      const row = document.createElement('div');
+      row.className = 'day-row';
+      const pctShown = c.pct === null ? '' : c.pct + '%';
+      const pctClass = c.pct === null ? 'neutral' : (c.pct >= 80 ? 'good' : c.pct >= 10 ? 'warn' : 'bad');
+      const width = c.pct === null ? 0 : Math.max(c.pct, 2);
+      row.innerHTML =
+        '<div class="day-date">' + c.date + '</div>' +
+        '<div class="day-count">' + c.count.toLocaleString() + '</div>' +
+        '<div class="bar-wrap"><div class="bar ' + barClass(c.pct) + '" style="width:' + width + '%"></div></div>' +
+        '<div class="day-pct ' + pctClass + '">' + pctShown + '</div>';
+      list.appendChild(row);
+    }
+
+    document.getElementById('footer').textContent = 'polling /api/itempath/picksync-health every 10s · asOf ' + toLocal(d.asOf);
+  } catch (e) {
+    document.getElementById('footer').textContent = 'fetch failed: ' + e.message;
+  }
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

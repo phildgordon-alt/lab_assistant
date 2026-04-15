@@ -1822,6 +1822,49 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/pick-sync-status') {
     return json(res, itempath.getPickSyncStatus());
   }
+  // GET /api/itempath/picksync-health — self-heal dashboard data
+  if (req.method==='GET' && url.pathname==='/api/itempath/picksync-health') {
+    const status = itempath.getPickSyncStatus();
+    const totals = labDb.db.prepare(`SELECT MAX(completed_at) AS maxCompleted, COUNT(*) AS totalRows FROM picks_history`).get();
+    const perDay = labDb.db.prepare(`
+      SELECT date(completed_at) AS date, COUNT(*) AS count
+      FROM picks_history
+      WHERE completed_at >= datetime('now', '-30 days')
+      GROUP BY date(completed_at)
+      ORDER BY date(completed_at) DESC
+    `).all();
+    // Expected picks per day: weekday ~2500, Sat ~300, Sun 0
+    const expectedFor = (dateStr) => {
+      const d = new Date(dateStr + 'T12:00:00Z').getUTCDay();
+      return d === 0 ? 0 : (d === 6 ? 300 : 2500);
+    };
+    const coverage = perDay.map(r => ({
+      date: r.date,
+      count: r.count,
+      expected: expectedFor(r.date),
+      pct: expectedFor(r.date) ? Math.min(100, Math.round((r.count / expectedFor(r.date)) * 100)) : null,
+    }));
+    const now = Date.now();
+    const maxCompletedMs = totals.maxCompleted ? new Date(totals.maxCompleted).getTime() : null;
+    const gapHours = maxCompletedMs ? Math.round((now - maxCompletedMs) / 3600000 * 10) / 10 : null;
+    const lastRunMs = status.lastRun ? new Date(status.lastRun).getTime() : null;
+    const nextRunAt = lastRunMs ? new Date(lastRunMs + 30 * 60 * 1000).toISOString() : null;
+    return json(res, {
+      lastRun: status.lastRun,
+      nextRunAt,
+      mode: status.mode,
+      itempathHealthy: status.itempathHealthy,
+      maxCompletedAt: totals.maxCompleted,
+      gapHours,
+      totalRows: totals.totalRows,
+      picksRecorded: status.picksRecorded,
+      lastError: status.lastError || null,
+      lastErrorAt: status.lastError ? status.lastRun : null,
+      consecutiveErrors: status.consecutiveErrors || 0,
+      perDayCoverage: coverage,
+      asOf: new Date().toISOString(),
+    });
+  }
   // GET /api/inventory/picks/history?days=30 — daily pick totals from picks_history
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
