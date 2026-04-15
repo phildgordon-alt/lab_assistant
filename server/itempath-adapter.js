@@ -986,11 +986,20 @@ async function poll() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PICK SYNC — records completed picks from /api/order_lines every 5 minutes
-// Separate from poll() to control frequency and prevent API overload
+// PICK SYNC — Path A (2026-04-15): fixed 24h lookback, paginated, INSERT OR IGNORE.
+// ItemPath /api/order_lines regressed on sub-day modifiedDate windows around
+// 2026-03-30 (narrow queries return empty or 504). 24h windows still work.
+// Strategy: every 30 min, query [now-25h, now], paginate to exhaustion, dedup
+// via UNIQUE pick_id. lastPickSyncTime kept as advisory for status endpoints.
 // ─────────────────────────────────────────────────────────────────────────────
+const db = require('./db');
 let pickSyncRunning = false;
 let pickSyncStatus = { lastRun: null, lastSuccess: null, picksRecorded: 0, errors: 0, reconciliation: null };
+
+const PICK_SYNC_PAGE_SIZE = 500;
+const PICK_SYNC_PAGE_PAUSE_MS = 2000;
+const PICK_SYNC_MAX_PAGES = 20; // safety: 500 × 20 = 10k rows/run; real days are ~3k
+const PICK_SYNC_LOOKBACK_MS = 25 * 60 * 60 * 1000; // 25h (1h overlap margin)
 
 async function pickSync() {
   if (CONFIG.mockMode) return;
@@ -998,101 +1007,54 @@ async function pickSync() {
   if (isConservationMode()) { console.log('[pickSync] Conservation mode — skipping'); return; }
   pickSyncRunning = true;
 
+  const windowStart = new Date(Date.now() - PICK_SYNC_LOOKBACK_MS);
+  const windowEnd = new Date();
+  let totalFetched = 0, totalInserted = 0, page = 0;
+
   try {
-    const db = require('./db');
+    console.log(`[pickSync] Fixed-24h scan ${windowStart.toISOString()} → ${windowEnd.toISOString()}`);
 
-    // Cap the sync window at 24h so ItemPath isn't asked for multi-day backlogs
-    // (causes 504s, which block the cursor and make it worse on the next attempt)
-    const windowStart = new Date(lastPickSyncTime);
-    const maxWindowMs = 24 * 60 * 60 * 1000;
-    const windowEnd = new Date(Math.min(windowStart.getTime() + maxWindowMs, Date.now()));
-    const windowCapped = windowEnd.getTime() < Date.now() - 60000; // true if we're >1 min behind
+    while (page < PICK_SYNC_MAX_PAGES) {
+      if (isConservationMode()) { console.warn('[pickSync] Conservation mode tripped mid-run — stopping'); break; }
 
-    console.log(`[pickSync] Fetching picks from ${windowStart.toISOString()} to ${windowEnd.toISOString()}${windowCapped ? ' (window capped — catching up)' : ''}...`);
-    const data = await ipFetch('/api/order_lines', {
-      directionType: 2, status: 'processed',
-      'modifiedDate[gte]': windowStart.toISOString(),
-      'modifiedDate[lte]': windowEnd.toISOString(),
-      limit: 500, page: 0,
-    }, { timeout: 120000 });
+      const data = await ipFetch('/api/order_lines', {
+        directionType: 2, status: 'processed',
+        'modifiedDate[gte]': windowStart.toISOString(),
+        'modifiedDate[lte]': windowEnd.toISOString(),
+        limit: PICK_SYNC_PAGE_SIZE, page,
+      }, { timeout: 120000 });
 
-    const lines = data.order_lines || [];
-    if (lines.length === 0) {
-      lastPickSyncTime = new Date().toISOString();
-      saveDailyTotals();
-      pickSyncStatus.lastRun = new Date().toISOString();
-      pickSyncRunning = false;
-      return;
+      const lines = data.order_lines || [];
+      totalFetched += lines.length;
+      if (lines.length === 0) break;
+
+      const { inserted } = db.upsertPicksHistory(lines);
+      totalInserted += inserted;
+
+      if (lines.length < PICK_SYNC_PAGE_SIZE) break; // short page → done
+      page++;
+      if (page < PICK_SYNC_MAX_PAGES) await new Promise(r => setTimeout(r, PICK_SYNC_PAGE_PAUSE_MS));
     }
 
-    // Step 3: Insert into picks_history
-    let inserted = 0;
-    const stmt = db.db.prepare(`
-      INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const save = db.db.transaction(() => {
-      for (const line of lines) {
-        const sku = line.materialName || '';
-        const orderName = line.orderName || line.orderId || '';
-        const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
-        if (!sku || qty <= 0) continue;
-
-        let wh = line.warehouseName || line.costCenterName || '';
-        if (/kitchen/i.test(wh) || /wh3/i.test(wh)) wh = 'WH3';
-        else if (/wh2/i.test(wh)) wh = 'WH2';
-        else if (/wh1/i.test(wh)) wh = 'WH1';
-
-        const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
-        const pickId = `hist-${line.id || line.orderLineId || ''}`;
-
-        const result = stmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt);
-        if (result.changes > 0) inserted++;
-      }
-    });
-    save();
-
-    // Step 4: Advance cursor
-    // Full page → advance to last record's modifiedDate (more to catch next cycle).
-    // Partial page → advance to windowEnd (we're caught up through that window).
-    // NB: limit is 500, not 1000 — the old `>= 1000` check meant full pages fell
-    // through to the "caught up" branch and silently dropped any picks past #500.
-    const PICK_SYNC_LIMIT = 500;
-    if (lines.length >= PICK_SYNC_LIMIT) {
-      const lastDate = lines[lines.length - 1].modifiedDate || lines[lines.length - 1].creationDate;
-      if (lastDate) lastPickSyncTime = lastDate;
-    } else {
-      // Advance to the windowEnd so the next run picks up from there (not always "now")
-      lastPickSyncTime = windowEnd.toISOString();
-    }
+    lastPickSyncTime = windowEnd.toISOString(); // advisory — status endpoints read this
     saveDailyTotals();
 
-    pickSyncStatus.lastRun = new Date().toISOString();
-    pickSyncStatus.lastSuccess = new Date().toISOString();
-    pickSyncStatus.picksRecorded += inserted;
+    pickSyncStatus.lastRun = lastPickSyncTime;
+    pickSyncStatus.lastSuccess = lastPickSyncTime;
+    pickSyncStatus.picksRecorded += totalInserted;
     pickSyncStatus.consecutiveErrors = 0;
-    console.log(`[pickSync] ✓ ${lines.length} fetched, ${inserted} new picks recorded (cursor: ${lastPickSyncTime.substring(11, 19)})`);
+    console.log(`[pickSync] ✓ ${totalFetched} fetched across ${page + 1} page(s), ${totalInserted} new rows`);
+
+    if (page === PICK_SYNC_MAX_PAGES - 1) {
+      console.warn(`[pickSync] Hit MAX_PAGES cap — may have missed rows; will re-query next cycle`);
+    }
 
   } catch (e) {
     pickSyncStatus.errors++;
     pickSyncStatus.lastError = e.message;
     pickSyncStatus.lastRun = new Date().toISOString();
     pickSyncStatus.consecutiveErrors = (pickSyncStatus.consecutiveErrors || 0) + 1;
-
-    // After 5 consecutive failures, advance cursor by 1 hour to escape stuck ranges.
-    // Better to skip an hour than stay broken for days. Reconciliation will catch gaps.
-    if (pickSyncStatus.consecutiveErrors >= 5) {
-      const skipTo = new Date(new Date(lastPickSyncTime).getTime() + 60 * 60 * 1000);
-      if (skipTo < new Date()) {
-        console.warn(`[pickSync] ${pickSyncStatus.consecutiveErrors} consecutive errors — skipping cursor forward by 1h: ${lastPickSyncTime} → ${skipTo.toISOString()}`);
-        lastPickSyncTime = skipTo.toISOString();
-        saveDailyTotals();
-        pickSyncStatus.consecutiveErrors = 0;
-      }
-    }
-
-    console.error(`[pickSync] ERROR: ${e.message} — will retry from ${lastPickSyncTime}`);
+    console.error(`[pickSync] ERROR: ${e.message} (page ${page}, fetched ${totalFetched})`);
   } finally {
     pickSyncRunning = false;
   }
@@ -1459,7 +1421,7 @@ function start() {
   // Pick sync: 30s delay then every 5 minutes (separate from poll to control API load)
   setTimeout(() => {
     pickSync();
-    setInterval(pickSync, 5 * 60 * 1000);
+    setInterval(pickSync, 30 * 60 * 1000);
   }, 30000);
 
   // Count reconciliation: 2min delay then every 30 minutes

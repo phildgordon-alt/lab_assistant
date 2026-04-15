@@ -1184,6 +1184,107 @@ function upsertPicks(picks) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PICKS HISTORY — append-only log of completed ItemPath order_lines.
+// Shared by live pickSync (itempath-adapter.js) and backfill scripts.
+// pick_id convention: 'hist-' + line.id (ItemPath order_line GUID).
+// UNIQUE constraint on pick_id makes INSERT OR IGNORE fully idempotent.
+// ─────────────────────────────────────────────────────────────────────────────
+const { normalizeWarehouse } = require('./itempath-normalize');
+
+const upsertPicksHistoryStmt = db.prepare(`
+  INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+function upsertPicksHistory(lines) {
+  let inserted = 0, skipped = 0;
+  const save = db.transaction(() => {
+    for (const line of lines) {
+      const sku = line.materialName || '';
+      const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
+      if (!sku || qty <= 0) { skipped++; continue; }
+      const orderName = line.orderName || line.orderId || '';
+      const wh = normalizeWarehouse(line.warehouseName || line.costCenterName || '');
+      const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
+      const pickId = `hist-${line.id || line.orderLineId || ''}`;
+      const result = upsertPicksHistoryStmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt);
+      if (result.changes > 0) inserted++;
+    }
+  });
+  save();
+  return { inserted, skipped, total: lines.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TRANSACTIONS — persistent mirror of ItemPath /api/transactions.
+// Stub: returns early until the `transactions` table is created (Phase 5).
+// When the table exists, populates via INSERT OR IGNORE on transaction_id PK.
+// ─────────────────────────────────────────────────────────────────────────────
+let _transactionsTableChecked = false;
+let _transactionsTableExists = false;
+
+function _checkTransactionsTable() {
+  if (_transactionsTableChecked) return _transactionsTableExists;
+  const row = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'`).get();
+  _transactionsTableExists = !!row;
+  _transactionsTableChecked = true;
+  return _transactionsTableExists;
+}
+
+function upsertTransactions(rows) {
+  if (!Array.isArray(rows) || rows.length === 0) return { inserted: 0, skipped: 0, total: 0 };
+  if (!_checkTransactionsTable()) return { inserted: 0, skipped: rows.length, total: rows.length, reason: 'transactions table not created yet' };
+
+  const txStmt = db.prepare(`
+    INSERT OR IGNORE INTO transactions (
+      transaction_id, type, motive_type, number,
+      order_id, order_line_id, order_name,
+      material_name, user_name,
+      warehouse_name, location_name, bin_name, station_name,
+      qty_requested, qty_confirmed, qty_deviated,
+      lot, serial_number, reason_code,
+      creation_date
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const rawStmt = db.prepare(`INSERT OR IGNORE INTO transactions_raw (transaction_id, raw_json) VALUES (?, ?)`);
+
+  let inserted = 0, skipped = 0;
+  const save = db.transaction(() => {
+    for (const r of rows) {
+      if (!r || !r.id) { skipped++; continue; }
+      const result = txStmt.run(
+        r.id,
+        r.type ?? null,
+        r.motiveType ?? null,
+        r.number ?? null,
+        r.orderId ?? null,
+        r.orderLineId ?? null,
+        r.orderName ?? null,
+        r.materialName ?? null,
+        r.userName ?? null,
+        r.warehouseName ?? null,
+        r.locationName ?? null,
+        r.binName ?? null,
+        r.stationName ?? null,
+        r.quantityRequested ?? null,
+        r.quantityConfirmed ?? null,
+        r.quantityDeviated ?? null,
+        r.lot ?? null,
+        r.serialNumber ?? null,
+        r.reasonCode ?? null,
+        r.creationDate ?? null,
+      );
+      if (result.changes > 0) {
+        inserted++;
+        rawStmt.run(r.id, JSON.stringify(r));
+      }
+    }
+  });
+  save();
+  return { inserted, skipped, total: rows.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // MAINTENANCE (Limble)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2169,6 +2270,8 @@ module.exports = {
   upsertInventory,
   upsertAlerts,
   upsertPicks,
+  upsertPicksHistory,
+  upsertTransactions,
   upsertAssets,
   upsertTasks,
   upsertParts,
