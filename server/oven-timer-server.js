@@ -3289,6 +3289,15 @@ Respond with a structured batching plan in this format:
     const data = await som.getLensPerHour(date ? { date } : { hours });
     return json(res, data);
   }
+  if (req.method==='GET' && url.pathname==='/api/som/tools') {
+    return json(res, som.getTools());
+  }
+  if (req.method==='GET' && url.pathname==='/api/som/alerts/active') {
+    return json(res, som.getToolAlerts());
+  }
+  if (req.method==='POST' && url.pathname==='/api/som/thresholds/reload') {
+    return json(res, { ok: true, thresholds: som.reloadThresholds() });
+  }
 
   // ── DVI File Sync endpoints ───────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/dvi-sync/status') {
@@ -6928,6 +6937,9 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`     GET  /api/som/orders           ← Jobs by department`);
   console.log(`     GET  /api/jobs/active          ← Active WIP: SOM + DVI cross-ref`);
   console.log(`     GET  /api/som/alerts           ← Machine/conveyor alerts`);
+  console.log(`     GET  /api/som/tools            ← Tool life + polish pads`);
+  console.log(`     GET  /api/som/alerts/active    ← Tool-life threshold alerts`);
+  console.log(`     POST /api/som/thresholds/reload← Hot-reload thresholds`);
   console.log(`     GET  /api/dvi/jobs             ← Live WIP jobs (trace watcher)`);
   console.log(`     GET  /api/dvi/trace/status     ← Trace watcher status`);
   console.log(`     GET  /api/dvi/trace/events     ← Recent movement events`);

@@ -36,6 +36,64 @@ const SOM_POLL_INTERVAL = parseInt(process.env.SOM_POLL_INTERVAL || '30000'); //
 // Persistence file
 const DATA_FILE = path.join(__dirname, 'som-data.json');
 
+// Alert thresholds config (config/som-alert-thresholds.json, hot-reloadable)
+const THRESHOLD_FILE = path.join(__dirname, '..', 'config', 'som-alert-thresholds.json');
+const DEFAULT_THRESHOLDS = {
+  tool_life: { heads_up: 0.25, warning: 0.10, critical: 0.05 }, // remainingPct
+  polish_liquid: { heads_up: 0.30, warning: 0.15, critical: 0.05 },
+  slack_channel: '#lab-maintenance',
+  slack_rate_limit_hours: 24, // min hours between slack alerts for same tool
+};
+let ALERT_THRESHOLDS = { ...DEFAULT_THRESHOLDS };
+function loadThresholds() {
+  try {
+    if (fs.existsSync(THRESHOLD_FILE)) {
+      const raw = JSON.parse(fs.readFileSync(THRESHOLD_FILE, 'utf8'));
+      ALERT_THRESHOLDS = { ...DEFAULT_THRESHOLDS, ...raw };
+    }
+  } catch (e) {
+    console.warn('[SOM] Could not load alert thresholds, using defaults:', e.message);
+    ALERT_THRESHOLDS = { ...DEFAULT_THRESHOLDS };
+  }
+}
+
+const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
+const SLACK_WEBHOOK = process.env.SLACK_WEBHOOK || '';
+
+async function postSlackAlert(text, channel) {
+  const ch = channel || ALERT_THRESHOLDS.slack_channel || '#lab-maintenance';
+  try {
+    if (SLACK_BOT_TOKEN) {
+      const resp = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${SLACK_BOT_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: ch, text, mrkdwn: true }),
+      });
+      const data = await resp.json();
+      if (!data.ok) console.warn('[SOM] Slack error:', data.error);
+      return data.ok;
+    } else if (SLACK_WEBHOOK) {
+      const resp = await fetch(SLACK_WEBHOOK, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: ch, text }),
+      });
+      return resp.ok;
+    }
+  } catch (e) {
+    console.warn('[SOM] Slack alert failed:', e.message);
+  }
+  return false;
+}
+
+function classifyTool(remainingPct, kind) {
+  const t = kind === 'polish_liquid' ? ALERT_THRESHOLDS.polish_liquid : ALERT_THRESHOLDS.tool_life;
+  if (remainingPct <= t.critical) return 'critical';
+  if (remainingPct <= t.warning) return 'warning';
+  if (remainingPct <= t.heads_up) return 'heads_up';
+  return 'ok';
+}
+
 // In-memory state
 let devices = [];
 let conveyors = [];
@@ -43,6 +101,9 @@ let oee = [];
 let orders = { byDepartment: [], today: [], total: 0, todayTotal: 0 };
 let activeJobs = []; // Individual WIP jobs with department + DVI job#
 let alerts = [];
+let tools = { milling: [], cutting: [], polish: [], edger: [], lastUpdated: null };
+let toolAlerts = []; // Active threshold-crossing alerts
+let lastSlackAlertByTool = {}; // { toolKey: timestamp } — rate limits Slack to 1/day/tool
 
 // Department mappings (Schneider LMS department IDs)
 const DEPARTMENTS = {
@@ -251,6 +312,134 @@ async function disconnect() {
 async function reconnect() {
   await disconnect();
   return await connect();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tool life / polish liquid polling
+// ─────────────────────────────────────────────────────────────────────────────
+async function pollTools() {
+  if (!connection) return false;
+  try {
+    const nowIso = new Date().toISOString();
+
+    // Milling / cutting tools: one row per Device/Side, up to 25 tool slots wide
+    const [toolRows] = await connection.query(`
+      SELECT * FROM production_tool_usage_current
+    `);
+
+    const milling = [];
+    const cutting = [];
+    for (const row of toolRows) {
+      const device = (row.Device || '').trim();
+      const side = row.Side;
+      // Route by device model via existing categorization
+      const devMeta = devices.find(d => d.id === device);
+      const category = devMeta?.category || categorizeDevice('', '', device);
+      const bucket = category === 'cutters' ? cutting : milling;
+
+      for (let i = 0; i <= 24; i++) {
+        const sn = row[`Tool_${i}SN`];
+        const used = Number(row[`Tool_${i}C`]);
+        const max = Number(row[`Tool_${i}M`]);
+        if (!sn || !max || max <= 0) continue;
+        const remaining = Math.max(0, max - used);
+        const remainingPct = max > 0 ? remaining / max : 0;
+        const status = classifyTool(remainingPct, 'tool_life');
+        bucket.push({
+          device,
+          side,
+          slot: i,
+          serialNumber: String(sn).trim(),
+          used, max, remaining, remainingPct,
+          status,
+          ordnumb: (row.Ordnumb || '').trim(),
+          time: row.Time,
+        });
+      }
+    }
+
+    // Polish pads (CCP)
+    const polish = [];
+    try {
+      const [ccpRows] = await connection.query(`
+        SELECT Device, padType, Side, SN, Value, OldSN, OldValue
+        FROM production_tool_usage_current_ccp
+      `);
+      // padType max values — treat "Value" as remaining life (0..100)% or absolute.
+      // SOM CCP stores pad "Value" as remaining life percent (0–100).
+      for (const r of ccpRows) {
+        const val = Number(r.Value);
+        if (!r.SN || isNaN(val)) continue;
+        const remainingPct = val > 1 ? val / 100 : val; // normalize
+        const status = classifyTool(remainingPct, 'polish_liquid');
+        polish.push({
+          device: (r.Device || '').trim(),
+          side: r.Side,
+          padType: r.padType,
+          serialNumber: String(r.SN).trim(),
+          remainingPct,
+          valueRaw: val,
+          status,
+        });
+      }
+    } catch (e) {
+      // Table may not exist on all installs
+    }
+
+    tools = { milling, cutting, polish, edger: [], lastUpdated: nowIso };
+
+    // Build active alerts list + fire Slack for new criticals (rate-limited)
+    checkToolAlerts();
+    return true;
+  } catch (e) {
+    console.warn('[SOM] pollTools error:', e.message);
+    return false;
+  }
+}
+
+function toolKey(t) {
+  return `${t.device}|${t.side ?? ''}|${t.slot ?? t.padType ?? ''}|${t.serialNumber}`;
+}
+
+function checkToolAlerts() {
+  const now = Date.now();
+  const rateMs = (ALERT_THRESHOLDS.slack_rate_limit_hours || 24) * 3600 * 1000;
+  const newAlerts = [];
+  const all = [
+    ...tools.milling.map(t => ({ ...t, kind: 'milling' })),
+    ...tools.cutting.map(t => ({ ...t, kind: 'cutting' })),
+    ...tools.polish.map(t => ({ ...t, kind: 'polish' })),
+  ];
+  for (const t of all) {
+    if (t.status === 'ok') continue;
+    const key = toolKey(t);
+    newAlerts.push({
+      key,
+      kind: t.kind,
+      device: t.device,
+      side: t.side,
+      slot: t.slot ?? t.padType,
+      serialNumber: t.serialNumber,
+      remainingPct: t.remainingPct,
+      status: t.status, // heads_up | warning | critical
+      timestamp: new Date().toISOString(),
+    });
+
+    // Slack only on critical, rate-limited per tool
+    if (t.status === 'critical') {
+      const last = lastSlackAlertByTool[key] || 0;
+      if (now - last > rateMs) {
+        lastSlackAlertByTool[key] = now;
+        const pct = (t.remainingPct * 100).toFixed(1);
+        const label = t.kind === 'polish' ? 'Polish pad' : 'Tool';
+        const slot = t.slot != null ? ` slot ${t.slot}` : (t.padType ? ` ${t.padType}` : '');
+        postSlackAlert(
+          `:rotating_light: *${label} critical* — ${t.device}${slot} (SN ${t.serialNumber}) at *${pct}%* remaining`
+        ).catch(() => {});
+      }
+    }
+  }
+  toolAlerts = newAlerts;
 }
 
 async function poll() {
@@ -509,6 +698,9 @@ async function poll() {
       return (severityOrder[a.severity] || 4) - (severityOrder[b.severity] || 4);
     });
 
+    // Tool life / polish liquid (runs on same poll cadence)
+    await pollTools();
+
     lastSuccessfulPoll = lastPoll;
     isLive = true;
     connectionError = null;
@@ -516,7 +708,7 @@ async function poll() {
     // Persist to disk
     saveToDisk();
 
-    console.log(`[SOM] Poll #${pollCount} - LIVE: ${devices.length} devices, ${conveyors.length} conveyors, ${orders.todayTotal} jobs today, ${alerts.length} alerts`);
+    console.log(`[SOM] Poll #${pollCount} - LIVE: ${devices.length} devices, ${conveyors.length} conveyors, ${orders.todayTotal} jobs today, ${alerts.length} alerts, ${toolAlerts.length} tool alerts`);
     return true;
 
   } catch (err) {
@@ -544,7 +736,8 @@ module.exports = {
     console.log(`[SOM] Host: ${SOM_HOST}:${SOM_PORT}/${SOM_DATABASE}`);
     console.log(`[SOM] Poll interval: ${SOM_POLL_INTERVAL}ms`);
 
-    // Load any persisted data first
+    // Load thresholds + any persisted data first
+    loadThresholds();
     loadFromDisk();
 
     // Start initial poll asynchronously (don't block server startup)
@@ -741,6 +934,66 @@ module.exports = {
         }, {})
       }
     };
+  },
+
+  /**
+   * Get tool life + polish pad snapshot for Maintenance → Machines section
+   */
+  getTools() {
+    return {
+      ...tools,
+      thresholds: ALERT_THRESHOLDS,
+      isLive,
+      lastPoll,
+      lastSuccessfulPoll,
+      connectionError,
+      summary: {
+        milling: tools.milling.length,
+        cutting: tools.cutting.length,
+        polish: tools.polish.length,
+        critical: toolAlerts.filter(a => a.status === 'critical').length,
+        warning: toolAlerts.filter(a => a.status === 'warning').length,
+        headsUp: toolAlerts.filter(a => a.status === 'heads_up').length,
+      },
+    };
+  },
+
+  /**
+   * Get active tool-life threshold alerts (Attention Rail feed)
+   */
+  getToolAlerts() {
+    // Sort: critical first, then warning, then heads_up; within a bucket lowest remaining first
+    const order = { critical: 0, warning: 1, heads_up: 2 };
+    const sorted = [...toolAlerts].sort((a, b) =>
+      (order[a.status] - order[b.status]) || (a.remainingPct - b.remainingPct)
+    );
+    return {
+      alerts: sorted,
+      isLive,
+      lastPoll,
+      thresholds: ALERT_THRESHOLDS,
+      summary: {
+        total: sorted.length,
+        critical: sorted.filter(a => a.status === 'critical').length,
+        warning: sorted.filter(a => a.status === 'warning').length,
+        headsUp: sorted.filter(a => a.status === 'heads_up').length,
+      },
+    };
+  },
+
+  /**
+   * Reload alert thresholds from disk (hot-reload without restarting server)
+   */
+  reloadThresholds() {
+    loadThresholds();
+    // Re-evaluate current snapshot against new thresholds
+    for (const bucket of ['milling', 'cutting', 'polish']) {
+      for (const t of tools[bucket] || []) {
+        t.status = classifyTool(t.remainingPct, bucket === 'polish' ? 'polish_liquid' : 'tool_life');
+      }
+    }
+    checkToolAlerts();
+    return ALERT_THRESHOLDS;
   },
 
   /**

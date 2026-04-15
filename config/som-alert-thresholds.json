@@ -1,0 +1,15 @@
+{
+  "_comment": "Edit + call POST /api/som/thresholds/reload (or restart Lab Server) to apply. remainingPct = 0..1.",
+  "tool_life": {
+    "heads_up": 0.25,
+    "warning": 0.10,
+    "critical": 0.05
+  },
+  "polish_liquid": {
+    "heads_up": 0.30,
+    "warning": 0.15,
+    "critical": 0.05
+  },
+  "slack_channel": "#lab-maintenance",
+  "slack_rate_limit_hours": 24
+}

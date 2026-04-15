@@ -70,12 +70,233 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
   );
 }
 
+// ─── Machines Section: tool life, polish pads, attention rail ──────────────
+function statusToColor(status){
+  if(status==='critical')return T.red;
+  if(status==='warning')return T.amber;
+  if(status==='heads_up')return T.orange||'#F97316';
+  return T.green;
+}
+function statusLabel(s){
+  return s==='critical'?'CRITICAL':s==='warning'?'WARNING':s==='heads_up'?'HEADS-UP':'OK';
+}
+
+function ToolLifeBar({remainingPct,status}){
+  const pct=Math.max(0,Math.min(1,remainingPct));
+  const color=statusToColor(status);
+  return (
+    <div style={{position:'relative',height:8,background:`${T.border}40`,borderRadius:4,overflow:'hidden'}}>
+      <div style={{position:'absolute',left:0,top:0,bottom:0,width:`${pct*100}%`,background:color,transition:'width .4s, background .4s'}}/>
+    </div>
+  );
+}
+
+function AttentionRail({alerts,summary}){
+  if(!alerts||alerts.length===0){
+    return (
+      <Card style={{padding:'14px 18px',display:'flex',alignItems:'center',gap:12}}>
+        <span style={{width:10,height:10,borderRadius:'50%',background:T.green}}/>
+        <div style={{fontSize:13,color:T.text,fontWeight:700}}>All tools & pads within thresholds</div>
+        <div style={{marginLeft:'auto',fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>NO ACTIVE ALERTS</div>
+      </Card>
+    );
+  }
+  const top=alerts.slice(0,6);
+  return (
+    <Card style={{padding:'12px 14px'}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:10}}>
+        <div style={{fontSize:11,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>ATTENTION RAIL</div>
+        {summary.critical>0&&<Pill color={T.red}>{summary.critical} critical</Pill>}
+        {summary.warning>0&&<Pill color={T.amber}>{summary.warning} warning</Pill>}
+        {summary.headsUp>0&&<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{summary.headsUp} heads-up</span>}
+        <div style={{marginLeft:'auto',fontSize:10,color:T.textDim,fontFamily:mono}}>{alerts.length} total</div>
+      </div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(260px,1fr))',gap:8}}>
+        {top.map(a=>{
+          const color=statusToColor(a.status);
+          return (
+            <div key={a.key} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 10px',background:`${color}12`,border:`1px solid ${color}40`,borderRadius:6}}>
+              <div style={{width:6,height:28,background:color,borderRadius:3}}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:700,color:T.text,fontFamily:mono,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                  {a.device}{a.slot!=null?` · slot ${a.slot}`:''}
+                </div>
+                <div style={{fontSize:10,color:T.textDim,fontFamily:mono,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                  SN {a.serialNumber} · {a.kind}
+                </div>
+              </div>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontSize:16,fontWeight:800,color,fontFamily:mono,lineHeight:1}}>{(a.remainingPct*100).toFixed(0)}%</div>
+                <div style={{fontSize:9,color,fontFamily:mono,letterSpacing:1}}>{statusLabel(a.status)}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {alerts.length>top.length&&(
+        <div style={{fontSize:10,color:T.textDim,fontFamily:mono,marginTop:8,textAlign:'right'}}>+{alerts.length-top.length} more — see full grid below</div>
+      )}
+    </Card>
+  );
+}
+
+function ToolLifeGrid({title,items,emptyLabel}){
+  if(!items||items.length===0){
+    return (
+      <Card>
+        <SectionHeader>{title}</SectionHeader>
+        <div style={{padding:'16px 4px',fontSize:12,color:T.textDim,fontFamily:mono}}>{emptyLabel||'No data'}</div>
+      </Card>
+    );
+  }
+  // Sort: lowest remaining first so operators see the urgent ones on top
+  const sorted=[...items].sort((a,b)=>a.remainingPct-b.remainingPct);
+  // Group by device
+  const byDevice={};
+  sorted.forEach(t=>{
+    if(!byDevice[t.device])byDevice[t.device]=[];
+    byDevice[t.device].push(t);
+  });
+  return (
+    <Card>
+      <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{items.length} tools</span>}>{title}</SectionHeader>
+      <div style={{display:'flex',flexDirection:'column',gap:14,maxHeight:440,overflowY:'auto',paddingRight:4}}>
+        {Object.entries(byDevice).map(([device,tools])=>(
+          <div key={device}>
+            <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5,marginBottom:6,borderBottom:`1px solid ${T.border}40`,paddingBottom:4}}>
+              {device} <span style={{color:T.textDim,fontWeight:400}}>· {tools.length} tool{tools.length!==1?'s':''}</span>
+            </div>
+            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:8}}>
+              {tools.map(t=>{
+                const color=statusToColor(t.status);
+                const pct=(t.remainingPct*100).toFixed(0);
+                return (
+                  <div key={`${device}-${t.side}-${t.slot}-${t.serialNumber}`} style={{padding:'8px 10px',background:T.card,border:`1px solid ${color}30`,borderRadius:6}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:4}}>
+                      <div style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono}}>
+                        Slot {t.slot}{t.side?` · ${t.side}`:''}
+                      </div>
+                      <div style={{fontSize:14,fontWeight:800,color,fontFamily:mono}}>{pct}%</div>
+                    </div>
+                    <ToolLifeBar remainingPct={t.remainingPct} status={t.status}/>
+                    <div style={{display:'flex',justifyContent:'space-between',marginTop:4,fontSize:9,color:T.textDim,fontFamily:mono}}>
+                      <span>SN {t.serialNumber}</span>
+                      <span>{t.used.toLocaleString()}/{t.max.toLocaleString()}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
+function PolishPadBars({items}){
+  if(!items||items.length===0){
+    return (
+      <Card>
+        <SectionHeader>Polish Pad Liquid Levels</SectionHeader>
+        <div style={{padding:'16px 4px',fontSize:12,color:T.textDim,fontFamily:mono}}>No polish pad data available</div>
+      </Card>
+    );
+  }
+  const sorted=[...items].sort((a,b)=>a.remainingPct-b.remainingPct);
+  return (
+    <Card>
+      <SectionHeader right={<span style={{fontSize:10,fontFamily:mono,color:T.textDim}}>{items.length} pads</span>}>Polish Pad Liquid Levels</SectionHeader>
+      <div style={{display:'flex',flexDirection:'column',gap:6,maxHeight:440,overflowY:'auto',paddingRight:4}}>
+        {sorted.map(p=>{
+          const color=statusToColor(p.status);
+          const pct=(p.remainingPct*100).toFixed(0);
+          return (
+            <div key={`${p.device}-${p.side}-${p.serialNumber}`} style={{display:'grid',gridTemplateColumns:'180px 1fr 60px 80px',gap:10,alignItems:'center',padding:'6px 8px',borderBottom:`1px solid ${T.border}22`}}>
+              <div style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                {p.device}{p.side?` · ${p.side}`:''}
+              </div>
+              <ToolLifeBar remainingPct={p.remainingPct} status={p.status}/>
+              <div style={{fontSize:13,fontWeight:800,color,fontFamily:mono,textAlign:'right'}}>{pct}%</div>
+              <div style={{fontSize:9,color:T.textDim,fontFamily:mono,textAlign:'right',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>
+                {p.padType||''} SN {p.serialNumber}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function MachinesSection({tools,toolAlerts,ovenServerUrl}){
+  const sum=tools.summary||{};
+  const lastPoll=tools.lastPoll?new Date(tools.lastPoll).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}):'—';
+  const statusDot=tools.isLive?T.green:T.red;
+  const statusTxt=tools.isLive?'SOM LIVE':'SOM OFFLINE';
+  return (
+    <div style={{display:'flex',flexDirection:'column',gap:16}}>
+      {/* Header strip */}
+      <div style={{display:'flex',alignItems:'center',gap:14,flexWrap:'wrap'}}>
+        <div>
+          <div style={{fontSize:18,fontWeight:800,color:T.text,fontFamily:"'Bebas Neue',sans-serif",letterSpacing:1}}>MACHINES</div>
+          <div style={{fontSize:11,color:T.textDim}}>Tool life & polish pad liquid levels — Schneider SOM</div>
+        </div>
+        <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:10}}>
+          <span style={{width:8,height:8,borderRadius:'50%',background:statusDot}}/>
+          <span style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1}}>{statusTxt}</span>
+          <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>Updated {lastPoll}</span>
+        </div>
+      </div>
+
+      {/* KPI strip */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))',gap:10}}>
+        <KPICard label="Cutting Tools" value={sum.cutting||0} sub="tracked" accent={T.cyan}/>
+        <KPICard label="Milling Tools" value={sum.milling||0} sub="tracked" accent={T.purple}/>
+        <KPICard label="Polish Pads" value={sum.polish||0} sub="tracked" accent={T.blue}/>
+        <KPICard label="Critical" value={sum.critical||0} sub="≤ 5% remaining" accent={(sum.critical||0)>0?T.red:T.green}/>
+        <KPICard label="Warning" value={sum.warning||0} sub="≤ 10% remaining" accent={(sum.warning||0)>0?T.amber:T.green}/>
+        <KPICard label="Heads-up" value={sum.headsUp||0} sub="≤ 25% remaining" accent={(sum.headsUp||0)>0?(T.orange||'#F97316'):T.green}/>
+      </div>
+
+      {/* Attention Rail */}
+      <AttentionRail alerts={toolAlerts.alerts||[]} summary={toolAlerts.summary||{}}/>
+
+      {/* Tool Life Grids — cutting + milling side by side, polish pads below */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(420px,1fr))',gap:16}}>
+        <ToolLifeGrid title="Cutting Tool Life" items={tools.cutting} emptyLabel="No cutting tools reporting"/>
+        <ToolLifeGrid title="Milling Tool Life" items={tools.milling} emptyLabel="No milling tools reporting"/>
+      </div>
+
+      <PolishPadBars items={tools.polish}/>
+    </div>
+  );
+}
+
 export default function MaintenanceTab({ovenServerUrl,settings}){
-  const [sub,setSub]=useState("overview");
+  const [sub,setSub]=useState("machines");
   const [maintenance,setMaintenance]=useState({assets:[],tasks:[],downtime:[],parts:[],stats:{},lastSync:null,status:'pending'});
   const [loading,setLoading]=useState(true);
   const [selectedTask,setSelectedTask]=useState(null);  // For work order detail modal
   const [selectedPart,setSelectedPart]=useState(null);  // For spare part detail panel
+
+  // SOM machine monitoring (tool life + polish pads)
+  const [somTools,setSomTools]=useState({milling:[],cutting:[],polish:[],summary:{},isLive:false,lastPoll:null});
+  const [somToolAlerts,setSomToolAlerts]=useState({alerts:[],summary:{}});
+  useEffect(()=>{
+    if(!ovenServerUrl)return;
+    const go=async()=>{
+      try{
+        const [tR,aR]=await Promise.all([
+          fetch(`${ovenServerUrl}/api/som/tools`,{signal:AbortSignal.timeout(5000)}),
+          fetch(`${ovenServerUrl}/api/som/alerts/active`,{signal:AbortSignal.timeout(5000)}),
+        ]);
+        if(tR.ok)setSomTools(await tR.json());
+        if(aR.ok)setSomToolAlerts(await aR.json());
+      }catch(e){/* silent — banner will show offline */}
+    };
+    go(); const iv=setInterval(go,30000); return()=>clearInterval(iv);
+  },[ovenServerUrl]);
 
   // Fetch maintenance data from server
   useEffect(()=>{
@@ -156,7 +377,7 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
   // Top bar navigation
   const topBar=(
     <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:18,flexWrap:"wrap"}}>
-      {[{id:"overview",icon:"◉",label:"Overview"},{id:"equipment",icon:"⚙️",label:"Equipment"},
+      {[{id:"machines",icon:"🛠",label:"Machines"},{id:"overview",icon:"◉",label:"Overview"},{id:"equipment",icon:"⚙️",label:"Equipment"},
         {id:"tasks",icon:"📋",label:"Work Orders"},{id:"downtime",icon:"⏱️",label:"Downtime"},
         {id:"parts",icon:"🔩",label:"Spare Parts"}].map(n=>(
         <button key={n.id} onClick={()=>setSub(n.id)}
@@ -198,6 +419,11 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
     <ProductionStageWrapper>
     <div>
       {topBar}
+
+      {/* ══ MACHINES (SOM tool life + polish pads) ══ */}
+      {sub==="machines"&&(
+        <MachinesSection tools={somTools} toolAlerts={somToolAlerts} ovenServerUrl={ovenServerUrl}/>
+      )}
 
       {/* ══ OVERVIEW ══ */}
       {sub==="overview"&&(
