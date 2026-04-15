@@ -332,6 +332,47 @@ try {
   db.exec(`DELETE FROM picks_history WHERE id NOT IN (SELECT MIN(id) FROM picks_history GROUP BY pick_id)`);
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_picks_hist_pick_id ON picks_history(pick_id)`);
 } catch (e) { /* index may already exist */ }
+
+// Transactions — persistent mirror of ItemPath /api/transactions (append-only, forever retention).
+// Split: hot table (scalar columns) + transactions_raw (JSON blob) to keep hot-table scan-friendly.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS transactions (
+    transaction_id TEXT PRIMARY KEY,
+    type INTEGER,
+    motive_type TEXT,
+    number TEXT,
+    order_id TEXT,
+    order_line_id TEXT,
+    order_name TEXT,
+    material_name TEXT,
+    user_name TEXT,
+    warehouse_name TEXT,
+    location_name TEXT,
+    bin_name TEXT,
+    station_name TEXT,
+    qty_requested REAL,
+    qty_confirmed REAL,
+    qty_deviated REAL,
+    lot TEXT,
+    serial_number TEXT,
+    reason_code TEXT,
+    creation_date TEXT,
+    recorded_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_tx_creation ON transactions(creation_date);
+  CREATE INDEX IF NOT EXISTS idx_tx_order_name ON transactions(order_name);
+  CREATE INDEX IF NOT EXISTS idx_tx_order_line ON transactions(order_line_id);
+  CREATE INDEX IF NOT EXISTS idx_tx_material ON transactions(material_name);
+  CREATE INDEX IF NOT EXISTS idx_tx_type ON transactions(type);
+  CREATE INDEX IF NOT EXISTS idx_tx_user ON transactions(user_name);
+  CREATE INDEX IF NOT EXISTS idx_tx_recorded ON transactions(recorded_at);
+
+  CREATE TABLE IF NOT EXISTS transactions_raw (
+    transaction_id TEXT PRIMARY KEY,
+    raw_json TEXT,
+    FOREIGN KEY (transaction_id) REFERENCES transactions(transaction_id)
+  );
+`);
 db.exec(`
 
   -- Binning Intelligence
@@ -1196,13 +1237,20 @@ const upsertPicksHistoryStmt = db.prepare(`
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
+const PICKS_HISTORY_MAX_QTY = 10000; // sanity clamp: no legitimate pick is 10k+ units
+
 function upsertPicksHistory(lines) {
-  let inserted = 0, skipped = 0;
+  let inserted = 0, skipped = 0, rejected = 0;
   const save = db.transaction(() => {
     for (const line of lines) {
       const sku = line.materialName || '';
       const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
       if (!sku || qty <= 0) { skipped++; continue; }
+      if (qty > PICKS_HISTORY_MAX_QTY) {
+        rejected++;
+        console.warn(`[DB] upsertPicksHistory: rejecting qty=${qty} sku=${sku} id=${line.id} (over ${PICKS_HISTORY_MAX_QTY} clamp — probable data error)`);
+        continue;
+      }
       const orderName = line.orderName || line.orderId || '';
       const wh = normalizeWarehouse(line.warehouseName || line.costCenterName || '');
       const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
@@ -1212,7 +1260,7 @@ function upsertPicksHistory(lines) {
     }
   });
   save();
-  return { inserted, skipped, total: lines.length };
+  return { inserted, skipped, rejected, total: lines.length };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

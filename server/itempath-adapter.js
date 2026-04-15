@@ -965,6 +965,21 @@ async function poll() {
 
       // Pick recording handled by separate pickSync() timer — not in poll()
 
+      // Persist ItemPath transactions (live mirror). Raw /api/transactions responses
+      // from all three type variants (default/put/pick) go to the transactions table;
+      // dedup via PK on transaction_id. Safe on bad rows — one malformed entry
+      // doesn't block the upsert transaction.
+      try {
+        const rawTx = [
+          ...(txResp.transactions || []),
+          ...(pickTxResp.transactions || []),
+          ...(putTxResp.transactions || []),
+        ];
+        if (rawTx.length > 0) db.upsertTransactions(rawTx);
+      } catch (txErr) {
+        console.error('[ItemPath] transactions upsert failed:', txErr.message);
+      }
+
       console.log(`[ItemPath] ✓ SQLite snapshot saved`);
     } catch (dbErr) {
       console.error('[ItemPath] SQLite write failed:', dbErr.message);
