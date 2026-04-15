@@ -1001,22 +1001,45 @@ async function poll() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PICK SYNC — Path A (2026-04-15): fixed 24h lookback, paginated, INSERT OR IGNORE.
-// ItemPath /api/order_lines regressed on sub-day modifiedDate windows around
-// 2026-03-30 (narrow queries return empty or 504). 24h windows still work.
-// Strategy: every 30 min, query [now-25h, now], paginate to exhaustion, dedup
-// via UNIQUE pick_id. lastPickSyncTime kept as advisory for status endpoints.
+// PICK SYNC — Self-healing gap-fill + steady-state live sync.
+// Each 30-min run: pre-flight probe → gap mode (walk forward 24h/run) OR
+// steady mode (25h rolling). No separate backfill script. No manual runs.
+// INSERT OR IGNORE handles overlap; UNIQUE pick_id guarantees no dupes.
+// ItemPath quirks empirically verified 2026-04-15:
+//   - limit>50 on /api/order_lines times out
+//   - sub-day modifiedDate windows return empty on recent dates
+//   - full-day windows on past dates work reliably
 // ─────────────────────────────────────────────────────────────────────────────
 const db = require('./db');
 let pickSyncRunning = false;
-let pickSyncStatus = { lastRun: null, lastSuccess: null, picksRecorded: 0, errors: 0, reconciliation: null };
+let pickSyncStatus = { lastRun: null, lastSuccess: null, picksRecorded: 0, errors: 0, reconciliation: null, mode: null, itempathHealthy: null };
 
-// ItemPath /api/order_lines times out above limit~50 (empirically verified
-// 2026-04-15 via probe_limit_size.js — limit=50 returns fine, limit=100 times out).
 const PICK_SYNC_PAGE_SIZE = 50;
 const PICK_SYNC_PAGE_PAUSE_MS = 1000;
-const PICK_SYNC_MAX_PAGES = 80;                      // 80 × 50 = 4000 rows; typical day ~2500–3000
-const PICK_SYNC_MAX_LOOKBACK_MS = 25 * 60 * 60 * 1000; // always 25h (narrow windows are broken upstream)
+const PICK_SYNC_MAX_PAGES = 80;                        // per-run cap
+const PICK_SYNC_STEADY_LOOKBACK_MS = 25 * 60 * 60 * 1000; // 25h for steady state
+const PICK_SYNC_GAP_THRESHOLD_MS = 24 * 60 * 60 * 1000; // >24h behind = gap mode
+const PICK_SYNC_GAP_WINDOW_MS = 24 * 60 * 60 * 1000;    // slice size in gap mode
+const PICK_SYNC_GAP_OVERLAP_MS = 60 * 60 * 1000;        // re-scan last 1h for safety
+const PICK_SYNC_PREFLIGHT_TIMEOUT_MS = 15000;           // abort probe fast if sick
+
+// Pre-flight probe: 1 cheap /api/order_lines call with a known-good filter.
+// Returns true if ItemPath responds quickly; false on 504/timeout/error.
+async function pickSyncPreflight() {
+  try {
+    const yesterdayStart = new Date(Date.now() - 24*60*60*1000);
+    const yesterdayEnd   = new Date(Date.now() - 23*60*60*1000);
+    const data = await ipFetch('/api/order_lines', {
+      directionType: 2, status: 'processed',
+      'modifiedDate[gte]': yesterdayStart.toISOString(),
+      'modifiedDate[lte]': yesterdayEnd.toISOString(),
+      limit: 1, page: 0,
+    }, { timeout: PICK_SYNC_PREFLIGHT_TIMEOUT_MS });
+    return { ok: true, sample: (data.order_lines || []).length };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
 
 async function pickSync() {
   if (CONFIG.mockMode) return;
@@ -1024,15 +1047,53 @@ async function pickSync() {
   if (isConservationMode()) { console.log('[pickSync] Conservation mode — skipping'); return; }
   pickSyncRunning = true;
 
-  // Always 25h window. ItemPath /api/order_lines regressed on sub-day
-  // modifiedDate filters (2026-03-30) — narrow windows return 0 even for
-  // active lab hours. 25h always works; INSERT OR IGNORE dedups repeated rows.
+  // Pre-flight: cheap 1-row probe. If ItemPath is sick (504/timeout), skip this run.
+  const preflight = await pickSyncPreflight();
+  pickSyncStatus.itempathHealthy = preflight.ok;
+  if (!preflight.ok) {
+    console.warn(`[pickSync] Pre-flight FAIL — ItemPath unhealthy (${preflight.error?.substring(0, 80)}). Skipping run.`);
+    pickSyncRunning = false;
+    return;
+  }
+
+  // Mode decision: gap (walk forward one 24h slice) vs steady (25h rolling).
+  // Uses MAX(completed_at) as the authoritative "caught up to" marker.
   const windowEnd = new Date();
-  const windowStart = new Date(windowEnd.getTime() - PICK_SYNC_MAX_LOOKBACK_MS);
+  let windowStart;
+  let mode;
+  try {
+    const row = db.db.prepare(`SELECT MAX(completed_at) AS m FROM picks_history`).get();
+    const maxTs = row?.m ? new Date(row.m) : null;
+    const gapMs = maxTs ? (windowEnd.getTime() - maxTs.getTime()) : Infinity;
+    if (maxTs && gapMs > PICK_SYNC_GAP_THRESHOLD_MS) {
+      mode = 'GAP';
+      const sliceStart = new Date(maxTs.getTime() - PICK_SYNC_GAP_OVERLAP_MS);
+      windowStart = sliceStart;
+      // Cap window to 24h slice to keep pages manageable
+      const sliceEnd = new Date(sliceStart.getTime() + PICK_SYNC_GAP_WINDOW_MS);
+      if (sliceEnd.getTime() < windowEnd.getTime()) {
+        // Override windowEnd to slice boundary so we walk forward day-by-day
+        // (but leave the outer `windowEnd` var for status — use local for the query)
+        var queryWindowEnd = sliceEnd;
+      } else {
+        var queryWindowEnd = windowEnd;
+      }
+    } else {
+      mode = 'STEADY';
+      windowStart = new Date(windowEnd.getTime() - PICK_SYNC_STEADY_LOOKBACK_MS);
+      var queryWindowEnd = windowEnd;
+    }
+  } catch (e) {
+    console.warn('[pickSync] Could not read MAX(completed_at), defaulting to steady 25h:', e.message);
+    mode = 'STEADY';
+    windowStart = new Date(windowEnd.getTime() - PICK_SYNC_STEADY_LOOKBACK_MS);
+    var queryWindowEnd = windowEnd;
+  }
+  pickSyncStatus.mode = mode;
   let totalFetched = 0, totalInserted = 0, page = 0;
 
   try {
-    console.log(`[pickSync] Fixed-24h scan ${windowStart.toISOString()} → ${windowEnd.toISOString()}`);
+    console.log(`[pickSync] ${mode} mode: ${windowStart.toISOString()} → ${queryWindowEnd.toISOString()}`);
 
     while (page < PICK_SYNC_MAX_PAGES) {
       if (isConservationMode()) { console.warn('[pickSync] Conservation mode tripped mid-run — stopping'); break; }
@@ -1040,7 +1101,7 @@ async function pickSync() {
       const data = await ipFetch('/api/order_lines', {
         directionType: 2, status: 'processed',
         'modifiedDate[gte]': windowStart.toISOString(),
-        'modifiedDate[lte]': windowEnd.toISOString(),
+        'modifiedDate[lte]': queryWindowEnd.toISOString(),
         limit: PICK_SYNC_PAGE_SIZE, page,
       }, { timeout: 120000 });
 
@@ -1056,14 +1117,14 @@ async function pickSync() {
       if (page < PICK_SYNC_MAX_PAGES) await new Promise(r => setTimeout(r, PICK_SYNC_PAGE_PAUSE_MS));
     }
 
-    lastPickSyncTime = windowEnd.toISOString(); // advisory — status endpoints read this
+    lastPickSyncTime = queryWindowEnd.toISOString(); // advisory — status endpoints read this
     saveDailyTotals();
 
     pickSyncStatus.lastRun = lastPickSyncTime;
     pickSyncStatus.lastSuccess = lastPickSyncTime;
     pickSyncStatus.picksRecorded += totalInserted;
     pickSyncStatus.consecutiveErrors = 0;
-    console.log(`[pickSync] ✓ ${totalFetched} fetched across ${page + 1} page(s), ${totalInserted} new rows`);
+    console.log(`[pickSync] ✓ ${mode} — ${totalFetched} fetched across ${page + 1} page(s), ${totalInserted} new rows`);
 
     if (page === PICK_SYNC_MAX_PAGES - 1) {
       console.warn(`[pickSync] Hit MAX_PAGES cap — may have missed rows; will re-query next cycle`);
