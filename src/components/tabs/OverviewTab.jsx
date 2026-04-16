@@ -1151,10 +1151,21 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                 <span style={{fontSize:10,color:isConnected?T.green:T.textDim,fontFamily:mono,fontWeight:700}}>{isConnected?`#${slack.cfg.channel||"lab-assistant"}`:"Not connected"}</span>
               </div>
             </div>
-            <button onClick={()=>{setDraft({...slack.cfg});setShowSlackCfg(s=>!s);}}
-              style={{fontSize:11,padding:"5px 12px",background:showSlackCfg?"#4A154B":T.bg,border:`1px solid ${showSlackCfg?"#611f69":T.border}`,borderRadius:6,color:showSlackCfg?"#E8A9F4":T.textMuted,cursor:"pointer",fontFamily:mono,fontWeight:700}}>
-              ⚙ {showSlackCfg?"Close":"Configure"}
-            </button>
+            <div style={{display:"flex",gap:6}}>
+              <button onClick={async()=>{
+                if(!confirm("Clear all Slack messages?")) return;
+                const gw=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+                try{ await fetch(`${gw}/api/slack/messages`,{method:"DELETE"}); }catch(e){}
+                setMessages([]);
+              }}
+                style={{fontSize:11,padding:"5px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.textMuted,cursor:"pointer",fontFamily:mono,fontWeight:700}}>
+                Clear
+              </button>
+              <button onClick={()=>{setDraft({...slack.cfg});setShowSlackCfg(s=>!s);}}
+                style={{fontSize:11,padding:"5px 12px",background:showSlackCfg?"#4A154B":T.bg,border:`1px solid ${showSlackCfg?"#611f69":T.border}`,borderRadius:6,color:showSlackCfg?"#E8A9F4":T.textMuted,cursor:"pointer",fontFamily:mono,fontWeight:700}}>
+                ⚙ {showSlackCfg?"Close":"Configure"}
+              </button>
+            </div>
           </div>
           {showSlackCfg&&(
             <div style={{marginBottom:14,padding:16,background:"#1A0A1E",border:"1px solid #611f69",borderRadius:10}}>
