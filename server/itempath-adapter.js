@@ -1038,8 +1038,17 @@ async function pickSyncPreflight() {
 }
 
 // Track days we've already tried to backfill that returned 0 from ItemPath.
-// Prevents infinite loop on days with genuinely no picks (holidays, closures).
+// Persisted to SQLite so restarts don't retry days we know are empty.
 const backfillAttempted = new Set();
+try {
+  const rows = db.db.prepare(`SELECT date FROM pickSync_attempted_days`).all();
+  rows.forEach(r => backfillAttempted.add(r.date));
+} catch (e) {
+  // Table may not exist yet — create it
+  try {
+    db.db.exec(`CREATE TABLE IF NOT EXISTS pickSync_attempted_days (date TEXT PRIMARY KEY, attempted_at TEXT DEFAULT (datetime('now')))`);
+  } catch (e2) { /* ignore */ }
+}
 
 // Find days with missing or low pick counts in picks_history.
 // Returns the oldest missing day as a Date, or null if coverage is good.
@@ -1171,6 +1180,7 @@ async function pickSync() {
     // If BACKFILL returned 0 from ItemPath, mark the day as attempted so we don't retry forever
     if (mode === 'BACKFILL' && totalFetched === 0 && missingDay) {
       backfillAttempted.add(missingDay.dateStr);
+      try { db.db.prepare(`INSERT OR IGNORE INTO pickSync_attempted_days (date) VALUES (?)`).run(missingDay.dateStr); } catch (e) { /* ignore */ }
       console.log(`[pickSync] Marking ${missingDay.dateStr} as attempted (ItemPath returned 0) — will skip next cycle`);
     }
 
