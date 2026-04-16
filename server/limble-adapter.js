@@ -337,19 +337,19 @@ function computeStats(assets, tasks, downtime) {
   const operatingHrsPerDay = 10; // Average operating hours per day
   const totalAvailableMins = 30 * operatingHrsPerDay * 60 * workingAssets;
 
-  // Uptime percentage
-  let uptimePercent = 99;  // Default if no data
+  // Uptime percentage — only from real data, never fake
+  let uptimePercent = null;
   if (totalAvailableMins > 0 && totalDowntimeMins > 0) {
     uptimePercent = Math.round((1 - totalDowntimeMins / totalAvailableMins) * 10000) / 100;
-  } else if (downtimeTasks.length > 0) {
-    // Some downtime tasks but can't calculate accurately
-    uptimePercent = 97;
+    uptimePercent = Math.max(0, Math.min(100, uptimePercent));
+  } else if (downtimeTasks.length > 0 && totalAvailableMins > 0) {
+    // Estimate from task hours only
+    const estimatedDownMins = downtimeTasks.reduce((s, t) => s + (t.actualHrs || t.estimatedHrs || 1) * 60, 0);
+    uptimePercent = Math.round((1 - estimatedDownMins / totalAvailableMins) * 10000) / 100;
+    uptimePercent = Math.max(0, Math.min(100, uptimePercent));
   }
-
-  // Don't clamp to unrealistic high values - if we have no data, show "N/A" scenario
-  const clampedUptime = totalDowntimeMins > 0 || downtimeTasks.length > 0
-    ? Math.min(99.9, Math.max(80, uptimePercent))
-    : null;  // null = no data available
+  // null = no data available — dashboard shows "—"
+  const clampedUptime = uptimePercent;
 
   // ── OEE CALCULATION ──
   // OEE = Availability × Performance × Quality
@@ -606,11 +606,11 @@ async function poll() {
     // Fetch all tasks - the API's status filter doesn't work as expected
     // Completed tasks have status=1 but dateCompleted>0, not status=2
     // So we fetch ALL tasks and filter ourselves
-    const [assetsResp, partsResp] = await Promise.all([
+    const [assetsResp, partsResp, downtimeResp] = await Promise.all([
       safeFetch('/v2/assets', { limit: 500 }),
       safeFetch('/v2/parts', { limit: 500 }),
+      safeFetch('/v2/downtimes', { limit: 500 }),
     ]);
-    const downtimeResp = []; // /v2/downtimes endpoint doesn't exist in our Limble plan
 
     // Fetch ALL tasks in pages (Limble returns oldest first)
     let allTasksRaw = [];
