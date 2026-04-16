@@ -1114,10 +1114,21 @@ async function pickSync() {
   const missingDay = findMissingDay();
   if (missingDay) {
     mode = 'BACKFILL';
-    // Query the full day (midnight to midnight UTC) for the missing date
-    windowStart = new Date(missingDay.dateStr + 'T00:00:00.000Z');
+    // Start from where we left off — use max completed_at for that day, not midnight
+    try {
+      const maxRow = db.db.prepare(
+        "SELECT MAX(completed_at) as m FROM picks_history WHERE date(completed_at) = ?"
+      ).get(missingDay.dateStr);
+      if (maxRow?.m) {
+        windowStart = new Date(maxRow.m);
+      } else {
+        windowStart = new Date(missingDay.dateStr + 'T00:00:00.000Z');
+      }
+    } catch (e) {
+      windowStart = new Date(missingDay.dateStr + 'T00:00:00.000Z');
+    }
     queryWindowEnd = new Date(missingDay.dateStr + 'T23:59:59.999Z');
-    console.log(`[pickSync] Found hole: ${missingDay.dateStr} has only ${missingDay.count} picks`);
+    console.log(`[pickSync] Found hole: ${missingDay.dateStr} has only ${missingDay.count} picks (starting from ${windowStart.toISOString()})`);
   } else {
     // No holes — check trailing gap
     try {
