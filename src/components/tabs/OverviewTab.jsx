@@ -1153,9 +1153,14 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
             </div>
             <div style={{display:"flex",gap:6}}>
               <button onClick={async()=>{
-                if(!confirm("Clear all Slack messages?")) return;
+                const mode=confirm("Clear ALL messages from Slack channel?\n\nOK = Delete all messages\nCancel = Delete bot messages only");
                 const gw=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
-                try{ await fetch(`${gw}/api/slack/messages`,{method:"DELETE"}); }catch(e){}
+                try{
+                  const r=await fetch(`${gw}/api/slack/messages${mode?"?all=true":""}`,{method:"DELETE"});
+                  const d=await r.json();
+                  if(d.deleted) alert(`Deleted ${d.deleted} messages from Slack`);
+                  else if(d.error) alert(d.error);
+                }catch(e){ alert("Failed to reach gateway"); }
                 setMessages([]);
               }}
                 style={{fontSize:11,padding:"5px 12px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,color:T.textMuted,cursor:"pointer",fontFamily:mono,fontWeight:700}}>
