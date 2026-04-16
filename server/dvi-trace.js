@@ -574,10 +574,29 @@ class DviTraceWatcher extends EventEmitter {
             (job.events || []).length,
             JSON.stringify(recentEvents)
           );
+          // Dual-write to unified jobs table
+          try {
+            db.upsertJobFromTrace({
+              invoice: jobId,
+              tray: job.tray,
+              stage: job.stage,
+              station: job.station,
+              stationNum: job.stationNum || 0,
+              operator: job.operator || null,
+              machineId: job.machineId || null,
+              status: job.status,
+              hasBreakage: job.hasBreakage,
+              firstSeenAt: job.firstSeen ? new Date(job.firstSeen).toISOString() : null,
+              lastEventAt: job.lastSeen ? new Date(job.lastSeen).toISOString() : null,
+              eventCount: (job.events || []).length,
+              eventsJson: JSON.stringify(recentEvents),
+              rush: null,
+            });
+          } catch (e2) { /* ignore — unified table enrichment */ }
         }
       });
       save();
-      console.log(`[DVI-Trace] Saved ${this.jobs.size} jobs to SQLite`);
+      console.log(`[DVI-Trace] Saved ${this.jobs.size} jobs to SQLite + unified jobs`);
     } catch (e) {
       console.error(`[DVI-Trace] Failed to save to SQLite: ${e.message}`);
     }

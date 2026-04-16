@@ -175,6 +175,25 @@ async function poll() {
     });
     save();
 
+    // Enrich unified jobs table with Looker data
+    try {
+      let lookerEnriched = 0;
+      for (const r of rows) {
+        const orderNum = r['poms_jobs.order_number'] || '';
+        if (orderNum) {
+          db.upsertJobFromLooker({
+            job_id: r['poms_jobs.job_id'] || '',
+            order_number: orderNum,
+            dvi_destination: r['dvi_jobs.dvi_destination'] || 'PAIR',
+            count_lenses: r['dvi_job_lenses.count_lenses'] || 0,
+            count_breakages: r['item_breakages.count_breakages'] || 0,
+          });
+          lookerEnriched++;
+        }
+      }
+      if (lookerEnriched > 0) console.log(`[Looker] Enriched ${lookerEnriched} jobs in unified table`);
+    } catch (e) { console.warn('[Looker] Jobs enrichment error:', e.message); }
+
     rebuildCache(rows);
     cache.lastSync = new Date().toISOString();
     cache.error = null;

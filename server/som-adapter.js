@@ -769,6 +769,19 @@ async function poll() {
     // Persist to disk
     saveToDisk();
 
+    // Enrich unified jobs table with SOM order_header data
+    try {
+      const db = require('./db');
+      let somEnriched = 0;
+      for (const j of activeJobs) {
+        if (j.dviJob) {
+          db.upsertJobFromSOM(j);
+          somEnriched++;
+        }
+      }
+      if (somEnriched > 0) console.log(`[SOM] Enriched ${somEnriched} jobs in unified table`);
+    } catch (e) { console.warn('[SOM] Jobs enrichment error:', e.message); }
+
     console.log(`[SOM] Poll #${pollCount} - LIVE: ${devices.length} devices, ${conveyors.length} conveyors, ${orders.todayTotal} jobs today, ${alerts.length} alerts, ${machineSummaries.length} machine summaries, ${toolAlerts.length} machine alerts`);
     return true;
 

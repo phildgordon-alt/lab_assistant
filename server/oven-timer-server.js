@@ -146,30 +146,46 @@ if (process.env.DVI_SYNC_USER) {
 // ── DVI Trace Watcher (live tray movement from LT files) ──────
 const dviTrace = require('./dvi-trace');
 dviTrace.start();
+// Sync active WIP to both dvi_jobs and unified jobs table
+function syncActiveJobsToDb(label) {
+  const allJobs = dviTrace.getJobs();
+  const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
+  const enriched = activeJobs.map(j => enrichJob(j, dviJobIndex));
+  const today = new Date().toISOString().split('T')[0];
+  labDb.upsertJobs(enriched, today);
+  // Dual-write to unified jobs table
+  for (const j of enriched) {
+    try {
+      labDb.upsertJobFromTrace({
+        invoice: j.invoice || j.job_id,
+        tray: j.tray,
+        stage: j.stage,
+        station: j.station,
+        stationNum: j.stationNum,
+        operator: j.operator,
+        machineId: j.machineId,
+        status: j.status || 'ACTIVE',
+        hasBreakage: j.hasBreakage,
+        firstSeenAt: j.firstSeen ? new Date(j.firstSeen).toISOString() : null,
+        lastEventAt: j.lastSeen ? new Date(j.lastSeen).toISOString() : null,
+        eventCount: (j.events || []).length,
+        eventsJson: j.events ? JSON.stringify((j.events || []).slice(-10)) : null,
+        rush: j.rush,
+      });
+    } catch (e) { /* ignore individual job errors */ }
+  }
+  console.log(`[DB] ${label}: ${enriched.length} DVI jobs to SQLite + unified jobs`);
+}
+
 dviTrace.on('data', ({ count, file }) => {
   const status = dviTrace.getStatus();
   console.log(`[DVI-Trace] ${file}: +${count} events (${status.totalEvents} total, ${status.jobCount} jobs)`);
-  // Sync all active jobs to SQLite for MCP agent queries
-  try {
-    const allJobs = dviTrace.getJobs();
-    const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
-    const enriched = activeJobs.map(j => enrichJob(j, dviJobIndex));
-    const today = new Date().toISOString().split('T')[0];
-    labDb.upsertJobs(enriched, today);
-    console.log(`[DB] Synced ${enriched.length} DVI jobs to SQLite`);
-  } catch (e) { console.warn('[DB] DVI sync error:', e.message); }
+  try { syncActiveJobsToDb('Synced'); } catch (e) { console.warn('[DB] DVI sync error:', e.message); }
 });
 
 // ── Initial SQLite sync after startup (give adapters time to load) ──
 setTimeout(() => {
-  try {
-    const allJobs = dviTrace.getJobs();
-    const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
-    const enriched = activeJobs.map(j => enrichJob(j, dviJobIndex));
-    const today = new Date().toISOString().split('T')[0];
-    labDb.upsertJobs(enriched, today);
-    console.log(`[DB] Initial sync: ${enriched.length} DVI jobs to SQLite`);
-  } catch (e) { console.warn('[DB] Initial DVI sync error:', e.message); }
+  try { syncActiveJobsToDb('Initial sync'); } catch (e) { console.warn('[DB] Initial DVI sync error:', e.message); }
 }, 15000); // 15s delay for DVI trace history to load
 
 // ── EWS: Register collectors and start engine (after adapters are up) ──
@@ -469,6 +485,8 @@ function loadShippedIndex() {
       shippedJobIndex.set(jobNum, parsed);
       // Persist to SQLite (ground truth)
       try { labDb.upsertShippedJob(parsed); } catch (e) { /* ignore db errors during load */ }
+      // Dual-write to unified jobs table
+      try { labDb.upsertJobFromXML(parsed); } catch (e) { /* ignore — jobs table enrichment */ }
       loaded++;
     } catch (e) { /* skip bad files */ }
   }
@@ -551,14 +569,7 @@ dviTrace.on('recovered', ({ reason }) => {
   if (shippedJobIndex.size > 0) {
     dviTrace.purgeShippedJobs(shippedJobIndex);
   }
-  try {
-    const allJobs = dviTrace.getJobs();
-    const activeJobs = allJobs.filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED');
-    const enriched = activeJobs.map(j => enrichJob(j, dviJobIndex));
-    const today = new Date().toISOString().split('T')[0];
-    labDb.upsertJobs(enriched, today);
-    console.log(`[DB] Post-recovery sync: ${enriched.length} DVI jobs to SQLite`);
-  } catch (e) { console.warn('[DB] Post-recovery sync error:', e.message); }
+  try { syncActiveJobsToDb('Post-recovery sync'); } catch (e) { console.warn('[DB] Post-recovery sync error:', e.message); }
 });
 
 // Demo mode: seed DVI trace + coating runs when SMB is unreachable
