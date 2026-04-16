@@ -47,21 +47,27 @@ body{display:flex;flex-direction:column;overflow:hidden;}
   padding:7px 12px;font-family:var(--mono);font-size:10px;color:var(--dim);cursor:pointer;}
 .hdr-btn:active{border-color:var(--cyan);color:var(--cyan);}
 
-/* ATTENTION RAIL 56px */
-.attn{flex-shrink:0;height:56px;background:#0A0D12;border-bottom:1px solid var(--border);
+/* ATTENTION RAIL 56px — broadcast ticker */
+.attn{flex-shrink:0;height:56px;background:#0A0D12;border-bottom:1px solid #21262D;
   display:flex;align-items:center;overflow:hidden;position:relative;}
 .attn-lbl{font-family:var(--mono);font-size:10px;font-weight:800;color:var(--red);
-  letter-spacing:2px;padding:0 16px;border-right:1px solid var(--border);flex-shrink:0;height:100%;display:flex;align-items:center;}
-.attn-track{display:flex;gap:14px;padding:0 16px;white-space:nowrap;overflow:hidden;flex:1;
-  animation:scrollx 60s linear infinite;}
-.attn:hover .attn-track{animation-play-state:paused;}
-@keyframes scrollx{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+  letter-spacing:2px;padding:0 16px;border-right:1px solid var(--border);flex-shrink:0;
+  height:100%;display:flex;align-items:center;z-index:2;background:#0A0D12;}
+.attn-viewport{flex:1;overflow:hidden;height:100%;position:relative;}
+.attn-track{display:flex;align-items:center;gap:0;white-space:nowrap;
+  position:absolute;top:0;left:0;height:100%;will-change:transform;}
 .attn-item{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:13px;
-  padding:6px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);}
-.attn-item.critical{border-color:var(--red);color:var(--red);background:#1A0808;}
-.attn-item.warning{border-color:var(--amber);color:var(--amber);background:#1A1208;}
-.attn-item.overdue{border-color:var(--purple);color:#C4B5FD;background:#14102A;}
-.attn-kind{font-size:9px;font-weight:800;letter-spacing:1px;opacity:.8;}
+  padding:6px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);flex-shrink:0;}
+.attn-item.critical{border-color:#F85149;color:#F85149;background:#1A0808;}
+.attn-item.warning{border-color:#D29922;color:#D29922;background:#1A1208;}
+.attn-item.overdue{border-color:#8B5CF6;color:#C4B5FD;background:#14102A;}
+.attn-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.attn-dot.critical{background:#F85149;box-shadow:0 0 6px #F85149;}
+.attn-dot.warning{background:#D29922;box-shadow:0 0 6px #D29922;}
+.attn-dot.overdue{background:#8B5CF6;box-shadow:0 0 6px #8B5CF6;}
+.attn-sep{color:#2A3A4A;font-size:11px;padding:0 10px;flex-shrink:0;user-select:none;}
+.attn-item.empty{color:var(--dim);border-color:var(--border);}
+.attn-kind{font-size:9px;font-weight:800;letter-spacing:1px;opacity:.7;}
 .attn-item.empty{color:var(--dim);border-color:var(--border);}
 
 /* MAIN padding 56/16/16/16 (overscan defense) */
@@ -201,9 +207,11 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 </div>
 
 <!-- ATTENTION RAIL -->
-<div class="attn">
+<div class="attn" id="attnRail">
   <div class="attn-lbl">&#9888; ATTENTION</div>
-  <div class="attn-track" id="attnTrack"><div class="attn-item empty">— initializing —</div></div>
+  <div class="attn-viewport" id="attnViewport">
+    <div class="attn-track" id="attnTrack"><div class="attn-item empty">— initializing —</div></div>
+  </div>
 </div>
 
 <!-- MAIN 5-zone grid -->
@@ -444,56 +452,110 @@ function worstOf(arr){
 }
 
 // ─────────────────────────────────────────────────────────────
-// ATTENTION RAIL
+// ATTENTION RAIL — broadcast-style ticker engine
 // ─────────────────────────────────────────────────────────────
+const TICKER_PX_PER_SEC = 55;
+const TICKER_GAP = 14;
+let tickerRAF = null;
+let tickerOffset = 0;
+let tickerContentWidth = 0;
+let tickerPaused = false;
+let tickerLastTime = 0;
+
+(function initTickerPause(){
+  const rail = document.getElementById('attnRail');
+  if (!rail) return;
+  rail.addEventListener('mouseenter', ()=>{ tickerPaused = true; });
+  rail.addEventListener('mouseleave', ()=>{ tickerPaused = false; tickerLastTime = 0; });
+  rail.addEventListener('touchstart', ()=>{ tickerPaused = true; }, {passive:true});
+  rail.addEventListener('touchend',   ()=>{ tickerPaused = false; tickerLastTime = 0; }, {passive:true});
+})();
+
+function tickerLoop(now){
+  tickerRAF = requestAnimationFrame(tickerLoop);
+  if (tickerPaused || tickerContentWidth === 0) { tickerLastTime = 0; return; }
+  if (tickerLastTime === 0) { tickerLastTime = now; return; }
+  const dt = (now - tickerLastTime) / 1000;
+  tickerLastTime = now;
+  tickerOffset -= TICKER_PX_PER_SEC * dt;
+  if (tickerOffset <= -tickerContentWidth) tickerOffset += tickerContentWidth;
+  const track = document.getElementById('attnTrack');
+  if (track) track.style.transform = `translateX(${tickerOffset}px)`;
+}
+
 function renderAttention(){
   const alerts = zoneState.alerts.data || [];
   const tasks  = zoneState.tasks.data || [];
   const items = [];
 
-  // Critical SOM alerts — sort: critical first, then by worst tool pct asc
   const crit = alerts.filter(a=>a.status==='critical')
     .sort((a,b)=>(a.worstToolRemainingPct ?? 1) - (b.worstToolRemainingPct ?? 1));
   const warn = alerts.filter(a=>a.status==='warning')
     .sort((a,b)=>(a.worstToolRemainingPct ?? 1) - (b.worstToolRemainingPct ?? 1));
 
   for (const a of crit) items.push({
-    kind:'critical',
-    text:`${a.device} · ${a.category.toUpperCase()} · TOOL ${pct(a.worstToolRemainingPct)}${a.worstPolishPct!=null?` · PAD ${pct(a.worstPolishPct)}`:''}`
+    kind:'critical', device:a.device, category:a.category.toUpperCase(),
+    metric:`TOOL ${pct(a.worstToolRemainingPct)}${a.worstPolishPct!=null?` · PAD ${pct(a.worstPolishPct)}`:''}`
   });
   for (const a of warn) items.push({
-    kind:'warning',
-    text:`${a.device} · ${a.category.toUpperCase()} · TOOL ${pct(a.worstToolRemainingPct)}`
+    kind:'warning', device:a.device, category:a.category.toUpperCase(),
+    metric:`TOOL ${pct(a.worstToolRemainingPct)}`
   });
 
-  // Overdue PMs
   const now = Date.now();
   const overdue = tasks
     .filter(t=>t.status!=='completed' && t.dueDate && new Date(t.dueDate).getTime() < now)
-    .map(t=>({
-      kind:'overdue',
-      days: Math.floor((now - new Date(t.dueDate).getTime())/86400000),
-      title: t.title
-    }))
-    .sort((a,b)=>b.days - a.days)
-    .slice(0,30);
-  for (const o of overdue) items.push({ kind:'overdue', text:`PM OVERDUE ${o.days}d · ${truncate(o.title,60)}` });
+    .map(t=>({ kind:'overdue', days:Math.floor((now - new Date(t.dueDate).getTime())/86400000), title:t.title }))
+    .sort((a,b)=>b.days - a.days).slice(0,30);
+  for (const o of overdue) items.push({
+    kind:'overdue', device:'', category:'PM',
+    metric:`OVERDUE ${o.days}d · ${truncate(o.title,50)}`
+  });
 
   const capped = items.slice(0, 50);
   const track = document.getElementById('attnTrack');
+
   if (capped.length === 0){
-    track.innerHTML = `<div class="attn-item empty">All systems within tolerance · no overdue PMs</div>`;
-    track.style.animation = 'none';
+    if (tickerRAF) { cancelAnimationFrame(tickerRAF); tickerRAF = null; }
+    tickerContentWidth = 0;
+    track.style.transform = '';
+    track.innerHTML = `<div class="attn-item empty" style="margin-left:16px">All systems within tolerance · no overdue PMs</div>`;
     return;
   }
-  // Duplicate content for seamless scroll
-  const once = capped.map(renderAttnItem).join('');
-  track.innerHTML = once + once;
-  // Re-enable animation (cleared above)
-  track.style.animation = '';
-}
-function renderAttnItem(it){
-  return `<div class="attn-item ${it.kind}"><span class="attn-kind">${it.kind.toUpperCase()}</span>${esc(it.text)}</div>`;
+
+  // Build one copy
+  const frag = document.createDocumentFragment();
+  capped.forEach((it, i) => {
+    if (i > 0) { const sep = document.createElement('span'); sep.className = 'attn-sep'; sep.textContent = '|'; frag.appendChild(sep); }
+    const el = document.createElement('div');
+    el.className = `attn-item ${it.kind}`;
+    el.innerHTML = `<span class="attn-dot ${it.kind}"></span>${it.device?`<span>${esc(it.device)}</span>`:''}` +
+      `<span class="attn-kind">${esc(it.category)}</span><span>${esc(it.metric)}</span>`;
+    frag.appendChild(el);
+  });
+
+  track.style.transform = '';
+  track.innerHTML = '';
+  track.appendChild(frag);
+
+  const oneWidth = track.scrollWidth + TICKER_GAP;
+  const viewport = document.getElementById('attnViewport');
+
+  if (oneWidth <= viewport.clientWidth) {
+    track.style.paddingLeft = '16px';
+    if (tickerRAF) { cancelAnimationFrame(tickerRAF); tickerRAF = null; }
+    tickerContentWidth = 0;
+    return;
+  }
+  track.style.paddingLeft = '';
+
+  const clone = track.innerHTML;
+  track.innerHTML = clone + '<span class="attn-sep">|</span>' + clone + '<span class="attn-sep">|</span>';
+
+  tickerContentWidth = oneWidth;
+  tickerOffset = 0;
+  tickerLastTime = 0;
+  if (!tickerRAF) tickerRAF = requestAnimationFrame(tickerLoop);
 }
 function pct(x){ if (x==null || isNaN(x)) return '—'; return Math.round(x*100)+'%'; }
 function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
