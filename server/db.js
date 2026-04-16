@@ -2310,6 +2310,98 @@ function getProductionDaily(days = 14) {
   }));
 }
 
+// ── Hourly pick/put stats (DB-backed, replaces in-memory counters) ──────────
+// picks_history has mixed `completed_at` formats:
+//   - Suffixed (-07:00): SQLite interprets as UTC. Subtract 7h to get PT.
+//   - Bare ISO: already PT-local. Use strftime directly.
+// CASE handles both. PT offset hardcoded to -7 (PDT); swap to -8 in PST
+// (verify with `date` on prod when DST flips).
+//
+// Lab day = 5 AM PT → 5 AM PT next day. Caller passes both bounds as ISO.
+// Result shape: { WH1: {0..23: N}, WH2: {...}, WH3: {...} } — zeros omitted.
+
+function _labHourFromCompletedAt() {
+  return `CAST(
+    CASE
+      WHEN completed_at LIKE '%-0%' OR completed_at LIKE '%+0%' OR completed_at LIKE '%Z'
+      THEN strftime('%H', datetime(completed_at, '-7 hours'))
+      ELSE strftime('%H', completed_at)
+    END AS INTEGER
+  )`;
+}
+function _labHourFromCreationDate() {
+  return `CAST(
+    CASE
+      WHEN creation_date LIKE '%-0%' OR creation_date LIKE '%+0%' OR creation_date LIKE '%Z'
+      THEN strftime('%H', datetime(creation_date, '-7 hours'))
+      ELSE strftime('%H', creation_date)
+    END AS INTEGER
+  )`;
+}
+
+let _hourlyCache = { at: 0, ttlMs: 30000, picks: null, puts: null, window: null };
+
+function _emptyHourlyShape() {
+  const wh = { WH1: {}, WH2: {}, WH3: {} };
+  for (const w of Object.keys(wh)) for (let h = 0; h < 24; h++) wh[w][h] = 0;
+  return wh;
+}
+
+function getHourlyPickStats(labDayStartUtcIso, labDayEndUtcIso) {
+  const sql = `
+    SELECT warehouse, ${_labHourFromCompletedAt()} AS hr, COUNT(*) AS n
+    FROM picks_history
+    WHERE completed_at IS NOT NULL
+      AND warehouse IN ('WH1','WH2','WH3')
+      AND datetime(completed_at) >= datetime(?)
+      AND datetime(completed_at) <  datetime(?)
+    GROUP BY warehouse, hr
+  `;
+  const rows = db.prepare(sql).all(labDayStartUtcIso, labDayEndUtcIso);
+  const out = _emptyHourlyShape();
+  for (const r of rows) if (r.hr !== null && out[r.warehouse]) out[r.warehouse][r.hr] = r.n;
+  return out;
+}
+
+function getHourlyPutStats(labDayStartUtcIso, labDayEndUtcIso) {
+  // Puts live in transactions table, type=3. Warehouse from warehouse_name
+  // already normalized (may be blank or free-form — map to WH1/2/3).
+  const sql = `
+    SELECT warehouse_name AS wh, ${_labHourFromCreationDate()} AS hr, COUNT(*) AS n
+    FROM transactions
+    WHERE type = 3
+      AND creation_date IS NOT NULL
+      AND datetime(creation_date) >= datetime(?)
+      AND datetime(creation_date) <  datetime(?)
+    GROUP BY wh, hr
+  `;
+  const rows = db.prepare(sql).all(labDayStartUtcIso, labDayEndUtcIso);
+  const out = _emptyHourlyShape();
+  for (const r of rows) {
+    const w = (r.wh || '').toUpperCase();
+    let norm = null;
+    if (/KITCHEN|WH3/.test(w)) norm = 'WH3';
+    else if (/WH2/.test(w)) norm = 'WH2';
+    else if (/WH1/.test(w)) norm = 'WH1';
+    if (norm && r.hr !== null) out[norm][r.hr] = (out[norm][r.hr] || 0) + r.n;
+  }
+  return out;
+}
+
+function getHourlyStatsCached(labDayStartUtcIso, labDayEndUtcIso) {
+  const key = labDayStartUtcIso + '|' + labDayEndUtcIso;
+  const now = Date.now();
+  if (_hourlyCache.window === key && (now - _hourlyCache.at) < _hourlyCache.ttlMs) {
+    return { picks: _hourlyCache.picks, puts: _hourlyCache.puts, cached: true, ageMs: now - _hourlyCache.at };
+  }
+  const picks = getHourlyPickStats(labDayStartUtcIso, labDayEndUtcIso);
+  let puts;
+  try { puts = getHourlyPutStats(labDayStartUtcIso, labDayEndUtcIso); }
+  catch { puts = _emptyHourlyShape(); } // transactions table may not have data yet
+  _hourlyCache = { at: now, ttlMs: 30000, picks, puts, window: key };
+  return { picks, puts, cached: false, ageMs: 0 };
+}
+
 module.exports = {
   db,
   logSync,
@@ -2320,6 +2412,10 @@ module.exports = {
   upsertPicks,
   upsertPicksHistory,
   upsertTransactions,
+  // DB-backed hourly stats (side-by-side with in-memory; see verify endpoint)
+  getHourlyPickStats,
+  getHourlyPutStats,
+  getHourlyStatsCached,
   upsertAssets,
   upsertTasks,
   upsertParts,

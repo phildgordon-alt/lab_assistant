@@ -1822,6 +1822,56 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/pick-sync-status') {
     return json(res, itempath.getPickSyncStatus());
   }
+  // GET /api/inventory/picks/_verify — side-by-side: in-memory hourly vs DB-backed.
+  // Temporary diagnostic endpoint — remove after swap verified.
+  if (req.method==='GET' && url.pathname==='/api/inventory/picks/_verify') {
+    const now = new Date();
+    // Lab day = 5 AM PT. Compute start/end in UTC (PDT = -7h).
+    const pdtOffsetH = 7;
+    const nowPt = new Date(now.getTime() - pdtOffsetH * 3600000);
+    let startPt;
+    if (nowPt.getUTCHours() < 5) {
+      const y = new Date(nowPt); y.setUTCDate(y.getUTCDate() - 1);
+      startPt = new Date(Date.UTC(y.getUTCFullYear(), y.getUTCMonth(), y.getUTCDate(), 5, 0, 0));
+    } else {
+      startPt = new Date(Date.UTC(nowPt.getUTCFullYear(), nowPt.getUTCMonth(), nowPt.getUTCDate(), 5, 0, 0));
+    }
+    const startUtc = new Date(startPt.getTime() + pdtOffsetH * 3600000);
+    const endUtc = new Date(startUtc.getTime() + 24 * 3600000);
+
+    const dbResult = labDb.getHourlyStatsCached(startUtc.toISOString(), endUtc.toISOString());
+    const memResult = itempath.getPicks();
+    const memPicks = memResult.hourlyStats || {};
+    const memPuts = memResult.hourlyPutStats || {};
+
+    const diffForWh = (a, b, wh) => {
+      const aw = a[wh] || {}, bw = b[wh] || {};
+      const diffs = [];
+      for (let h = 0; h < 24; h++) {
+        const av = aw[h] || 0, bv = bw[h] || 0;
+        if (av !== bv) diffs.push({ hour: h, memory: av, sql: bv, delta: bv - av });
+      }
+      return diffs;
+    };
+
+    return json(res, {
+      labDayStartPT: startPt.toISOString().replace('Z', '-07:00'),
+      labDayStartUTC: startUtc.toISOString(),
+      labDayEndUTC: endUtc.toISOString(),
+      sql: { picks: dbResult.picks, puts: dbResult.puts, cached: dbResult.cached, ageMs: dbResult.ageMs },
+      memory: { picks: memPicks, puts: memPuts },
+      diff: {
+        picks: { WH1: diffForWh(memPicks, dbResult.picks, 'WH1'), WH2: diffForWh(memPicks, dbResult.picks, 'WH2'), WH3: diffForWh(memPicks, dbResult.picks, 'WH3') },
+        puts:  { WH1: diffForWh(memPuts,  dbResult.puts,  'WH1'), WH2: diffForWh(memPuts,  dbResult.puts,  'WH2'), WH3: diffForWh(memPuts,  dbResult.puts,  'WH3') },
+      },
+      totals: {
+        memPicksTotal: ['WH1','WH2','WH3'].reduce((s,w) => s + Object.values(memPicks[w]||{}).reduce((a,b)=>a+b,0), 0),
+        sqlPicksTotal: ['WH1','WH2','WH3'].reduce((s,w) => s + Object.values(dbResult.picks[w]||{}).reduce((a,b)=>a+b,0), 0),
+        memPutsTotal:  ['WH1','WH2','WH3'].reduce((s,w) => s + Object.values(memPuts[w]||{}).reduce((a,b)=>a+b,0), 0),
+        sqlPutsTotal:  ['WH1','WH2','WH3'].reduce((s,w) => s + Object.values(dbResult.puts[w]||{}).reduce((a,b)=>a+b,0), 0),
+      },
+    });
+  }
   // GET /api/itempath/picksync-health — self-heal dashboard data
   if (req.method==='GET' && url.pathname==='/api/itempath/picksync-health') {
     const status = itempath.getPickSyncStatus();
