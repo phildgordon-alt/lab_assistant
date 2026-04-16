@@ -688,6 +688,16 @@ function persist() {
 
 // ── Helpers ───────────────────────────────────────────────────
 
+// Map snake_case DB rows to camelCase for frontend compatibility
+function snakeToCamel(obj) {
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    const cc = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
+    out[cc] = v;
+  }
+  return out;
+}
+
 function cors(res) {
   res.setHeader('Access-Control-Allow-Origin',  CORS);
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
@@ -1059,14 +1069,27 @@ const server = http.createServer(async (req, res) => {
     } catch(e) { return json(res,{ok:false,error:e.message},400); }
   }
 
-  // ── GET run history ─────────────────────────────────────────
+  // ── GET run history (SQLite primary, in-memory fallback) ─────
   if (req.method==='GET' && url.pathname==='/api/oven-runs') {
-    let result = [...runs];
     const oven   = url.searchParams.get('oven');
     const rack   = url.searchParams.get('rack');
     const coating= url.searchParams.get('coating');
     const limit  = parseInt(url.searchParams.get('limit')||'500');
     const since  = parseInt(url.searchParams.get('since')||'0');
+    try {
+      let dbRows = labDb.getOvenRuns(limit + 200); // fetch extra to allow filtering
+      if (dbRows && dbRows.length > 0) {
+        let result = dbRows.map(snakeToCamel);
+        if (oven)    result = result.filter(r=>r.ovenId===oven||r.ovenName===oven);
+        if (rack)    result = result.filter(r=>r.rack===rack);
+        if (coating) result = result.filter(r=>r.coating===coating);
+        if (since)   result = result.filter(r=>r.receivedAt>=since);
+        const total = labDb.db.prepare('SELECT COUNT(*) as c FROM oven_runs').get().c;
+        return json(res,{ok:true,runs:result.slice(0,limit),total});
+      }
+    } catch (e) { console.warn('[OvenRuns] DB read failed, falling back to in-memory:', e.message); }
+    // Fallback: in-memory runs[]
+    let result = [...runs];
     if (oven)    result = result.filter(r=>r.ovenId===oven||r.ovenName===oven);
     if (rack)    result = result.filter(r=>r.rack===rack);
     if (coating) result = result.filter(r=>r.coating===coating);
@@ -1164,9 +1187,22 @@ const server = http.createServer(async (req, res) => {
     return json(res, { ok:true });
   }
 
-  // ── GET coating runs history ─────────────────────────────────
+  // ── GET coating runs history (SQLite primary, in-memory fallback) ──
   if (req.method==='GET' && url.pathname==='/api/coating-runs') {
     const limit = parseInt(new URL('http://x'+req.url).searchParams.get('limit')||'200');
+    try {
+      const dbRows = labDb.getCoatingRuns(limit);
+      if (dbRows && dbRows.length > 0) {
+        const mapped = dbRows.map(r => {
+          const row = snakeToCamel(r);
+          // Parse jobs_json back to array, rename to match frontend shape
+          if (row.jobsJson) { try { row.jobs = JSON.parse(row.jobsJson); } catch { row.jobs = []; } delete row.jobsJson; }
+          return row;
+        });
+        return json(res, { ok:true, runs: mapped });
+      }
+    } catch (e) { console.warn('[CoatingRuns] DB read failed, falling back to in-memory:', e.message); }
+    // Fallback: in-memory global.coatingRuns
     return json(res, { ok:true, runs: (global.coatingRuns||[]).slice(0,limit) });
   }
 
@@ -2011,11 +2047,25 @@ Respond with a structured batching plan in this format:
     return json(res, binning.acknowledgeRecommendation(body.id, body.status || 'accepted'));
   }
 
-  // ── NetSuite Reconciliation ─────────────────────────────
+  // ── NetSuite Reconciliation (SQLite primary, in-memory fallback) ──
   if (req.method==='GET' && url.pathname==='/api/netsuite/inventory') {
+    try {
+      const dbRows = labDb.db.prepare('SELECT * FROM netsuite_inventory').all();
+      if (dbRows && dbRows.length > 0) {
+        const items = dbRows.map(snakeToCamel);
+        // Rename className → class_name was stored as class_name in DB
+        const totalQty = Math.round(items.reduce((s, i) => s + (i.qty || 0), 0));
+        const lastSync = items[0]?.lastSync || null;
+        return json(res, { items, count: items.length, totalQty, lastSync, location: 'Irvine 2' });
+      }
+    } catch (e) { console.warn('[NetSuite] DB inventory read failed, falling back to in-memory:', e.message); }
     return json(res, netsuite.getInventory());
   }
   if (req.method==='GET' && url.pathname==='/api/netsuite/reconcile') {
+    // NOTE: reconcile() deeply uses netsuite adapter's internal inventory object +
+    // itempath.getWarehouseStock() for classifySku() and per-warehouse breakdowns.
+    // Full SQLite swap requires the adapter to accept an inventory override — deferred.
+    // TOPS manual count already comes from SQLite (tops_inventory table).
     const category = url.searchParams.get('category') || null;
     const topsRows = labDb.db.prepare('SELECT sku, qty FROM tops_inventory').all();
     return json(res, netsuite.reconcile(itempath, category, topsRows));
@@ -3381,17 +3431,51 @@ Respond with a structured batching plan in this format:
     return json(res, { uploads });
   }
 
-  // ── Limble CMMS maintenance endpoints ──────────────────────────
+  // ── Limble CMMS maintenance endpoints (SQLite primary, Limble cache fallback) ──
   if (req.method==='GET' && url.pathname==='/api/maintenance/assets') {
+    try {
+      const dbRows = labDb.db.prepare('SELECT * FROM maintenance_assets').all();
+      if (dbRows && dbRows.length > 0) {
+        const assets = dbRows.map(snakeToCamel);
+        const lastSync = assets[0]?.lastSync || null;
+        return json(res, { assets, lastSync, status: 'ok' });
+      }
+    } catch (e) { console.warn('[Maintenance] DB assets read failed, falling back to Limble cache:', e.message); }
     return json(res, limble.getAssets());
   }
   if (req.method==='GET' && url.pathname==='/api/maintenance/tasks') {
+    try {
+      const dbRows = labDb.db.prepare('SELECT * FROM maintenance_tasks').all();
+      if (dbRows && dbRows.length > 0) {
+        const tasks = dbRows.map(snakeToCamel);
+        const openTasks = tasks.filter(t => t.status === 'open' || t.status === 'in-progress');
+        const lastSync = tasks[0]?.lastSync || null;
+        return json(res, { tasks, open: openTasks, openTasks, critical: tasks.filter(t => t.priority === 'critical'), lastSync });
+      }
+    } catch (e) { console.warn('[Maintenance] DB tasks read failed, falling back to Limble cache:', e.message); }
     return json(res, limble.getTasks());
   }
   if (req.method==='GET' && url.pathname==='/api/maintenance/downtime') {
+    try {
+      const dbRows = labDb.db.prepare('SELECT * FROM downtime_records').all();
+      if (dbRows && dbRows.length > 0) {
+        const downtime = dbRows.map(snakeToCamel);
+        const lastSync = downtime[0]?.lastSync || null;
+        return json(res, { downtime, planned: downtime.filter(d => d.planned), unplanned: downtime.filter(d => !d.planned), lastSync });
+      }
+    } catch (e) { console.warn('[Maintenance] DB downtime read failed, falling back to Limble cache:', e.message); }
     return json(res, limble.getDowntime());
   }
   if (req.method==='GET' && url.pathname==='/api/maintenance/parts') {
+    try {
+      const dbRows = labDb.db.prepare('SELECT * FROM spare_parts').all();
+      if (dbRows && dbRows.length > 0) {
+        const parts = dbRows.map(snakeToCamel);
+        const lowStock = parts.filter(p => p.qty <= p.minQty);
+        const lastSync = parts[0]?.lastSync || null;
+        return json(res, { parts, lowStock, lowStockParts: lowStock, lastSync });
+      }
+    } catch (e) { console.warn('[Maintenance] DB parts read failed, falling back to Limble cache:', e.message); }
     return json(res, limble.getParts());
   }
   if (req.method==='GET' && url.pathname==='/api/maintenance/stats') {
@@ -3401,11 +3485,47 @@ Respond with a structured batching plan in this format:
     return json(res, limble.getAIContext());
   }
 
-  // ── SOM (Schneider) Control Center endpoints ─────────────────
+  // ── SOM (Schneider) Control Center endpoints (SQLite primary, in-memory fallback) ──
   if (req.method==='GET' && url.pathname==='/api/som/devices') {
+    try {
+      const dbRows = labDb.db.prepare('SELECT * FROM som_devices').all();
+      if (dbRows && dbRows.length > 0) {
+        const devices = dbRows.map(snakeToCamel);
+        return json(res, {
+          devices,
+          isLive: true,
+          lastPoll: devices[0]?.lastSync || null,
+          summary: {
+            total: devices.length,
+            running: devices.filter(d => d.severity === 'ok' && d.status !== 'SIDL').length,
+            idle: devices.filter(d => d.status === 'SIDL').length,
+            errors: devices.filter(d => d.severity === 'critical').length,
+            warnings: devices.filter(d => d.severity === 'warning').length,
+            byCategory: devices.reduce((acc, d) => { acc[d.category] = (acc[d.category] || 0) + 1; return acc; }, {})
+          }
+        });
+      }
+    } catch (e) { console.warn('[SOM] DB devices read failed, falling back to in-memory:', e.message); }
     return json(res, som.getDevices());
   }
   if (req.method==='GET' && url.pathname==='/api/som/conveyors') {
+    try {
+      const dbRows = labDb.db.prepare('SELECT * FROM som_conveyors').all();
+      if (dbRows && dbRows.length > 0) {
+        const conveyors = dbRows.map(snakeToCamel);
+        return json(res, {
+          conveyors,
+          isLive: true,
+          lastPoll: conveyors[0]?.lastSync || null,
+          summary: {
+            total: conveyors.length,
+            ok: conveyors.filter(c => c.severity === 'ok').length,
+            errors: conveyors.filter(c => c.severity === 'critical').length,
+            warnings: conveyors.filter(c => c.severity === 'warning').length
+          }
+        });
+      }
+    } catch (e) { console.warn('[SOM] DB conveyors read failed, falling back to in-memory:', e.message); }
     return json(res, som.getConveyors());
   }
   if (req.method==='GET' && url.pathname==='/api/som/alerts') {
