@@ -3603,80 +3603,112 @@ Respond with a structured batching plan in this format:
 
   if (req.method==='GET' && url.pathname==='/api/dvi/jobs') {
     // Primary job data endpoint — feeds KPIs and department views
-    const jobs = dviTrace.getJobsForKPI();
-    const traceJobIds = new Set(jobs.map(j => j.job_id));
+    let enriched;
+    let _dviJobsSource = 'jobs-table';
+    let _traceJobCount = 0;
+    let _queueJobCount = 0;
 
-    // Enrich trace jobs with DVI XML data (coating, lens, frame)
-    const enriched = jobs.map(j => {
-      const xml = dviJobIndex.get(j.job_id);
-      if (xml) {
-        j.coating = xml.coating;
-        j.coatType = xml.coatType;
-        j.lensType = xml.lensType; // P=progressive, S=SV, B=bifocal
-        j.lensStyle = xml.lensStyle;
-        j.lensMat = xml.lensMat;
-        j.lensThick = xml.lensThick;
-        j.lensColor = xml.lensColor;
-        j.frameStyle = xml.frameStyle;
-        j.frameSku = xml.frameSku;
-        j.frameMfr = xml.frameMfr;
-        j.eyeSize = xml.eyeSize;
-        j.bridge = xml.bridge;
-        j.edge = xml.edge;
-        j.rxNum = xml.rxNum;
-        j.patient = xml.patient;
-        j.rx = xml.rx; // { R: {sphere,cylinder,axis,pd,add}, L: {...} }
-      }
-      return j;
-    });
+    try {
+      // ── PRIMARY: unified jobs table ──
+      const dbRows = labDb.queryJobsActiveWip();
+      if (!dbRows || dbRows.length === 0) throw new Error('No active WIP in jobs table');
+      enriched = dbRows.map(r => ({
+        job_id: r.invoice,
+        invoice: r.invoice,
+        tray: r.tray,
+        stage: r.current_stage,
+        status: r.status || 'ACTIVE',
+        station: r.current_station,
+        stationNum: r.current_station_num,
+        coating: r.coating || '',
+        coatType: r.coat_type || '',
+        lensType: r.lens_type || '',
+        lensStyle: r.lens_style || '',
+        lensMat: r.lens_material || '',
+        lensColor: r.lens_color || '',
+        frameStyle: r.frame_style || '',
+        frameSku: r.frame_sku || '',
+        frameMfr: r.frame_mfr || '',
+        eyeSize: r.eye_size || '',
+        bridge: r.bridge || '',
+        edge: r.edge_type || '',
+        rxNum: r.rx_number || '',
+        rush: r.rush || 'N',
+        Rush: r.rush || 'N',
+        priority: r.rush === 'Y' ? 'RUSH' : 'NORMAL',
+        firstSeen: r.first_seen_at ? new Date(r.first_seen_at).getTime() : null,
+        lastSeen: r.last_event_at ? new Date(r.last_event_at).getTime() : null,
+        daysInLab: r.days_in_lab,
+        operator: r.operator,
+        rx: (r.rx_r_sphere || r.rx_l_sphere) ? {
+          R: { sphere: r.rx_r_sphere, cylinder: r.rx_r_cylinder, axis: r.rx_r_axis, pd: r.rx_r_pd, add: r.rx_r_add },
+          L: { sphere: r.rx_l_sphere, cylinder: r.rx_l_cylinder, axis: r.rx_l_axis, pd: r.rx_l_pd, add: r.rx_l_add },
+        } : undefined,
+        source: 'jobs-table',
+      }));
+      _traceJobCount = enriched.length;
+    } catch (e) {
+      // ── FALLBACK: in-memory dviTrace + XML enrichment (old path) ──
+      console.warn('[dvi/jobs] Jobs table failed, falling back to trace:', e.message);
+      _dviJobsSource = 'dvi-trace+xml+shipped';
+      const jobs = dviTrace.getJobsForKPI();
+      const traceJobIds = new Set(jobs.map(j => j.job_id));
+      _traceJobCount = traceJobIds.size;
 
-    // Add unreleased queue jobs — jobs in XML index with no trace events
-    // and NOT in the shipped archive. DVI exports all jobs with Status="NEW"
-    // regardless of actual state, so we must cross-reference shipped index
-    // to avoid counting completed jobs as WIP.
-    let queueJobCount = 0;
-    let skippedShipped = 0;
-    let skippedOld = 0;
-    const maxQueueAge = 7 * 86400000; // 7 days — jobs older than this are probably done
-    for (const [jobNum, xml] of dviJobIndex) {
-      if (traceJobIds.has(jobNum)) continue;      // already tracked by trace
-      if (shippedJobIndex.has(jobNum)) { skippedShipped++; continue; } // already shipped
-      // Skip jobs from XML files older than 7 days
-      if (xml.fileDate && (Date.now() - xml.fileDate) > maxQueueAge) { skippedOld++; continue; }
-      queueJobCount++;
-      enriched.push({
-        job_id: jobNum,
-        invoice: jobNum,
-        stage: 'INCOMING',
-        status: 'Queued',
-        station: xml.status || 'NEW',
-        coating: xml.coating,
-        lensStyle: xml.lensStyle,
-        lensMat: xml.lensMat,
-        frameStyle: xml.frameStyle,
-        frameSku: xml.frameSku,
-        rxNum: xml.rxNum,
-        rush: 'N',
-        Rush: 'N',
-        priority: 'NORMAL',
-        firstSeen: null,
-        lastSeen: null,
-        source: 'dvi-xml'
+      enriched = jobs.map(j => {
+        const xml = dviJobIndex.get(j.job_id);
+        if (xml) {
+          j.coating = xml.coating;
+          j.coatType = xml.coatType;
+          j.lensType = xml.lensType;
+          j.lensStyle = xml.lensStyle;
+          j.lensMat = xml.lensMat;
+          j.lensThick = xml.lensThick;
+          j.lensColor = xml.lensColor;
+          j.frameStyle = xml.frameStyle;
+          j.frameSku = xml.frameSku;
+          j.frameMfr = xml.frameMfr;
+          j.eyeSize = xml.eyeSize;
+          j.bridge = xml.bridge;
+          j.edge = xml.edge;
+          j.rxNum = xml.rxNum;
+          j.patient = xml.patient;
+          j.rx = xml.rx;
+        }
+        return j;
       });
-    }
-    // Log queue stats at most once per 5 minutes
-    const _now = Date.now();
-    if (!global._lastQueueLog || _now - global._lastQueueLog > 300000) {
-      if (queueJobCount > 0 || skippedShipped > 0 || skippedOld > 0) console.log(`[DVI-Jobs] Queue: ${queueJobCount} unreleased, ${skippedShipped} shipped, ${skippedOld} old (>7d) skipped`);
-      global._lastQueueLog = _now;
+
+      // Add unreleased queue jobs from XML index
+      let skippedShipped = 0;
+      let skippedOld = 0;
+      const maxQueueAge = 7 * 86400000;
+      for (const [jobNum, xml] of dviJobIndex) {
+        if (traceJobIds.has(jobNum)) continue;
+        if (shippedJobIndex.has(jobNum)) { skippedShipped++; continue; }
+        if (xml.fileDate && (Date.now() - xml.fileDate) > maxQueueAge) { skippedOld++; continue; }
+        _queueJobCount++;
+        enriched.push({
+          job_id: jobNum, invoice: jobNum, stage: 'INCOMING', status: 'Queued',
+          station: xml.status || 'NEW', coating: xml.coating, lensStyle: xml.lensStyle,
+          lensMat: xml.lensMat, frameStyle: xml.frameStyle, frameSku: xml.frameSku,
+          rxNum: xml.rxNum, rush: 'N', Rush: 'N', priority: 'NORMAL',
+          firstSeen: null, lastSeen: null, source: 'dvi-xml'
+        });
+      }
+      const _now2 = Date.now();
+      if (!global._lastQueueLog || _now2 - global._lastQueueLog > 300000) {
+        if (_queueJobCount > 0 || skippedShipped > 0 || skippedOld > 0) console.log(`[DVI-Jobs] Queue: ${_queueJobCount} unreleased, ${skippedShipped} shipped, ${skippedOld} old (>7d) skipped`);
+        global._lastQueueLog = _now2;
+      }
     }
 
-    // Shipped stats — single source of truth
+    // Shipped stats — single source of truth (always from dvi_shipped_jobs)
     const _shipped = getShippedCounts();
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     const todayMs = todayStart.getTime();
 
-    // Count assembly completions today from trace history (one count per job, not per event)
+    // Count assembly completions today from trace events ring buffer
+    // (trace events are real-time and not in the jobs table)
     const allTracedJobs = dviTrace.getJobs ? dviTrace.getJobs() : [];
     let assembledToday = 0;
     let assemblyPassToday = 0;
@@ -3710,10 +3742,10 @@ Respond with a structured batching plan in this format:
         failToday: assemblyFailToday,
       },
       stats: dviTrace.getStats(),
-      source: 'dvi-trace+xml+shipped',
+      source: _dviJobsSource,
       jobCount: enriched.length,
-      traceJobs: traceJobIds.size,
-      queueJobs: queueJobCount,
+      traceJobs: _traceJobCount,
+      queueJobs: _queueJobCount,
       dviIndexSize: dviJobIndex.size,
       shippedIndexSize: shippedJobIndex.size
     });
