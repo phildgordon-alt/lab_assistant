@@ -1054,8 +1054,8 @@ try {
 // Returns the oldest missing day as a Date, or null if coverage is good.
 function findMissingDay() {
   try {
-    // Look back 30 days for holes. A "hole" is a weekday with < 1500 picks.
-    // Normal workday: 2000-3000 picks. Anything under 1500 is incomplete.
+    // Look back 30 days for holes. A "hole" is a weekday with < 2500 picks.
+    // Normal workday: 3000-5000 picks (each job = 3 picks: R lens, L lens, frame).
     const rows = db.db.prepare(`
       SELECT date(completed_at) as d, COUNT(*) as n
       FROM picks_history
@@ -1075,7 +1075,7 @@ function findMissingDay() {
       const count = covered.get(dateStr) || 0;
       // Skip days where ItemPath confirmed 0 picks (holidays/closures)
       if (backfillAttempted.has(dateStr) && count === 0) continue;
-      if (count < 1500) { // threshold: a normal workday has 2000-3000 picks
+      if (count < 2500) { // threshold: normal workday 3000-5000 picks (3 per job)
         return { date: d, dateStr, count };
       }
     }
