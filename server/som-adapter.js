@@ -168,9 +168,9 @@ function categorizeDevice(model, typeDescr, deviceName) {
   // Deblocking (DBA modulo — end of surfacing line)
   if (text.includes('DBA')) return 'deblocking';
   // Generators (HSC modulo XTS)
-  if (text.includes('GENERATOR') || text.includes('SURF') || text.includes('HSC')) return 'generators';
-  // Cutters (HSE modulo QS)
-  if (text.includes('HSE')) return 'cutters';
+  if (text.includes('GENERATOR') || text.includes('SURF') || text.includes('HSC') || text.includes('HXS')) return 'generator';
+  // Cutters (HSE, HSQ)
+  if (text.includes('HSE') || text.includes('HSQ')) return 'cutting';
   // Blocking / Autoblockers (CBB, CCU, CU1 — start of surfacing line)
   if (text.includes('BOND') || text.includes('CB-') || text.includes('BLOCK') || text.includes('CBB') || text.includes('CCU') || text.includes('CU1')) return 'blocking';
   // Polishing
@@ -205,7 +205,7 @@ function categorizeStation(stationName) {
   const text = (stationName || '').toUpperCase();
   // Surfacing sub-zones
   if (text.includes('DBA')) return 'deblocking';
-  if (text.includes('GENERATOR') || text.includes('GEN')) return 'generators';
+  if (text.includes('GENERATOR') || text.includes('GEN')) return 'generator';
   if (text.includes('BLOCK') || text.includes('CBB') || text.includes('TAPE')) return 'blocking';
   if (text.includes('POLISH') || text.includes('POL')) return 'polishing';
   if (text.includes('FINER') || text.includes('FIN')) return 'fining';
@@ -371,14 +371,15 @@ throughput AS (
 devices AS (SELECT Device FROM tool_agg UNION SELECT Device FROM pad_agg)
 SELECT d.Device device,
   CASE WHEN d.Device LIKE 'CP%' OR d.Device LIKE 'CCP%' THEN 'polishing'
-       WHEN d.Device LIKE 'HXS%' OR d.Device LIKE 'HSQ%' OR d.Device LIKE 'HSC%' THEN 'generator'
-       WHEN d.Device LIKE 'HSE%' OR d.Device LIKE 'CUT%' THEN 'cutting'
+       WHEN d.Device LIKE 'HXS%' OR d.Device LIKE 'HSC%' THEN 'generator'
+       WHEN d.Device LIKE 'HSQ%' OR d.Device LIKE 'HSE%' OR d.Device LIKE 'CUT%' THEN 'cutting'
        WHEN d.Device LIKE 'CBB%' OR d.Device LIKE 'CCU%' OR d.Device LIKE 'CU1%' OR d.Device LIKE 'CB-%' THEN 'blocking'
-       WHEN d.Device LIKE 'D2H%' OR d.Device LIKE 'DBA%' THEN 'deblocking'
+       WHEN d.Device LIKE 'DBA%' THEN 'deblocking'
+       WHEN d.Device LIKE 'D2H%' THEN 'deblocking'
        WHEN d.Device LIKE 'TSA%' THEN 'detaper'
-       WHEN d.Device LIKE 'CCL%' OR d.Device LIKE 'EBC%' THEN 'coating'
-       WHEN d.Device LIKE 'CLI%' OR d.Device LIKE 'DNL%' THEN 'fining'
-       WHEN d.Device LIKE 'CCS%' OR d.Device LIKE 'LCU%' THEN 'cleaning'
+       WHEN d.Device LIKE 'CCL%' OR d.Device LIKE 'EBC%' OR d.Device LIKE 'EB9%' OR d.Device LIKE 'E14%' THEN 'coating'
+       WHEN d.Device LIKE 'DNL%' OR d.Device LIKE 'CLI%' THEN 'fining'
+       WHEN d.Device LIKE 'CCS%' OR d.Device LIKE 'LCU%' OR d.Device LIKE 'LC1%' THEN 'cleaning'
        WHEN d.Device LIKE 'MIL%' THEN 'milling'
        ELSE 'other' END category,
   ROUND(ta.worst_tool_remaining_pct,4) worst_tool_remaining_pct,
