@@ -2236,6 +2236,420 @@ function upsertShippedJob(p) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// UNIFIED JOBS TABLE — single source of truth for all job data
+// Every source enriches the same row: trace → XML → SOM → Looker
+// ─────────────────────────────────────────────────────────────────────────────
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS jobs (
+    -- Identity
+    invoice TEXT PRIMARY KEY,
+    reference TEXT,
+    rx_number TEXT,
+    som_order TEXT,
+    tray TEXT,
+
+    -- Lifecycle
+    entry_date TEXT,
+    entry_time TEXT,
+    ship_date TEXT,
+    ship_time TEXT,
+    days_in_lab INTEGER,
+    current_stage TEXT,
+    current_station TEXT,
+    current_station_num INTEGER,
+    current_dept INTEGER,
+    previous_dept INTEGER,
+    status TEXT DEFAULT 'ACTIVE',
+    job_type TEXT,
+    rush TEXT DEFAULT 'N',
+
+    -- Operator & Machine
+    operator TEXT,
+    machine_id TEXT,
+    is_hko INTEGER DEFAULT 0,
+    department TEXT,
+    job_origin TEXT,
+
+    -- Lens Rx - Right
+    rx_r_sphere TEXT,
+    rx_r_cylinder TEXT,
+    rx_r_axis TEXT,
+    rx_r_pd TEXT,
+    rx_r_add TEXT,
+    lens_opc_r TEXT,
+    lens_pick_r TEXT,
+
+    -- Lens Rx - Left
+    rx_l_sphere TEXT,
+    rx_l_cylinder TEXT,
+    rx_l_axis TEXT,
+    rx_l_pd TEXT,
+    rx_l_add TEXT,
+    lens_opc_l TEXT,
+    lens_pick_l TEXT,
+
+    -- Lens Common
+    lens_style TEXT,
+    lens_material TEXT,
+    lens_type TEXT,
+    lens_color TEXT,
+    coating TEXT,
+    coat_type TEXT,
+
+    -- Frame
+    frame_upc TEXT,
+    frame_name TEXT,
+    frame_style TEXT,
+    frame_sku TEXT,
+    frame_mfr TEXT,
+    frame_color TEXT,
+    eye_size TEXT,
+    bridge TEXT,
+    edge_type TEXT,
+
+    -- SOM enrichment
+    som_frame_no TEXT,
+    som_frame_ref TEXT,
+    som_lds TEXT,
+    som_side TEXT,
+    som_entry_date TEXT,
+
+    -- Looker enrichment
+    looker_job_id TEXT,
+    dvi_destination TEXT,
+    count_lenses INTEGER,
+    count_breakages INTEGER,
+
+    -- Trace state
+    has_breakage INTEGER DEFAULT 0,
+    first_seen_at TEXT,
+    last_event_at TEXT,
+    event_count INTEGER DEFAULT 0,
+    events_json TEXT,
+
+    -- System
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+// Indices for hot query patterns
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_jobs_reference ON jobs(reference);
+  CREATE INDEX IF NOT EXISTS idx_jobs_rx_number ON jobs(rx_number);
+  CREATE INDEX IF NOT EXISTS idx_jobs_som_order ON jobs(som_order);
+  CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+  CREATE INDEX IF NOT EXISTS idx_jobs_stage ON jobs(current_stage);
+  CREATE INDEX IF NOT EXISTS idx_jobs_entry_date ON jobs(entry_date);
+  CREATE INDEX IF NOT EXISTS idx_jobs_ship_date ON jobs(ship_date);
+  CREATE INDEX IF NOT EXISTS idx_jobs_coating ON jobs(coating);
+  CREATE INDEX IF NOT EXISTS idx_jobs_frame_upc ON jobs(frame_upc);
+  CREATE INDEX IF NOT EXISTS idx_jobs_lens_opc_r ON jobs(lens_opc_r);
+  CREATE INDEX IF NOT EXISTS idx_jobs_department ON jobs(department);
+  CREATE INDEX IF NOT EXISTS idx_jobs_operator ON jobs(operator);
+  CREATE INDEX IF NOT EXISTS idx_jobs_days_in_lab ON jobs(days_in_lab);
+  CREATE INDEX IF NOT EXISTS idx_jobs_rush ON jobs(rush);
+  CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at);
+`);
+
+// Append-only stage transition log — replaces events_json blob for queryable history
+db.exec(`
+  CREATE TABLE IF NOT EXISTS job_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    invoice TEXT NOT NULL,
+    station TEXT,
+    station_num INTEGER,
+    stage TEXT,
+    operator TEXT,
+    machine_id TEXT,
+    event_time TEXT,
+    event_ts INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  )
+`);
+
+db.exec(`
+  CREATE INDEX IF NOT EXISTS idx_je_invoice ON job_events(invoice);
+  CREATE INDEX IF NOT EXISTS idx_je_stage ON job_events(stage);
+  CREATE INDEX IF NOT EXISTS idx_je_time ON job_events(event_ts);
+  CREATE INDEX IF NOT EXISTS idx_je_operator ON job_events(operator);
+`);
+
+// ── Prepared statements for jobs table ──────────────────────────────────────
+
+const upsertJobFromTraceStmt = db.prepare(`
+  INSERT INTO jobs (invoice, tray, current_stage, current_station, current_station_num,
+                    operator, machine_id, status, has_breakage, first_seen_at, last_event_at,
+                    event_count, events_json, rush, updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  ON CONFLICT(invoice) DO UPDATE SET
+    tray = COALESCE(excluded.tray, jobs.tray),
+    current_stage = excluded.current_stage,
+    current_station = excluded.current_station,
+    current_station_num = excluded.current_station_num,
+    operator = COALESCE(excluded.operator, jobs.operator),
+    machine_id = COALESCE(excluded.machine_id, jobs.machine_id),
+    status = excluded.status,
+    has_breakage = MAX(jobs.has_breakage, excluded.has_breakage),
+    last_event_at = excluded.last_event_at,
+    event_count = excluded.event_count,
+    events_json = excluded.events_json,
+    rush = COALESCE(excluded.rush, jobs.rush),
+    updated_at = datetime('now')
+`);
+
+function upsertJobFromTrace(j) {
+  if (!j || !j.invoice) return;
+  upsertJobFromTraceStmt.run(
+    j.invoice, j.tray || null, j.stage || null, j.station || null, j.stationNum || null,
+    j.operator || null, j.machineId || null, j.status || 'ACTIVE',
+    j.hasBreakage ? 1 : 0, j.firstSeenAt || null, j.lastEventAt || null,
+    j.eventCount || 0, j.eventsJson || null, j.rush || null
+  );
+}
+
+const upsertJobFromXMLStmt = db.prepare(`
+  INSERT INTO jobs (invoice, reference, rx_number, tray, entry_date, entry_time,
+                    ship_date, ship_time, days_in_lab, department, job_type, operator,
+                    job_origin, machine_id, is_hko, status,
+                    lens_opc_r, lens_opc_l, lens_style, lens_material, lens_type,
+                    lens_pick_r, lens_color, coating, coat_type,
+                    frame_upc, frame_name, frame_style, frame_sku, frame_mfr, frame_color,
+                    eye_size, bridge, edge_type,
+                    rx_r_sphere, rx_r_cylinder, rx_r_axis, rx_r_pd, rx_r_add,
+                    rx_l_sphere, rx_l_cylinder, rx_l_axis, rx_l_pd, rx_l_add,
+                    updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SHIPPED',
+          ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          datetime('now'))
+  ON CONFLICT(invoice) DO UPDATE SET
+    reference = COALESCE(excluded.reference, jobs.reference),
+    rx_number = COALESCE(excluded.rx_number, jobs.rx_number),
+    tray = COALESCE(excluded.tray, jobs.tray),
+    entry_date = COALESCE(excluded.entry_date, jobs.entry_date),
+    entry_time = COALESCE(excluded.entry_time, jobs.entry_time),
+    ship_date = excluded.ship_date,
+    ship_time = excluded.ship_time,
+    days_in_lab = COALESCE(excluded.days_in_lab, jobs.days_in_lab),
+    department = COALESCE(excluded.department, jobs.department),
+    job_type = COALESCE(excluded.job_type, jobs.job_type),
+    operator = COALESCE(excluded.operator, jobs.operator),
+    job_origin = COALESCE(excluded.job_origin, jobs.job_origin),
+    machine_id = COALESCE(excluded.machine_id, jobs.machine_id),
+    is_hko = excluded.is_hko,
+    status = CASE WHEN excluded.ship_date IS NOT NULL THEN 'SHIPPED' ELSE jobs.status END,
+    lens_opc_r = COALESCE(excluded.lens_opc_r, jobs.lens_opc_r),
+    lens_opc_l = COALESCE(excluded.lens_opc_l, jobs.lens_opc_l),
+    lens_style = COALESCE(excluded.lens_style, jobs.lens_style),
+    lens_material = COALESCE(excluded.lens_material, jobs.lens_material),
+    lens_type = COALESCE(excluded.lens_type, jobs.lens_type),
+    lens_pick_r = COALESCE(excluded.lens_pick_r, jobs.lens_pick_r),
+    lens_color = COALESCE(excluded.lens_color, jobs.lens_color),
+    coating = COALESCE(excluded.coating, jobs.coating),
+    coat_type = COALESCE(excluded.coat_type, jobs.coat_type),
+    frame_upc = COALESCE(excluded.frame_upc, jobs.frame_upc),
+    frame_name = COALESCE(excluded.frame_name, jobs.frame_name),
+    frame_style = COALESCE(excluded.frame_style, jobs.frame_style),
+    frame_sku = COALESCE(excluded.frame_sku, jobs.frame_sku),
+    frame_mfr = COALESCE(excluded.frame_mfr, jobs.frame_mfr),
+    frame_color = COALESCE(excluded.frame_color, jobs.frame_color),
+    eye_size = COALESCE(excluded.eye_size, jobs.eye_size),
+    bridge = COALESCE(excluded.bridge, jobs.bridge),
+    edge_type = COALESCE(excluded.edge_type, jobs.edge_type),
+    rx_r_sphere = COALESCE(excluded.rx_r_sphere, jobs.rx_r_sphere),
+    rx_r_cylinder = COALESCE(excluded.rx_r_cylinder, jobs.rx_r_cylinder),
+    rx_r_axis = COALESCE(excluded.rx_r_axis, jobs.rx_r_axis),
+    rx_r_pd = COALESCE(excluded.rx_r_pd, jobs.rx_r_pd),
+    rx_r_add = COALESCE(excluded.rx_r_add, jobs.rx_r_add),
+    rx_l_sphere = COALESCE(excluded.rx_l_sphere, jobs.rx_l_sphere),
+    rx_l_cylinder = COALESCE(excluded.rx_l_cylinder, jobs.rx_l_cylinder),
+    rx_l_axis = COALESCE(excluded.rx_l_axis, jobs.rx_l_axis),
+    rx_l_pd = COALESCE(excluded.rx_l_pd, jobs.rx_l_pd),
+    rx_l_add = COALESCE(excluded.rx_l_add, jobs.rx_l_add),
+    updated_at = datetime('now')
+`);
+
+function upsertJobFromXML(p) {
+  if (!p || !p.invoice) return;
+  const rx = p.rx || {};
+  const R = rx.R || {};
+  const L = rx.L || {};
+  upsertJobFromXMLStmt.run(
+    p.invoice, p.reference || null, p.rxNum || null, p.tray || null,
+    p.entryDate || null, p.entryTime || null, p.shipDate || null, p.shipTime || null,
+    p.daysInLab || null, p.department || null, p.jobType || null, p.operator || null,
+    p.jobOrigin || null, p.machineId || null, p.isHko ? 1 : 0,
+    p.lensOpcR || null, p.lensOpcL || null, p.lensStyle || null, p.lensMaterial || null,
+    p.lensType || null, p.lensPick || null, p.lensColor || null,
+    p.coating || null, p.coatType || null,
+    p.frameUpc || null, p.frameName || null, p.frameStyle || null, p.frameSku || null,
+    p.frameMfr || null, p.frameColor || null,
+    p.eyeSize || null, p.bridge || null, p.edgeType || null,
+    R.sphere || null, R.cylinder || null, R.axis || null, R.pd || null, R.add || null,
+    L.sphere || null, L.cylinder || null, L.axis || null, L.pd || null, L.add || null
+  );
+}
+
+const upsertJobFromSOMStmt = db.prepare(`
+  UPDATE jobs SET
+    som_order = ?,
+    current_dept = ?,
+    previous_dept = ?,
+    som_side = ?,
+    som_entry_date = ?,
+    som_frame_no = ?,
+    som_frame_ref = ?,
+    som_lds = ?,
+    reference = COALESCE(?, jobs.reference),
+    updated_at = datetime('now')
+  WHERE invoice = ?
+`);
+
+function upsertJobFromSOM(j) {
+  if (!j || !j.dviJob) return;
+  upsertJobFromSOMStmt.run(
+    j.somOrder || null, j.dept || null, j.prevDept || null,
+    j.side || null, j.entryDate || null, j.frameNo || null,
+    j.frameRef || null, j.lds || null, j.reference || null,
+    j.dviJob
+  );
+}
+
+const upsertJobFromLookerStmt = db.prepare(`
+  UPDATE jobs SET
+    looker_job_id = ?,
+    dvi_destination = ?,
+    count_lenses = ?,
+    count_breakages = ?,
+    updated_at = datetime('now')
+  WHERE reference = ?
+`);
+
+function upsertJobFromLooker(j) {
+  if (!j || !j.order_number) return;
+  upsertJobFromLookerStmt.run(
+    j.job_id || null, j.dvi_destination || null,
+    j.count_lenses || 0, j.count_breakages || 0,
+    j.order_number
+  );
+}
+
+const insertJobEventStmt = db.prepare(`
+  INSERT INTO job_events (invoice, station, station_num, stage, operator, machine_id, event_time, event_ts)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+function insertJobEvent(e) {
+  if (!e || !e.invoice) return;
+  insertJobEventStmt.run(
+    e.invoice, e.station || null, e.stationNum || null, e.stage || null,
+    e.operator || null, e.machineId || null, e.eventTime || null, e.eventTs || null
+  );
+}
+
+// Bulk insert events inside a transaction for migration
+const insertJobEventsBulk = db.transaction((events) => {
+  for (const e of events) insertJobEvent(e);
+});
+
+// ── Query functions for unified jobs table ──────────────────────────────────
+
+function getJob(invoice) {
+  return db.prepare('SELECT * FROM jobs WHERE invoice = ?').get(invoice);
+}
+
+function getJobByReference(reference) {
+  return db.prepare('SELECT * FROM jobs WHERE reference = ?').get(reference);
+}
+
+function queryJobsWip() {
+  return db.prepare(`
+    SELECT current_stage, status, rush, COUNT(*) as count,
+           AVG(days_in_lab) as avg_days, MAX(days_in_lab) as max_days
+    FROM jobs WHERE status = 'ACTIVE'
+    GROUP BY current_stage
+    ORDER BY count DESC
+  `).all();
+}
+
+function queryJobsShipped(days) {
+  return db.prepare(`
+    SELECT * FROM jobs
+    WHERE status = 'SHIPPED' AND ship_date >= date('now', '-' || ? || ' days')
+    ORDER BY ship_date DESC, ship_time DESC
+  `).all(days);
+}
+
+function queryJobsShippedStats(days) {
+  return db.prepare(`
+    SELECT ship_date, COUNT(*) as count, SUM(CASE WHEN rush='Y' THEN 1 ELSE 0 END) as rush_count,
+           ROUND(AVG(days_in_lab), 1) as avg_days, SUM(CASE WHEN is_hko=1 THEN 1 ELSE 0 END) as hko_count
+    FROM jobs
+    WHERE status = 'SHIPPED' AND ship_date >= date('now', '-' || ? || ' days')
+    GROUP BY ship_date ORDER BY ship_date DESC
+  `).all(days);
+}
+
+function queryJobsAging(thresholdDays) {
+  return db.prepare(`
+    SELECT invoice, tray, current_stage, current_station, days_in_lab, entry_date,
+           coating, rush, operator, lens_style, frame_name
+    FROM jobs WHERE status = 'ACTIVE' AND days_in_lab >= ?
+    ORDER BY days_in_lab DESC
+  `).all(thresholdDays);
+}
+
+function queryJobsByCoating(coatingType) {
+  return db.prepare(`
+    SELECT invoice, tray, current_stage, days_in_lab, entry_date, rush, status
+    FROM jobs WHERE coating = ? AND status = 'ACTIVE'
+    ORDER BY days_in_lab DESC
+  `).all(coatingType);
+}
+
+function queryJobEvents(invoice, limit) {
+  return db.prepare(`
+    SELECT * FROM job_events WHERE invoice = ? ORDER BY event_ts DESC LIMIT ?
+  `).all(invoice, limit || 50);
+}
+
+function queryStageTimings(days) {
+  return db.prepare(`
+    SELECT stage, COUNT(*) as transitions,
+           ROUND(AVG(duration_ms) / 60000, 1) as avg_minutes
+    FROM (
+      SELECT je1.invoice, je1.stage,
+             (je2.event_ts - je1.event_ts) as duration_ms
+      FROM job_events je1
+      INNER JOIN job_events je2 ON je1.invoice = je2.invoice
+        AND je2.id = (SELECT MIN(id) FROM job_events WHERE invoice = je1.invoice AND id > je1.id)
+      WHERE je1.event_ts >= (strftime('%s','now') - ? * 86400) * 1000
+    )
+    GROUP BY stage ORDER BY avg_minutes DESC
+  `).all(days);
+}
+
+function getJobsTableStats() {
+  return db.prepare(`
+    SELECT
+      COUNT(*) as total_rows,
+      SUM(CASE WHEN status='ACTIVE' THEN 1 ELSE 0 END) as active,
+      SUM(CASE WHEN status='SHIPPED' THEN 1 ELSE 0 END) as shipped,
+      MIN(entry_date) as oldest_entry,
+      MAX(ship_date) as newest_ship,
+      SUM(CASE WHEN reference IS NOT NULL THEN 1 ELSE 0 END) as has_reference,
+      SUM(CASE WHEN som_order IS NOT NULL THEN 1 ELSE 0 END) as has_som,
+      SUM(CASE WHEN looker_job_id IS NOT NULL THEN 1 ELSE 0 END) as has_looker
+    FROM jobs
+  `).get();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2463,4 +2877,21 @@ module.exports = {
   // Production daily summary
   upsertProductionDaily,
   getProductionDaily,
+  // Unified jobs table
+  upsertJobFromTrace,
+  upsertJobFromXML,
+  upsertJobFromSOM,
+  upsertJobFromLooker,
+  insertJobEvent,
+  insertJobEventsBulk,
+  getJob,
+  getJobByReference,
+  queryJobsWip,
+  queryJobsShipped,
+  queryJobsShippedStats,
+  queryJobsAging,
+  queryJobsByCoating,
+  queryJobEvents,
+  queryStageTimings,
+  getJobsTableStats,
 };
