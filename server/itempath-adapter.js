@@ -1054,7 +1054,8 @@ try {
 // Returns the oldest missing day as a Date, or null if coverage is good.
 function findMissingDay() {
   try {
-    // Look back 30 days for holes. A "hole" is a weekday with < 100 picks.
+    // Look back 30 days for holes. A "hole" is a weekday with < 1500 picks.
+    // Normal workday: 2000-3000 picks. Anything under 1500 is incomplete.
     const rows = db.db.prepare(`
       SELECT date(completed_at) as d, COUNT(*) as n
       FROM picks_history
@@ -1071,9 +1072,10 @@ function findMissingDay() {
       const dow = d.getDay(); // 0=Sun, 6=Sat
       if (dow === 0 || dow === 6) continue; // skip weekends
       const dateStr = d.toISOString().substring(0, 10);
-      if (backfillAttempted.has(dateStr)) continue; // already tried, ItemPath had nothing
       const count = covered.get(dateStr) || 0;
-      if (count < 100) { // threshold: a normal workday has 1500-3000 picks
+      // Skip days where ItemPath confirmed 0 picks (holidays/closures)
+      if (backfillAttempted.has(dateStr) && count === 0) continue;
+      if (count < 1500) { // threshold: a normal workday has 2000-3000 picks
         return { date: d, dateStr, count };
       }
     }
@@ -1177,11 +1179,11 @@ async function pickSync() {
     pickSyncStatus.consecutiveErrors = 0;
     console.log(`[pickSync] ✓ ${mode} — ${totalFetched} fetched across ${page + 1} page(s), ${totalInserted} new rows`);
 
-    // If BACKFILL returned 0 from ItemPath, mark the day as attempted so we don't retry forever
-    if (mode === 'BACKFILL' && totalFetched === 0 && missingDay) {
+    // If BACKFILL returned 0 from ItemPath AND we had 0 existing picks, mark as genuinely empty
+    if (mode === 'BACKFILL' && totalFetched === 0 && missingDay && missingDay.count === 0) {
       backfillAttempted.add(missingDay.dateStr);
       try { db.db.prepare(`INSERT OR IGNORE INTO pickSync_attempted_days (date) VALUES (?)`).run(missingDay.dateStr); } catch (e) { /* ignore */ }
-      console.log(`[pickSync] Marking ${missingDay.dateStr} as attempted (ItemPath returned 0) — will skip next cycle`);
+      console.log(`[pickSync] Marking ${missingDay.dateStr} as empty (ItemPath returned 0, we had 0) — will skip`);
     }
 
     if (page === PICK_SYNC_MAX_PAGES - 1) {
