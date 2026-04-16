@@ -81,28 +81,50 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 .z-badge.err{background:var(--redDk);color:var(--red);}
 .z-badge.mock{background:var(--amberDk);color:var(--amber);}
 
-/* MACHINE GRID — 14 machines = 2 cols x 7 rows */
-.mgrid{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:repeat(7,1fr);
-  gap:8px;flex:1;min-height:0;}
-.mcard{background:var(--surface);border:1px solid var(--border);border-radius:10px;
-  padding:10px 12px;display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;min-height:0;}
-.mcard.healthy{border-left:4px solid var(--green);}
-.mcard.warning{border-left:4px solid var(--amber);}
-.mcard.critical{border-left:4px solid var(--red);background:#170A0A;}
-.mcard.offline{border-left:4px solid var(--dimmer);opacity:.6;}
-.mc-id{font-family:var(--mono);font-size:13px;font-weight:800;color:var(--text);}
-.mc-type{font-family:var(--mono);font-size:8px;color:var(--dim);letter-spacing:1px;margin-top:1px;}
-.mc-mid{min-width:0;display:flex;flex-direction:column;gap:3px;}
-.mc-bars{display:flex;gap:6px;}
-.mc-bar-wrap{flex:1;min-width:0;}
-.mc-bar-lbl{font-family:var(--mono);font-size:7px;color:var(--dimmer);letter-spacing:1px;display:flex;justify-content:space-between;}
-.mc-bar-bg{height:5px;background:var(--border);border-radius:3px;overflow:hidden;margin-top:2px;}
-.mc-bar{height:100%;border-radius:3px;transition:width .6s;}
-.mc-bar.g{background:var(--green);} .mc-bar.a{background:var(--amber);} .mc-bar.r{background:var(--red);}
-.mc-right{text-align:right;min-width:54px;}
-.mc-tp{font-family:var(--mono);font-size:18px;font-weight:800;line-height:1;color:var(--cyan);}
-.mc-tp-lbl{font-family:var(--mono);font-size:7px;color:var(--dimmer);letter-spacing:1px;margin-top:2px;}
-.mc-err{font-family:var(--mono);font-size:9px;color:var(--red);margin-top:2px;font-weight:700;}
+/* TOOL LIFE — grouped by category columns */
+@keyframes critical-pulse{0%,100%{opacity:1;}50%{opacity:0.7;}}
+.tl-header{display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.tl-title{font-family:var(--sans);font-weight:700;font-size:20px;color:#E6EDF3;}
+.tl-summary{display:flex;align-items:center;gap:12px;}
+.tl-sum-item{display:flex;align-items:center;gap:5px;font-family:var(--sans);font-size:13px;font-weight:600;}
+.tl-sum-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
+.tl-sum-dot.crit{background:#F85149;}
+.tl-sum-dot.warn{background:#D29922;}
+.tl-sum-count{color:#8B949E;}
+.tl-columns{display:flex;gap:14px;flex:1;min-height:0;overflow:hidden;}
+.tl-col{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0;}
+.tl-col-hdr{display:flex;align-items:center;gap:8px;padding-bottom:8px;margin-bottom:8px;
+  border-bottom:1px solid #21262D;}
+.tl-col-name{font-family:var(--sans);font-weight:600;font-size:18px;color:#8B949E;}
+.tl-col-pill{font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 7px;
+  border-radius:4px;background:#21262D;color:#8B949E;}
+.tl-col-body{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;min-height:0;}
+.tl-machine{display:flex;flex-direction:column;gap:6px;padding:6px 8px 6px 11px;
+  border-radius:6px;background:transparent;position:relative;}
+.tl-machine.border-red{border-left:3px solid #F85149;}
+.tl-machine.border-amber{border-left:3px solid #D29922;}
+.tl-machine-id{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-weight:500;font-size:14px;color:#E6EDF3;}
+.tl-bar-row{display:flex;align-items:center;gap:8px;}
+.tl-bar-track{flex:1;height:14px;background:#161B22;border-radius:3px;overflow:hidden;min-width:0;}
+.tl-bar-fill{height:100%;border-radius:3px;transition:width .6s;}
+.tl-bar-fill.red{background:#F85149;animation:critical-pulse 1.5s ease-in-out infinite;}
+.tl-bar-fill.amber{background:#D29922;}
+.tl-bar-fill.green{background:#3FB950;}
+.tl-bar-fill.green-muted{background:#3FB950;opacity:0.6;}
+.tl-bar-pct{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-weight:500;font-size:13px;min-width:36px;text-align:right;}
+.tl-bar-pct.red{color:#F85149;}
+.tl-bar-pct.amber{color:#D29922;}
+.tl-bar-pct.green{color:#3FB950;}
+.tl-bar-pct.muted{color:#3FB950;opacity:0.5;}
+.tl-bar-abbr{font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-weight:400;font-size:11px;color:#8B949E;min-width:28px;}
+/* Compressed single-line for all-healthy machines */
+.tl-compact{display:flex;align-items:center;gap:10px;padding:3px 8px 3px 11px;
+  height:16px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;}
+.tl-compact .tl-machine-id{font-size:13px;color:#8B949E;}
+.tl-compact .tl-compact-tools{display:flex;gap:10px;font-size:12px;color:#8B949E;opacity:0.7;}
 
 /* THROUGHPUT — small multiples */
 .tp-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;flex:1;min-height:0;}
@@ -187,11 +209,14 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 <!-- MAIN 5-zone grid -->
 <div class="main">
   <div class="zone zone-grid" id="zMachines">
-    <div class="zone-title">
-      <span>MACHINE HEALTH · 14 ASSETS</span>
-      <span class="z-badge" id="bMach">—</span>
+    <div class="tl-header">
+      <span class="tl-title">TOOL LIFE</span>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="tl-summary" id="tlSummary"></div>
+        <span class="z-badge" id="bMach">—</span>
+      </div>
     </div>
-    <div class="mgrid" id="mgrid"></div>
+    <div class="tl-columns" id="tlColumns"></div>
   </div>
 
   <div class="zone" id="zThroughput">
@@ -296,15 +321,28 @@ setInterval(()=>{ markStale(); renderDots(); renderBadges(); }, 5000);
 // ─────────────────────────────────────────────────────────────
 const MOCK = {
   machines: {
-    isLive:false, machines: Array.from({length:14},(_,i)=>{
-      const types = ['polishing','polishing','polishing','polishing','generator','generator','generator','generator','generator','generator','generator','generator','generator','generator'];
-      const ids = ['CP1001','CP1002','CP1003','CP1004','HSQ001','HSQ002','HSQ003','HSQ004','HSQ005','HSQ006','HSQ007','HXS001','HXS002','HXS003'];
-      const st = ['warning','critical','healthy','critical','warning','warning','healthy','warning','warning','warning','warning','critical','healthy','critical'][i];
-      return {id:ids[i],name:ids[i],type:types[i],status:st,
-        worstTool:{pct:Math.random(),state:'ok'},
-        polishPad:types[i]==='polishing'?{pct:Math.random(),state:'ok'}:null,
-        errorsToday:Math.floor(Math.random()*3),throughputToday:Math.floor(Math.random()*400),throughputUnit:'lenses'};
-    })
+    isLive:false, machines: (function(){
+      const defs = [
+        {id:'CP1001',type:'polishing',status:'warning',  tl:0.45,pad:0.23},
+        {id:'CP1002',type:'polishing',status:'critical', tl:0.08,pad:0.05},
+        {id:'CP1003',type:'polishing',status:'healthy',  tl:0.72,pad:0.65},
+        {id:'CP1004',type:'polishing',status:'critical', tl:0.03,pad:0.12},
+        {id:'HSQ001',type:'generator',status:'warning',  tl:0.22,pad:null},
+        {id:'HSQ002',type:'generator',status:'warning',  tl:0.18,pad:null},
+        {id:'HSQ003',type:'generator',status:'healthy',  tl:0.84,pad:null},
+        {id:'HSQ004',type:'generator',status:'warning',  tl:0.31,pad:null},
+        {id:'HSQ005',type:'generator',status:'warning',  tl:0.14,pad:null},
+        {id:'HSQ006',type:'generator',status:'healthy',  tl:0.67,pad:null},
+        {id:'HSQ007',type:'generator',status:'healthy',  tl:0.91,pad:null},
+        {id:'HXS001',type:'cutting',  status:'critical', tl:0.02,pad:null},
+        {id:'HXS002',type:'cutting',  status:'healthy',  tl:0.56,pad:null},
+        {id:'HXS003',type:'cutting',  status:'critical', tl:0.07,pad:null},
+      ];
+      return defs.map(d=>({id:d.id,name:d.id,type:d.type,status:d.status,
+        worstTool:{pct:d.tl,state:d.tl<0.1?'critical':d.tl<0.25?'warning':'ok'},
+        polishPad:d.pad!=null?{pct:d.pad,state:d.pad<0.1?'critical':d.pad<0.25?'warning':'ok'}:null,
+        errorsToday:Math.floor(Math.random()*3),throughputToday:Math.floor(Math.random()*400),throughputUnit:'lenses'}));
+    })()
   },
   alerts: { alerts: [
     {key:'CP1002:polishing',device:'CP1002',category:'polishing',status:'critical',worstToolRemainingPct:0.66,worstPolishPct:0},
@@ -462,45 +500,159 @@ function esc(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')
 function truncate(s,n){ s=String(s||''); return s.length>n?s.slice(0,n-1)+'…':s; }
 
 // ─────────────────────────────────────────────────────────────
-// MACHINE GRID
+// TOOL LIFE — grouped by category
 // ─────────────────────────────────────────────────────────────
-function renderMachineGrid(){
-  const g = document.getElementById('mgrid');
-  const machines = zoneState.machines.data || [];
-  if (!machines.length){ g.innerHTML = `<div style="color:var(--dim);font-family:var(--mono);font-size:10px;padding:16px">No machine data.</div>`; return; }
-  // Ensure 14 cards; fill by id order
-  g.innerHTML = machines.slice(0,14).map(renderMCard).join('');
+const TL_CATEGORY_ORDER = ['generator','polishing','cutting','blocking','deblocking','coating'];
+const TL_CATEGORY_LABELS = {generator:'GENERATORS',polishing:'POLISHERS',cutting:'CUTTERS',
+  blocking:'BLOCKING',deblocking:'DEBLOCKING',coating:'COATING'};
+const TL_COMPRESS_THRESHOLD = 7; // compress healthy machines when column has 7+
+
+function tlBarColor(pctRaw){
+  const p = Math.round(pctRaw * 100);
+  if (p <= 9) return 'red';
+  if (p <= 24) return 'amber';
+  if (p <= 49) return 'green';
+  return 'green-muted';
 }
-function renderMCard(m){
-  const status = m.status || 'healthy';
-  const toolPct = m.worstTool && typeof m.worstTool.pct === 'number' ? Math.max(0,Math.min(1,m.worstTool.pct)) : null;
-  const padPct  = m.polishPad && typeof m.polishPad.pct  === 'number' ? Math.max(0,Math.min(1,m.polishPad.pct)) : null;
-  const toolCls = toolPct==null ? '' : toolPct < 0.15 ? 'r' : toolPct < 0.3 ? 'a' : 'g';
-  const padCls  = padPct==null  ? '' : padPct  < 0.15 ? 'r' : padPct  < 0.3 ? 'a' : 'g';
-  const tp = m.throughputToday ?? 0;
-  const err = m.errorsToday ?? 0;
-  return `<div class="mcard ${status}">
-    <div>
-      <div class="mc-id">${esc(m.id)}</div>
-      <div class="mc-type">${esc((m.type||'').toUpperCase())}</div>
-    </div>
-    <div class="mc-mid">
-      <div class="mc-bars">
-        <div class="mc-bar-wrap">
-          <div class="mc-bar-lbl"><span>TOOL</span><span>${toolPct==null?'—':Math.round(toolPct*100)+'%'}</span></div>
-          <div class="mc-bar-bg"><div class="mc-bar ${toolCls}" style="width:${toolPct==null?0:Math.round(toolPct*100)}%"></div></div>
-        </div>
-        ${padPct!=null?`<div class="mc-bar-wrap">
-          <div class="mc-bar-lbl"><span>PAD</span><span>${Math.round(padPct*100)}%</span></div>
-          <div class="mc-bar-bg"><div class="mc-bar ${padCls}" style="width:${Math.round(padPct*100)}%"></div></div>
-        </div>`:''}
+function tlPctColor(pctRaw){
+  const p = Math.round(pctRaw * 100);
+  if (p <= 9) return 'red';
+  if (p <= 24) return 'amber';
+  if (p <= 49) return 'green';
+  return 'muted';
+}
+function tlWorstPct(m){
+  const vals = [];
+  if (m.worstTool && typeof m.worstTool.pct === 'number') vals.push(m.worstTool.pct);
+  if (m.polishPad && typeof m.polishPad.pct === 'number') vals.push(m.polishPad.pct);
+  return vals.length ? Math.min(...vals) : 1;
+}
+function tlAllAbove50(m){
+  const check = v => v == null || (typeof v.pct === 'number' && v.pct > 0.5);
+  return check(m.worstTool) && check(m.polishPad);
+}
+function tlBorderClass(m){
+  const s = m.status;
+  if (s === 'critical') return 'border-red';
+  if (s === 'warning') return 'border-amber';
+  return '';
+}
+
+function renderToolLife(){
+  const machines = zoneState.machines.data || [];
+  const cols = document.getElementById('tlColumns');
+  const summary = document.getElementById('tlSummary');
+
+  if (!machines.length){
+    cols.innerHTML = `<div style="color:#8B949E;font-family:var(--mono);font-size:10px;padding:16px">No machine data.</div>`;
+    summary.innerHTML = '';
+    return;
+  }
+
+  // Count critical + warning across all machines
+  let critCount = 0, warnCount = 0;
+  machines.forEach(m => {
+    if (m.status === 'critical') critCount++;
+    else if (m.status === 'warning') warnCount++;
+  });
+  let sumHtml = '';
+  if (critCount > 0) sumHtml += `<div class="tl-sum-item"><div class="tl-sum-dot crit"></div><span class="tl-sum-count">${critCount} critical</span></div>`;
+  if (warnCount > 0) sumHtml += `<div class="tl-sum-item"><div class="tl-sum-dot warn"></div><span class="tl-sum-count">${warnCount} warning</span></div>`;
+  summary.innerHTML = sumHtml;
+
+  // Group by category
+  const groups = {};
+  machines.forEach(m => {
+    const cat = (m.type || 'other').toLowerCase();
+    if (!groups[cat]) groups[cat] = [];
+    groups[cat].push(m);
+  });
+
+  // Sort within each group by worst tool pct ascending
+  Object.values(groups).forEach(arr => arr.sort((a, b) => tlWorstPct(a) - tlWorstPct(b)));
+
+  // Build columns: primary categories first, then ancillary only if they have tool data
+  const primary = ['generator', 'polishing', 'cutting'];
+  const ancillary = ['blocking', 'deblocking', 'coating'];
+  const columnKeys = [];
+  primary.forEach(k => { if (groups[k] && groups[k].length) columnKeys.push(k); });
+  ancillary.forEach(k => {
+    if (groups[k] && groups[k].length && groups[k].some(m => m.worstTool || m.polishPad)) columnKeys.push(k);
+  });
+  // Any remaining categories not in primary/ancillary
+  Object.keys(groups).forEach(k => {
+    if (!columnKeys.includes(k)) {
+      if (groups[k].some(m => m.worstTool || m.polishPad)) columnKeys.push(k);
+    }
+  });
+
+  if (!columnKeys.length){
+    cols.innerHTML = `<div style="color:#8B949E;font-family:var(--mono);font-size:10px;padding:16px">No tool data.</div>`;
+    return;
+  }
+
+  cols.innerHTML = columnKeys.map(cat => {
+    const arr = groups[cat];
+    const label = TL_CATEGORY_LABELS[cat] || cat.toUpperCase();
+    const shouldCompress = arr.length >= TL_COMPRESS_THRESHOLD;
+
+    const machineHtml = arr.map(m => {
+      // Compress if column is large AND all tools > 50%
+      if (shouldCompress && tlAllAbove50(m)) return renderTLCompact(m);
+      return renderTLMachine(m);
+    }).join('');
+
+    return `<div class="tl-col">
+      <div class="tl-col-hdr">
+        <span class="tl-col-name">${label}</span>
+        <span class="tl-col-pill">${arr.length}</span>
       </div>
-    </div>
-    <div class="mc-right">
-      <div class="mc-tp">${tp}</div>
-      <div class="mc-tp-lbl">LENS/DAY</div>
-      ${err>0?`<div class="mc-err">${err} ERR</div>`:''}
-    </div>
+      <div class="tl-col-body">${machineHtml}</div>
+    </div>`;
+  }).join('');
+}
+
+function renderTLMachine(m){
+  const border = tlBorderClass(m);
+  // Collect tool bars, sorted worst first
+  const bars = [];
+  if (m.worstTool && typeof m.worstTool.pct === 'number'){
+    bars.push({pct: m.worstTool.pct, abbr: 'TL'});
+  }
+  if (m.polishPad && typeof m.polishPad.pct === 'number'){
+    bars.push({pct: m.polishPad.pct, abbr: 'PAD'});
+  }
+  bars.sort((a, b) => a.pct - b.pct);
+
+  const barsHtml = bars.map(b => {
+    const clamped = Math.max(0, Math.min(1, b.pct));
+    const p = Math.round(clamped * 100);
+    const fillCls = tlBarColor(clamped);
+    const pctCls = tlPctColor(clamped);
+    return `<div class="tl-bar-row">
+      <div class="tl-bar-track"><div class="tl-bar-fill ${fillCls}" style="width:${p}%"></div></div>
+      <span class="tl-bar-pct ${pctCls}">${p}%</span>
+      <span class="tl-bar-abbr">${b.abbr}</span>
+    </div>`;
+  }).join('');
+
+  return `<div class="tl-machine ${border}">
+    <div class="tl-machine-id">${esc(m.id)}</div>
+    ${barsHtml}
+  </div>`;
+}
+
+function renderTLCompact(m){
+  const parts = [];
+  if (m.worstTool && typeof m.worstTool.pct === 'number'){
+    parts.push(`TL ${Math.round(Math.max(0, Math.min(1, m.worstTool.pct)) * 100)}%`);
+  }
+  if (m.polishPad && typeof m.polishPad.pct === 'number'){
+    parts.push(`PAD ${Math.round(Math.max(0, Math.min(1, m.polishPad.pct)) * 100)}%`);
+  }
+  return `<div class="tl-compact">
+    <span class="tl-machine-id">${esc(m.id)}</span>
+    <span class="tl-compact-tools">${parts.join('&nbsp;&nbsp;')}</span>
   </div>`;
 }
 
@@ -597,7 +749,7 @@ function kpiCls(v, warn, good){ if (v==null) return ''; if (v>=good) return 'g';
 // ─────────────────────────────────────────────────────────────
 function startPollers(){
   // Machine grid — 30s
-  setTimeout(()=>schedule('machines','/api/som/machines/summary', d=>d.machines||[], 30000, renderMachineGrid), 0);
+  setTimeout(()=>schedule('machines','/api/som/machines/summary', d=>d.machines||[], 30000, renderToolLife), 0);
   // Alerts — 15s (for Attention rail)
   setTimeout(()=>schedule('alerts','/api/som/alerts/active', d=>d.alerts||[], 15000, renderAttention), 2000);
   // Tasks — 15s (overdue PMs)
