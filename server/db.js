@@ -2403,7 +2403,7 @@ function upsertJobFromTrace(j) {
   if (!j || !j.invoice) return;
   upsertJobFromTraceStmt.run(
     j.invoice, j.tray || null, j.stage || null, j.station || null, j.stationNum || null,
-    j.operator || null, j.machineId || null, j.status || 'ACTIVE',
+    j.operator || null, j.machineId || null, (j.status || 'ACTIVE').toUpperCase(),
     j.hasBreakage ? 1 : 0, j.firstSeenAt || null, j.lastEventAt || null,
     j.eventCount || 0, j.eventsJson || null, j.rush || null
   );
@@ -2571,7 +2571,7 @@ function queryJobsWip() {
   return db.prepare(`
     SELECT current_stage, status, rush, COUNT(*) as count,
            AVG(days_in_lab) as avg_days, MAX(days_in_lab) as max_days
-    FROM jobs WHERE status = 'ACTIVE'
+    FROM jobs WHERE status IN ('ACTIVE','Active')
     GROUP BY current_stage
     ORDER BY count DESC
   `).all();
@@ -2599,7 +2599,7 @@ function queryJobsAging(thresholdDays) {
   return db.prepare(`
     SELECT invoice, tray, current_stage, current_station, days_in_lab, entry_date,
            coating, rush, operator, lens_style, frame_name
-    FROM jobs WHERE status = 'ACTIVE' AND days_in_lab >= ?
+    FROM jobs WHERE status IN ('ACTIVE','Active') AND days_in_lab >= ?
     ORDER BY days_in_lab DESC
   `).all(thresholdDays);
 }
@@ -2607,7 +2607,7 @@ function queryJobsAging(thresholdDays) {
 function queryJobsByCoating(coatingType) {
   return db.prepare(`
     SELECT invoice, tray, current_stage, days_in_lab, entry_date, rush, status
-    FROM jobs WHERE coating = ? AND status = 'ACTIVE'
+    FROM jobs WHERE coating = ? AND status IN ('ACTIVE','Active')
     ORDER BY days_in_lab DESC
   `).all(coatingType);
 }
@@ -2638,7 +2638,7 @@ function getJobsTableStats() {
   return db.prepare(`
     SELECT
       COUNT(*) as total_rows,
-      SUM(CASE WHEN status='ACTIVE' THEN 1 ELSE 0 END) as active,
+      SUM(CASE WHEN status IN ('ACTIVE','Active') THEN 1 ELSE 0 END) as active,
       SUM(CASE WHEN status='SHIPPED' THEN 1 ELSE 0 END) as shipped,
       MIN(entry_date) as oldest_entry,
       MAX(ship_date) as newest_ship,
