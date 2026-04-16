@@ -1026,13 +1026,15 @@ const PICK_SYNC_PREFLIGHT_TIMEOUT_MS = 15000;           // abort probe fast if s
 // Pre-flight probe: 1 cheap /api/order_lines call with a known-good filter.
 // Returns true if ItemPath responds quickly; false on 504/timeout/error.
 async function pickSyncPreflight() {
+  // Use a 25h window from 2 days ago — past-date wide windows work reliably.
+  // Narrow windows trigger ItemPath's sub-day regression and mask real health.
   try {
-    const yesterdayStart = new Date(Date.now() - 24*60*60*1000);
-    const yesterdayEnd   = new Date(Date.now() - 23*60*60*1000);
+    const start = new Date(Date.now() - 2 * 25*60*60*1000);
+    const end   = new Date(Date.now() - 1 * 25*60*60*1000);
     const data = await ipFetch('/api/order_lines', {
       directionType: 2, status: 'processed',
-      'modifiedDate[gte]': yesterdayStart.toISOString(),
-      'modifiedDate[lte]': yesterdayEnd.toISOString(),
+      'modifiedDate[gte]': start.toISOString(),
+      'modifiedDate[lte]': end.toISOString(),
       limit: 1, page: 0,
     }, { timeout: PICK_SYNC_PREFLIGHT_TIMEOUT_MS });
     return { ok: true, sample: (data.order_lines || []).length };
