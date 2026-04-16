@@ -459,6 +459,23 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_parts_qty ON spare_parts(qty);
 
+  -- Downtime records (Limble)
+  CREATE TABLE IF NOT EXISTS downtime_records (
+    id TEXT PRIMARY KEY,
+    asset_id TEXT,
+    asset_name TEXT,
+    start_time TEXT,
+    end_time TEXT,
+    duration_mins INTEGER,
+    reason TEXT,
+    planned INTEGER DEFAULT 0,
+    category TEXT,
+    last_sync TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_downtime_start ON downtime_records(start_time);
+  CREATE INDEX IF NOT EXISTS idx_downtime_asset ON downtime_records(asset_id);
+  CREATE INDEX IF NOT EXISTS idx_downtime_planned ON downtime_records(planned);
+
   -- DVI Jobs - now with archived flag for soft-delete
   CREATE TABLE IF NOT EXISTS dvi_jobs (
     id TEXT PRIMARY KEY,
@@ -654,6 +671,22 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_ns_cd_date ON netsuite_consumption_daily(tran_date);
   CREATE INDEX IF NOT EXISTS idx_ns_cd_sku ON netsuite_consumption_daily(sku);
+
+  -- NetSuite inventory snapshot (current on-hand at Irvine 2)
+  CREATE TABLE IF NOT EXISTS netsuite_inventory (
+    sku TEXT PRIMARY KEY,
+    item_id TEXT,
+    upc TEXT,
+    name TEXT,
+    qty REAL DEFAULT 0,
+    available REAL DEFAULT 0,
+    category TEXT,
+    class_name TEXT,
+    class_id TEXT,
+    last_sync TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_ns_inv_category ON netsuite_inventory(category);
+  CREATE INDEX IF NOT EXISTS idx_ns_inv_qty ON netsuite_inventory(qty);
 
   -- Looker lens usage (cached from Look 1118)
   CREATE TABLE IF NOT EXISTS looker_lens_daily (
@@ -1412,6 +1445,26 @@ function upsertParts(parts) {
 
   upsertMany(parts);
   logSync('parts', parts.length);
+}
+
+function upsertDowntime(records) {
+  const stmt = db.prepare(`
+    INSERT OR REPLACE INTO downtime_records (id, asset_id, asset_name, start_time, end_time, duration_mins, reason, planned, category, last_sync)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+  `);
+
+  const upsertMany = db.transaction((items) => {
+    for (const d of items) {
+      stmt.run(
+        d.id, d.assetId, d.assetName,
+        d.startTime, d.endTime, d.durationMins,
+        d.reason, d.planned ? 1 : 0, d.category
+      );
+    }
+  });
+
+  upsertMany(records);
+  logSync('downtime', records.length);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2833,6 +2886,7 @@ module.exports = {
   upsertAssets,
   upsertTasks,
   upsertParts,
+  upsertDowntime,
   upsertJobs,
   // Query functions (for AI/MCP) - legacy
   queryInventorySummary,

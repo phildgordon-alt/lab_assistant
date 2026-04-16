@@ -227,8 +227,12 @@ setInterval(() => {
   try {
     const assetsData = limble.getAssets();
     const tasksData = limble.getTasks();
+    const partsData = limble.getParts();
+    const downtimeData = limble.getDowntime();
     if (assetsData.assets && assetsData.assets.length > 0) labDb.upsertAssets(assetsData.assets);
     if (tasksData.tasks && tasksData.tasks.length > 0) labDb.upsertTasks(tasksData.tasks);
+    if (partsData.parts && partsData.parts.length > 0) labDb.upsertParts(partsData.parts);
+    if (downtimeData.downtime && downtimeData.downtime.length > 0) labDb.upsertDowntime(downtimeData.downtime);
   } catch (e) { /* maintenance not ready yet */ }
 }, 60000); // sync every 60s
 

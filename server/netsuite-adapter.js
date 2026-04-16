@@ -218,6 +218,21 @@ async function poll() {
     lastSync = new Date().toISOString();
     syncError = null;
 
+    // Persist inventory snapshot to SQLite
+    try {
+      const db = require('./db');
+      const stmt = db.db.prepare(`
+        INSERT OR REPLACE INTO netsuite_inventory (sku, item_id, upc, name, qty, available, category, class_name, class_id, last_sync)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `);
+      const save = db.db.transaction(() => {
+        for (const item of Object.values(newInventory)) {
+          stmt.run(item.sku, item.itemId, item.upc, item.name, item.qty, item.available, item.category, item.className, item.classId);
+        }
+      });
+      save();
+    } catch (e) { console.warn('[NetSuite] SQLite persist error:', e.message); }
+
     const elapsed = Date.now() - start;
     const totalQty = Object.values(inventory).reduce((s, i) => s + i.qty, 0);
     console.log(`[NetSuite] Poll #${pollCount}: ${Object.keys(inventory).length} SKUs, ${Math.round(totalQty)} units at Irvine 2 (${elapsed}ms)`);
