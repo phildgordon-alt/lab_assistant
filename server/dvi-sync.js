@@ -356,14 +356,14 @@ class DviSyncService extends EventEmitter {
       // Stagger initial polls by 15s each so they don't all hit SMB at once
       const delay = staggerDelay;
       setTimeout(() => {
-        this.pollSync(sync).catch(() => {});
+        this.pollSync(sync).catch(e => { console.warn(`[DVI-Sync] Initial poll failed for ${sync.name}:`, e.message); });
       }, delay);
       staggerDelay += 15000;
 
       // Set up interval
       const interval = sync.pollInterval || 60000;
       this.intervals[sync.id] = setInterval(() => {
-        this.pollSync(sync).catch(() => {});
+        this.pollSync(sync).catch(e => { console.warn(`[DVI-Sync] Poll failed for ${sync.name}:`, e.message); });
       }, interval);
 
       console.log(`[DVI-Sync] Scheduled: ${sync.name} (every ${interval / 1000}s, first poll in ${delay / 1000}s)`);

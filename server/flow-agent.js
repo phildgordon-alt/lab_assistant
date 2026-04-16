@@ -226,6 +226,7 @@ const FLOW_TO_TRACE_STAGE = {
 
 let adapters = {};      // { dviTrace, dviJobIndex, som, itempath, timeAtLab, getOvenState, ews }
 let pollTimer = null;
+let _polling = false;
 let lastSnapshot = null;  // most recent computed snapshot
 let lastRecs = [];        // most recent recommendations
 let pollCount = 0;
@@ -1282,6 +1283,8 @@ function computeCatchUp(lineId, scenario = {}) {
 // ─── MAIN POLL CYCLE ───────────────────────────────────────────────────────
 
 function poll() {
+  if (_polling) { console.log('[Flow] Poll still running — skipping'); return; }
+  _polling = true;
   const t0 = Date.now();
   try {
     const { dviTrace, dviJobIndex, som, itempath, timeAtLab, getOvenState } = adapters;
@@ -1395,6 +1398,8 @@ function poll() {
     }
   } catch (err) {
     console.error('[Flow] Poll error:', err.message);
+  } finally {
+    _polling = false;
   }
 }
 

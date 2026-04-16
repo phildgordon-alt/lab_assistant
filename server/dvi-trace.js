@@ -147,6 +147,7 @@ class DviTraceWatcher extends EventEmitter {
     this.incomingByDate = {};    // { 'YYYY-MM-DD': count } — first appearance per job
     this.todayStats = freshTodayStats();
     this._recovering = false;    // Blocks polls during recovery
+    this._polling = false;       // Backpressure guard for poll()
 
     this.on('error', (err) => {
       console.error('[DVI-Trace] Error:', err.message || err);
@@ -604,7 +605,9 @@ class DviTraceWatcher extends EventEmitter {
 
   async poll() {
     if (!this.running || this._recovering) return;
+    if (this._polling) { console.log('[DVI-Trace] Poll still running — skipping'); return; }
     if (!this._useLocal && !this.client) return;
+    this._polling = true;
 
     const filename = getTodayFilename();
     const remotePath = `${TRACE_DIR}\\${filename}`;
@@ -700,6 +703,8 @@ class DviTraceWatcher extends EventEmitter {
         return;
       }
       this.emit('error', err);
+    } finally {
+      this._polling = false;
     }
   }
 

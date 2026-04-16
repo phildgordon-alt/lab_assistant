@@ -657,7 +657,7 @@ try {
   }
 } catch (e) { console.warn('⚠️  Could not load oven-rack-jobs.json:', e.message); }
 function persistOvenRackJobs() {
-  try { fs.writeFileSync(OVEN_RACK_JOBS_FILE, JSON.stringify(ovenRackJobs)); } catch {}
+  try { fs.writeFileSync(OVEN_RACK_JOBS_FILE, JSON.stringify(ovenRackJobs)); } catch (e) { console.warn('[OvenTimer] Failed to persist rack jobs:', e.message); }
 }
 
 // ── Coating run timers (server-authoritative) ──────────────────
@@ -672,7 +672,7 @@ try {
   }
 } catch (e) { console.warn('⚠️  Could not load coating-runs.json:', e.message); }
 function persistCoatingRuns() {
-  try { fs.writeFileSync(COATING_RUNS_FILE, JSON.stringify(coatingRunHistory.slice(0, 500))); } catch {}
+  try { fs.writeFileSync(COATING_RUNS_FILE, JSON.stringify(coatingRunHistory.slice(0, 500))); } catch (e) { console.warn('[OvenTimer] Failed to persist coating runs:', e.message); }
 }
 
 try {
@@ -683,7 +683,7 @@ try {
 } catch (e) { console.warn('⚠️  Could not load oven-runs.json:', e.message); }
 
 function persist() {
-  try { fs.writeFileSync(DATA_FILE, JSON.stringify(runs.slice(0, MAX_RUNS))); } catch {}
+  try { fs.writeFileSync(DATA_FILE, JSON.stringify(runs.slice(0, MAX_RUNS))); } catch (e) { console.warn('[OvenTimer] Failed to persist oven runs:', e.message); }
 }
 
 // ── Helpers ───────────────────────────────────────────────────
@@ -2232,7 +2232,7 @@ Respond with a structured batching plan in this format:
           byDate[date] = data.total || 0;
         }
       }
-    } catch {}
+    } catch (e) { console.warn('[OvenTimer] Failed to read breakage history:', e.message); }
 
     // 2. Also aggregate live trace (in case history file hasn't been updated yet)
     const liveByDate = {};
@@ -2248,7 +2248,7 @@ Respond with a structured batching plan in this format:
         const d = ts.toISOString().slice(0, 10);
         liveByDate[d] = (liveByDate[d] || 0) + 1;
       }
-    } catch {}
+    } catch (e) { console.warn('[OvenTimer] Failed to aggregate live breakage:', e.message); }
 
     // Use whichever is higher per date (history may have data from before trace window,
     // live may have data not yet persisted)
@@ -2463,18 +2463,23 @@ Respond with a structured batching plan in this format:
     if (date === 'today') date = labDateFromMs(Date.now());
     else if (date === 'yesterday') date = labDateFromMs(Date.now() - 86400000);
 
-    // Build set of dates to match (MM/DD/YY format)
+    // Build ISO date list (YYYY-MM-DD) for jobs table query
+    const isoDates = [];
+    // Also build MM/DD/YY set for fallback path
     const matchDates = new Set();
     if (date) {
+      isoDates.push(date);
       const [yyyy, mm, dd] = date.split('-');
       matchDates.add(`${mm}/${dd}/${yyyy.slice(2)}`);
     } else if (from && to) {
       const d = new Date(from + 'T00:00:00');
       const end = new Date(to + 'T00:00:00');
       while (d <= end) {
+        const yyyy = d.getFullYear();
         const mm = String(d.getMonth()+1).padStart(2,'0');
         const dd = String(d.getDate()).padStart(2,'0');
-        const yy = String(d.getFullYear()).slice(2);
+        const yy = String(yyyy).slice(2);
+        isoDates.push(`${yyyy}-${mm}-${dd}`);
         matchDates.add(`${mm}/${dd}/${yy}`);
         d.setDate(d.getDate() + 1);
       }
@@ -2482,38 +2487,66 @@ Respond with a structured batching plan in this format:
       for (let i = 0; i < days; i++) {
         const d = new Date();
         d.setDate(d.getDate() - i);
+        const yyyy = d.getFullYear();
         const mm = String(d.getMonth()+1).padStart(2,'0');
         const dd = String(d.getDate()).padStart(2,'0');
-        const yy = String(d.getFullYear()).slice(2);
+        const yy = String(yyyy).slice(2);
+        isoDates.push(`${yyyy}-${mm}-${dd}`);
         matchDates.add(`${mm}/${dd}/${yy}`);
       }
     } else {
       return json(res, { error: 'Provide date, from+to, or days param' }, 400);
     }
 
-    const jobs = [];
-    for (const [jobNum, xml] of shippedJobIndex) {
-      if (matchDates.has(xml.shipDate)) {
-        const [mm, dd, yy] = xml.shipDate.split('/');
-        jobs.push({
-          date: `20${yy}-${mm}-${dd}`,
-          invoice: xml.invoice || jobNum,
-          tray: xml.tray || jobNum,
-          coating: xml.coating || '',
-          lensType: xml.lensType || '',
-          lensMat: xml.lensMat || '',
-          frameStyle: xml.frameStyle || '',
-          frameSku: xml.frameSku || '',
-          department: xml.department || '',
-          daysInLab: xml.daysInLab || '',
-          entryDate: xml.entryDate || '',
-          shipDate: xml.shipDate || '',
-          rush: xml.rush || 'N',
-        });
+    let jobs;
+    let source = 'jobs-table';
+    try {
+      // ── PRIMARY: unified jobs table ──
+      const dbRows = labDb.queryJobsShippedByDates(isoDates);
+      if (!dbRows || dbRows.length === 0) throw new Error('No shipped jobs for dates in jobs table');
+      jobs = dbRows.map(r => ({
+        date: r.ship_date,
+        invoice: r.invoice || '',
+        tray: r.tray || r.invoice || '',
+        coating: r.coating || '',
+        lensType: r.lens_type || '',
+        lensMat: r.lens_material || '',
+        frameStyle: r.frame_style || '',
+        frameSku: r.frame_sku || '',
+        department: r.department || '',
+        daysInLab: r.days_in_lab != null ? String(r.days_in_lab) : '',
+        entryDate: r.entry_date || '',
+        shipDate: r.ship_date || '',
+        rush: r.rush || 'N',
+      }));
+    } catch (e) {
+      // ── FALLBACK: in-memory shippedJobIndex (old path) ──
+      console.warn('[shipping/detail] Jobs table failed, falling back to shippedJobIndex:', e.message);
+      source = 'shippedJobIndex-fallback';
+      jobs = [];
+      for (const [jobNum, xml] of shippedJobIndex) {
+        if (matchDates.has(xml.shipDate)) {
+          const [mm, dd, yy] = xml.shipDate.split('/');
+          jobs.push({
+            date: `20${yy}-${mm}-${dd}`,
+            invoice: xml.invoice || jobNum,
+            tray: xml.tray || jobNum,
+            coating: xml.coating || '',
+            lensType: xml.lensType || '',
+            lensMat: xml.lensMat || '',
+            frameStyle: xml.frameStyle || '',
+            frameSku: xml.frameSku || '',
+            department: xml.department || '',
+            daysInLab: xml.daysInLab || '',
+            entryDate: xml.entryDate || '',
+            shipDate: xml.shipDate || '',
+            rush: xml.rush || 'N',
+          });
+        }
       }
     }
     jobs.sort((a, b) => b.date.localeCompare(a.date) || (a.invoice || '').localeCompare(b.invoice || ''));
-    return json(res, { jobs, count: jobs.length, dates: matchDates.size });
+    return json(res, { jobs, count: jobs.length, dates: isoDates.length, source });
   }
 
   // ── DVI vs Looker job comparison ────────────────────────────
@@ -2672,72 +2705,93 @@ Respond with a structured batching plan in this format:
 
   // ── Aging Jobs ─────────────────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/aging/jobs') {
-    const allJobs = dviTrace.getJobs();
-    const now = Date.now();
+    // Compute zone/SLA from lens type + days (shared by both code paths)
+    const _computeAging = (lensType, daysInLab) => {
+      const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing' : 'Single Vision';
+      const slaTarget = jobType === 'Surfacing' ? 3 : 2;
+      let zone = 'GREEN';
+      if (jobType === 'Surfacing') {
+        if (daysInLab >= 3) zone = 'CRITICAL';
+        else if (daysInLab >= 2) zone = 'RED';
+        else if (daysInLab >= 1) zone = 'YELLOW';
+      } else {
+        if (daysInLab >= 2) zone = 'CRITICAL';
+        else if (daysInLab >= 1.5) zone = 'RED';
+        else if (daysInLab >= 0.75) zone = 'YELLOW';
+      }
+      return { lensType, jobType, slaTarget, daysInLab, zone, overSLA: daysInLab >= slaTarget };
+    };
 
-    const jobs = allJobs
-      .filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED' && j.stage !== 'SHIPPED')
-      .map(j => {
-        const enteredMs = j.firstSeen || j.enteredAt || now;
-        const daysInLab = Math.round((now - enteredMs) / 86400000 * 10) / 10;
-
-        // Enrich with XML data for lens type
-        const xml = dviJobIndex.get(j.job_id);
-        const lensType = j.lensType || xml?.lensType || '';
-        // S=Single Vision, P=Progressive, B=Bifocal
-        // Surfacing jobs: P or B (need surfacing). SV: S or unknown (finished lens path)
-        const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing' : 'Single Vision';
-        const slaTarget = jobType === 'Surfacing' ? 3 : 2;
-
-        // Zone based on job type SLA target
-        let zone = 'GREEN';
-        if (jobType === 'Surfacing') {
-          if (daysInLab >= 3) zone = 'CRITICAL';
-          else if (daysInLab >= 2) zone = 'RED';
-          else if (daysInLab >= 1) zone = 'YELLOW';
+    let _agingJobs;
+    let _agingSource = 'jobs-table';
+    try {
+      // ── PRIMARY: unified jobs table ──
+      const dbRows = labDb.queryJobsAgingFull();
+      if (!dbRows || dbRows.length === 0) throw new Error('No active jobs in jobs table');
+      const _now = Date.now();
+      _agingJobs = dbRows.map(r => {
+        let dil = r.days_in_lab;
+        if (typeof dil !== 'number' || dil <= 0) {
+          const entMs = r.first_seen_at ? new Date(r.first_seen_at).getTime() : _now;
+          dil = Math.round(((_now - entMs) / 86400000) * 10) / 10;
         } else {
-          // Single Vision: tighter targets (2 day SLA)
-          if (daysInLab >= 2) zone = 'CRITICAL';
-          else if (daysInLab >= 1.5) zone = 'RED';
-          else if (daysInLab >= 0.75) zone = 'YELLOW';
+          dil = Math.round(dil * 10) / 10;
         }
-
+        const aging = _computeAging(r.lens_type || '', dil);
         return {
-          job_id: j.job_id,
-          invoice: j.invoice || j.job_id,
-          stage: j.stage,
-          station: j.station,
-          coating: j.coating || xml?.coating || '',
-          rush: j.rush || 'N',
-          lensType,
-          jobType,
-          slaTarget,
-          daysInLab: Math.round(daysInLab * 10) / 10,
-          overSLA: daysInLab >= slaTarget,
-          zone,
-          enteredAt: enteredMs ? new Date(enteredMs).toISOString().slice(0, 10) : '',
+          job_id: r.invoice,
+          invoice: r.invoice,
+          stage: r.current_stage,
+          station: r.current_station,
+          coating: r.coating || '',
+          rush: r.rush || 'N',
+          ...aging,
+          enteredAt: r.entry_date || (r.first_seen_at ? r.first_seen_at.slice(0, 10) : ''),
         };
-      })
-      .sort((a, b) => b.daysInLab - a.daysInLab);
+      }).sort((a, b) => b.daysInLab - a.daysInLab);
+    } catch (_agingErr) {
+      // ── FALLBACK: in-memory dviTrace (old path) ──
+      console.warn('[aging/jobs] Jobs table failed, falling back to trace:', _agingErr.message);
+      _agingSource = 'dvi-trace-fallback';
+      const allJobs = dviTrace.getJobs();
+      const _now = Date.now();
+      _agingJobs = allJobs
+        .filter(j => j.status !== 'SHIPPED' && j.stage !== 'CANCELED' && j.stage !== 'SHIPPED')
+        .map(j => {
+          const enteredMs = j.firstSeen || j.enteredAt || _now;
+          const daysInLab = Math.round((_now - enteredMs) / 86400000 * 10) / 10;
+          const xml = dviJobIndex.get(j.job_id);
+          const aging = _computeAging(j.lensType || xml?.lensType || '', daysInLab);
+          return {
+            job_id: j.job_id,
+            invoice: j.invoice || j.job_id,
+            stage: j.stage,
+            station: j.station,
+            coating: j.coating || xml?.coating || '',
+            rush: j.rush || 'N',
+            ...aging,
+            enteredAt: enteredMs ? new Date(enteredMs).toISOString().slice(0, 10) : '',
+          };
+        })
+        .sort((a, b) => b.daysInLab - a.daysInLab);
+    }
+    // Replace `jobs` and `now` references below with the computed array
+    const jobs = _agingJobs;
 
     const total = jobs.length;
     const sv = jobs.filter(j => j.jobType === 'Single Vision');
     const surf = jobs.filter(j => j.jobType === 'Surfacing');
 
-    const zoneCounts = (list) => {
-      const r = list.filter(j => j.zone === 'RED').length;
-      const c = list.filter(j => j.zone === 'CRITICAL').length;
-      return {
-        total: list.length,
-        green: list.filter(j => j.zone === 'GREEN').length,
-        yellow: list.filter(j => j.zone === 'YELLOW').length,
-        red: r,
-        critical: c,
-        overSLA: list.filter(j => j.overSLA).length,
-        avgDays: list.length > 0 ? Math.round(list.reduce((s, j) => s + j.daysInLab, 0) / list.length * 10) / 10 : 0,
-        outlierPct: list.length > 0 ? Math.round((list.filter(j => j.daysInLab >= 3).length / list.length) * 1000) / 10 : 0,
-      };
-    };
+    const zoneCounts = (list) => ({
+      total: list.length,
+      green: list.filter(j => j.zone === 'GREEN').length,
+      yellow: list.filter(j => j.zone === 'YELLOW').length,
+      red: list.filter(j => j.zone === 'RED').length,
+      critical: list.filter(j => j.zone === 'CRITICAL').length,
+      overSLA: list.filter(j => j.overSLA).length,
+      avgDays: list.length > 0 ? Math.round(list.reduce((s, j) => s + j.daysInLab, 0) / list.length * 10) / 10 : 0,
+      outlierPct: list.length > 0 ? Math.round((list.filter(j => j.daysInLab >= 3).length / list.length) * 1000) / 10 : 0,
+    });
 
     const green = jobs.filter(j => j.zone === 'GREEN').length;
     const yellow = jobs.filter(j => j.zone === 'YELLOW').length;
@@ -2754,6 +2808,7 @@ Respond with a structured batching plan in this format:
       summary: { total, green, yellow, red, critical, over5, over10, outlierPct, avgDays, outlierThreshold: 5 },
       singleVision: { ...zoneCounts(sv), slaTarget: 2 },
       surfacing: { ...zoneCounts(surf), slaTarget: 3 },
+      source: _agingSource,
     });
   }
 
@@ -2834,7 +2889,7 @@ Respond with a structured batching plan in this format:
         const lastRun = labDb.db.prepare("SELECT value FROM model_params WHERE key = 'long_tail_last_run'").get();
         if (cached?.value) global._longTailCache = JSON.parse(cached.value);
         if (lastRun?.value) global._longTailLastRun = lastRun.value;
-      } catch {}
+      } catch (e) { console.warn('[OvenTimer] Failed to load long-tail cache:', e.message); }
     }
     return json(res, { ...(global._longTailCache || {}), lastRun: global._longTailLastRun || null });
   }
@@ -2844,13 +2899,13 @@ Respond with a structured batching plan in this format:
       labDb.db.exec("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
       // Check data availability
       let weeklyCount = 0;
-      try { weeklyCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM lens_consumption_weekly').get()?.cnt || 0; } catch {}
+      try { weeklyCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM lens_consumption_weekly').get()?.cnt || 0; } catch (e) { console.warn('[OvenTimer] lens_consumption_weekly query failed:', e.message); }
       if (weeklyCount === 0) {
         // Try rebuilding weekly consumption first
         try { lensIntel.computeAll(labDb.db, itempath, netsuite); } catch (e) {
           console.error('[LongTail] Lens intel refresh failed:', e.message);
         }
-        try { weeklyCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM lens_consumption_weekly').get()?.cnt || 0; } catch {}
+        try { weeklyCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM lens_consumption_weekly').get()?.cnt || 0; } catch (e) { console.warn('[OvenTimer] lens_consumption_weekly query failed:', e.message); }
       }
       if (weeklyCount === 0) return json(res, { error: 'No consumption data — run Lens Intel refresh first (need ItemPath + Looker data)' }, 400);
 
@@ -2874,7 +2929,7 @@ Respond with a structured batching plan in this format:
     try {
       const rows = labDb.db.prepare("SELECT key, value FROM model_params WHERE key LIKE 'long_tail_%'").all();
       for (const r of rows) params[r.key] = isNaN(Number(r.value)) ? r.value : Number(r.value);
-    } catch {}
+    } catch (e) { console.warn('[OvenTimer] Failed to load long-tail params:', e.message); }
     return json(res, params);
   }
   if (req.method==='POST' && url.pathname==='/api/lens-intel/long-tail/params') {
@@ -3360,19 +3415,38 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/jobs/active') {
     const somData = som.getActiveJobs();
     const enriched = somData.jobs.map(job => {
-      const dvi = dviJobIndex.get(job.dviJob) || null;
-      return {
-        ...job,
-        dvi: dvi ? {
-          coating: dvi.coating,
-          lensStyle: dvi.lensStyle,
-          lensMat: dvi.lensMat,
-          frameStyle: dvi.frameStyle,
-          frameSku: dvi.frameSku,
-          rxNum: dvi.rxNum,
-          serviceInstruction: dvi.serviceInstruction,
-        } : null
-      };
+      // ── PRIMARY: look up in unified jobs table first ──
+      let dvi = null;
+      try {
+        const dbJob = job.dviJob ? labDb.getJob(job.dviJob) : null;
+        if (dbJob) {
+          dvi = {
+            coating: dbJob.coating,
+            lensStyle: dbJob.lens_style,
+            lensMat: dbJob.lens_material,
+            frameStyle: dbJob.frame_style,
+            frameSku: dbJob.frame_sku,
+            rxNum: dbJob.rx_number,
+            serviceInstruction: null, // not in jobs table
+          };
+        }
+      } catch (e) { /* fall through to in-memory */ }
+      // ── FALLBACK: in-memory dviJobIndex ──
+      if (!dvi) {
+        const xml = dviJobIndex.get(job.dviJob) || null;
+        if (xml) {
+          dvi = {
+            coating: xml.coating,
+            lensStyle: xml.lensStyle,
+            lensMat: xml.lensMat,
+            frameStyle: xml.frameStyle,
+            frameSku: xml.frameSku,
+            rxNum: xml.rxNum,
+            serviceInstruction: xml.serviceInstruction,
+          };
+        }
+      }
+      return { ...job, dvi };
     });
     // Group by department zone
     const byZone = {};
@@ -3387,7 +3461,8 @@ Respond with a structured batching plan in this format:
       matchRate: enriched.filter(j => j.dvi).length,
       byZone,
       isLive: somData.isLive,
-      lastPoll: somData.lastPoll
+      lastPoll: somData.lastPoll,
+      source: 'som+jobs-table',
     });
   }
   if (req.method==='GET' && url.pathname==='/api/som/health') {
@@ -4119,17 +4194,27 @@ Respond with a structured batching plan in this format:
 
   // ── Assembly config (operator assignments + name map) ──────────
   // Synced from standalone AssemblyDashboard.html so main app can read them
-  // ── Shipped history — daily shipped counts from trace + shipped XML ─────
+  // ── Shipped history — daily shipped counts ─────
   if (req.method==='GET' && url.pathname==='/api/shipping/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
-    // Single source of truth: dvi_shipped_jobs SQLite table (from shipped XML files)
-    const rows = labDb.db.prepare(`
-      SELECT ship_date, COUNT(*) as shipped
-      FROM dvi_shipped_jobs
-      WHERE is_hko = 0 AND ship_date >= date('now', '-' || ? || ' days')
-      GROUP BY ship_date
-      ORDER BY ship_date DESC
-    `).all(days);
+    let rows;
+    let source = 'jobs-table';
+    try {
+      // ── PRIMARY: unified jobs table ──
+      rows = labDb.queryJobsShippedHistory(days);
+      if (!rows || rows.length === 0) throw new Error('No shipped rows in jobs table');
+    } catch (e) {
+      // ── FALLBACK: dvi_shipped_jobs table (old path) ──
+      console.warn('[shipping/history] Jobs table failed, falling back to dvi_shipped_jobs:', e.message);
+      source = 'dvi_shipped_jobs';
+      rows = labDb.db.prepare(`
+        SELECT ship_date, COUNT(*) as shipped
+        FROM dvi_shipped_jobs
+        WHERE is_hko = 0 AND ship_date >= date('now', '-' || ? || ' days')
+        GROUP BY ship_date
+        ORDER BY ship_date DESC
+      `).all(days);
+    }
     // Build full day range with zeros for missing days
     const byDay = {};
     for (let d = 0; d < days; d++) {
@@ -4139,12 +4224,14 @@ Respond with a structured batching plan in this format:
       byDay[key] = { date: key, shipped: 0, rush: 0 };
     }
     for (const row of rows) {
-      if (byDay[row.ship_date]) {
-        byDay[row.ship_date].shipped = row.shipped;
+      const shipDate = row.ship_date;
+      if (byDay[shipDate]) {
+        byDay[shipDate].shipped = row.shipped;
+        if (row.rush_count) byDay[shipDate].rush = row.rush_count;
       }
     }
     const history = Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date));
-    return json(res, { history, days, source: 'dvi_shipped_jobs' });
+    return json(res, { history, days, source });
   }
 
   if (req.method==='GET' && url.pathname==='/api/assembly/config') {
@@ -4503,7 +4590,7 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/breakage/history') {
     const histPath = path.join(__dirname, 'data', 'breakage-history.json');
     let saved = {};
-    try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch(e) {}
+    try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch(e) { console.warn('[OvenTimer] Failed to parse breakage history:', e.message); }
     const days = Object.entries(saved).map(([date, data]) => ({ date, ...data })).sort((a, b) => b.date.localeCompare(a.date));
     return json(res, { history: days, totalDays: days.length });
   }
@@ -4529,7 +4616,7 @@ Respond with a structured batching plan in this format:
           traceDates[d] = (traceDates[d] || 0) + 1;
         }
       }
-    } catch (e) { /* */ }
+    } catch (e) { console.warn('[OvenTimer] Breakage diagnostic trace error:', e.message); }
 
     // 2. History file
     const histPath = path.join(__dirname, 'data', 'breakage-history.json');
@@ -4540,11 +4627,11 @@ Respond with a structured batching plan in this format:
         histExists = true;
         histData = JSON.parse(fs.readFileSync(histPath, 'utf8'));
       }
-    } catch {}
+    } catch (e) { console.warn('[OvenTimer] Failed to read breakage history file:', e.message); }
 
     // 3. SQLite breakage_events
     let sqliteCount = 0;
-    try { sqliteCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM breakage_events').get()?.cnt || 0; } catch {}
+    try { sqliteCount = labDb.db.prepare('SELECT COUNT(*) as cnt FROM breakage_events').get()?.cnt || 0; } catch (e) { console.warn('[OvenTimer] Failed to count breakage events:', e.message); }
 
     // 4. getDviBreakageByDate result
     const combined = getDviBreakageByDate();
@@ -6121,7 +6208,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
             currentWIP += 3;
           }
         }
-      } catch {}
+      } catch (e) { console.warn('[OvenTimer] Failed to compute WIP from trace:', e.message); }
 
       // 4b. DVI breakage — same source as /api/breakage (QC tab)
       let labBreakage = 0;
@@ -7114,7 +7201,7 @@ server.listen(PORT, '0.0.0.0', () => {
         }
         const histPath = path.join(__dirname, 'data', 'breakage-history.json');
         let saved = {};
-        try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch {}
+        try { if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8')); } catch (e) { console.warn('[OvenTimer] Failed to parse breakage history:', e.message); }
         for (const [date, data] of Object.entries(byDay)) {
           if (!saved[date] || (data.total > (saved[date].total || 0))) saved[date] = data;
         }

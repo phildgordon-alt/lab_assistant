@@ -123,6 +123,7 @@ const DEPARTMENTS = {
 let lastPoll = null;
 let lastSuccessfulPoll = null;
 let pollInterval = null;
+let _polling = false;
 let connection = null;
 let isLive = false;
 let connectionError = null;
@@ -504,6 +505,9 @@ function hidMachineType(sqlCategory) {
 }
 
 async function poll() {
+  if (_polling) { console.log('[SOM] Poll still running — skipping'); return; }
+  _polling = true;
+  try {
   lastPoll = new Date().toISOString();
   pollCount++;
 
@@ -801,6 +805,9 @@ async function poll() {
     }
 
     return false;
+  }
+  } finally {
+    _polling = false;
   }
 }
 

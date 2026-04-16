@@ -1785,9 +1785,9 @@ function queryRaw(sql) {
 function queryShippedJobs(days = 7) {
   return db.prepare(`
     SELECT * FROM dvi_jobs_history
-    WHERE shipped_at >= datetime('now', '-${days} days')
+    WHERE shipped_at >= datetime('now', '-' || ? || ' days')
     ORDER BY shipped_at DESC
-  `).all();
+  `).all(days);
 }
 
 function queryShippedStats(days = 7) {
@@ -1796,15 +1796,15 @@ function queryShippedStats(days = 7) {
            SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush_count,
            AVG(days_in_lab) as avg_days
     FROM dvi_jobs_history
-    WHERE shipped_at >= datetime('now', '-${days} days')
+    WHERE shipped_at >= datetime('now', '-' || ? || ' days')
     GROUP BY date(shipped_at)
     ORDER BY ship_date DESC
-  `).all();
+  `).all(days);
 
   const total = db.prepare(`
     SELECT COUNT(*) as count FROM dvi_jobs_history
-    WHERE shipped_at >= datetime('now', '-${days} days')
-  `).get();
+    WHERE shipped_at >= datetime('now', '-' || ? || ' days')
+  `).get(days);
 
   return { daily, total: total.count, days };
 }
@@ -2176,24 +2176,26 @@ function getCoatingQueueAged(minDays = 0) {
 
 // Get breakage summary by department - summary + top 5 events
 function getBreakageByDept(dept = null, sinceDays = 7) {
-  const whereClause = dept ? `AND department = '${dept}'` : '';
+  const daysParam = [sinceDays];
+  const deptFilter = dept ? 'AND department = ?' : '';
+  const params = dept ? [sinceDays, dept] : daysParam;
 
   const summary = db.prepare(`
     SELECT department, reason, COUNT(*) as count
     FROM breakage_events
-    WHERE occurred_at >= datetime('now', '-${sinceDays} days') ${whereClause}
+    WHERE occurred_at >= datetime('now', '-' || ? || ' days') ${deptFilter}
     GROUP BY department, reason
     ORDER BY count DESC
     LIMIT 15
-  `).all();
+  `).all(...params);
 
   const recent = db.prepare(`
     SELECT job_id, invoice, department, reason, occurred_at
     FROM breakage_events
-    WHERE occurred_at >= datetime('now', '-${sinceDays} days') ${whereClause}
+    WHERE occurred_at >= datetime('now', '-' || ? || ' days') ${deptFilter}
     ORDER BY occurred_at DESC
     LIMIT 5
-  `).all();
+  `).all(...params);
 
   return { summary, recentEvents: recent, source: 'sqlite' };
 }
@@ -2883,6 +2885,86 @@ function getJobsTableStats() {
   `).get();
 }
 
+// ── Extended query functions for endpoint migration ──────────────────────────
+
+/**
+ * All active WIP jobs with full detail — replaces dviTrace.getJobsForKPI() + enrichment
+ */
+function queryJobsActiveWip() {
+  return db.prepare(`
+    SELECT invoice, reference, rx_number, tray, current_stage, current_station,
+           current_station_num, status, rush, days_in_lab, entry_date, entry_time,
+           operator, machine_id, coating, coat_type, lens_type, lens_style, lens_material,
+           lens_color, frame_style, frame_sku, frame_mfr, frame_name, frame_upc,
+           eye_size, bridge, edge_type, rx_number as rxNum, has_breakage,
+           first_seen_at, last_event_at, event_count, events_json,
+           department, job_type, is_hko,
+           rx_r_sphere, rx_r_cylinder, rx_r_axis, rx_r_pd, rx_r_add,
+           rx_l_sphere, rx_l_cylinder, rx_l_axis, rx_l_pd, rx_l_add
+    FROM jobs
+    WHERE status IN ('ACTIVE','Active')
+    ORDER BY last_event_at DESC
+  `).all();
+}
+
+/**
+ * Shipped jobs for a given date range — replaces shippedJobIndex reads in /api/shipping/detail
+ * Accepts an array of ISO date strings (YYYY-MM-DD)
+ */
+function queryJobsShippedByDates(dates) {
+  if (!dates || dates.length === 0) return [];
+  const placeholders = dates.map(() => '?').join(',');
+  return db.prepare(`
+    SELECT invoice, tray, coating, lens_type, lens_material, lens_style,
+           frame_style, frame_sku, frame_name, department, days_in_lab,
+           entry_date, ship_date, ship_time, rush, is_hko
+    FROM jobs
+    WHERE status = 'SHIPPED' AND ship_date IN (${placeholders})
+    ORDER BY ship_date DESC, invoice ASC
+  `).all(...dates);
+}
+
+/**
+ * Shipped counts for today/yesterday/week — replaces getShippedCounts() in-memory
+ */
+function queryJobsShippedCounts(weekStartDate) {
+  const rows = db.prepare(`
+    SELECT ship_date, COUNT(*) as cnt, SUM(CASE WHEN is_hko=1 THEN 1 ELSE 0 END) as hko_cnt
+    FROM jobs
+    WHERE status = 'SHIPPED' AND ship_date >= ?
+    GROUP BY ship_date
+  `).all(weekStartDate);
+  return rows;
+}
+
+/**
+ * Full aging report with zone/SLA calculations — replaces /api/aging/jobs in-memory computation
+ */
+function queryJobsAgingFull() {
+  return db.prepare(`
+    SELECT invoice, tray, current_stage, current_station, days_in_lab, entry_date,
+           coating, rush, operator, lens_style, lens_type, frame_name, first_seen_at,
+           status
+    FROM jobs
+    WHERE status IN ('ACTIVE','Active')
+    ORDER BY days_in_lab DESC
+  `).all();
+}
+
+/**
+ * Daily shipped history — replaces /api/shipping/history dvi_shipped_jobs query
+ */
+function queryJobsShippedHistory(days) {
+  return db.prepare(`
+    SELECT ship_date, COUNT(*) as shipped,
+           SUM(CASE WHEN rush='Y' THEN 1 ELSE 0 END) as rush_count
+    FROM jobs
+    WHERE status = 'SHIPPED' AND is_hko = 0 AND ship_date >= date('now', '-' || ? || ' days')
+    GROUP BY ship_date
+    ORDER BY ship_date DESC
+  `).all(days);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // EXPORTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3135,4 +3217,10 @@ module.exports = {
   queryJobEvents,
   queryStageTimings,
   getJobsTableStats,
+  // Extended queries for endpoint migration
+  queryJobsActiveWip,
+  queryJobsShippedByDates,
+  queryJobsShippedCounts,
+  queryJobsAgingFull,
+  queryJobsShippedHistory,
 };

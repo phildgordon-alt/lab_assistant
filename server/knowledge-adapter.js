@@ -187,8 +187,8 @@ function deleteDocument(id) {
   if (!doc) return false;
 
   const filePath = path.join(KNOWLEDGE_DIR, doc.category, doc.filename);
-  try { fs.unlinkSync(filePath); } catch (e) {}
-  try { fs.unlinkSync(filePath + '.txt'); } catch (e) {}
+  try { fs.unlinkSync(filePath); } catch (e) { console.warn('[Knowledge] Failed to delete file:', e.message); }
+  try { fs.unlinkSync(filePath + '.txt'); } catch (e) { console.warn('[Knowledge] Failed to delete txt sidecar:', e.message); }
 
   index = index.filter(d => d.id !== id);
   saveIndex();
@@ -217,7 +217,7 @@ function updateDocument(id, updates) {
     try {
       fs.renameSync(oldPath, newPath);
       if (fs.existsSync(oldPath + '.txt')) fs.renameSync(oldPath + '.txt', newPath + '.txt');
-    } catch (e) {}
+    } catch (e) { console.warn('[Knowledge] Failed to move file to new category:', e.message); }
     doc.category = updates.category;
   }
   doc.updatedAt = Date.now();

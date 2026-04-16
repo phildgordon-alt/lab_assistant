@@ -284,15 +284,15 @@ function processEvent(evt) {
     const exitField = STAGE_EXIT_FIELDS[prevStage.stage];
 
     if (enterField) {
-      try { db.prepare(`UPDATE job_lifecycle SET ${enterField} = ? WHERE job_id = ? AND ${enterField} IS NULL`).run(timestamp, jobId); } catch (e) {}
+      try { db.prepare(`UPDATE job_lifecycle SET ${enterField} = ? WHERE job_id = ? AND ${enterField} IS NULL`).run(timestamp, jobId); } catch (e) { console.warn('[TimeAtLab] Failed to set enter field:', e.message); }
     }
     if (exitField) {
-      try { db.prepare(`UPDATE job_lifecycle SET ${exitField} = ? WHERE job_id = ?`).run(timestamp, jobId); } catch (e) {}
+      try { db.prepare(`UPDATE job_lifecycle SET ${exitField} = ? WHERE job_id = ?`).run(timestamp, jobId); } catch (e) { console.warn('[TimeAtLab] Failed to set exit field:', e.message); }
     }
 
     // Handle shipped
     if (stage === 'SHIPPED' || stage === 'COMPLETE') {
-      try { stmts.setShipped.run(timestamp, timestamp, timestamp, now, jobId); } catch (e) {}
+      try { stmts.setShipped.run(timestamp, timestamp, timestamp, now, jobId); } catch (e) { console.warn('[TimeAtLab] Failed to set shipped:', e.message); }
     }
   }
 
