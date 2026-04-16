@@ -239,18 +239,37 @@ let lastEventCounts = {}; // stage → count at last check (for delta)
 
 // ─── CORE COMPUTE ──────────────────────────────────────────────────────────
 
+// Cache of semi-finished SKUs from lens_sku_params — loaded once on startup
+const _semiFinishedSkus = new Set();
+try {
+  const rows = db.prepare("SELECT sku FROM lens_sku_params WHERE sku_type = 'semifinished'").all();
+  for (const r of rows) _semiFinishedSkus.add(r.sku);
+  if (_semiFinishedSkus.size > 0) console.log(`[Flow] Loaded ${_semiFinishedSkus.size} semi-finished SKUs for job classification`);
+} catch {}
+
 /**
- * Classify a job into a line (sv, surfacing, edits) based on lens type
+ * Classify a job into a line (sv, surfacing, edits) based on lens type.
+ * Surfacing uses pucks (semi-finished blanks) — NEVER default unknown to SV.
  */
 function classifyJob(job, dviJobIndex) {
   const xml = dviJobIndex ? dviJobIndex.get(job.job_id) : null;
   const lensType = job.lensType || xml?.lensType || '';
 
+  // DVI lens type field: S=single vision (stock), P=progressive, B=bifocal
   if (lensType === 'S') return 'sv';
   if (lensType === 'P' || lensType === 'B') return 'surfacing';
-  // Fallback: check stage — if it's in surfacing stages, it's surfacing path
-  if (['SURFACING'].includes(job.stage)) return 'surfacing';
-  return 'sv'; // default to SV if unknown
+
+  // Check OPC against semi-finished SKU list from lens_sku_params
+  const opc = job.lensOpc || xml?.lensOpcR || xml?.opc || '';
+  if (opc && _semiFinishedSkus.has(opc)) return 'surfacing';
+
+  // Fallback: check stage — if it's in any surfacing stage, it's surfacing path
+  const surfStages = ['SURFACING', 'COATING', 'AT_KARDEX', 'NEL'];
+  if (surfStages.includes(job.stage)) return 'surfacing';
+
+  // Unknown lens type — do NOT default to SV. Leave unclassified.
+  // Unclassified jobs won't trigger SV push recommendations.
+  return 'unknown';
 }
 
 /**
