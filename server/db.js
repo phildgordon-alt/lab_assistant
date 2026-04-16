@@ -476,6 +476,44 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_downtime_asset ON downtime_records(asset_id);
   CREATE INDEX IF NOT EXISTS idx_downtime_planned ON downtime_records(planned);
 
+  -- Oven runs (migrated from oven-runs.json)
+  CREATE TABLE IF NOT EXISTS oven_runs (
+    id INTEGER PRIMARY KEY,
+    oven_id TEXT,
+    oven_name TEXT,
+    rack TEXT,
+    rack_label TEXT,
+    coating TEXT,
+    target_secs INTEGER,
+    actual_secs INTEGER,
+    operator TEXT,
+    received_at INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_oven_runs_oven ON oven_runs(oven_id);
+  CREATE INDEX IF NOT EXISTS idx_oven_runs_received ON oven_runs(received_at);
+  CREATE INDEX IF NOT EXISTS idx_oven_runs_coating ON oven_runs(coating);
+
+  -- Coating runs (migrated from coating-runs.json)
+  CREATE TABLE IF NOT EXISTS coating_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coater_id TEXT,
+    coater_name TEXT,
+    started_at INTEGER,
+    stopped_at INTEGER,
+    target_sec INTEGER,
+    elapsed_sec INTEGER,
+    job_count INTEGER,
+    jobs_json TEXT,
+    status TEXT,
+    rating INTEGER,
+    feedback TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_coating_runs_coater ON coating_runs(coater_id);
+  CREATE INDEX IF NOT EXISTS idx_coating_runs_started ON coating_runs(started_at);
+  CREATE INDEX IF NOT EXISTS idx_coating_runs_status ON coating_runs(status);
+
   -- DVI Jobs - now with archived flag for soft-delete
   CREATE TABLE IF NOT EXISTS dvi_jobs (
     id TEXT PRIMARY KEY,
@@ -2289,6 +2327,49 @@ function upsertShippedJob(p) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OVEN & COATING RUNS (SQLite persistence alongside JSON files)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const insertOvenRunStmt = db.prepare(`
+  INSERT OR IGNORE INTO oven_runs (id, oven_id, oven_name, rack, rack_label, coating, target_secs, actual_secs, operator, received_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+function insertOvenRun(run) {
+  if (!run || !run.id) return;
+  insertOvenRunStmt.run(
+    run.id, run.ovenId || null, run.ovenName || null,
+    run.rack || null, run.rackLabel || null, run.coating || null,
+    run.targetSecs || null, run.actualSecs || null,
+    run.operator || null, run.receivedAt || Date.now()
+  );
+}
+
+const insertCoatingRunStmt = db.prepare(`
+  INSERT INTO coating_runs (coater_id, coater_name, started_at, stopped_at, target_sec, elapsed_sec, job_count, jobs_json, status)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+function insertCoatingRun(run) {
+  if (!run) return;
+  insertCoatingRunStmt.run(
+    run.coaterId || null, run.coaterName || null,
+    run.startedAt || null, run.stoppedAt || null,
+    run.targetSec || null, run.elapsedSec || null,
+    run.jobCount || 0, JSON.stringify(run.jobs || []),
+    run.status || 'completed'
+  );
+}
+
+function getOvenRuns(limit) {
+  return db.prepare('SELECT * FROM oven_runs ORDER BY received_at DESC LIMIT ?').all(limit || 500);
+}
+
+function getCoatingRuns(limit) {
+  return db.prepare('SELECT * FROM coating_runs ORDER BY started_at DESC LIMIT ?').all(limit || 500);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // UNIFIED JOBS TABLE — single source of truth for all job data
 // Every source enriches the same row: trace → XML → SOM → Looker
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2887,6 +2968,10 @@ module.exports = {
   upsertTasks,
   upsertParts,
   upsertDowntime,
+  insertOvenRun,
+  insertCoatingRun,
+  getOvenRuns,
+  getCoatingRuns,
   upsertJobs,
   // Query functions (for AI/MCP) - legacy
   queryInventorySummary,

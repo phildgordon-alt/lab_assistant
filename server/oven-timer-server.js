@@ -1029,6 +1029,7 @@ const server = http.createServer(async (req, res) => {
       if (!runs.find(r=>r.id===run.id)) {
         runs.unshift(run);
         persist();
+        try { labDb.insertOvenRun(run); } catch (e) { /* SQLite dual-write — JSON is primary */ }
         console.log(`📥 ${run.ovenName||run.ovenId} ${run.rackLabel||run.rack} | ${run.coating} | ${fmtSecs(run.actualSecs)}`);
       }
       return json(res,{ok:true,total:runs.length});
@@ -1250,6 +1251,7 @@ const server = http.createServer(async (req, res) => {
       const completed = { ...run, status: 'completed', stoppedAt: Date.now(), elapsedSec: elapsed };
       coatingRunHistory.unshift(completed);
       persistCoatingRuns();
+      try { labDb.insertCoatingRun(completed); } catch (e) { /* SQLite dual-write — JSON is primary */ }
       delete coatingRuns[coaterId];
       console.log(`[Coating] Stopped run on ${run.coaterName}: ${elapsed}s elapsed, ${run.jobCount} jobs`);
       return json(res, {ok:true, run: completed});
