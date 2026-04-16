@@ -1037,6 +1037,39 @@ async function pickSyncPreflight() {
   }
 }
 
+// Find days with missing or low pick counts in picks_history.
+// Returns the oldest missing day as a Date, or null if coverage is good.
+function findMissingDay() {
+  try {
+    // Look back 30 days for holes. A "hole" is a weekday with < 100 picks.
+    const rows = db.db.prepare(`
+      SELECT date(completed_at) as d, COUNT(*) as n
+      FROM picks_history
+      WHERE completed_at >= date('now', '-30 days')
+      GROUP BY date(completed_at)
+    `).all();
+    const covered = new Map(rows.map(r => [r.d, r.n]));
+
+    // Walk backwards from yesterday (today may still be accumulating)
+    const now = new Date();
+    for (let i = 1; i <= 30; i++) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dow = d.getDay(); // 0=Sun, 6=Sat
+      if (dow === 0 || dow === 6) continue; // skip weekends
+      const dateStr = d.toISOString().substring(0, 10);
+      const count = covered.get(dateStr) || 0;
+      if (count < 100) { // threshold: a normal workday has 1500-3000 picks
+        return { date: d, dateStr, count };
+      }
+    }
+    return null;
+  } catch (e) {
+    console.warn('[pickSync] findMissingDay error:', e.message);
+    return null;
+  }
+}
+
 async function pickSync() {
   if (CONFIG.mockMode) return;
   if (pickSyncRunning) { console.log('[pickSync] Already running — skipping'); return; }
@@ -1052,38 +1085,46 @@ async function pickSync() {
     return;
   }
 
-  // Mode decision: gap (walk forward one 24h slice) vs steady (25h rolling).
-  // Uses MAX(completed_at) as the authoritative "caught up to" marker.
+  // Mode decision: 3 modes now:
+  //   1. BACKFILL — found a day with < 100 picks in the last 30 days. Fill that day.
+  //   2. GAP — MAX(completed_at) is >24h behind now. Walk forward from there.
+  //   3. STEADY — caught up. 25h rolling window.
   const windowEnd = new Date();
   let windowStart;
   let mode;
-  try {
-    const row = db.db.prepare(`SELECT MAX(completed_at) AS m FROM picks_history`).get();
-    const maxTs = row?.m ? new Date(row.m) : null;
-    const gapMs = maxTs ? (windowEnd.getTime() - maxTs.getTime()) : Infinity;
-    if (maxTs && gapMs > PICK_SYNC_GAP_THRESHOLD_MS) {
-      mode = 'GAP';
-      const sliceStart = new Date(maxTs.getTime() - PICK_SYNC_GAP_OVERLAP_MS);
-      windowStart = sliceStart;
-      // Cap window to 24h slice to keep pages manageable
-      const sliceEnd = new Date(sliceStart.getTime() + PICK_SYNC_GAP_WINDOW_MS);
-      if (sliceEnd.getTime() < windowEnd.getTime()) {
-        // Override windowEnd to slice boundary so we walk forward day-by-day
-        // (but leave the outer `windowEnd` var for status — use local for the query)
-        var queryWindowEnd = sliceEnd;
+  let queryWindowEnd;
+
+  // First: check for interior holes (days with missing data)
+  const missingDay = findMissingDay();
+  if (missingDay) {
+    mode = 'BACKFILL';
+    // Query the full day (midnight to midnight UTC) for the missing date
+    windowStart = new Date(missingDay.dateStr + 'T00:00:00.000Z');
+    queryWindowEnd = new Date(missingDay.dateStr + 'T23:59:59.999Z');
+    console.log(`[pickSync] Found hole: ${missingDay.dateStr} has only ${missingDay.count} picks`);
+  } else {
+    // No holes — check trailing gap
+    try {
+      const row = db.db.prepare(`SELECT MAX(completed_at) AS m FROM picks_history`).get();
+      const maxTs = row?.m ? new Date(row.m) : null;
+      const gapMs = maxTs ? (windowEnd.getTime() - maxTs.getTime()) : Infinity;
+      if (maxTs && gapMs > PICK_SYNC_GAP_THRESHOLD_MS) {
+        mode = 'GAP';
+        const sliceStart = new Date(maxTs.getTime() - PICK_SYNC_GAP_OVERLAP_MS);
+        windowStart = sliceStart;
+        const sliceEnd = new Date(sliceStart.getTime() + PICK_SYNC_GAP_WINDOW_MS);
+        queryWindowEnd = sliceEnd.getTime() < windowEnd.getTime() ? sliceEnd : windowEnd;
       } else {
-        var queryWindowEnd = windowEnd;
+        mode = 'STEADY';
+        windowStart = new Date(windowEnd.getTime() - PICK_SYNC_STEADY_LOOKBACK_MS);
+        queryWindowEnd = windowEnd;
       }
-    } else {
+    } catch (e) {
+      console.warn('[pickSync] Could not read MAX(completed_at), defaulting to steady 25h:', e.message);
       mode = 'STEADY';
       windowStart = new Date(windowEnd.getTime() - PICK_SYNC_STEADY_LOOKBACK_MS);
-      var queryWindowEnd = windowEnd;
+      queryWindowEnd = windowEnd;
     }
-  } catch (e) {
-    console.warn('[pickSync] Could not read MAX(completed_at), defaulting to steady 25h:', e.message);
-    mode = 'STEADY';
-    windowStart = new Date(windowEnd.getTime() - PICK_SYNC_STEADY_LOOKBACK_MS);
-    var queryWindowEnd = windowEnd;
   }
   pickSyncStatus.mode = mode;
   let totalFetched = 0, totalInserted = 0, page = 0;
