@@ -1021,23 +1021,17 @@ const PICK_SYNC_STEADY_LOOKBACK_MS = 25 * 60 * 60 * 1000; // 25h for steady stat
 const PICK_SYNC_GAP_THRESHOLD_MS = 24 * 60 * 60 * 1000; // >24h behind = gap mode
 const PICK_SYNC_GAP_WINDOW_MS = 24 * 60 * 60 * 1000;    // slice size in gap mode
 const PICK_SYNC_GAP_OVERLAP_MS = 60 * 60 * 1000;        // re-scan last 1h for safety
-const PICK_SYNC_PREFLIGHT_TIMEOUT_MS = 15000;           // abort probe fast if sick
+const PICK_SYNC_PREFLIGHT_TIMEOUT_MS = 30000;           // ItemPath can be slow; don't false-fail
 
 // Pre-flight probe: 1 cheap /api/order_lines call with a known-good filter.
 // Returns true if ItemPath responds quickly; false on 504/timeout/error.
 async function pickSyncPreflight() {
-  // Use a 25h window from 2 days ago — past-date wide windows work reliably.
-  // Narrow windows trigger ItemPath's sub-day regression and mask real health.
+  // Cheapest probe: /api/warehouses returns ~0.2KB and bypasses the known
+  // /api/order_lines regression. If warehouses is slow, ItemPath is sick.
   try {
-    const start = new Date(Date.now() - 2 * 25*60*60*1000);
-    const end   = new Date(Date.now() - 1 * 25*60*60*1000);
-    const data = await ipFetch('/api/order_lines', {
-      directionType: 2, status: 'processed',
-      'modifiedDate[gte]': start.toISOString(),
-      'modifiedDate[lte]': end.toISOString(),
-      limit: 1, page: 0,
-    }, { timeout: PICK_SYNC_PREFLIGHT_TIMEOUT_MS });
-    return { ok: true, sample: (data.order_lines || []).length };
+    const data = await ipFetch('/api/warehouses', {}, { timeout: PICK_SYNC_PREFLIGHT_TIMEOUT_MS });
+    const count = (data.warehouses || []).length;
+    return { ok: true, sample: count };
   } catch (e) {
     return { ok: false, error: e.message };
   }
