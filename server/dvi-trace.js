@@ -148,6 +148,7 @@ class DviTraceWatcher extends EventEmitter {
     this.todayStats = freshTodayStats();
     this._recovering = false;    // Blocks polls during recovery
     this._polling = false;       // Backpressure guard for poll()
+    this._liveMode = false;      // True once history is loaded and live polling starts
 
     this.on('error', (err) => {
       console.error('[DVI-Trace] Error:', err.message || err);
@@ -219,12 +220,14 @@ class DviTraceWatcher extends EventEmitter {
       this.saveToDb();
     };
     startHistory().then(() => {
+      this._liveMode = true;
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
       this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
       this._startSelfHealing();
     }).catch(err => {
       console.error('[DVI-Trace] History load failed, starting live poll anyway:', err.message);
+      this._liveMode = true;
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
       this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
@@ -789,6 +792,9 @@ class DviTraceWatcher extends EventEmitter {
       this.jobs.set(evt.jobId, job);
     }
 
+    // Track station change for job_events logging
+    const stationChanged = job.station !== evt.station;
+
     // Update last known position
     job.station = evt.station;
     job.stationNum = evt.stationNum;
@@ -804,6 +810,23 @@ class DviTraceWatcher extends EventEmitter {
       timestamp: evt.timestamp,
       operator: evt.operator
     });
+
+    // Write stage transitions to job_events table (live mode only — skip history replay)
+    if (this._liveMode && stationChanged) {
+      try {
+        const db = require('./db');
+        db.insertJobEvent({
+          invoice: evt.jobId,
+          station: evt.station,
+          stationNum: evt.stationNum,
+          stage,
+          operator: evt.operator,
+          machineId: evt.machineId,
+          eventTime: evt.time || null,
+          eventTs: evt.timestamp || null,
+        });
+      } catch (e) { /* job_events write — non-critical */ }
+    }
 
     // Only mark SHIPPED when job hits actual shipping scan (SH CONVEY), not ASSEMBLY PASS
     if (stage === 'SHIPPING' && /SH CONVEY|SHIP/i.test(evt.station) && evt.station !== 'ASSEMBLY PASS') {
