@@ -1037,6 +1037,10 @@ async function pickSyncPreflight() {
   }
 }
 
+// Track days we've already tried to backfill that returned 0 from ItemPath.
+// Prevents infinite loop on days with genuinely no picks (holidays, closures).
+const backfillAttempted = new Set();
+
 // Find days with missing or low pick counts in picks_history.
 // Returns the oldest missing day as a Date, or null if coverage is good.
 function findMissingDay() {
@@ -1058,6 +1062,7 @@ function findMissingDay() {
       const dow = d.getDay(); // 0=Sun, 6=Sat
       if (dow === 0 || dow === 6) continue; // skip weekends
       const dateStr = d.toISOString().substring(0, 10);
+      if (backfillAttempted.has(dateStr)) continue; // already tried, ItemPath had nothing
       const count = covered.get(dateStr) || 0;
       if (count < 100) { // threshold: a normal workday has 1500-3000 picks
         return { date: d, dateStr, count };
@@ -1162,6 +1167,12 @@ async function pickSync() {
     pickSyncStatus.picksRecorded += totalInserted;
     pickSyncStatus.consecutiveErrors = 0;
     console.log(`[pickSync] ✓ ${mode} — ${totalFetched} fetched across ${page + 1} page(s), ${totalInserted} new rows`);
+
+    // If BACKFILL returned 0 from ItemPath, mark the day as attempted so we don't retry forever
+    if (mode === 'BACKFILL' && totalFetched === 0 && missingDay) {
+      backfillAttempted.add(missingDay.dateStr);
+      console.log(`[pickSync] Marking ${missingDay.dateStr} as attempted (ItemPath returned 0) — will skip next cycle`);
+    }
 
     if (page === PICK_SYNC_MAX_PAGES - 1) {
       console.warn(`[pickSync] Hit MAX_PAGES cap — may have missed rows; will re-query next cycle`);
