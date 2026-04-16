@@ -2401,8 +2401,10 @@ function upsertSomDevices(devices) {
   const save = db.transaction(() => {
     for (const d of devices) {
       upsertSomDeviceStmt.run(
-        d.id, d.model, d.typeDescription, d.category, d.departmentId,
-        d.status, d.statusLabel, d.severity, d.event, d.lastOrder,
+        String(d.id || ''), d.model || null, d.typeDescription || null, d.category || null,
+        typeof d.departmentId === 'number' ? d.departmentId : null,
+        d.status || null, d.statusLabel || null, d.severity || null,
+        d.event || null, d.lastOrder || null,
         d.counts?.count1 || 0, d.counts?.count2 || 0, d.counts?.count3 || 0,
         d.cycleTime || 0, d.isActive ? 1 : 0
       );
@@ -2421,7 +2423,8 @@ function upsertSomConveyors(conveyors) {
   const save = db.transaction(() => {
     for (const c of conveyors) {
       upsertSomConveyorStmt.run(
-        c.id, c.status, c.statusLabel, c.severity, c.event, c.lastUpdate
+        String(c.id || ''), c.status || null, c.statusLabel || null, c.severity || null,
+        c.event || null, c.lastUpdate ? String(c.lastUpdate) : null
       );
     }
   });
