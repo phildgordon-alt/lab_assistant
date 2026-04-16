@@ -370,12 +370,17 @@ throughput AS (
 ),
 devices AS (SELECT Device FROM tool_agg UNION SELECT Device FROM pad_agg)
 SELECT d.Device device,
-  CASE WHEN d.Device LIKE 'CP%' THEN 'polishing'
-       WHEN d.Device LIKE 'HXS%' OR d.Device LIKE 'HSQ%' THEN 'generator'
-       WHEN d.Device LIKE 'D2H%' THEN 'deblocking'
-       WHEN d.Device LIKE 'CCL%' THEN 'coating'
+  CASE WHEN d.Device LIKE 'CP%' OR d.Device LIKE 'CCP%' THEN 'polishing'
+       WHEN d.Device LIKE 'HXS%' OR d.Device LIKE 'HSQ%' OR d.Device LIKE 'HSC%' THEN 'generator'
+       WHEN d.Device LIKE 'HSE%' OR d.Device LIKE 'CUT%' THEN 'cutting'
+       WHEN d.Device LIKE 'CBB%' OR d.Device LIKE 'CCU%' OR d.Device LIKE 'CU1%' OR d.Device LIKE 'CB-%' THEN 'blocking'
+       WHEN d.Device LIKE 'D2H%' OR d.Device LIKE 'DBA%' THEN 'deblocking'
+       WHEN d.Device LIKE 'TSA%' THEN 'detaper'
+       WHEN d.Device LIKE 'CCL%' OR d.Device LIKE 'EBC%' THEN 'coating'
+       WHEN d.Device LIKE 'CLI%' OR d.Device LIKE 'DNL%' THEN 'fining'
+       WHEN d.Device LIKE 'CCS%' OR d.Device LIKE 'LCU%' THEN 'cleaning'
        WHEN d.Device LIKE 'MIL%' THEN 'milling'
-       WHEN d.Device LIKE 'CUT%' THEN 'cutting' ELSE 'other' END category,
+       ELSE 'other' END category,
   ROUND(ta.worst_tool_remaining_pct,4) worst_tool_remaining_pct,
   CASE WHEN ta.worst_tool_remaining_pct IS NULL THEN NULL
        WHEN ta.worst_tool_remaining_pct <= 0.05 THEN 'critical'
