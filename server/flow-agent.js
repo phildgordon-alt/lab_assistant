@@ -826,14 +826,16 @@ function computePutList() {
     }
   }
 
-  // For substitutable OPCs (surfacing), find same-material alternatives in stock
+  // For substitutable OPCs (surfacing), find same-material SEMI-FINISHED alternatives in stock.
+  // NEVER suggest SV/stock/plano lenses as substitutes for surfacing pucks.
   for (const oos of Object.values(outOfStock)) {
     if (!oos.canSubstitute) continue;
     const mat = oos.material.toUpperCase();
     const alts = [];
     for (const m of allMaterials) {
       if (m.qty <= 0 || m.sku === oos.opc) continue;
-      const mMat = (m.coatingType || '').toUpperCase();
+      // ONLY suggest semi-finished blanks — never SV/stock lenses
+      if (!_semiFinishedSkus.has(m.sku)) continue;
       // Same material family match
       if (mat && (m.name || '').toUpperCase().includes(mat)) {
         alts.push({ sku: m.sku, name: m.name, qty: m.qty, warehouse: m.warehouse });
@@ -842,7 +844,9 @@ function computePutList() {
     if (alts.length > 0) {
       alts.sort((a, b) => b.qty - a.qty);
       oos.alternatives = alts.slice(0, 5);
-      oos.action = `SUBSTITUTE: ${alts[0].sku} (${alts[0].qty} in ${alts[0].warehouse})`;
+      oos.action = `CHANGE BASE: ${alts[0].sku} (${alts[0].qty} avail)`;
+    } else {
+      oos.action = 'REORDER — no semi-finished alternatives in stock';
     }
   }
 
@@ -1641,7 +1645,8 @@ module.exports = {
       } catch {}
       const isSF = (sku) => {
         if (knownSemiFinished.has(sku)) return true;
-        if (/^(062|026|001)/.test(sku || '')) return true;
+        if (_semiFinishedSkus.has(sku)) return true;
+        // No regex heuristic — lens_sku_params is the only source of truth
         return false;
       };
       const stockByMaterial = {};
@@ -1819,7 +1824,8 @@ module.exports = {
       } catch {}
       const isSemiFinished = (sku) => {
         if (nelSemiFinished.has(sku)) return true;
-        if (/^(062|026|001)/.test(sku || '')) return true;
+        if (_semiFinishedSkus.has(sku)) return true;
+        // No regex heuristic — lens_sku_params is the only source of truth
         return false;
       };
       const stockByMaterial = {}; // material → [{ sku, qty, name, warehouse, coatingType }]
