@@ -750,8 +750,9 @@ function computePutList() {
     const coating = xml.coating || 'Unknown';
     const material = xml.lensMat || 'Unknown';
     const style = xml.lensStyle || '';
-    const lensType = xml.lensType || 'S';
-    const line = (lensType === 'P' || lensType === 'B') ? 'surfacing' : 'sv';
+    const lensType = xml.lensType || '';
+    const isSemiFinished = lensType === 'P' || lensType === 'B' || _semiFinishedSkus.has(opc);
+    const line = isSemiFinished ? 'surfacing' : (lensType === 'S' ? 'sv' : 'unknown');
     const rush = j.rush === 'Y' || xml.rush === 'Y';
     const lensesNeeded = 2; // R + L
     totalLensesNeeded += lensesNeeded;
@@ -811,10 +812,9 @@ function computePutList() {
       if (!outOfStock[opc]) {
         outOfStock[opc] = {
           opc, coating: xml.coating || 'Unknown', material: xml.lensMat || 'Unknown',
-          style: xml.lensStyle || '', lensType: xml.lensType || 'S',
+          style: xml.lensStyle || '', lensType: xml.lensType || '',
           jobCount: 0, lensesNeeded: 0, rushCount: 0,
-          // For surfacing jobs, suggest looking for same-material alternatives
-          canSubstitute: xml.lensType === 'P' || xml.lensType === 'B', // only progressive/bifocal can use different base
+          canSubstitute: isSemiFinished, // only semi-finished (progressive/bifocal) can use different base
           action: (xml.lensType === 'P' || xml.lensType === 'B') ? 'FIND ALTERNATIVE OR REORDER' : 'REORDER',
         };
       }
@@ -1672,8 +1672,8 @@ module.exports = {
         const opc = xml?.lensOpc || null;
         const coating = xml?.coating || 'Unknown';
         const material = xml?.lensMat || 'Unknown';
-        const lensType = xml?.lensType || 'S';
-        const isSurfacing = lensType === 'P' || lensType === 'B'; // only progressive/bifocal need surfacing
+        const lensType = xml?.lensType || '';
+        const isSurfacing = lensType === 'P' || lensType === 'B' || _semiFinishedSkus.has(opc);
         const rush = j.rush === 'Y' || xml?.rush === 'Y';
 
         const jobInfo = {
@@ -1845,8 +1845,8 @@ module.exports = {
         const coating = xml.coating || 'Unknown';
         const material = xml.lensMat || 'Unknown';
         const style = xml.lensStyle || '';
-        const lensType = xml.lensType || 'S';
-        const isSurfacing = lensType === 'P' || lensType === 'B'; // only progressive/bifocal need surfacing
+        const lensType = xml.lensType || '';
+        const isSurfacing = lensType === 'P' || lensType === 'B' || _semiFinishedSkus.has(opc);
         const rush = j.rush === 'Y' || xml.rush === 'Y';
 
         // Find alternatives — same material blanks in stock
