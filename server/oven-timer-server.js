@@ -1079,7 +1079,7 @@ const server = http.createServer(async (req, res) => {
     try {
       let dbRows = labDb.getOvenRuns(limit + 200); // fetch extra to allow filtering
       if (dbRows && dbRows.length > 0) {
-        let result = dbRows.map(snakeToCamel);
+        let result = dbRows.map(r => { const row = snakeToCamel(r); row.startedAt = row.receivedAt; return row; });
         if (oven)    result = result.filter(r=>r.ovenId===oven||r.ovenName===oven);
         if (rack)    result = result.filter(r=>r.rack===rack);
         if (coating) result = result.filter(r=>r.coating===coating);
@@ -3490,7 +3490,7 @@ Respond with a structured batching plan in this format:
     try {
       const dbRows = labDb.db.prepare('SELECT * FROM som_devices').all();
       if (dbRows && dbRows.length > 0) {
-        const devices = dbRows.map(snakeToCamel);
+        const devices = dbRows.map(r => { const d = snakeToCamel(r); d.name = d.id; return d; });
         return json(res, {
           devices,
           isLive: true,
