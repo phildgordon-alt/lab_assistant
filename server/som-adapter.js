@@ -769,9 +769,13 @@ async function poll() {
     // Persist to disk
     saveToDisk();
 
-    // Enrich unified jobs table with SOM order_header data
+    // Persist devices + conveyors to SQLite
     try {
       const db = require('./db');
+      if (devices.length > 0) db.upsertSomDevices(devices);
+      if (conveyors.length > 0) db.upsertSomConveyors(conveyors);
+
+      // Enrich unified jobs table with SOM order_header data
       let somEnriched = 0;
       for (const j of activeJobs) {
         if (j.dviJob) {
@@ -780,7 +784,7 @@ async function poll() {
         }
       }
       if (somEnriched > 0) console.log(`[SOM] Enriched ${somEnriched} jobs in unified table`);
-    } catch (e) { console.warn('[SOM] Jobs enrichment error:', e.message); }
+    } catch (e) { console.warn('[SOM] SQLite persist error:', e.message); }
 
     console.log(`[SOM] Poll #${pollCount} - LIVE: ${devices.length} devices, ${conveyors.length} conveyors, ${orders.todayTotal} jobs today, ${alerts.length} alerts, ${machineSummaries.length} machine summaries, ${toolAlerts.length} machine alerts`);
     return true;

@@ -459,6 +459,53 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_parts_qty ON spare_parts(qty);
 
+  -- SOM devices (Schneider machine status)
+  CREATE TABLE IF NOT EXISTS som_devices (
+    id TEXT PRIMARY KEY,
+    model TEXT,
+    type_description TEXT,
+    category TEXT,
+    department_id INTEGER,
+    status INTEGER,
+    status_label TEXT,
+    severity TEXT,
+    event TEXT,
+    last_order TEXT,
+    count1 INTEGER DEFAULT 0,
+    count2 INTEGER DEFAULT 0,
+    count3 INTEGER DEFAULT 0,
+    cycle_time REAL DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    last_sync TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_som_dev_category ON som_devices(category);
+  CREATE INDEX IF NOT EXISTS idx_som_dev_status ON som_devices(status);
+
+  -- SOM conveyors (Schneider conveyor positions)
+  CREATE TABLE IF NOT EXISTS som_conveyors (
+    id TEXT PRIMARY KEY,
+    status INTEGER,
+    status_label TEXT,
+    severity TEXT,
+    event TEXT,
+    last_update TEXT,
+    last_sync TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_som_conv_status ON som_conveyors(status);
+
+  -- SOM device history (append-only status changes)
+  CREATE TABLE IF NOT EXISTS som_device_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id TEXT NOT NULL,
+    status INTEGER,
+    status_label TEXT,
+    severity TEXT,
+    event TEXT,
+    recorded_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_som_hist_device ON som_device_history(device_id);
+  CREATE INDEX IF NOT EXISTS idx_som_hist_time ON som_device_history(recorded_at);
+
   -- Downtime records (Limble)
   CREATE TABLE IF NOT EXISTS downtime_records (
     id TEXT PRIMARY KEY,
@@ -2327,6 +2374,59 @@ function upsertShippedJob(p) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SOM DEVICES & CONVEYORS
+// ─────────────────────────────────────────────────────────────────────────────
+
+const upsertSomDeviceStmt = db.prepare(`
+  INSERT OR REPLACE INTO som_devices (id, model, type_description, category, department_id, status, status_label, severity, event, last_order, count1, count2, count3, cycle_time, is_active, last_sync)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+`);
+
+const upsertSomConveyorStmt = db.prepare(`
+  INSERT OR REPLACE INTO som_conveyors (id, status, status_label, severity, event, last_update, last_sync)
+  VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+`);
+
+// Only log status changes — don't flood with identical snapshots
+const _lastDeviceStatus = new Map();
+
+const insertSomDeviceHistoryStmt = db.prepare(`
+  INSERT INTO som_device_history (device_id, status, status_label, severity, event)
+  VALUES (?, ?, ?, ?, ?)
+`);
+
+function upsertSomDevices(devices) {
+  const save = db.transaction(() => {
+    for (const d of devices) {
+      upsertSomDeviceStmt.run(
+        d.id, d.model, d.typeDescription, d.category, d.departmentId,
+        d.status, d.statusLabel, d.severity, d.event, d.lastOrder,
+        d.counts?.count1 || 0, d.counts?.count2 || 0, d.counts?.count3 || 0,
+        d.cycleTime || 0, d.isActive ? 1 : 0
+      );
+      // Log status changes to history
+      const prevStatus = _lastDeviceStatus.get(d.id);
+      if (prevStatus !== d.status) {
+        insertSomDeviceHistoryStmt.run(d.id, d.status, d.statusLabel, d.severity, d.event);
+        _lastDeviceStatus.set(d.id, d.status);
+      }
+    }
+  });
+  save();
+}
+
+function upsertSomConveyors(conveyors) {
+  const save = db.transaction(() => {
+    for (const c of conveyors) {
+      upsertSomConveyorStmt.run(
+        c.id, c.status, c.statusLabel, c.severity, c.event, c.lastUpdate
+      );
+    }
+  });
+  save();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // OVEN & COATING RUNS (SQLite persistence alongside JSON files)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2968,6 +3068,8 @@ module.exports = {
   upsertTasks,
   upsertParts,
   upsertDowntime,
+  upsertSomDevices,
+  upsertSomConveyors,
   insertOvenRun,
   insertCoatingRun,
   getOvenRuns,
