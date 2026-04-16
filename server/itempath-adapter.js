@@ -1547,10 +1547,23 @@ function start() {
   poll();
   setInterval(poll, CONFIG.pollInterval);
 
-  // Pick sync: 30s delay then every 30 minutes (separate from poll to control API load)
-  setTimeout(() => {
-    pickSync();
-    setInterval(pickSync, 30 * 60 * 1000);
+  // Pick sync: 30s delay then adaptive interval.
+  // BACKFILL mode: 5 min between runs (catch up fast).
+  // STEADY mode: 30 min between runs (normal operation).
+  let pickSyncTimer = null;
+  function scheduleNextPickSync() {
+    const hasHoles = findMissingDay();
+    const interval = hasHoles ? 5 * 60 * 1000 : 30 * 60 * 1000;
+    if (pickSyncTimer) clearTimeout(pickSyncTimer);
+    pickSyncTimer = setTimeout(async () => {
+      await pickSync();
+      scheduleNextPickSync();
+    }, interval);
+    if (hasHoles) console.log(`[pickSync] Backfill pending — next run in 5 min`);
+  }
+  setTimeout(async () => {
+    await pickSync();
+    scheduleNextPickSync();
   }, 30000);
 
   // Count reconciliation: 2min delay then every 30 minutes
