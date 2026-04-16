@@ -603,293 +603,31 @@ app.get('/api/itempath/picks', async (_req: Request, res: Response) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Limble Maintenance API Proxy
-// ─────────────────────────────────────────────────────────────────────────────
-app.get('/api/limble/assets', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', assets: [], configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    const resp = await fetch(`${limbleUrl}/v2/assets`, {
-      headers: { 'Authorization': `Basic ${basicAuth}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    res.json({ mock: false, assets: data, lastSync: new Date().toISOString() });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
-  }
-});
-
-app.get('/api/limble/tasks', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', tasks: [], configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    const resp = await fetch(`${limbleUrl}/v2/tasks`, {
-      headers: { 'Authorization': `Basic ${basicAuth}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    res.json({ mock: false, tasks: data, lastSync: new Date().toISOString() });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
-  }
-});
-
-app.get('/api/limble/stats', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', stats: {}, configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    // Fetch assets and tasks to compute stats
-    const [assetsResp, tasksResp] = await Promise.all([
-      fetch(`${limbleUrl}/v2/assets`, { headers: { 'Authorization': `Basic ${basicAuth}` }, signal: AbortSignal.timeout(10000) }),
-      fetch(`${limbleUrl}/v2/tasks`, { headers: { 'Authorization': `Basic ${basicAuth}` }, signal: AbortSignal.timeout(10000) })
-    ]);
-
-    const assets = assetsResp.ok ? await assetsResp.json() as any : [];
-    const tasks = tasksResp.ok ? await tasksResp.json() as any : [];
-
-    const stats = {
-      totalAssets: Array.isArray(assets) ? assets.length : (assets?.data?.length || 0),
-      openWorkOrders: Array.isArray(tasks) ? tasks.filter((t: any) => t.status === 'open').length : 0,
-      overdueWorkOrders: Array.isArray(tasks) ? tasks.filter((t: any) => t.status === 'overdue').length : 0,
-      completedToday: Array.isArray(tasks) ? tasks.filter((t: any) => t.status === 'completed').length : 0,
-    };
-
-    res.json({ mock: false, stats, lastSync: new Date().toISOString() });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    res.status(500).json({ error: msg });
-  }
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Legacy API endpoints (compatibility with frontend calling port 3002)
-// These proxy to the ItemPath and Limble endpoints above
+// Limble & Inventory — ALL proxied to Lab Server (port 3002)
+// Lab Server polls Limble every 60s and caches. No direct Limble API calls.
 // ─────────────────────────────────────────────────────────────────────────────
 
-// /api/inventory, /api/inventory/alerts, /api/inventory/picks, /api/inventory/vlms
-// These proxy through the Lab Server (port 3002) which caches ItemPath data.
-// Previously each gateway request hit ItemPath directly — massive over-fetching.
-
-app.get('/api/inventory', async (_req: Request, res: Response) => {
+const proxyToLabServer = (path: string, fallback: object) => async (_req: Request, res: Response) => {
   try {
-    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory`, { signal: AbortSignal.timeout(5000) });
-    const data = await resp.json();
-    res.json(data);
+    const resp = await fetch(`${LAB_SERVER_URL}${path}`, { signal: AbortSignal.timeout(5000) });
+    res.json(await resp.json());
   } catch (e) {
-    res.status(502).json({ error: 'Lab Server unreachable', materials: [], alertCount: 0 });
+    res.status(503).json({ error: 'Lab Server unreachable', ...fallback });
   }
-});
+};
 
-app.get('/api/inventory/alerts', async (_req: Request, res: Response) => {
-  try {
-    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory/alerts`, { signal: AbortSignal.timeout(5000) });
-    const data = await resp.json();
-    res.json(data);
-  } catch (e) {
-    res.json({ alerts: [], error: 'Lab Server unreachable' });
-  }
-});
-
-app.get('/api/inventory/picks', async (_req: Request, res: Response) => {
-  try {
-    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory/picks`, { signal: AbortSignal.timeout(5000) });
-    const data = await resp.json();
-    res.json(data);
-  } catch (e) {
-    res.json({ picks: [], recent: [], count: 0, error: 'Lab Server unreachable' });
-  }
-});
-
-app.get('/api/inventory/vlms', async (_req: Request, res: Response) => {
-  try {
-    const resp = await fetch(`${LAB_SERVER_URL}/api/inventory/vlms`, { signal: AbortSignal.timeout(5000) });
-    const data = await resp.json();
-    res.json(data);
-  } catch (e) {
-    res.json({ vlmStats: {}, locations: [], error: 'Lab Server unreachable' });
-  }
-});
-
-// /api/maintenance/assets - equipment assets from Limble
-app.get('/api/maintenance/assets', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', assets: [], configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    const resp = await fetch(`${limbleUrl}/v2/assets`, {
-      headers: { 'Authorization': `Basic ${basicAuth}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json() as any;
-    const assets = Array.isArray(data) ? data : (data.data || []);
-    res.json({ assets, mock: false, lastSync: new Date().toISOString() });
-  } catch (e) {
-    res.status(500).json({ assets: [], error: (e as Error).message, lastSync: null });
-  }
-});
-
-// /api/maintenance/downtime - downtime records from Limble
-app.get('/api/maintenance/downtime', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', downtime: [], planned: [], unplanned: [], configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    const resp = await fetch(`${limbleUrl}/v2/downtime`, {
-      headers: { 'Authorization': `Basic ${basicAuth}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json() as any;
-    const downtime = Array.isArray(data) ? data : (data.data || []);
-    const planned = downtime.filter((d: any) => d.planned);
-    const unplanned = downtime.filter((d: any) => !d.planned);
-    res.json({ downtime, planned, unplanned, mock: false });
-  } catch (e) {
-    res.status(500).json({ downtime: [], planned: [], unplanned: [], error: (e as Error).message });
-  }
-});
-
-// /api/maintenance/parts - spare parts inventory from Limble
-app.get('/api/maintenance/parts', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', parts: [], lowStock: [], configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    const resp = await fetch(`${limbleUrl}/v2/parts`, {
-      headers: { 'Authorization': `Basic ${basicAuth}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json() as any;
-    const parts = Array.isArray(data) ? data : (data.data || []);
-    const lowStock = parts.filter((p: any) => p.qty <= (p.minQty || 5));
-    res.json({ parts, lowStock, mock: false });
-  } catch (e) {
-    res.status(500).json({ parts: [], lowStock: [], error: (e as Error).message });
-  }
-});
-
-// /api/maintenance/stats - legacy endpoint for Limble stats
-app.get('/api/maintenance/stats', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    const [assetsResp, tasksResp] = await Promise.all([
-      fetch(`${limbleUrl}/v2/assets`, { headers: { 'Authorization': `Basic ${basicAuth}` }, signal: AbortSignal.timeout(10000) }),
-      fetch(`${limbleUrl}/v2/tasks`, { headers: { 'Authorization': `Basic ${basicAuth}` }, signal: AbortSignal.timeout(10000) })
-    ]);
-
-    const assets = assetsResp.ok ? await assetsResp.json() as any : [];
-    const tasks = tasksResp.ok ? await tasksResp.json() as any : [];
-
-    const taskList = Array.isArray(tasks) ? tasks : (tasks.data || []);
-    const assetList = Array.isArray(assets) ? assets : (assets.data || []);
-
-    const stats = {
-      totalAssets: assetList.length,
-      openWorkOrders: taskList.filter((t: any) => t.status === 'open' || t.status === 'in_progress').length,
-      openTaskCount: taskList.filter((t: any) => t.status === 'open' || t.status === 'in_progress').length,
-      criticalTaskCount: taskList.filter((t: any) => t.priority === 'Critical' || t.priority === 'critical').length,
-      overdueWorkOrders: taskList.filter((t: any) => t.status === 'overdue').length,
-      completedToday: taskList.filter((t: any) => t.status === 'completed').length,
-      pmCompliancePercent: 85 + Math.floor(Math.random() * 10),
-      uptimePercent: 94 + Math.floor(Math.random() * 5),
-      assetsDown: assetList.filter((a: any) => a.status === 'Down' || a.status === 'Maintenance').length,
-      hasData: true,
-    };
-
-    res.json({
-      status: 'ok',
-      ...stats,
-      lastSync: new Date().toISOString()
-    });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to fetch';
-    log.error('Maintenance stats fetch error:', msg);
-    res.status(500).json({ error: msg, hasData: false, lastSync: null });
-  }
-});
-
-// /api/maintenance/tasks - legacy endpoint for Limble tasks
-app.get('/api/maintenance/tasks', async (_req: Request, res: Response) => {
-  const limbleUrl = process.env.LIMBLE_URL;
-  const limbleClientId = process.env.LIMBLE_CLIENT_ID;
-  const limbleClientSecret = process.env.LIMBLE_CLIENT_SECRET;
-
-  if (!limbleUrl || !limbleClientId || !limbleClientSecret) {
-    return res.status(503).json({ error: 'Limble CMMS not configured', open: [], critical: [], configured: false });
-  }
-
-  try {
-    const basicAuth = Buffer.from(`${limbleClientId}:${limbleClientSecret}`).toString('base64');
-    const resp = await fetch(`${limbleUrl}/v2/tasks`, {
-      headers: { 'Authorization': `Basic ${basicAuth}` },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json() as any;
-    const tasks = Array.isArray(data) ? data : (data.data || []);
-
-    const open = tasks.filter((t: any) => t.status === 'open' || t.status === 'in_progress');
-    const critical = tasks.filter((t: any) => t.priority === 'Critical' || t.priority === 'critical');
-
-    res.json({ open, critical, mock: false });
-  } catch (e) {
-    res.json({ open: [], critical: [], error: (e as Error).message });
-  }
-});
+app.get('/api/limble/assets', proxyToLabServer('/api/maintenance/assets', { assets: [] }));
+app.get('/api/limble/tasks', proxyToLabServer('/api/maintenance/tasks', { tasks: [] }));
+app.get('/api/limble/stats', proxyToLabServer('/api/maintenance/stats', { stats: {} }));
+app.get('/api/inventory', proxyToLabServer('/api/inventory', { materials: [], alertCount: 0 }));
+app.get('/api/inventory/alerts', proxyToLabServer('/api/inventory/alerts', { alerts: [] }));
+app.get('/api/inventory/picks', proxyToLabServer('/api/inventory/picks', { picks: [], recent: [], count: 0 }));
+app.get('/api/inventory/vlms', proxyToLabServer('/api/inventory/vlms', { vlmStats: {}, locations: [] }));
+app.get('/api/maintenance/assets', proxyToLabServer('/api/maintenance/assets', { assets: [] }));
+app.get('/api/maintenance/tasks', proxyToLabServer('/api/maintenance/tasks', { open: [], critical: [] }));
+app.get('/api/maintenance/stats', proxyToLabServer('/api/maintenance/stats', { hasData: false }));
+app.get('/api/maintenance/downtime', proxyToLabServer('/api/maintenance/downtime', { downtime: [], planned: [], unplanned: [] }));
+app.get('/api/maintenance/parts', proxyToLabServer('/api/maintenance/parts', { parts: [], lowStock: [] }));
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Slack Proxy Endpoints for Frontend
