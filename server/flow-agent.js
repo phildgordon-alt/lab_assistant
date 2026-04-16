@@ -810,12 +810,14 @@ function computePutList() {
     const totalAcrossWh = (wh1Stock[opc] || 0) + (wh2Stock[opc] || 0) + ((whStock.WH3 || {})[opc] || 0);
     if (totalAcrossWh <= 0) {
       if (!outOfStock[opc]) {
+        const lt = xml.lensType || '';
+        const isSF = lt === 'P' || lt === 'B' || _semiFinishedSkus.has(opc);
         outOfStock[opc] = {
           opc, coating: xml.coating || 'Unknown', material: xml.lensMat || 'Unknown',
-          style: xml.lensStyle || '', lensType: xml.lensType || '',
+          style: xml.lensStyle || '', lensType: lt,
           jobCount: 0, lensesNeeded: 0, rushCount: 0,
-          canSubstitute: isSemiFinished, // only semi-finished (progressive/bifocal) can use different base
-          action: (xml.lensType === 'P' || xml.lensType === 'B') ? 'FIND ALTERNATIVE OR REORDER' : 'REORDER',
+          canSubstitute: isSF, // only semi-finished (progressive/bifocal) can use different base
+          action: isSF ? 'FIND ALTERNATIVE OR REORDER' : (lt === 'S' ? 'REORDER' : 'CLASSIFY LENS TYPE — UNKNOWN'),
         };
       }
       outOfStock[opc].jobCount++;
@@ -1733,9 +1735,10 @@ module.exports = {
       const totalWip = active.length;
       const processableNow = inProcess.length + readyToProcess.length;
 
-      // SV vs Surfacing breakdown
+      // SV vs Surfacing breakdown — unknown lens type must NOT be counted as SV
       const isSurfType = t => t === 'P' || t === 'B';
-      const svAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return !isSurfType(x?.lensType); });
+      const isSvType = t => t === 'S';
+      const svAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return isSvType(x?.lensType); });
       const surfAll = active.filter(j => { const x = dviJobIndex.get(j.job_id); return isSurfType(x?.lensType); });
 
       const buildLineBreakdown = (label, jobs) => {
@@ -1871,7 +1874,8 @@ module.exports = {
           daysInLab: j.daysInLab || 0,
           station: j.station || '',
           alternatives,
-          action: !isSurfacing ? 'REORDER (SV — no substitution)'
+          action: !isSurfacing
+            ? (lensType === 'S' ? 'REORDER (SV — no substitution)' : 'CLASSIFY LENS TYPE — UNKNOWN (cannot recommend path)')
             : alternatives.length > 0 ? `CHANGE BASE: ${alternatives[0].sku} (${alternatives[0].qty} avail${alternatives[0].warehouse ? ' in ' + alternatives[0].warehouse : ''})`
             : 'NO ALTERNATIVES FOUND — REORDER',
         });

@@ -205,7 +205,10 @@ function getSlaDays(lensType, coating, isRush) {
   if (lensType === 'P') return 2;
   if (coating === 'TRANSITIONS' || coating === 'POLARIZED') return 2;
   if (lensType === 'S' && (coating === 'HARD_COAT' || coating === 'HARD COAT')) return 1;
-  return 2; // default
+  if (lensType === 'S') return 2;
+  // Unknown/missing lens type: use conservative 3-day SLA (surfacing path)
+  // to avoid misclassifying surfacing jobs as over-SLA on a 2-day target
+  return 3;
 }
 
 // ─── STAGE MAPPING ─────────────────────────────────────────────────────────

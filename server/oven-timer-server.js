@@ -1787,7 +1787,7 @@ ${coatingQueue.length > 0 ? `Breakdown by coating type:
 ${Object.entries(coatingQueue.reduce((g,j) => { g[j.coating]=(g[j.coating]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
 
 Breakdown by lens type:
-${Object.entries(coatingQueue.reduce((g,j) => { const k = j.lensType==='P'?'Progressive':j.lensType==='B'?'Bifocal':(j.lensType==='S'||j.lensType==='C')?'Single Vision':'Single Vision'; g[k]=(g[k]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
+${Object.entries(coatingQueue.reduce((g,j) => { const k = j.lensType==='P'?'Progressive':j.lensType==='B'?'Bifocal':(j.lensType==='S'||j.lensType==='C')?'Single Vision':'Unknown'; g[k]=(g[k]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
 
 Breakdown by lens material:
 ${Object.entries(coatingQueue.reduce((g,j) => { g[j.lensMat]=(g[j.lensMat]||0)+1; return g; }, {})).map(([t,c]) => `  - ${t}: ${c} jobs`).join('\n')}
@@ -1808,7 +1808,7 @@ ${runningRacksData.length > 0 ? runningRacksData.map(r => `  - ${r.location}: ${
 ${COATERS.map(c => `  - ${c.name} (${c.id}): ${c.lensCapacity} lens capacity (${c.orderCapacity} orders), ${c.runHours}h run. ${c.notes}`).join('\n')}
 
 ### Full Job List in Coating Queue:
-${coatingQueue.slice(0, 300).map(j => `${j.jobId} | ${j.coating} | ${j.lensType==='P'?'Prog':j.lensType==='B'?'BF':'SV'} | ${j.lensMat} | eye:${j.eyeSize} | ${j.rush?'RUSH':'std'} | wait:${j.minutesInStage}m | ${j.daysInLab}d in lab`).join('\n')}
+${coatingQueue.slice(0, 300).map(j => `${j.jobId} | ${j.coating} | ${j.lensType==='P'?'Prog':j.lensType==='B'?'BF':j.lensType==='S'?'SV':'?'} | ${j.lensMat} | eye:${j.eyeSize} | ${j.rush?'RUSH':'std'} | wait:${j.minutesInStage}m | ${j.daysInLab}d in lab`).join('\n')}
 `;
 
       // Call gateway AI
@@ -2757,10 +2757,12 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/aging/jobs') {
     // Compute zone/SLA from lens type + days (shared by both code paths)
     const _computeAging = (lensType, daysInLab) => {
-      const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing' : 'Single Vision';
-      const slaTarget = jobType === 'Surfacing' ? 3 : 2;
+      const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing' : lensType === 'S' ? 'Single Vision' : 'Unknown';
+      // Unknown lens type gets the longer surfacing SLA (3 days) to avoid
+      // misclassifying surfacing jobs as over-SLA on the SV 2-day target
+      const slaTarget = jobType === 'Single Vision' ? 2 : 3;
       let zone = 'GREEN';
-      if (jobType === 'Surfacing') {
+      if (jobType === 'Surfacing' || jobType === 'Unknown') {
         if (daysInLab >= 3) zone = 'CRITICAL';
         else if (daysInLab >= 2) zone = 'RED';
         else if (daysInLab >= 1) zone = 'YELLOW';
@@ -4260,18 +4262,23 @@ Respond with a structured batching plan in this format:
     const operatorStats = buildOperatorStats(dviTrace, /SH CONVEY|SHIP/i);
 
     // Single pass: bucket by stage + classify SLA line
-    let assemblyWip = 0, cuttingWip = 0, svWip = 0, surfWip = 0;
+    // CRITICAL: unknown lens type must NOT be counted as SV or surfacing.
+    // Unknown jobs use the surfacing (3-day) SLA as a conservative default for target calc.
+    let assemblyWip = 0, cuttingWip = 0, svWip = 0, surfWip = 0, unknownWip = 0;
     for (const j of allJobs) {
       if (j.stage === 'ASSEMBLY') assemblyWip++;
       if (j.stage === 'CUTTING') cuttingWip++;
       if (j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED') {
         const xml = dviJobIndex.get(j.job_id);
-        if ((xml?.lensType || '').toUpperCase() === 'S') svWip++;
-        else surfWip++;
+        const lt = (xml?.lensType || '').toUpperCase();
+        if (lt === 'S') svWip++;
+        else if (lt === 'P' || lt === 'B') surfWip++;
+        else unknownWip++;
       }
     }
     const svDailyTarget = Math.ceil(svWip * 0.5);    // 2-day SLA
-    const surfDailyTarget = Math.ceil(surfWip * 0.33); // 3-day SLA
+    // Unknown lens type jobs use surfacing (3-day) SLA as conservative default
+    const surfDailyTarget = Math.ceil((surfWip + unknownWip) * 0.33); // 3-day SLA
     const dayOfWeek = new Date().getDay(); // 0=Sun, 6=Sat
     const isWorkday = dayOfWeek >= 1 && dayOfWeek <= 5;
     const dailyShipTarget = isWorkday ? svDailyTarget + surfDailyTarget : 0;
@@ -4687,7 +4694,7 @@ Respond with a structured batching plan in this format:
         station: j.station,
         currentStage: j.stage,
         type: 'Breakage',
-        lens: xml.lensType === 'P' ? 'Both' : xml.lensType === 'S' ? 'OD' : 'OS',
+        lens: xml.lensType === 'P' ? 'Both' : xml.lensType === 'S' ? 'OD' : xml.lensType === 'B' ? 'Both' : 'Unknown',
         coating: xml.coating || 'Unknown',
         lensStyle: xml.lensStyle || null,
         lensMat: xml.lensMat || null,
@@ -6569,7 +6576,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       if (!nel) { res.writeHead(503); res.end('Not ready'); return; }
       const headers = ['Job ID','OPC','Coating','Material','Style','Type','Rush','Days In Lab','Action','Alt SKU','Alt Qty','Alt Warehouse'];
       const rows = nel.jobs.map(j => [
-        j.jobId, j.opc || '', j.coating, j.material, j.style, j.isSurfacing ? 'SURF' : 'SV',
+        j.jobId, j.opc || '', j.coating, j.material, j.style, j.isSurfacing ? 'SURF' : (j.lensType === 'S' ? 'SV' : 'UNKNOWN'),
         j.rush ? 'YES' : '', Math.round(j.daysInLab * 10) / 10, `"${j.action}"`,
         j.alternatives[0]?.sku || '', j.alternatives[0]?.qty || '', j.alternatives[0]?.warehouse || ''
       ].join(','));
@@ -7240,15 +7247,18 @@ function captureDailyShipTarget() {
     const isWorkday = dow >= 1 && dow <= 5 ? 1 : 0;
 
     const allJobs = dviTrace.getJobs();
-    let svWip = 0, surfWip = 0;
+    let svWip = 0, surfWip = 0, unknownWip = 0;
     for (const j of allJobs) {
       if (j.stage === 'SHIPPING' || j.stage === 'CANCELED' || j.status === 'SHIPPED') continue;
       const xml = dviJobIndex.get(j.job_id);
-      if ((xml?.lensType || '').toUpperCase() === 'S') svWip++;
-      else surfWip++;
+      const lt = (xml?.lensType || '').toUpperCase();
+      if (lt === 'S') svWip++;
+      else if (lt === 'P' || lt === 'B') surfWip++;
+      else unknownWip++;
     }
     const svTarget = Math.ceil(svWip * 0.5);
-    const surfTarget = Math.ceil(surfWip * 0.33);
+    // Unknown lens type jobs use surfacing (3-day) SLA as conservative default
+    const surfTarget = Math.ceil((surfWip + unknownWip) * 0.33);
     const totalTarget = isWorkday ? svTarget + surfTarget : 0;
     const shipped = getShippedCounts().today;
     const variance = shipped - totalTarget;

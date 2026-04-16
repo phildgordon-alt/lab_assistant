@@ -100,7 +100,7 @@ When recommending batches, you MUST consider all of these factors:
 
 1. **Coating type grouping** — Each coater run should be ONE coating type (AR, Blue Cut, etc.)
 2. **Lens material grouping** — Group same materials together when possible (PLY, CR39, HI_INDEX)
-3. **Lens type** — P=Progressive, S=Single Vision, B=Bifocal. Group similar types.
+3. **Lens type** — P=Progressive, S=Single Vision, B=Bifocal, ?=Unknown. NEVER assume unknown is SV. Group similar types.
 4. **Eye size** — Similar frame sizes coat more evenly. Group when possible.
 5. **Rush priority** — Rush jobs go in the earliest possible batch, ideally on an EB9 for faster turnaround.
 6. **Fill efficiency** — E1400 should be used for large batches (100+ orders). EB9s for smaller groups or rush.
@@ -306,7 +306,7 @@ maintenance, jobs, WIP, and equipment.
 ## Lab Context
 - 54-person automated lens lab in Irvine, CA
 - Weekly target: 5,100+ jobs processed
-- 60% Single Vision (cutting path), 40% Surfacing/Coating path
+- ~60% Single Vision (cutting path), ~40% Surfacing/Coating path. NEVER classify unknown lens types as SV — they must remain 'unknown' until DVI lens type is confirmed.
 - Key systems: DVI VISION (LMS), Kardex Power Pick, ItemPath, Limble CMMS
 
 ## Departments

@@ -1675,8 +1675,9 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
 
       case "aging_alert":{
         // SLA-based aging: SV (S) = 24h, Semi-finished (P/B) = 48h
+        // Unknown lens type uses the longer 48h (surfacing) SLA to avoid false over-SLA flags
         const getSla=(lt)=>lt==='S'?24:48;
-        const getLensLabel=(lt)=>lt==='P'?'SF':lt==='B'?'SF':'SV';
+        const getLensLabel=(lt)=>lt==='P'?'SF':lt==='B'?'SF':lt==='S'?'SV':'?';
         const now=Date.now();
         const aged=(dviJobs||[])
           .filter(j=>{
@@ -2271,7 +2272,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                   ["Over SLA", agingJob.overSla!=null?`+${Math.floor(agingJob.overSla)}h ${Math.round((agingJob.overSla%1)*60)}m`:null],
                   ["Days In Lab", agingJob.daysInLab!=null?`${Math.floor(agingJob.daysInLab)}d ${Math.round((agingJob.daysInLab%1)*24)}h`:null],
                   ["SLA", agingJob.sla?`${agingJob.sla}h`:null],
-                  ["Lens Type", agingJob.lensType==='P'?'Progressive':agingJob.lensType==='B'?'Bifocal':'SV (Single Vision)'],
+                  ["Lens Type", agingJob.lensType==='P'?'Progressive':agingJob.lensType==='B'?'Bifocal':agingJob.lensType==='S'?'SV (Single Vision)':'Unknown'],
                   ["Lens Style", agingJob.lensStyle],
                   ["Lens Material", agingJob.lensMat],
                   ["Lens Thickness", agingJob.lensThick],

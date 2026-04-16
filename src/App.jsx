@@ -3015,7 +3015,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
                       {jobs.map(j=>(
                         <div key={j.jobId} style={{display:"contents"}}>
                           <div style={{color:j.rush?T.red:T.text,padding:"3px 0",fontWeight:600}}>{j.jobId}</div>
-                          <div style={{color:T.textDim,padding:"3px 0"}}>{j.lensType==='P'?'Prog':j.lensType==='B'?'BF':'SV'}</div>
+                          <div style={{color:T.textDim,padding:"3px 0"}}>{j.lensType==='P'?'Prog':j.lensType==='B'?'BF':j.lensType==='S'?'SV':'?'}</div>
                           <div style={{color:T.textDim,padding:"3px 0"}}>{j.eyeSize||'—'}</div>
                           <div style={{color:j.rush?T.red:T.textDim,padding:"3px 0"}}>{j.rush?'YES':'—'}</div>
                           <div style={{color:T.textMuted,padding:"3px 0"}}>{j.station||'—'}</div>
@@ -3305,7 +3305,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
                   <div style={{color:j.rush?T.red:assignedIds.has(j.jobId)?T.green:T.text,padding:"3px 0",fontWeight:600}}>{j.rush?"! ":assignedIds.has(j.jobId)?"+ ":""}{j.jobId}</div>
                   <div style={{color:T.amber,padding:"3px 0"}}>{j.coating||"AR"}</div>
                   <div style={{color:T.textMuted,padding:"3px 0"}}>{j.station}</div>
-                  <div style={{color:T.textDim,padding:"3px 0"}}>{j.lensType==='P'?'Prog':j.lensType==='B'?'BF':'SV'}</div>
+                  <div style={{color:T.textDim,padding:"3px 0"}}>{j.lensType==='P'?'Prog':j.lensType==='B'?'BF':j.lensType==='S'?'SV':'?'}</div>
                   <div style={{color:T.textDim,padding:"3px 0"}}>{j.lensMat||'—'}</div>
                   <div style={{color:j.waitMin>60?T.red:j.waitMin>30?T.amber:T.textDim,padding:"3px 0",textAlign:"right"}}>{j.waitMin}m</div>
                 </div>
