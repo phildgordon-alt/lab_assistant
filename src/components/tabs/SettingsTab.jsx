@@ -1895,6 +1895,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
               {name:"Shipping Dashboard",icon:"📦",desc:"Shipped today, rate, pipeline — visible across the floor",path:"/standalone/ShippingDashboard.html",color:T.green},
               {name:"Oven Timer",icon:"🔥",desc:"Coating oven rack timers — 6 racks per oven",path:"/standalone/OvenTimer.html",color:"#F59E0B"},
               {name:"Coating Timer",icon:"⏱",desc:"Per-coater timer — single large display",path:"/standalone/CoatingTimer.html",color:"#06B6D4"},
+              {name:"pickSync Health",icon:"❤️",desc:"Self-heal progress, ItemPath pre-flight, per-day coverage",path:"/standalone/picksync-health.html",color:T.red||"#F85149"},
             ].map(d=>(
               <a key={d.name} href={d.path} target="_blank" rel="noopener noreferrer"
                 style={{background:T.card,border:`2px solid ${T.border}`,borderRadius:14,padding:"20px 18px",
