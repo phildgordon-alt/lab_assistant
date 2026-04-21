@@ -1114,21 +1114,13 @@ async function pickSync() {
   const missingDay = findMissingDay();
   if (missingDay) {
     mode = 'BACKFILL';
-    // Start from where we left off — use max completed_at for that day, not midnight
-    try {
-      const maxRow = db.db.prepare(
-        "SELECT MAX(completed_at) as m FROM picks_history WHERE date(completed_at) = ?"
-      ).get(missingDay.dateStr);
-      if (maxRow?.m) {
-        windowStart = new Date(maxRow.m);
-      } else {
-        windowStart = new Date(missingDay.dateStr + 'T00:00:00.000Z');
-      }
-    } catch (e) {
-      windowStart = new Date(missingDay.dateStr + 'T00:00:00.000Z');
-    }
+    // Backfill the full hole day. Previous logic used MAX(completed_at) WHERE date(completed_at)=X
+    // as windowStart, but SQLite date() is UTC while completed_at is stored as PT-in-UTC, so the
+    // MAX could land on the next UTC day and invert the query window, silently returning 0 rows
+    // forever. INSERT OR IGNORE on pick_id dedupes, so a full-day re-query is safe.
+    windowStart = new Date(missingDay.dateStr + 'T00:00:00.000Z');
     queryWindowEnd = new Date(missingDay.dateStr + 'T23:59:59.999Z');
-    console.log(`[pickSync] Found hole: ${missingDay.dateStr} has only ${missingDay.count} picks (starting from ${windowStart.toISOString()})`);
+    console.log(`[pickSync] Found hole: ${missingDay.dateStr} has only ${missingDay.count} picks (full-day backfill ${windowStart.toISOString()} → ${queryWindowEnd.toISOString()})`);
   } else {
     // No holes — check trailing gap
     try {
