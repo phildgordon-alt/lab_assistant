@@ -89,7 +89,13 @@ const stmts = {
       current_stage = excluded.current_stage,
       current_station = excluded.current_station,
       event_count = job_lifecycle.event_count + 1,
-      updated_at = excluded.updated_at
+      updated_at = excluded.updated_at,
+      coating = COALESCE(job_lifecycle.coating, excluded.coating),
+      lens_material = COALESCE(job_lifecycle.lens_material, excluded.lens_material),
+      lens_type = COALESCE(job_lifecycle.lens_type, excluded.lens_type),
+      is_rush = CASE WHEN job_lifecycle.is_rush = 0 AND excluded.is_rush = 1 THEN 1 ELSE job_lifecycle.is_rush END,
+      sla_target_days = CASE WHEN job_lifecycle.lens_type IS NULL AND excluded.lens_type IS NOT NULL THEN excluded.sla_target_days ELSE job_lifecycle.sla_target_days END,
+      sla_due_at = CASE WHEN job_lifecycle.lens_type IS NULL AND excluded.lens_type IS NOT NULL THEN excluded.sla_due_at ELSE job_lifecycle.sla_due_at END
   `),
 
   setShipped: db.prepare(`
