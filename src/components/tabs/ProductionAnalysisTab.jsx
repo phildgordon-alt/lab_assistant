@@ -7,8 +7,8 @@ import { Card, SectionHeader } from '../shared';
 const STAGES = [
   { key: 'PICKING',    label: 'Picked',    color: '#06B6D4' },
   { key: 'SURFACING',  label: 'Surfaced',  color: '#3B82F6' },
-  { key: 'CUTTING',    label: 'Cut',       color: '#8B5CF6' },
   { key: 'COATING',    label: 'Coated',    color: '#F59E0B' },
+  { key: 'CUTTING',    label: 'Cut',       color: '#8B5CF6' },
   { key: 'ASSEMBLY',   label: 'Assembled', color: '#EC4899' },
   { key: 'SHIPPING',   label: 'Shipped',   color: '#10B981' },
 ];
@@ -723,7 +723,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: mono, fontSize: 11 }}>
               <thead>
                 <tr>
-                  {['Day', 'Picked', 'Surfaced', 'Cut', 'Coated', 'Assembled', 'Shipped', 'HKO', 'Bottleneck'].map(col => (
+                  {['Day', 'Picked', 'Surfaced', 'Coated', 'Cut', 'Assembled', 'Shipped', 'HKO', 'Bottleneck'].map(col => (
                     <th key={col} style={{
                       textAlign: col === 'Day' || col === 'Bottleneck' ? 'left' : 'right',
                       padding: '8px 10px', borderBottom: `1px solid ${T.border}`,
@@ -749,7 +749,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
                       <td style={{ padding: '8px 10px', borderBottom: `1px solid ${T.border}10`, color: isToday ? T.blue : T.text, fontWeight: isToday ? 700 : 400, whiteSpace: 'nowrap' }}>
                         {day.label}{isToday ? ' (today)' : ''}
                       </td>
-                      {['PICKING', 'SURFACING', 'CUTTING', 'COATING', 'ASSEMBLY', 'SHIPPING'].map(stage => (
+                      {['PICKING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'].map(stage => (
                         <td key={stage} style={{
                           padding: '8px 10px', borderBottom: `1px solid ${T.border}10`, textAlign: 'right',
                           color: (t[stage] || 0) > 0 ? T.text : T.textDim
