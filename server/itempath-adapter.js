@@ -1611,18 +1611,35 @@ function start() {
   // STEADY mode: 30 min between runs (normal operation).
   let pickSyncTimer = null;
   function scheduleNextPickSync() {
-    const hasHoles = findMissingDay();
+    // Guard: findMissingDay queries the DB and can throw on corruption/lock.
+    // If we throw here, the setTimeout chain dies permanently — exactly the
+    // silent-death pattern we want to avoid. Default to 30 min on error.
+    let hasHoles = null;
+    try { hasHoles = findMissingDay(); }
+    catch (e) { console.error('[pickSync] scheduleNextPickSync findMissingDay error:', e.message); }
     const interval = hasHoles ? 5 * 60 * 1000 : 30 * 60 * 1000;
     if (pickSyncTimer) clearTimeout(pickSyncTimer);
     pickSyncTimer = setTimeout(async () => {
-      await pickSync();
-      scheduleNextPickSync();
+      try { await pickSync(); }
+      catch (e) { console.error('[pickSync] chain pickSync error:', e.message); }
+      try { scheduleNextPickSync(); }
+      catch (e) {
+        // Last-resort: if even scheduleNextPickSync throws, fall back to a
+        // fixed 30 min retry so the chain can't die silently.
+        console.error('[pickSync] chain scheduleNextPickSync error, falling back to 30min retry:', e.message);
+        setTimeout(() => scheduleNextPickSync(), 30 * 60 * 1000);
+      }
     }, interval);
     if (hasHoles) console.log(`[pickSync] Backfill pending — next run in 5 min`);
   }
   setTimeout(async () => {
-    await pickSync();
-    scheduleNextPickSync();
+    try { await pickSync(); }
+    catch (e) { console.error('[pickSync] bootstrap pickSync error:', e.message); }
+    try { scheduleNextPickSync(); }
+    catch (e) {
+      console.error('[pickSync] bootstrap scheduleNext error, retrying in 30min:', e.message);
+      setTimeout(() => scheduleNextPickSync(), 30 * 60 * 1000);
+    }
   }, 30000);
 
   // Count reconciliation: 2min delay then every 30 minutes
