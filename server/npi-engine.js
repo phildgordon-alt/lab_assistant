@@ -748,20 +748,18 @@ function formatSvStockingCsv(db, scenarioId) {
   const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
   const placeholders = svMaterials.map(() => '?').join(',');
   // UNION R+L; bucket sph by 2.00D, cyl by 1.00D, add by 0.50D
-  // jobs.entry_date is DVI MM/DD/YY format (e.g. '03/18/26'), NOT ISO. Convert
-  // inline so we can compare against an ISO :since parameter.
+  // jobs.entry_date is DVI MM/DD/YY format. Convert to ISO for :since compare.
   const entryDateIso = `('20' || substr(entry_date,7,2) || '-' || substr(entry_date,1,2) || '-' || substr(entry_date,4,2))`;
-  // DVI VISION stores Rx as diopters × 100 in some installs (e.g. sphere -13.75
-  // stored as -1375, cyl -1.25 as -125). Normalize heuristically: any abs
-  // value > 20 is clearly a ×100 encoding and gets divided; otherwise it's
-  // already in diopters. Same heuristic as backfill-lens-sku-properties.js.
-  const norm = (col) => `CASE WHEN ABS(CAST(${col} AS REAL)) > 20 THEN CAST(${col} AS REAL) / 100.0 ELSE CAST(${col} AS REAL) END`;
+  // Rx values in jobs table are stored as integer × 100 (e.g. -175 = -1.75D).
+  // Normalize by dividing by 100 unconditionally (all values are in that encoding
+  // per DB samples) and snap to 0.25D standard Rx grid.
+  const norm = (col) => `ROUND(CAST(${col} AS REAL) / 100.0 / 0.25) * 0.25`;
   const sql = `
     WITH samples AS (
-      SELECT lens_material AS material,
+      SELECT lens_opc_r AS sku, lens_material AS material,
              ${norm('rx_r_sphere')} AS sph,
-             ${norm('rx_r_cylinder')} AS cyl,
-             ${norm('rx_r_add')} AS add_pwr
+             COALESCE(${norm('rx_r_cylinder')}, 0) AS cyl,
+             COALESCE(${norm('rx_r_add')}, 0)      AS add_pwr
       FROM jobs
       WHERE lens_type IN ('S','C')
         AND lens_material IN (${placeholders})
@@ -769,10 +767,10 @@ function formatSvStockingCsv(db, scenarioId) {
         AND rx_r_sphere IS NOT NULL AND rx_r_sphere != ''
         AND ${entryDateIso} >= ?
       UNION ALL
-      SELECT lens_material,
+      SELECT lens_opc_l, lens_material,
              ${norm('rx_l_sphere')},
-             ${norm('rx_l_cylinder')},
-             ${norm('rx_l_add')}
+             COALESCE(${norm('rx_l_cylinder')}, 0),
+             COALESCE(${norm('rx_l_add')}, 0)
       FROM jobs
       WHERE lens_type IN ('S','C')
         AND lens_material IN (${placeholders})
@@ -780,18 +778,13 @@ function formatSvStockingCsv(db, scenarioId) {
         AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
         AND ${entryDateIso} >= ?
     )
-    -- One row per unique prescription (material × sph × cyl × add). Rx values
-    -- snapped to 0.25D standard Rx grid — matches how supplier stocks units.
-    SELECT
-      material,
-      ROUND(sph / 0.25) * 0.25                             AS sph,
-      COALESCE(ROUND(cyl / 0.25) * 0.25, 0)                AS cyl,
-      CASE WHEN add_pwr IS NULL OR add_pwr = 0 THEN 0
-           ELSE ROUND(add_pwr / 0.25) * 0.25 END           AS add_pwr,
-      COUNT(*) AS sample_count
+    -- One row per (source_sku, material, sph, cyl, add) — stock SKUs usually
+    -- collapse to one row each (each SKU has one Rx). sample_count = how many
+    -- times that exact Rx/SKU was used historically. Order by material then sku.
+    SELECT sku AS source_sku, material, sph, cyl, add_pwr, COUNT(*) AS sample_count
     FROM samples
-    GROUP BY material, sph, cyl, add_pwr
-    ORDER BY material, sph, cyl, add_pwr
+    GROUP BY sku, material, sph, cyl, add_pwr
+    ORDER BY material, source_sku
   `;
   const params = [...svMaterials, since, ...svMaterials, since];
   const rows = db.prepare(sql).all(...params);
@@ -804,10 +797,10 @@ function formatSvStockingCsv(db, scenarioId) {
   const samplesByMat = {};
   for (const r of rows) samplesByMat[r.material] = (samplesByMat[r.material] || 0) + r.sample_count;
 
-  // Per-row qty — each row is one unique Rx variant. Project per-Rx by its
-  // share of the material's historical samples, then CEIL per row so no
-  // under-ordering. CEIL per row means sum-of-rows may exceed the exact
-  // projection by ~1/row — acceptable headroom for stocking.
+  // Per-row qty — each row = one historical (source_sku, Rx). sample_count
+  // is raw usage count over the window. Project forward: that count / total
+  // samples in material × projected_weekly for material × (lead + safety)
+  // weeks = qty to order.
   const rowQty = rows.map(r => {
     const matSamples = samplesByMat[r.material] || 1;
     const pctOfMat = r.sample_count / matSamples;
@@ -831,15 +824,17 @@ function formatSvStockingCsv(db, scenarioId) {
   }
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  lines.push(['material','sph','cyl','add','sample_count','pct_of_material','weekly_projection','initial_order_qty'].join(','));
+  // Columns match Phil's reference format: sku, material, sph, cyl, qty.
+  // add included for progressive/bifocal; zero for plain SV.
+  lines.push(['source_sku','material','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
   for (const r of rowQty) {
     lines.push([
+      csvEsc(r.source_sku),
       csvEsc(r.material),
-      r.sph.toFixed(2),
-      r.cyl.toFixed(2),
+      (r.sph || 0).toFixed(2),
+      (r.cyl || 0).toFixed(2),
       (r.add_pwr || 0).toFixed(2),
       r.sample_count,
-      (r.pctOfMat * 100).toFixed(2),
       r.weeklyForRow.toFixed(2),
       r.qty,
     ].join(','));
