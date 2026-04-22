@@ -7394,6 +7394,7 @@ server.listen(PORT, '0.0.0.0', () => {
 // ── Slack AI Auto-Responder ───────────────────────────────────────
 let lastProcessedTs = null;
 const processedMessages = new Set(); // Track processed message IDs
+let slackAiConsecutiveErrors = 0;    // used by poll-error guardrail
 
 async function startSlackAIPolling() {
   const token = process.env.SLACK_BOT_TOKEN;
@@ -7523,8 +7524,29 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         const arr = Array.from(processedMessages);
         arr.slice(0, arr.length - 100).forEach(ts => processedMessages.delete(ts));
       }
+      // Success — reset consecutive error counter + heartbeat
+      slackAiConsecutiveErrors = 0;
+      try { labDb.recordHeartbeat('slack_ai_poll', processedMessages.size, 5 * 60 * 1000); } catch {}
     } catch (e) {
-      // Silent fail on poll errors
+      // Log EVERY error (used to be silent). Categorize the common ones so we
+      // can tell rate-limit from auth from network from parse error at a glance.
+      slackAiConsecutiveErrors = (slackAiConsecutiveErrors || 0) + 1;
+      const category = e?.code || (e?.message || '').match(/^(HTTP \d+|Unexpected|ENOTFOUND|ECONNRESET|timeout)/)?.[1] || 'unknown';
+      console.error(`[Slack AI] Poll error (${category}, consecutive=${slackAiConsecutiveErrors}): ${e.message}`);
+      try { labDb.recordHeartbeatError('slack_ai_poll', `${category}: ${e.message}`, 5 * 60 * 1000); } catch {}
+      // After 12 consecutive errors (2 min of continuous failure) fire a Slack
+      // alert once — but NOT via the bot (which is broken) — use the webhook.
+      if (slackAiConsecutiveErrors === 12) {
+        try {
+          if (process.env.SLACK_WEBHOOK_URL) {
+            fetch(process.env.SLACK_WEBHOOK_URL, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text: `:warning: Lab_Assistant Slack AI poll failing for 2+ min. Last error: *${category}* — ${e.message}` }),
+            }).catch(() => {});
+          }
+        } catch {}
+      }
     }
   }, 10000); // Poll every 10 seconds
 }
