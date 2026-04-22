@@ -423,6 +423,25 @@ function expandScenarioToPerJobRows(db, scenarioId) {
 // ─────────────────────────────────────────────────────────────────────────────
 // CSV FORMATTER — the per-job Rx list for Excel download
 // ─────────────────────────────────────────────────────────────────────────────
+// Category classification — derives the ordering bucket for a row:
+//   Single Vision  (lens_type S/C + non-blue material)
+//   Single Vision Blue Light  (lens_type S/C + BLY/B67 material)
+//   Surfacing       (lens_type P + non-blue)
+//   Surfacing Blue Light  (lens_type P + BLY/B67)
+// Material codes: BLY = Poly Blue Light, B67 = 1.67 Blue Light (both = "blue").
+function categorizeRow(lensType, material) {
+  const lt = (lensType || '').toUpperCase();
+  const mat = (material || '').toUpperCase();
+  const isBlue = mat === 'BLY' || mat === 'B67';
+  if (lt === 'P' || lt === 'SURFACING' || lt === 'B') {
+    return isBlue ? 'Surfacing Blue Light' : 'Surfacing';
+  }
+  if (lt === 'S' || lt === 'C' || lt === 'SV') {
+    return isBlue ? 'Single Vision Blue Light' : 'Single Vision';
+  }
+  return isBlue ? 'Unknown Blue Light' : 'Unknown';
+}
+
 function formatRxListCsv(expandedResult) {
   const esc = (v) => {
     if (v === null || v === undefined) return '';
@@ -433,39 +452,62 @@ function formatRxListCsv(expandedResult) {
   const scenario = expandedResult.scenario || {};
   const compute = expandedResult.compute || {};
 
+  // Tag each row with a category for grouping + summary
+  for (const r of rows) r.category = categorizeRow(r.lens_type, r.material);
+
   // Aggregate breakdowns for the header so the operator sees totals at the top
   const totalQty = rows.length;
   const byPlaceholder = {};
   const byMaterial = {};
-  const byLensType = { SV: 0, Surfacing: 0, Other: 0 };
+  const byCategory = {};
+  const byCategoryMaterial = {}; // e.g. "Single Vision Blue Light / BLY" → 1200
   for (const r of rows) {
     byPlaceholder[r.placeholder_sku] = (byPlaceholder[r.placeholder_sku] || 0) + 1;
     const mat = (r.material || '').toUpperCase();
     if (mat) byMaterial[mat] = (byMaterial[mat] || 0) + 1;
-    const lt = r.lens_type;
-    if (lt === 'S' || lt === 'C' || lt === 'SV') byLensType.SV++;
-    else if (lt === 'P' || lt === 'Surfacing') byLensType.Surfacing++;
-    else byLensType.Other++;
+    byCategory[r.category] = (byCategory[r.category] || 0) + 1;
+    const key = `${r.category} / ${mat || '—'}`;
+    byCategoryMaterial[key] = (byCategoryMaterial[key] || 0) + 1;
   }
   const phLine = Object.entries(byPlaceholder).map(([k, n]) => `${k}=${n}`).join(' | ');
   const matLine = Object.entries(byMaterial).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}=${n}`).join(' | ');
+
+  // Sort rows by category → placeholder → source_sku so Excel reads cleanly
+  const categoryOrder = { 'Single Vision': 0, 'Single Vision Blue Light': 1, 'Surfacing': 2, 'Surfacing Blue Light': 3, 'Unknown': 4, 'Unknown Blue Light': 5 };
+  rows.sort((a, b) => {
+    const ca = categoryOrder[a.category] ?? 99;
+    const cb = categoryOrder[b.category] ?? 99;
+    if (ca !== cb) return ca - cb;
+    if (a.placeholder_sku !== b.placeholder_sku) return String(a.placeholder_sku).localeCompare(String(b.placeholder_sku));
+    return String(a.source_sku || '').localeCompare(String(b.source_sku || ''));
+  });
 
   const lines = [];
   // ── Summary header (Excel treats # as regular text — Phil can filter/delete)
   lines.push(`# NPI Rx List — ${esc(scenario.name || scenario.id || '')}`);
   lines.push(`# Source type: ${scenario.source_type || ''}`);
   lines.push(`# TOTAL LENSES TO ORDER: ${totalQty}`);
-  lines.push(`# SV: ${byLensType.SV}   Surfacing: ${byLensType.Surfacing}${byLensType.Other ? `   Other/Unknown: ${byLensType.Other}` : ''}`);
+  lines.push(`#`);
+  lines.push(`# By category:`);
+  for (const [cat, n] of Object.entries(byCategory).sort((a, b) => (categoryOrder[a[0]] ?? 99) - (categoryOrder[b[0]] ?? 99))) {
+    lines.push(`#   ${cat}: ${n}`);
+  }
+  lines.push(`#`);
+  lines.push(`# By category x material (order detail):`);
+  for (const [key, n] of Object.entries(byCategoryMaterial).sort((a, b) => b[1] - a[1])) {
+    lines.push(`#   ${key}: ${n}`);
+  }
+  lines.push(`#`);
   if (phLine) lines.push(`# By placeholder: ${phLine}`);
   if (matLine) lines.push(`# By material: ${matLine}`);
   lines.push(`# Lead time: ${compute.totalLeadTime || ''}wk | Safety: ${compute.safetyWeeks || ''}wk | ABC: ${compute.abcClass || ''}`);
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
   // ── Per-row data
-  lines.push(['line','placeholder_sku','real_sku','source_sku','lens_type','material','base_curve','diameter','sph','cyl','axis','add','pd','confidence'].join(','));
+  lines.push(['line','category','placeholder_sku','real_sku','source_sku','lens_type','material','base_curve','diameter','sph','cyl','axis','add','pd','confidence'].join(','));
   for (const r of rows) {
     lines.push([
-      r.line_no, esc(r.placeholder_sku), esc(r.real_sku), esc(r.source_sku), esc(r.lens_type),
+      r.line_no, esc(r.category), esc(r.placeholder_sku), esc(r.real_sku), esc(r.source_sku), esc(r.lens_type),
       esc(r.material), r.base_curve ?? '', r.diameter ?? '',
       r.sph ?? '', r.cyl ?? '', r.axis ?? '', r.add ?? '', r.pd ?? '',
       r.confidence ?? ''

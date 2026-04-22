@@ -237,7 +237,8 @@ test('CSV has summary header + column header + per-row + grand total', () => {
   const csv = npiEngine.formatRxListCsv(r);
   assert.ok(csv.includes('# TOTAL LENSES TO ORDER: 100'), 'summary total present');
   assert.ok(csv.startsWith('# NPI Rx List'), 'starts with summary header');
-  assert.ok(csv.includes('line,placeholder_sku,real_sku'), 'column header present');
+  assert.ok(csv.includes('line,category,placeholder_sku,real_sku'), 'column header present (with category)');
+  assert.ok(csv.includes('# By category:'), 'category breakdown in header');
   assert.ok(csv.includes('# Grand total lenses: 100'), 'grand total at bottom');
   // Count data rows — should be 100 plus headers
   const dataRows = csv.split('\n').filter(l => /^\d+,/.test(l));
