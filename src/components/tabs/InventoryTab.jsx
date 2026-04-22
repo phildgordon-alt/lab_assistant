@@ -3511,7 +3511,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           {/* Edit form */}
                           <div style={{ padding: 10, background: T.bg, borderRadius: 6, marginBottom: 12 }}>
                             <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 8 }}>EDIT SCENARIO</div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 8, marginBottom: 8 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.3fr 1.7fr 1fr', gap: 8, marginBottom: 8 }}>
                               <div>
                                 <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>NAME</label>
                                 <input type="text" defaultValue={sc.name} id="npi-edit-name" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
@@ -3521,8 +3521,25 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <input type="number" defaultValue={sc.adoption_pct} id="npi-edit-adoption" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
                               </div>
                               <div>
-                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SOURCE VALUE</label>
-                                <input type="text" defaultValue={sc.source_value || ''} id="npi-edit-source" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SOURCE TYPE</label>
+                                <select defaultValue={sc.source_type || 'prefix'} id="npi-edit-source-type" onChange={(e) => {
+                                  const lbl = document.getElementById('npi-edit-source-label');
+                                  const inp = document.getElementById('npi-edit-source');
+                                  const t = e.target.value;
+                                  if (lbl) lbl.textContent = t === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : t === 'skus' ? 'SKUS (COMMA-SEP)' : t === 'prefix' ? 'SKU PREFIX' : 'N/A (CR39 AUTO)';
+                                  if (inp) inp.disabled = (t === 'null_opc');
+                                }} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }}>
+                                  <option value="prefix">SKU prefix (e.g. 4800)</option>
+                                  <option value="skus">Specific SKUs</option>
+                                  <option value="proxy">Closest SKU (proxy)</option>
+                                  <option value="null_opc">Null OPC (CR39)</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label id="npi-edit-source-label" style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>
+                                  {sc.source_type === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : sc.source_type === 'skus' ? 'SKUS (COMMA-SEP)' : sc.source_type === 'null_opc' ? 'N/A (CR39 AUTO)' : 'SKU PREFIX'}
+                                </label>
+                                <input type="text" defaultValue={sc.proxy_sku || sc.source_value || ''} id="npi-edit-source" placeholder="e.g. 4800150916 or 4800,062" disabled={sc.source_type === 'null_opc'} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
                               </div>
                               <div>
                                 <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>NEW SKU PREFIX</label>
@@ -3548,10 +3565,14 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               </div>
                               <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                                 <button onClick={async () => {
+                                  const st = document.getElementById('npi-edit-source-type')?.value || 'prefix';
+                                  const srcVal = document.getElementById('npi-edit-source')?.value || null;
                                   const body = {
                                     name: document.getElementById('npi-edit-name')?.value,
                                     adoption_pct: parseFloat(document.getElementById('npi-edit-adoption')?.value) || 50,
-                                    source_value: document.getElementById('npi-edit-source')?.value || null,
+                                    source_type: st,
+                                    source_value: st === 'null_opc' ? null : srcVal,
+                                    proxy_sku: st === 'proxy' ? srcVal : null,
                                     new_sku_prefix: document.getElementById('npi-edit-prefix')?.value || null,
                                     manufacturing_weeks: parseFloat(document.getElementById('npi-edit-mfg')?.value) || 13,
                                     transit_weeks: parseFloat(document.getElementById('npi-edit-transit')?.value) || 4,
