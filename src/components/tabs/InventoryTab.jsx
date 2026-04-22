@@ -667,6 +667,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
   const [npiScenarios, setNpiScenarios] = useState(null);
   const [npiSelected, setNpiSelected] = useState(null);
   const [npiCreating, setNpiCreating] = useState(false);
+  const [npiTemplates, setNpiTemplates] = useState([]);
+  useEffect(() => {
+    fetch(`${ovenServerUrl}/api/rx-profile-templates`).then(r => r.json()).then(d => {
+      setNpiTemplates(d?.templates || []);
+    }).catch(() => setNpiTemplates([]));
+  }, [ovenServerUrl]);
   const [longTailData, setLongTailData] = useState(null);
   const [longTailOpen, setLongTailOpen] = useState(false);
   const [longTailFilter, setLongTailFilter] = useState('all');
@@ -3498,7 +3504,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                       {npiSelected?.scenario && (() => {
                         const sc = npiSelected.scenario;
                         return (
-                        <div style={{ marginTop: 12, padding: 12, background: T.surface, borderRadius: 8 }}>
+                        <div key={`npi-panel-${sc.id}`} style={{ marginTop: 12, padding: 12, background: T.surface, borderRadius: 8 }}>
                           {/* KPIs */}
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 6, marginBottom: 12 }}>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sc.adoption_pct}%</div><div style={{ fontSize: 8, color: T.textDim }}>ADOPTION</div></div>
@@ -3516,14 +3522,21 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.text, fontFamily: mono }}>{(npiSelected.initialOrderQty || 0).toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>INITIAL ORDER</div></div>
                           </div>
 
-                          {/* Export button — full scenario + cannibalization detail as CSV */}
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                          {/* Export buttons — summary CSV + per-job Rx list CSV */}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 10 }}>
                             <button
                               onClick={() => window.open(`${ovenServerUrl}/api/npi/scenarios/${sc.id}/export`, '_blank')}
                               style={{ background: `${T.blue}20`, border: `1px solid ${T.blue}60`, borderRadius: 4, padding: '5px 12px', color: T.blue, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}
-                              title="Download initial order + cannibalization breakdown as CSV"
+                              title="Download initial order + cannibalization breakdown as CSV (summary)"
                             >
-                              ⬇ Export Initial Order CSV
+                              ⬇ Summary CSV
+                            </button>
+                            <button
+                              onClick={() => window.open(`${ovenServerUrl}/api/npi/scenarios/${sc.id}/rx-list.csv`, '_blank')}
+                              style={{ background: `${T.green}20`, border: `1px solid ${T.green}60`, borderRadius: 4, padding: '5px 12px', color: T.green, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}
+                              title="Download one row per expected lens unit with full Rx — Excel-friendly, primary order artifact"
+                            >
+                              ⬇ Per-Job Rx List CSV
                             </button>
                           </div>
 
@@ -3544,25 +3557,44 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <select defaultValue={sc.source_type || 'prefix'} id="npi-edit-source-type" onChange={(e) => {
                                   const lbl = document.getElementById('npi-edit-source-label');
                                   const inp = document.getElementById('npi-edit-source');
+                                  const stdRow = document.getElementById('npi-edit-std-row');
                                   const t = e.target.value;
-                                  if (lbl) lbl.textContent = t === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : t === 'skus' ? 'SKUS (COMMA-SEP)' : t === 'prefix' ? 'SKU PREFIX' : 'N/A (CR39 AUTO)';
-                                  if (inp) inp.disabled = (t === 'null_opc');
+                                  if (lbl) lbl.textContent = t === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : t === 'skus' ? 'SKUS (COMMA-SEP)' : t === 'prefix' ? 'SKU PREFIX' : t === 'standard_profile' ? 'N/A (SEE TEMPLATE BELOW)' : 'N/A (CR39 AUTO)';
+                                  if (inp) inp.disabled = (t === 'null_opc' || t === 'standard_profile');
+                                  if (stdRow) stdRow.style.display = (t === 'standard_profile') ? '' : 'none';
                                 }} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }}>
                                   <option value="prefix">SKU prefix (e.g. 4800)</option>
                                   <option value="skus">Specific SKUs</option>
                                   <option value="proxy">Closest SKU (proxy)</option>
                                   <option value="null_opc">Null OPC (CR39)</option>
+                                  <option value="standard_profile">Standard Profile (non-cannibalizing)</option>
                                 </select>
                               </div>
                               <div>
                                 <label id="npi-edit-source-label" style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>
-                                  {sc.source_type === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : sc.source_type === 'skus' ? 'SKUS (COMMA-SEP)' : sc.source_type === 'null_opc' ? 'N/A (CR39 AUTO)' : 'SKU PREFIX'}
+                                  {sc.source_type === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : sc.source_type === 'skus' ? 'SKUS (COMMA-SEP)' : sc.source_type === 'null_opc' ? 'N/A (CR39 AUTO)' : sc.source_type === 'standard_profile' ? 'N/A (SEE TEMPLATE BELOW)' : 'SKU PREFIX'}
                                 </label>
-                                <input type="text" defaultValue={sc.proxy_sku || sc.source_value || ''} id="npi-edit-source" placeholder="e.g. 4800150916 or 4800,062" disabled={sc.source_type === 'null_opc'} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                                <input type="text" defaultValue={sc.proxy_sku || sc.source_value || ''} id="npi-edit-source" placeholder="e.g. 4800150916 or 4800,062" disabled={sc.source_type === 'null_opc' || sc.source_type === 'standard_profile'} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
                               </div>
                               <div>
                                 <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>NEW SKU PREFIX</label>
                                 <input type="text" defaultValue={sc.new_sku_prefix || ''} id="npi-edit-prefix" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                            </div>
+                            {/* Standard profile row — visible only when source_type='standard_profile' */}
+                            <div id="npi-edit-std-row" style={{ display: sc.source_type === 'standard_profile' ? 'grid' : 'none', gridTemplateColumns: '2fr 1fr', gap: 8, marginBottom: 8, padding: '6px 8px', background: T.bg, borderRadius: 3, border: `1px dashed ${T.border}` }}>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>STANDARD Rx TEMPLATE</label>
+                                <select defaultValue={sc.standard_profile_template_id || ''} id="npi-edit-std-template" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }}>
+                                  <option value="">— select template —</option>
+                                  {npiTemplates.map(t => (
+                                    <option key={t.id} value={t.id}>{t.name} ({t.lens_type})</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>TOTAL QTY (LENSES)</label>
+                                <input type="number" min="1" defaultValue={sc.standard_profile_qty || ''} placeholder="5000" id="npi-edit-std-qty" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
                               </div>
                             </div>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 8, marginBottom: 8 }}>
@@ -3601,11 +3633,13 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                   const srcVal = document.getElementById('npi-edit-source')?.value || null;
                                   const safetyRaw = document.getElementById('npi-edit-safety')?.value;
                                   const abcRaw = document.getElementById('npi-edit-abc')?.value;
+                                  const stdTpl = document.getElementById('npi-edit-std-template')?.value;
+                                  const stdQty = document.getElementById('npi-edit-std-qty')?.value;
                                   const body = {
                                     name: document.getElementById('npi-edit-name')?.value,
                                     adoption_pct: parseFloat(document.getElementById('npi-edit-adoption')?.value) || 50,
                                     source_type: st,
-                                    source_value: st === 'null_opc' ? null : srcVal,
+                                    source_value: st === 'null_opc' || st === 'standard_profile' ? null : srcVal,
                                     proxy_sku: st === 'proxy' ? srcVal : null,
                                     new_sku_prefix: document.getElementById('npi-edit-prefix')?.value || null,
                                     manufacturing_weeks: parseFloat(document.getElementById('npi-edit-mfg')?.value) || 13,
@@ -3614,6 +3648,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                     safety_stock_weeks: safetyRaw && !isNaN(parseFloat(safetyRaw)) ? parseFloat(safetyRaw) : null,
                                     abc_class: abcRaw || null,
                                     launch_date: document.getElementById('npi-edit-launch')?.value || null,
+                                    standard_profile_template_id: st === 'standard_profile' && stdTpl ? parseInt(stdTpl, 10) : null,
+                                    standard_profile_qty: st === 'standard_profile' && stdQty ? parseInt(stdQty, 10) : null,
                                   };
                                   const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${sc.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });
                                   if (!resp.ok) { console.error('NPI save failed:', resp.status); return; }
@@ -4137,6 +4173,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         <option value="skus">Specific SKUs (comma-separated)</option>
                         <option value="proxy">Emulate a proxy SKU's demand</option>
                         <option value="null_opc">Null OPC orders (CR 39 free option) — auto-detects adoption rate</option>
+                        <option value="standard_profile">Standard Profile (non-cannibalizing — pick a template + total qty)</option>
                       </select>
                     </div>
                     <div>

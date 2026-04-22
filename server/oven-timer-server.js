@@ -3055,6 +3055,16 @@ Respond with a structured batching plan in this format:
     const id = url.pathname.split('/').pop();
     return json(res, npiEngine.getScenario(labDb.db, id, netsuite));
   }
+  // List Rx profile templates (for standard_profile source-type dropdown)
+  if (req.method==='GET' && url.pathname==='/api/rx-profile-templates') {
+    return json(res, { templates: labDb.listRxProfileTemplates() });
+  }
+  if (req.method==='GET' && url.pathname.startsWith('/api/rx-profile-templates/')) {
+    const id = parseInt(url.pathname.split('/').pop(), 10);
+    const tpl = labDb.getRxProfileTemplate(id);
+    if (!tpl) { res.writeHead(404); return res.end('Template not found'); }
+    return json(res, tpl);
+  }
   // Per-job Rx list CSV — one row per expected lens unit with placeholder SKU,
   // source SKU (cannibalizing) or bucket midpoint (standard_profile), and full
   // Rx fields. Excel-friendly.
