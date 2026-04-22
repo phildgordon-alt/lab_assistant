@@ -699,6 +699,146 @@ function NpiPlaceholderSection({ scenarioId, ovenServerUrl }) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ── NPI MATERIAL CATEGORY TARGETS (sub-component) ─────────────
+// ══════════════════════════════════════════════════════════════
+// Checkbox-driven cannibalization target picker. Replaces the paste-SKU
+// model for non-CR39 NPI. Global adoption % applies to all checked
+// categories. Two SKU exports at the bottom — SV stocking CSV (with Rx
+// buckets) and Semi stocking CSV (base-curve only, pucks have no Rx).
+function NpiMaterialTargetsSection({ scenarioId, ovenServerUrl }) {
+  const MATERIAL_OPTIONS = [
+    { code: 'PLY', class: 'SV',   label: 'Polycarbonate (PLY)' },
+    { code: 'BLY', class: 'SV',   label: 'Poly Blue Light (BLY)' },
+    { code: 'H67', class: 'SV',   label: '1.67 (H67)' },
+    { code: 'B67', class: 'SV',   label: '1.67 Blue Light (B67)' },
+    { code: 'PLY', class: 'SEMI', label: 'Semi Poly (PLY puck)' },
+    { code: 'BLY', class: 'SEMI', label: 'Semi Poly BL (BLY puck)' },
+    { code: 'H67', class: 'SEMI', label: 'Semi 1.67 (H67 puck)' },
+    { code: 'B67', class: 'SEMI', label: 'Semi 1.67 BL (B67 puck)' },
+  ];
+  const [targets, setTargets] = useState([]);    // array of {material_code, lens_type_class, adoption_pct}
+  const [projection, setProjection] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [globalPct, setGlobalPct] = useState(50);
+
+  const reload = async () => {
+    try {
+      const [tr, pr] = await Promise.all([
+        fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/material-targets`).then(r => r.json()),
+        fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/material-projection`).then(r => r.json()),
+      ]);
+      setTargets(tr?.targets || []);
+      setProjection(pr?.rows || []);
+      // Seed globalPct from first target if set
+      if (tr?.targets?.[0]?.adoption_pct) setGlobalPct(tr.targets[0].adoption_pct);
+    } catch {}
+    setLoading(false);
+  };
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [scenarioId]);
+
+  const toggle = (code, cls) => {
+    const key = (code + '|' + cls);
+    const exists = targets.find(t => t.material_code === code && t.lens_type_class === cls);
+    if (exists) {
+      setTargets(targets.filter(t => !(t.material_code === code && t.lens_type_class === cls)));
+    } else {
+      setTargets([...targets, { material_code: code, lens_type_class: cls, adoption_pct: globalPct }]);
+    }
+  };
+
+  const applyGlobal = () => {
+    setTargets(targets.map(t => ({ ...t, adoption_pct: globalPct })));
+  };
+
+  const save = async () => {
+    const body = { targets: targets.map(t => ({ ...t, adoption_pct: globalPct })) };
+    const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/material-targets`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+    });
+    if (!resp.ok) { alert('Save failed'); return; }
+    await reload();
+  };
+
+  const checked = (code, cls) => targets.some(t => t.material_code === code && t.lens_type_class === cls);
+
+  const totalWeekly = projection.reduce((s, r) => s + (r.projected_weekly || 0), 0);
+  const svWeekly = projection.filter(r => r.lens_type_class === 'SV').reduce((s, r) => s + (r.projected_weekly || 0), 0);
+  const semiWeekly = projection.filter(r => r.lens_type_class === 'SEMI').reduce((s, r) => s + (r.projected_weekly || 0), 0);
+
+  if (loading) return null;
+  return (
+    <div style={{ marginBottom: 12, padding: 10, background: T.bg, borderRadius: 6, border: `1px solid ${T.border}` }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 8 }}>
+        CANNIBALIZATION TARGETS <span style={{ color: T.textMuted, fontWeight: 400 }}>(material categories — global adoption %)</span>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 9, color: T.blue, fontFamily: mono, fontWeight: 700, marginBottom: 4 }}>STOCK (Single Vision)</div>
+          {MATERIAL_OPTIONS.filter(m => m.class === 'SV').map(m => (
+            <label key={m.code + m.class} style={{ display: 'block', fontSize: 10, color: T.text, fontFamily: mono, marginBottom: 3, cursor: 'pointer' }}>
+              <input type="checkbox" checked={checked(m.code, m.class)} onChange={() => toggle(m.code, m.class)} style={{ marginRight: 6 }} />
+              {m.label}
+            </label>
+          ))}
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: T.purple, fontFamily: mono, fontWeight: 700, marginBottom: 4 }}>SEMI-FINISHED (pucks)</div>
+          {MATERIAL_OPTIONS.filter(m => m.class === 'SEMI').map(m => (
+            <label key={m.code + m.class} style={{ display: 'block', fontSize: 10, color: T.text, fontFamily: mono, marginBottom: 3, cursor: 'pointer' }}>
+              <input type="checkbox" checked={checked(m.code, m.class)} onChange={() => toggle(m.code, m.class)} style={{ marginRight: 6 }} />
+              {m.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+        <label style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>GLOBAL ADOPTION %:</label>
+        <input type="number" min={0} max={100} value={globalPct} onChange={e => setGlobalPct(parseFloat(e.target.value) || 0)} style={{ width: 70, padding: '3px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+        <button onClick={save} style={{ background: T.blue, border: 'none', borderRadius: 3, padding: '3px 12px', color: '#fff', fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
+          Save & Compute
+        </button>
+      </div>
+      {/* Live preview */}
+      {projection.length > 0 && (
+        <div style={{ padding: '6px 8px', background: T.surface, borderRadius: 3, border: `1px solid ${T.border}`, fontSize: 10, fontFamily: mono }}>
+          <div style={{ color: T.textDim, fontSize: 9, marginBottom: 4 }}>PROJECTED WEEKLY CONSUMPTION (LIVE PREVIEW)</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ background: T.bg }}>
+              <th style={{ padding: '2px 4px', textAlign: 'left', fontSize: 8, color: T.textDim }}>MATERIAL</th>
+              <th style={{ padding: '2px 4px', textAlign: 'left', fontSize: 8, color: T.textDim }}>CLASS</th>
+              <th style={{ padding: '2px 4px', textAlign: 'right', fontSize: 8, color: T.textDim }}>SKUs</th>
+              <th style={{ padding: '2px 4px', textAlign: 'right', fontSize: 8, color: T.textDim }}>WEEKLY AVG</th>
+              <th style={{ padding: '2px 4px', textAlign: 'right', fontSize: 8, color: T.textDim }}>ADOPTION</th>
+              <th style={{ padding: '2px 4px', textAlign: 'right', fontSize: 8, color: T.green }}>PROJECTED/WK</th>
+            </tr></thead>
+            <tbody>
+              {projection.map((r, i) => (
+                <tr key={i}>
+                  <td style={{ padding: '2px 4px', color: T.text }}>{r.material_code}</td>
+                  <td style={{ padding: '2px 4px', color: r.lens_type_class === 'SV' ? T.blue : T.purple }}>{r.lens_type_class}</td>
+                  <td style={{ padding: '2px 4px', textAlign: 'right', color: T.textMuted }}>{r.sku_count}</td>
+                  <td style={{ padding: '2px 4px', textAlign: 'right', color: T.text }}>{r.weekly_avg}</td>
+                  <td style={{ padding: '2px 4px', textAlign: 'right', color: T.textMuted }}>{r.adoption_pct}%</td>
+                  <td style={{ padding: '2px 4px', textAlign: 'right', color: T.green, fontWeight: 700 }}>{r.projected_weekly}</td>
+                </tr>
+              ))}
+              <tr style={{ borderTop: `1px solid ${T.border}` }}>
+                <td colSpan={5} style={{ padding: '3px 4px', color: T.textDim, fontSize: 9, fontWeight: 700 }}>TOTAL (SV {Math.round(svWeekly)} + SEMI {Math.round(semiWeekly)})</td>
+                <td style={{ padding: '3px 4px', textAlign: 'right', color: T.green, fontWeight: 700 }}>{Math.round(totalWeekly)}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 }}>
+        <button onClick={() => window.open(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/rx-stocking-sv.csv`, '_blank')} style={{ background: `${T.blue}20`, border: `1px solid ${T.blue}60`, borderRadius: 4, padding: '4px 10px', color: T.blue, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>⬇ SV Stocking CSV</button>
+        <button onClick={() => window.open(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/rx-stocking-semi.csv`, '_blank')} style={{ background: `${T.purple}20`, border: `1px solid ${T.purple}60`, borderRadius: 4, padding: '4px 10px', color: T.purple, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>⬇ Semi Stocking CSV</button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // ── NPI QUARANTINE SECTION (sub-component) ────────────────────
 // ══════════════════════════════════════════════════════════════
 // Tracks physical lens receipts tied to placeholder SKUs before the real
@@ -3792,11 +3932,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                   if (inp) inp.disabled = (t === 'null_opc' || t === 'standard_profile');
                                   if (stdRow) stdRow.style.display = (t === 'standard_profile') ? '' : 'none';
                                 }} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }}>
-                                  <option value="prefix">SKU prefix (e.g. 4800)</option>
-                                  <option value="skus">Specific SKUs</option>
-                                  <option value="proxy">Closest SKU (proxy)</option>
+                                  <option value="material_category">Material Category (recommended — checkbox UI below)</option>
                                   <option value="null_opc">Null OPC (CR39)</option>
                                   <option value="standard_profile">Standard Profile (non-cannibalizing)</option>
+                                  <option value="skus">Specific SKUs (legacy paste list)</option>
+                                  <option value="prefix">SKU prefix (legacy)</option>
+                                  <option value="proxy">Closest SKU proxy (legacy)</option>
                                 </select>
                               </div>
                               <div>
@@ -3910,6 +4051,10 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             </div>
                           </div>
 
+                          {/* Material-category targets — visible only for new material_category scenarios */}
+                          {sc.source_type === 'material_category' && (
+                            <NpiMaterialTargetsSection scenarioId={sc.id} ovenServerUrl={ovenServerUrl} />
+                          )}
                           {/* Placeholder SKU section — auto-populated on scenario create; operator maps to real SKUs on receipt */}
                           <NpiPlaceholderSection scenarioId={sc.id} ovenServerUrl={ovenServerUrl} />
                           {/* Quarantine receipts — physical lenses received under placeholders; release on map */}
@@ -4419,11 +4564,12 @@ function InventoryTab({ ovenServerUrl, settings }) {
                           } catch {}
                         }
                       }} style={{ width: '100%', padding: '8px 10px', background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 12, fontFamily: mono }}>
-                        <option value="prefix">By SKU prefix (e.g. 4800 = all Essilor poly)</option>
-                        <option value="skus">Specific SKUs (comma-separated)</option>
-                        <option value="proxy">Emulate a proxy SKU's demand</option>
-                        <option value="null_opc">Null OPC orders (CR 39 free option) — auto-detects adoption rate</option>
-                        <option value="standard_profile">Standard Profile (non-cannibalizing — pick a template + total qty)</option>
+                        <option value="material_category">Material Category (recommended — checkbox UI)</option>
+                        <option value="null_opc">Null OPC orders (CR 39 free option)</option>
+                        <option value="standard_profile">Standard Profile (non-cannibalizing — template + qty)</option>
+                        <option value="prefix">By SKU prefix (legacy)</option>
+                        <option value="skus">Specific SKUs (legacy paste list)</option>
+                        <option value="proxy">Emulate a proxy SKU's demand (legacy)</option>
                       </select>
                     </div>
                     <div>

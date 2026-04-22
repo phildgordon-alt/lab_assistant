@@ -73,6 +73,29 @@ try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN abc_class TEXT"); } catch (e
 try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN standard_profile_template_id INTEGER REFERENCES rx_profile_templates(id)"); } catch (e) { /* already exists */ }
 try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN standard_profile_qty INTEGER"); } catch (e) { /* already exists */ }
 
+// Phase M1 (material-category NPI): checkbox-driven cannibalization by material
+// class instead of per-SKU paste. source_type='material_category' + one row per
+// checked (material, lens_type_class) in npi_scenario_material_targets. Feature-
+// flagged via model_params.npi_material_category_ui_enabled (default false).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS npi_scenario_material_targets (
+    scenario_id     TEXT NOT NULL,
+    material_code   TEXT NOT NULL,      -- 'PLY','BLY','H67','B67' (extensible)
+    lens_type_class TEXT NOT NULL CHECK (lens_type_class IN ('SV','SEMI')),
+    adoption_pct    REAL NOT NULL DEFAULT 50 CHECK (adoption_pct BETWEEN 0 AND 100),
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (scenario_id, material_code, lens_type_class),
+    FOREIGN KEY (scenario_id) REFERENCES npi_scenarios(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_nsmt_scenario ON npi_scenario_material_targets(scenario_id);
+  CREATE INDEX IF NOT EXISTS idx_nsmt_material ON npi_scenario_material_targets(material_code, lens_type_class);
+`);
+// Composite index on jobs to speed the SV Rx bucket query (predicate on
+// lens_type + lens_material + entry_date). Not critical at current row count
+// but future-proof.
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_jobs_type_mat_entry ON jobs(lens_type, lens_material, entry_date)"); } catch {}
+
 // Phase 4: placeholder SKUs for NPI ordering — the real supplier SKUs don't
 // exist until after the order is placed and received. Orders reference
 // placeholder codes; operator maps placeholder → real SKU when the supplier
@@ -1589,6 +1612,87 @@ function releaseQuarantineForPlaceholder(placeholderCode, realSku, itempathQtySn
      WHERE placeholder_code = ? AND status = 'quarantined'`
   ).run(now, realSku, itempathQtySnapshot, placeholderCode);
   return { released: res.changes };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NPI Material-Category Targets — Phase M1 helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function listMaterialTargets(scenarioId) {
+  return db.prepare(
+    `SELECT * FROM npi_scenario_material_targets WHERE scenario_id = ? ORDER BY lens_type_class, material_code`
+  ).all(scenarioId);
+}
+
+function setMaterialTargets(scenarioId, targets) {
+  // targets: array of {material_code, lens_type_class, adoption_pct}
+  db.transaction(() => {
+    db.prepare(`DELETE FROM npi_scenario_material_targets WHERE scenario_id = ?`).run(scenarioId);
+    const ins = db.prepare(
+      `INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct)
+       VALUES (?, ?, ?, ?)`
+    );
+    for (const t of targets) {
+      if (!t.material_code || !t.lens_type_class) continue;
+      if (!['SV', 'SEMI'].includes(t.lens_type_class)) throw new Error('Invalid lens_type_class');
+      ins.run(scenarioId, t.material_code.toUpperCase(), t.lens_type_class, Number(t.adoption_pct) || 50);
+    }
+  })();
+  return { updated: targets.length };
+}
+
+// Materialize cannibalized consumption for a scenario. Reads
+// lens_sku_properties + lens_consumption_weekly. Returns per-target row:
+// { scenario_id, material_code, lens_type_class, sku_count, weekly_avg,
+//   adoption_pct, projected_weekly }.
+// 12-month window matches lens_sku_properties backfill convention.
+function getMaterialCategoryProjection(scenarioId) {
+  try {
+    return db.prepare(`
+      SELECT
+        t.scenario_id,
+        t.material_code,
+        t.lens_type_class,
+        COUNT(DISTINCT p.sku)                                               AS sku_count,
+        ROUND(COALESCE(SUM(cw.weekly_avg), 0), 1)                           AS weekly_avg,
+        t.adoption_pct,
+        ROUND(COALESCE(SUM(cw.weekly_avg), 0) * t.adoption_pct / 100.0, 1)  AS projected_weekly
+      FROM npi_scenario_material_targets t
+      JOIN lens_sku_properties p
+        ON p.material = t.material_code
+       AND ((t.lens_type_class = 'SV'   AND p.lens_type_modal IN ('S','C'))
+         OR (t.lens_type_class = 'SEMI' AND p.lens_type_modal = 'P'))
+      LEFT JOIN (
+        SELECT sku,
+               SUM(units_consumed) * 1.0 / NULLIF(COUNT(DISTINCT week_start), 0) AS weekly_avg
+        FROM lens_consumption_weekly
+        WHERE week_start >= date('now', '-12 months', 'localtime')
+        GROUP BY sku
+      ) cw ON cw.sku = p.sku
+      WHERE t.scenario_id = ?
+      GROUP BY t.scenario_id, t.material_code, t.lens_type_class, t.adoption_pct
+      ORDER BY t.lens_type_class, t.material_code
+    `).all(scenarioId);
+  } catch (e) {
+    return [];
+  }
+}
+
+// Simple key/value model_params feature flag — default false (rollback safe)
+function getModelFlag(key) {
+  try {
+    const row = db.prepare(`SELECT value FROM model_params WHERE key = ?`).get(key);
+    if (!row) return null;
+    if (row.value === 'true') return true;
+    if (row.value === 'false') return false;
+    return row.value;
+  } catch { return null; }
+}
+function setModelFlag(key, value) {
+  try {
+    db.exec("CREATE TABLE IF NOT EXISTS model_params (key TEXT PRIMARY KEY, value TEXT)");
+    db.prepare(`INSERT INTO model_params (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, String(value));
+  } catch { /* ignore */ }
 }
 
 function confirmQuarantineReconcile(scenarioId, receiptId, reconciledBy = null) {
@@ -3624,6 +3728,11 @@ module.exports = {
   removeQuarantineReceipt,
   releaseQuarantineForPlaceholder,
   confirmQuarantineReconcile,
+  listMaterialTargets,
+  setMaterialTargets,
+  getMaterialCategoryProjection,
+  getModelFlag,
+  setModelFlag,
   SEED_SEMIFINISHED,
   // Upsert functions (called by adapters)
   upsertInventory,

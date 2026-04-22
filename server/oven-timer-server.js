@@ -3054,6 +3054,10 @@ Respond with a structured batching plan in this format:
       && !url.pathname.includes('/variant-skus')
       && !url.pathname.includes('/placeholder-skus')
       && !url.pathname.includes('/quarantine-receipts')
+      && !url.pathname.endsWith('/material-targets')
+      && !url.pathname.endsWith('/material-projection')
+      && !url.pathname.endsWith('/rx-stocking-sv.csv')
+      && !url.pathname.endsWith('/rx-stocking-semi.csv')
       && !url.pathname.endsWith('/po-document')) {
     const id = url.pathname.split('/').pop();
     return json(res, npiEngine.getScenario(labDb.db, id, netsuite));
@@ -3153,6 +3157,54 @@ Respond with a structured batching plan in this format:
     const tpl = labDb.getRxProfileTemplate(id);
     if (!tpl) { res.writeHead(404); return res.end('Template not found'); }
     return json(res, tpl);
+  }
+  // Phase M1 — material-category targets + stocking CSVs
+  //   GET/PUT /api/npi/scenarios/:id/material-targets
+  //   GET     /api/npi/scenarios/:id/material-projection
+  //   GET     /api/npi/scenarios/:id/rx-stocking-sv.csv
+  //   GET     /api/npi/scenarios/:id/rx-stocking-semi.csv
+  //   Feature flag: GET/PUT /api/model-flags/:key
+  if (req.method === 'GET' && url.pathname.startsWith('/api/model-flags/')) {
+    const key = url.pathname.split('/').pop();
+    return json(res, { key, value: labDb.getModelFlag(key) });
+  }
+  if (req.method === 'PUT' && url.pathname.startsWith('/api/model-flags/')) {
+    const key = url.pathname.split('/').pop();
+    const body = await readBody(req);
+    labDb.setModelFlag(key, body.value);
+    return json(res, { key, value: labDb.getModelFlag(key) });
+  }
+  if (url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/material-targets')) {
+    const id = url.pathname.split('/')[4];
+    if (req.method === 'GET') return json(res, { targets: labDb.listMaterialTargets(id) });
+    if (req.method === 'PUT') {
+      const body = await readBody(req);
+      const result = labDb.setMaterialTargets(id, Array.isArray(body?.targets) ? body.targets : []);
+      return json(res, result);
+    }
+  }
+  if (req.method === 'GET' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/material-projection')) {
+    const id = url.pathname.split('/')[4];
+    const projRows = labDb.getMaterialCategoryProjection(id);
+    return json(res, { rows: projRows });
+  }
+  if (req.method === 'GET' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/rx-stocking-sv.csv')) {
+    const id = url.pathname.split('/')[4];
+    const out = npiEngine.formatSvStockingCsv(labDb.db, id);
+    if (out.error) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: out.error })); }
+    const scn = out.totals?.scenario || {};
+    const safeName = (scn.name || 'scenario').replace(/[^A-Za-z0-9_-]/g, '_');
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="npi-sv-stocking-${safeName}-${new Date().toISOString().slice(0,10)}.csv"` });
+    return res.end(out.csv);
+  }
+  if (req.method === 'GET' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/rx-stocking-semi.csv')) {
+    const id = url.pathname.split('/')[4];
+    const out = npiEngine.formatSemiStockingCsv(labDb.db, id);
+    if (out.error) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: out.error })); }
+    const scn = out.totals?.scenario || {};
+    const safeName = (scn.name || 'scenario').replace(/[^A-Za-z0-9_-]/g, '_');
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="npi-semi-stocking-${safeName}-${new Date().toISOString().slice(0,10)}.csv"` });
+    return res.end(out.csv);
   }
   // Projected vs actual cannibalization variance for a scenario. Computes
   // recent-window actual consumption per source SKU and compares against the

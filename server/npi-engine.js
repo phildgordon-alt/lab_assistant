@@ -166,6 +166,117 @@ function computeCannibalization(db, scenarioId) {
       GROUP BY sku
       ORDER BY total DESC
     `).all();
+  } else if (scenario.source_type === 'material_category') {
+    // Material-category cannibalization. Read targets, find SKUs in
+    // lens_sku_properties matching (material × lens_type class), weight by
+    // their own adoption_pct, aggregate into sourceSkus the same way the
+    // 'skus' path does. Fixed 12-month window on lens_consumption_weekly.
+    const targets = db.prepare(
+      `SELECT material_code, lens_type_class, adoption_pct FROM npi_scenario_material_targets WHERE scenario_id = ?`
+    ).all(scenarioId);
+    if (targets.length > 0) {
+      // Collect matching SKUs per target, preserving adoption_pct
+      const skuAdoption = new Map(); // sku → adoption_pct
+      const skuList = [];
+      for (const t of targets) {
+        const skus = db.prepare(
+          `SELECT sku FROM lens_sku_properties
+           WHERE material = ?
+             AND ${t.lens_type_class === 'SV' ? `lens_type_modal IN ('S','C')` : `lens_type_modal = 'P'`}`
+        ).all(t.material_code);
+        for (const r of skus) {
+          skuAdoption.set(r.sku, t.adoption_pct);
+          skuList.push(r.sku);
+        }
+      }
+      if (skuList.length > 0) {
+        // Pull weekly consumption in chunks of 500 (SQLite param limit safety)
+        const CHUNK = 500;
+        const rowsByKey = new Map();
+        for (let i = 0; i < skuList.length; i += CHUNK) {
+          const chunk = skuList.slice(i, i + CHUNK);
+          const ph = chunk.map(() => '?').join(',');
+          const rows = db.prepare(`
+            SELECT sku, SUM(units_consumed) as total, COUNT(DISTINCT week_start) as weeks
+            FROM lens_consumption_weekly
+            WHERE sku IN (${ph})
+              AND week_start >= date('now', '-12 months', 'localtime')
+            GROUP BY sku
+          `).all(...chunk);
+          for (const r of rows) rowsByKey.set(r.sku, r);
+        }
+        // Build sourceSkus with per-SKU adoption_pct instead of global. Custom
+        // override: we compute lost/remaining here directly since the default
+        // loop below uses scenario.adoption_pct. We'll store the per-SKU math
+        // and short-circuit the default loop.
+        const save = db.transaction(() => {
+          const del2 = db.prepare('DELETE FROM npi_cannibalization WHERE scenario_id = ?');
+          const ins2 = db.prepare('INSERT INTO npi_cannibalization (scenario_id, source_sku, current_weekly, lost_weekly, new_weekly) VALUES (?, ?, ?, ?, ?)');
+          del2.run(scenarioId);
+          for (const sku of skuAdoption.keys()) {
+            const r = rowsByKey.get(sku);
+            const weeklyAvg = r && r.weeks > 0 ? Math.round(r.total / r.weeks * 10) / 10 : 0;
+            const adoption = (skuAdoption.get(sku) || 50) / 100;
+            const lost = Math.round(weeklyAvg * adoption * 10) / 10;
+            const remaining = Math.round((weeklyAvg - lost) * 10) / 10;
+            ins2.run(scenarioId, sku, weeklyAvg, lost, remaining);
+          }
+        });
+        save();
+        // Re-read and hand off to the shared tail: set sourceSkus so the
+        // downstream totals computation runs as normal. Cast lost_weekly to
+        // emulate what the 'skus' path would produce.
+        sourceSkus = db.prepare(
+          `SELECT source_sku AS sku, (current_weekly) AS total, 1 AS weeks FROM npi_cannibalization WHERE scenario_id = ?`
+        ).all(scenarioId).map(r => ({ sku: r.sku, total: r.total, weeks: 1 }));
+        // Suppress the default loop's re-delete+insert by flagging with a
+        // sentinel. Cleanest way: skip the default save by running what's
+        // below manually. But simplest is to just let the default loop run —
+        // it will DELETE + re-INSERT with the SCENARIO-level adoption_pct
+        // overriding our per-target logic. That's wrong.
+        // Fix: short-circuit by returning here with the full computed response.
+        const totalCurrentWeekly2 = [...rowsByKey.values()].reduce((s, r) => s + (r.weeks > 0 ? r.total / r.weeks : 0), 0);
+        const totalLostWeekly2 = db.prepare(
+          `SELECT SUM(lost_weekly) AS s FROM npi_cannibalization WHERE scenario_id = ?`
+        ).get(scenarioId).s || 0;
+        const totalLeadTime2 = (scenario.manufacturing_weeks || 13) + (scenario.transit_weeks || 4) + (scenario.fda_hold_weeks || 2);
+        const newProductWeeklyLenses2 = Math.round(totalLostWeekly2);
+        const SAFETY_BY_CLASS = { A: 6, B: 4, C: 3 };
+        const monthlyLenses2 = newProductWeeklyLenses2 * 4.33;
+        const autoAbc2 = monthlyLenses2 >= 100 ? 'A' : monthlyLenses2 >= 20 ? 'B' : 'C';
+        const abcClass2 = scenario.abc_class || autoAbc2;
+        const safetyWeeks2 = scenario.safety_stock_weeks || SAFETY_BY_CLASS[abcClass2];
+        const initialOrderQty2 = Math.ceil((totalLeadTime2 + safetyWeeks2) * newProductWeeklyLenses2);
+        return {
+          scenario,
+          sourceSkuCount: skuAdoption.size,
+          totalCurrentWeekly: Math.round(totalCurrentWeekly2),
+          totalLostWeekly: Math.round(totalLostWeekly2),
+          newProductWeeklyJobs: Math.round(totalLostWeekly2),
+          newProductWeeklyLenses: newProductWeeklyLenses2,
+          abcClass: abcClass2,
+          abcClassSource: scenario.abc_class ? 'scenario_override' : 'auto_from_volume',
+          safetyWeeks: safetyWeeks2,
+          safetyWeeksSource: `material_category_${abcClass2}`,
+          initialOrderQty: initialOrderQty2,
+          totalLeadTime: totalLeadTime2,
+          materialTargets: targets,
+        };
+      }
+    }
+    // No targets set — empty response, don't fall through to the 'skus' default save
+    db.prepare('DELETE FROM npi_cannibalization WHERE scenario_id = ?').run(scenarioId);
+    return {
+      scenario,
+      sourceSkuCount: 0,
+      totalCurrentWeekly: 0, totalLostWeekly: 0,
+      newProductWeeklyJobs: 0, newProductWeeklyLenses: 0,
+      abcClass: scenario.abc_class || 'B', abcClassSource: 'default',
+      safetyWeeks: scenario.safety_stock_weeks || 4, safetyWeeksSource: 'default',
+      initialOrderQty: 0,
+      totalLeadTime: (scenario.manufacturing_weeks || 13) + (scenario.transit_weeks || 4) + (scenario.fda_hold_weeks || 2),
+      note: 'No material targets selected — go to Material Targets section and pick at least one.',
+    };
   } else if (scenario.source_type === 'standard_profile') {
     // Non-cannibalizing NPI — no source SKUs, no cannibalization rows.
     // User specifies standard_profile_template_id + standard_profile_qty.
@@ -576,4 +687,211 @@ function getCannibalizationVariance(db, scenarioId, windowWeeks = 4) {
   };
 }
 
-module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows, formatRxListCsv, getCannibalizationVariance };
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase M1 — Material-Category Stocking CSVs
+// For source_type='material_category' scenarios: aggregate historical Rx
+// distribution from the jobs table, bucket it, and emit as CSV. Two files:
+//  • SV stocking: sph/cyl/add buckets, per-material, qty per bucket
+//  • Semi stocking: base_curve per material, pucks have no Rx
+// Initial-order qty is computed per-bucket (CEIL per bucket) so total never
+// underruns the projection target.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function csvEsc(v) {
+  if (v === null || v === undefined) return '';
+  const s = String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function computeMaterialCategoryScenarioTotals(db, scenarioId) {
+  const scenario = db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(scenarioId);
+  if (!scenario) return { error: 'Scenario not found' };
+  const targetsModule = require('./db');
+  const projRows = targetsModule.getMaterialCategoryProjection(scenarioId);
+  let svWeekly = 0, semiWeekly = 0;
+  const byMatClass = {};
+  for (const r of projRows) {
+    const key = `${r.lens_type_class}|${r.material_code}`;
+    byMatClass[key] = r;
+    if (r.lens_type_class === 'SV') svWeekly += r.projected_weekly;
+    else if (r.lens_type_class === 'SEMI') semiWeekly += r.projected_weekly;
+  }
+  const totalLeadTime = (scenario.manufacturing_weeks || 13) + (scenario.transit_weeks || 4) + (scenario.fda_hold_weeks || 2);
+  const SAFETY_BY_CLASS = { A: 6, B: 4, C: 3 };
+  const totalWeekly = Math.round(svWeekly + semiWeekly);
+  const monthly = totalWeekly * 4.33;
+  const autoAbc = monthly >= 100 ? 'A' : monthly >= 20 ? 'B' : 'C';
+  const abcClass = scenario.abc_class || autoAbc;
+  const safetyWeeks = scenario.safety_stock_weeks || SAFETY_BY_CLASS[abcClass];
+  const weeks = totalLeadTime + safetyWeeks;
+  return {
+    scenario, projRows, byMatClass,
+    svProjectedWeekly: Math.round(svWeekly * 10) / 10,
+    semiProjectedWeekly: Math.round(semiWeekly * 10) / 10,
+    totalProjectedWeekly: totalWeekly,
+    totalLeadTime, safetyWeeks, abcClass,
+    weeksMultiplier: weeks,
+    svInitialOrder: Math.ceil(svWeekly * weeks),
+    semiInitialOrder: Math.ceil(semiWeekly * weeks),
+  };
+}
+
+// SV Rx bucket CSV — per-bucket qty. Axis ignored (not stocked by axis).
+// Counts R+L as separate samples.
+function formatSvStockingCsv(db, scenarioId) {
+  const totals = computeMaterialCategoryScenarioTotals(db, scenarioId);
+  if (totals.error) return { error: totals.error };
+  const svMaterials = totals.projRows.filter(r => r.lens_type_class === 'SV').map(r => r.material_code);
+  if (svMaterials.length === 0) {
+    return { csv: '# No SV materials selected for cannibalization.\n' };
+  }
+  const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  const placeholders = svMaterials.map(() => '?').join(',');
+  // UNION R+L; bucket sph by 2.00D, cyl by 1.00D, add by 0.50D
+  const sql = `
+    WITH samples AS (
+      SELECT lens_material AS material,
+             CAST(rx_r_sphere AS REAL) AS sph,
+             CAST(rx_r_cylinder AS REAL) AS cyl,
+             CAST(rx_r_add AS REAL) AS add_pwr
+      FROM jobs
+      WHERE lens_type IN ('S','C')
+        AND lens_material IN (${placeholders})
+        AND lens_opc_r IS NOT NULL AND lens_opc_r != ''
+        AND rx_r_sphere IS NOT NULL AND rx_r_sphere != ''
+        AND substr(entry_date, 1, 10) >= ?
+      UNION ALL
+      SELECT lens_material,
+             CAST(rx_l_sphere AS REAL),
+             CAST(rx_l_cylinder AS REAL),
+             CAST(rx_l_add AS REAL)
+      FROM jobs
+      WHERE lens_type IN ('S','C')
+        AND lens_material IN (${placeholders})
+        AND lens_opc_l IS NOT NULL AND lens_opc_l != ''
+        AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
+        AND substr(entry_date, 1, 10) >= ?
+    )
+    SELECT
+      material,
+      CAST(FLOOR(sph / 2.0) * 2.0 AS REAL)                 AS sph_from,
+      CAST(FLOOR(sph / 2.0) * 2.0 + 2.0 AS REAL)           AS sph_to,
+      CAST(FLOOR(COALESCE(cyl, 0) / 1.0) * 1.0 AS REAL)             AS cyl_from,
+      CAST(FLOOR(COALESCE(cyl, 0) / 1.0) * 1.0 + 1.0 AS REAL)       AS cyl_to,
+      CASE WHEN add_pwr IS NULL OR add_pwr = 0 THEN NULL
+           ELSE CAST(FLOOR(add_pwr / 0.5) * 0.5 AS REAL) END         AS add_from,
+      CASE WHEN add_pwr IS NULL OR add_pwr = 0 THEN NULL
+           ELSE CAST(FLOOR(add_pwr / 0.5) * 0.5 + 0.5 AS REAL) END   AS add_to,
+      COUNT(*) AS sample_count
+    FROM samples
+    GROUP BY material, sph_from, sph_to, cyl_from, cyl_to, add_from, add_to
+    ORDER BY material, sph_from, cyl_from, add_from
+  `;
+  const params = [...svMaterials, since, ...svMaterials, since];
+  const rows = db.prepare(sql).all(...params);
+  const totalSamples = rows.reduce((s, r) => s + r.sample_count, 0) || 1;
+
+  // Per-material projected_weekly lookup
+  const projByMat = {};
+  for (const r of totals.projRows) if (r.lens_type_class === 'SV') projByMat[r.material_code] = r.projected_weekly;
+  // Per-material total samples
+  const samplesByMat = {};
+  for (const r of rows) samplesByMat[r.material] = (samplesByMat[r.material] || 0) + r.sample_count;
+
+  const lines = [];
+  lines.push(`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`);
+  lines.push(`# Source: material_category | Window: last 12 months | R+L samples each`);
+  lines.push(`# Total SV projected weekly: ${totals.svProjectedWeekly} lenses/wk`);
+  lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
+  lines.push(`# Total SV initial order: ${totals.svInitialOrder} lenses`);
+  for (const [mat, n] of Object.entries(samplesByMat)) {
+    lines.push(`# ${mat}: ${n} Rx samples · projected ${projByMat[mat] || 0}/wk`);
+  }
+  lines.push(`# Generated: ${new Date().toISOString()}`);
+  lines.push('');
+  lines.push(['material','sph_from','sph_to','cyl_from','cyl_to','add_from','add_to','sample_count','pct_of_material','weekly_projection','initial_order_qty'].join(','));
+  for (const r of rows) {
+    const matSamples = samplesByMat[r.material] || 1;
+    const pctOfMat = r.sample_count / matSamples;
+    const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
+    const qty = Math.ceil(weeklyForBucket * totals.weeksMultiplier);
+    lines.push([
+      csvEsc(r.material),
+      r.sph_from.toFixed(2), r.sph_to.toFixed(2),
+      r.cyl_from.toFixed(2), r.cyl_to.toFixed(2),
+      r.add_from != null ? r.add_from.toFixed(2) : '',
+      r.add_to != null ? r.add_to.toFixed(2) : '',
+      r.sample_count,
+      (pctOfMat * 100).toFixed(2),
+      weeklyForBucket.toFixed(1),
+      qty,
+    ].join(','));
+  }
+  return { csv: lines.join('\n'), totals };
+}
+
+// Semi stocking CSV — one row per (material, base_curve). No Rx (pucks are
+// surfaced after stocking). Weighted by weekly consumption.
+function formatSemiStockingCsv(db, scenarioId) {
+  const totals = computeMaterialCategoryScenarioTotals(db, scenarioId);
+  if (totals.error) return { error: totals.error };
+  const semiMaterials = totals.projRows.filter(r => r.lens_type_class === 'SEMI').map(r => r.material_code);
+  if (semiMaterials.length === 0) {
+    return { csv: '# No semi-finished materials selected for cannibalization.\n' };
+  }
+  const placeholders = semiMaterials.map(() => '?').join(',');
+  // base_curve + weekly consumption per SKU
+  const sql = `
+    SELECT
+      p.material,
+      p.base_curve,
+      COUNT(DISTINCT p.sku) AS sku_count,
+      ROUND(COALESCE(SUM(cw.weekly_avg), 0), 2) AS weekly_consumption
+    FROM lens_sku_properties p
+    LEFT JOIN (
+      SELECT sku, SUM(units_consumed) * 1.0 / NULLIF(COUNT(DISTINCT week_start), 0) AS weekly_avg
+      FROM lens_consumption_weekly
+      WHERE week_start >= date('now', '-12 months', 'localtime')
+      GROUP BY sku
+    ) cw ON cw.sku = p.sku
+    WHERE p.lens_type_modal = 'P'
+      AND p.material IN (${placeholders})
+    GROUP BY p.material, p.base_curve
+    ORDER BY p.material, p.base_curve
+  `;
+  const rows = db.prepare(sql).all(...semiMaterials);
+
+  const projByMat = {};
+  for (const r of totals.projRows) if (r.lens_type_class === 'SEMI') projByMat[r.material_code] = r.projected_weekly;
+  const totalsByMat = {};
+  for (const r of rows) totalsByMat[r.material] = (totalsByMat[r.material] || 0) + r.weekly_consumption;
+
+  const lines = [];
+  lines.push(`# NPI Semi-Finished Stocking — ${csvEsc(totals.scenario.name || '')}`);
+  lines.push(`# Source: material_category | Window: last 12 months`);
+  lines.push(`# Total Semi projected weekly: ${totals.semiProjectedWeekly} pucks/wk`);
+  lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
+  lines.push(`# Total Semi initial order: ${totals.semiInitialOrder} pucks`);
+  lines.push(`# Note: base_curve=UNKNOWN means the SKU didn't have a known BC in lens_sku_properties.`);
+  lines.push(`# Generated: ${new Date().toISOString()}`);
+  lines.push('');
+  lines.push(['material','base_curve','sku_count','weekly_consumption','pct_of_material','weekly_projection','initial_order_qty'].join(','));
+  for (const r of rows) {
+    const matTotal = totalsByMat[r.material] || 1;
+    const pctOfMat = r.weekly_consumption / matTotal;
+    const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
+    const qty = Math.ceil(weeklyForBucket * totals.weeksMultiplier);
+    lines.push([
+      csvEsc(r.material),
+      r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
+      r.sku_count,
+      r.weekly_consumption.toFixed(2),
+      (pctOfMat * 100).toFixed(2),
+      weeklyForBucket.toFixed(2),
+      qty,
+    ].join(','));
+  }
+  return { csv: lines.join('\n'), totals };
+}
+
+module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows, formatRxListCsv, getCannibalizationVariance, computeMaterialCategoryScenarioTotals, formatSvStockingCsv, formatSemiStockingCsv };
