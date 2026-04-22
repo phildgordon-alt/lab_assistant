@@ -3508,6 +3508,17 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.text, fontFamily: mono }}>{(npiSelected.initialOrderQty || 0).toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>INITIAL ORDER</div></div>
                           </div>
 
+                          {/* Export button — full scenario + cannibalization detail as CSV */}
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+                            <button
+                              onClick={() => window.open(`${ovenServerUrl}/api/npi/scenarios/${sc.id}/export`, '_blank')}
+                              style={{ background: `${T.blue}20`, border: `1px solid ${T.blue}60`, borderRadius: 4, padding: '5px 12px', color: T.blue, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}
+                              title="Download initial order + cannibalization breakdown as CSV"
+                            >
+                              ⬇ Export Initial Order CSV
+                            </button>
+                          </div>
+
                           {/* Edit form */}
                           <div style={{ padding: 10, background: T.bg, borderRadius: 6, marginBottom: 12 }}>
                             <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono, marginBottom: 8 }}>EDIT SCENARIO</div>

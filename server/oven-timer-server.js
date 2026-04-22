@@ -3066,6 +3066,70 @@ Respond with a structured batching plan in this format:
     const result = npiEngine.computeCannibalization(labDb.db, id);
     return json(res, result || { error: 'Scenario not found' });
   }
+  // CSV export — initial order + cannibalization detail for a scenario
+  if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/export')) {
+    const id = url.pathname.split('/')[4];
+    const scenario = labDb.db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(id);
+    if (!scenario) {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      return res.end('Scenario not found');
+    }
+    const cannibalization = labDb.db.prepare('SELECT * FROM npi_cannibalization WHERE scenario_id = ? ORDER BY lost_weekly DESC').all(id);
+    const result = npiEngine.computeCannibalization(labDb.db, id) || {};
+    const totalLeadTime = (scenario.manufacturing_weeks || 13) + (scenario.transit_weeks || 4) + (scenario.fda_hold_weeks || 2);
+    const safetyWeeks = 4;
+    const esc = (v) => {
+      if (v === null || v === undefined) return '';
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [];
+    // Section 1: scenario header + initial order summary
+    lines.push('# NPI SCENARIO — INITIAL ORDER');
+    lines.push(`Generated,${new Date().toISOString()}`);
+    lines.push('');
+    lines.push('Field,Value');
+    lines.push(`Scenario Name,${esc(scenario.name)}`);
+    lines.push(`Status,${esc(scenario.status || 'draft')}`);
+    lines.push(`New SKU Prefix,${esc(scenario.new_sku_prefix || '')}`);
+    lines.push(`Adoption %,${scenario.adoption_pct || 50}`);
+    lines.push(`Source Type,${esc(scenario.source_type || '')}`);
+    lines.push(`Source Value,${esc(scenario.source_value || '')}`);
+    lines.push(`Proxy SKU,${esc(scenario.proxy_sku || '')}`);
+    lines.push(`Launch Date,${esc(scenario.launch_date || '')}`);
+    lines.push(`Manufacturing Weeks,${scenario.manufacturing_weeks || 13}`);
+    lines.push(`Transit Weeks,${scenario.transit_weeks || 4}`);
+    lines.push(`FDA Hold Weeks,${scenario.fda_hold_weeks || 2}`);
+    lines.push(`Safety Stock Weeks,${safetyWeeks}`);
+    lines.push(`Total Lead Time Weeks,${totalLeadTime}`);
+    lines.push('');
+    lines.push('# DEMAND PROJECTION');
+    lines.push('Metric,Value');
+    lines.push(`Projected Jobs/Week,${result.newProductWeeklyJobs || 0}`);
+    lines.push(`Projected Lenses/Week,${result.newProductWeeklyLenses || 0}`);
+    lines.push(`Weekly Reduction from Cannibalization,${result.totalLostWeekly || 0}`);
+    lines.push(`Current Weekly Volume (cannibalized SKUs),${result.totalCurrentWeekly || 0}`);
+    lines.push(`Source SKU Count,${result.sourceSkuCount || 0}`);
+    lines.push('');
+    lines.push('# INITIAL ORDER RECOMMENDATION');
+    lines.push('Metric,Value');
+    lines.push(`Initial Order Quantity,${result.initialOrderQty || 0}`);
+    lines.push(`Formula,(${totalLeadTime}wk lead + ${safetyWeeks}wk safety) * ${result.newProductWeeklyLenses || 0} lenses/wk`);
+    lines.push('');
+    // Section 2: cannibalization breakdown
+    lines.push('# CANNIBALIZATION DETAIL');
+    lines.push('Source SKU,Current Weekly,Lost Weekly,New Weekly');
+    for (const c of cannibalization) {
+      lines.push(`${esc(c.source_sku)},${c.current_weekly || 0},${c.lost_weekly || 0},${c.new_weekly || 0}`);
+    }
+    const csv = lines.join('\n');
+    const filename = `npi-${(scenario.name || 'scenario').replace(/[^A-Za-z0-9_-]/g, '_')}-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    return res.end(csv);
+  }
   // Activate NPI — inject new SKU into lens intelligence, apply cannibalization adjustments
   if (req.method==='POST' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/activate')) {
     const id = url.pathname.split('/')[4];
