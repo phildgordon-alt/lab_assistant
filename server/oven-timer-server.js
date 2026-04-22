@@ -636,9 +636,20 @@ if (process.env.DEMO_MODE === 'true') {
 
 // Also reload when dvi-sync copies new files
 dviSync.on('file', (evt) => {
-  if (evt.sync === 'jobs') {
-    setTimeout(loadDviJobIndex, 1000);
+  try {
+    if (evt && evt.sync === 'jobs') {
+      setTimeout(() => {
+        try { loadDviJobIndex(); }
+        catch (e) { console.error(`[DVI-Sync] loadDviJobIndex failed after file event: ${e.message}`); }
+      }, 1000);
+    }
+  } catch (e) {
+    console.error(`[DVI-Sync] 'file' event handler failed: ${e.message}`);
   }
+});
+dviSync.on('error', (err) => {
+  // EventEmitters without an 'error' listener crash the process on emit('error')
+  console.error(`[DVI-Sync] error event: ${err?.message || err}`);
 });
 
 const PORT      = parseInt(process.env.PORT || '3002', 10);
