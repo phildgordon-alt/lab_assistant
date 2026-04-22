@@ -1052,26 +1052,50 @@ try {
 
 // Find days with missing or low pick counts in picks_history.
 // Returns the oldest missing day as a Date, or null if coverage is good.
+// Return the lab-local (PT) YYYY-MM-DD for a Date object. Never use UTC date math for
+// lab-day boundaries — PT rows between 5 PM and midnight are "today" at the lab but
+// "tomorrow" in UTC. substr(completed_at, 1, 10) reads the PT date directly from the
+// stored string (offset-form and naive-noon both have YYYY-MM-DD in their first 10 chars).
+function labDateString(d) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(d || new Date());
+  const get = (t) => parts.find(p => p.type === t)?.value;
+  return `${get('year')}-${get('month')}-${get('day')}`;
+}
+function labDayOfWeek(d) {
+  // PT day-of-week: use the lab-local calendar date, construct a synthetic Date
+  // from it, and read getUTCDay() to avoid re-applying the host's offset.
+  const s = labDateString(d);
+  return new Date(s + 'T12:00:00Z').getUTCDay();
+}
+
 function findMissingDay() {
   try {
     // Look back 30 days for holes. A "hole" is a weekday with < 2500 picks.
     // Normal workday: 3000-5000 picks (each job = 3 picks: R lens, L lens, frame).
+    //
+    // substr(completed_at, 1, 10) reads the PT-local date from the stored string
+    // (column is mixed: offset-form '2026-04-17 17:11-07:00' and naive-noon backfill
+    // rows). date(col) would evaluate in UTC and shift evening PT picks into tomorrow,
+    // which caused the 04-17 phantom hole that trapped pickSync for 5 days.
     const rows = db.db.prepare(`
-      SELECT date(completed_at) as d, COUNT(*) as n
+      SELECT substr(completed_at, 1, 10) as d, COUNT(*) as n
       FROM picks_history
       WHERE completed_at >= date('now', '-30 days')
-      GROUP BY date(completed_at)
+      GROUP BY substr(completed_at, 1, 10)
     `).all();
     const covered = new Map(rows.map(r => [r.d, r.n]));
 
-    // Walk backwards from yesterday (today may still be accumulating)
+    // Walk backwards from yesterday (today may still be accumulating) using PT calendar.
     const now = new Date();
     for (let i = 1; i <= 30; i++) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      const dow = d.getDay(); // 0=Sun, 6=Sat
+      const dow = labDayOfWeek(d);
       if (dow === 0 || dow === 6) continue; // skip weekends
-      const dateStr = d.toISOString().substring(0, 10);
+      const dateStr = labDateString(d);
       const count = covered.get(dateStr) || 0;
       // Skip days where ItemPath confirmed 0 picks (holidays/closures)
       if (backfillAttempted.has(dateStr) && count === 0) continue;
@@ -1214,8 +1238,11 @@ async function countReconciliation() {
 
   try {
     const db = require('./db');
-    const today = new Date().toISOString().substring(0, 10);
-    const midnightToday = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()).toISOString();
+    // "Today" at the lab is PT, not UTC. UTC-based "today" skips 5 PM - midnight PT
+    // production and double-counts after UTC midnight.
+    const today = labDateString(new Date());
+    // Midnight today PT → UTC ISO for the ItemPath query window
+    const midnightToday = new Date(today + 'T00:00:00-07:00').toISOString();
 
     // ItemPath count for today — fetch with small limit instead of countOnly (was causing timeouts)
     const countData = await ipFetch('/api/order_lines', {
@@ -1225,9 +1252,9 @@ async function countReconciliation() {
     }, { timeout: 30000 });
     const ipCount = countData.total_count || countData.count || (countData.order_lines || []).length;
 
-    // Our count for today
+    // Our count for today — substr reads PT date literal, date() would be UTC
     const ourCount = db.db.prepare(
-      "SELECT COUNT(*) as cnt FROM picks_history WHERE pick_id LIKE 'hist-%' AND date(completed_at) = ?"
+      "SELECT COUNT(*) as cnt FROM picks_history WHERE pick_id LIKE 'hist-%' AND substr(completed_at, 1, 10) = ?"
     ).get(today)?.cnt || 0;
 
     const gap = ipCount - ourCount;
