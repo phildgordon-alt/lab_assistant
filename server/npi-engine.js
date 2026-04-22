@@ -751,12 +751,17 @@ function formatSvStockingCsv(db, scenarioId) {
   // jobs.entry_date is DVI MM/DD/YY format (e.g. '03/18/26'), NOT ISO. Convert
   // inline so we can compare against an ISO :since parameter.
   const entryDateIso = `('20' || substr(entry_date,7,2) || '-' || substr(entry_date,1,2) || '-' || substr(entry_date,4,2))`;
+  // DVI VISION stores Rx as diopters × 100 in some installs (e.g. sphere -13.75
+  // stored as -1375, cyl -1.25 as -125). Normalize heuristically: any abs
+  // value > 20 is clearly a ×100 encoding and gets divided; otherwise it's
+  // already in diopters. Same heuristic as backfill-lens-sku-properties.js.
+  const norm = (col) => `CASE WHEN ABS(CAST(${col} AS REAL)) > 20 THEN CAST(${col} AS REAL) / 100.0 ELSE CAST(${col} AS REAL) END`;
   const sql = `
     WITH samples AS (
       SELECT lens_material AS material,
-             CAST(rx_r_sphere AS REAL) AS sph,
-             CAST(rx_r_cylinder AS REAL) AS cyl,
-             CAST(rx_r_add AS REAL) AS add_pwr
+             ${norm('rx_r_sphere')} AS sph,
+             ${norm('rx_r_cylinder')} AS cyl,
+             ${norm('rx_r_add')} AS add_pwr
       FROM jobs
       WHERE lens_type IN ('S','C')
         AND lens_material IN (${placeholders})
@@ -765,9 +770,9 @@ function formatSvStockingCsv(db, scenarioId) {
         AND ${entryDateIso} >= ?
       UNION ALL
       SELECT lens_material,
-             CAST(rx_l_sphere AS REAL),
-             CAST(rx_l_cylinder AS REAL),
-             CAST(rx_l_add AS REAL)
+             ${norm('rx_l_sphere')},
+             ${norm('rx_l_cylinder')},
+             ${norm('rx_l_add')}
       FROM jobs
       WHERE lens_type IN ('S','C')
         AND lens_material IN (${placeholders})
@@ -775,20 +780,18 @@ function formatSvStockingCsv(db, scenarioId) {
         AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
         AND ${entryDateIso} >= ?
     )
+    -- One row per unique prescription (material × sph × cyl × add). Rx values
+    -- snapped to 0.25D standard Rx grid — matches how supplier stocks units.
     SELECT
       material,
-      CAST(FLOOR(sph / 2.0) * 2.0 AS REAL)                 AS sph_from,
-      CAST(FLOOR(sph / 2.0) * 2.0 + 2.0 AS REAL)           AS sph_to,
-      CAST(FLOOR(COALESCE(cyl, 0) / 1.0) * 1.0 AS REAL)             AS cyl_from,
-      CAST(FLOOR(COALESCE(cyl, 0) / 1.0) * 1.0 + 1.0 AS REAL)       AS cyl_to,
-      CASE WHEN add_pwr IS NULL OR add_pwr = 0 THEN NULL
-           ELSE CAST(FLOOR(add_pwr / 0.5) * 0.5 AS REAL) END         AS add_from,
-      CASE WHEN add_pwr IS NULL OR add_pwr = 0 THEN NULL
-           ELSE CAST(FLOOR(add_pwr / 0.5) * 0.5 + 0.5 AS REAL) END   AS add_to,
+      ROUND(sph / 0.25) * 0.25                             AS sph,
+      COALESCE(ROUND(cyl / 0.25) * 0.25, 0)                AS cyl,
+      CASE WHEN add_pwr IS NULL OR add_pwr = 0 THEN 0
+           ELSE ROUND(add_pwr / 0.25) * 0.25 END           AS add_pwr,
       COUNT(*) AS sample_count
     FROM samples
-    GROUP BY material, sph_from, sph_to, cyl_from, cyl_to, add_from, add_to
-    ORDER BY material, sph_from, cyl_from, add_from
+    GROUP BY material, sph, cyl, add_pwr
+    ORDER BY material, sph, cyl, add_pwr
   `;
   const params = [...svMaterials, since, ...svMaterials, since];
   const rows = db.prepare(sql).all(...params);
@@ -801,12 +804,15 @@ function formatSvStockingCsv(db, scenarioId) {
   const samplesByMat = {};
   for (const r of rows) samplesByMat[r.material] = (samplesByMat[r.material] || 0) + r.sample_count;
 
-  // Compute per-row initial_order_qty first so we can sum by material for the header
+  // Per-row qty — each row is one unique Rx variant. Project per-Rx by its
+  // share of the material's historical samples, then CEIL per row so no
+  // under-ordering. CEIL per row means sum-of-rows may exceed the exact
+  // projection by ~1/row — acceptable headroom for stocking.
   const rowQty = rows.map(r => {
     const matSamples = samplesByMat[r.material] || 1;
     const pctOfMat = r.sample_count / matSamples;
-    const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
-    return { ...r, pctOfMat, weeklyForBucket, qty: Math.ceil(weeklyForBucket * totals.weeksMultiplier) };
+    const weeklyForRow = (projByMat[r.material] || 0) * pctOfMat;
+    return { ...r, pctOfMat, weeklyForRow, qty: Math.ceil(weeklyForRow * totals.weeksMultiplier) };
   });
   const orderQtyByMat = {};
   for (const r of rowQty) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
@@ -814,7 +820,8 @@ function formatSvStockingCsv(db, scenarioId) {
 
   const lines = [];
   lines.push(`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`);
-  lines.push(`# Source: material_category | Window: last 12 months | R+L samples each`);
+  lines.push(`# Source: material_category | Window: last 12 months | R+L samples counted separately`);
+  lines.push(`# Rx granularity: 0.25D (standard supplier stocking grid)`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
   lines.push(`#`);
   lines.push(`# TOTAL SV INITIAL ORDER: ${grandSum} lenses`);
@@ -822,24 +829,18 @@ function formatSvStockingCsv(db, scenarioId) {
   for (const [mat, q] of Object.entries(orderQtyByMat).sort((a, b) => b[1] - a[1])) {
     lines.push(`#   ${mat}: ${q} lenses   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
   }
-  lines.push(`#`);
-  lines.push(`# Per-material projection + sample detail:`);
-  for (const [mat, n] of Object.entries(samplesByMat)) {
-    lines.push(`#   ${mat}: ${n} Rx samples  ·  projected ${projByMat[mat] || 0}/wk  ·  order ${orderQtyByMat[mat] || 0}`);
-  }
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  lines.push(['material','sph_from','sph_to','cyl_from','cyl_to','add_from','add_to','sample_count','pct_of_material','weekly_projection','initial_order_qty'].join(','));
+  lines.push(['material','sph','cyl','add','sample_count','pct_of_material','weekly_projection','initial_order_qty'].join(','));
   for (const r of rowQty) {
     lines.push([
       csvEsc(r.material),
-      r.sph_from.toFixed(2), r.sph_to.toFixed(2),
-      r.cyl_from.toFixed(2), r.cyl_to.toFixed(2),
-      r.add_from != null ? r.add_from.toFixed(2) : '',
-      r.add_to != null ? r.add_to.toFixed(2) : '',
+      r.sph.toFixed(2),
+      r.cyl.toFixed(2),
+      (r.add_pwr || 0).toFixed(2),
       r.sample_count,
       (r.pctOfMat * 100).toFixed(2),
-      r.weeklyForBucket.toFixed(1),
+      r.weeklyForRow.toFixed(2),
       r.qty,
     ].join(','));
   }
