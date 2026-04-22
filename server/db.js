@@ -1628,6 +1628,11 @@ function upsertJobs(jobs, dataDate) {
       status = excluded.status,
       days_in_lab = excluded.days_in_lab,
       data_date = excluded.data_date,
+      tray = COALESCE(excluded.tray, dvi_jobs.tray),
+      rush = CASE WHEN dvi_jobs.rush IS NULL OR dvi_jobs.rush = 'N' THEN COALESCE(excluded.rush, dvi_jobs.rush) ELSE dvi_jobs.rush END,
+      entry_date = COALESCE(dvi_jobs.entry_date, excluded.entry_date),
+      coating = COALESCE(dvi_jobs.coating, excluded.coating),
+      frame_name = COALESCE(dvi_jobs.frame_name, excluded.frame_name),
       archived = 0,
       shipped_at = NULL,
       last_sync = datetime('now')
@@ -2620,8 +2625,16 @@ db.exec(`
 const upsertJobFromTraceStmt = db.prepare(`
   INSERT INTO jobs (invoice, tray, current_stage, current_station, current_station_num,
                     operator, machine_id, status, has_breakage, first_seen_at, last_event_at,
-                    event_count, events_json, rush, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    event_count, events_json, rush,
+                    reference, rx_number, entry_date, entry_time, department, job_type,
+                    is_hko, lens_type, lens_material, lens_style, lens_color, coating,
+                    coat_type, lens_opc_r, lens_opc_l, frame_upc, frame_name, frame_style,
+                    updated_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          datetime('now'))
   ON CONFLICT(invoice) DO UPDATE SET
     tray = COALESCE(excluded.tray, jobs.tray),
     current_stage = excluded.current_stage,
@@ -2634,17 +2647,47 @@ const upsertJobFromTraceStmt = db.prepare(`
     last_event_at = excluded.last_event_at,
     event_count = excluded.event_count,
     events_json = excluded.events_json,
-    rush = COALESCE(excluded.rush, jobs.rush),
+    rush = CASE WHEN jobs.rush IS NULL OR jobs.rush = 'N' THEN COALESCE(excluded.rush, jobs.rush) ELSE jobs.rush END,
+    reference = COALESCE(jobs.reference, excluded.reference),
+    rx_number = COALESCE(jobs.rx_number, excluded.rx_number),
+    entry_date = COALESCE(jobs.entry_date, excluded.entry_date),
+    entry_time = COALESCE(jobs.entry_time, excluded.entry_time),
+    department = COALESCE(jobs.department, excluded.department),
+    job_type = COALESCE(jobs.job_type, excluded.job_type),
+    is_hko = MAX(jobs.is_hko, excluded.is_hko),
+    lens_type = COALESCE(jobs.lens_type, excluded.lens_type),
+    lens_material = COALESCE(jobs.lens_material, excluded.lens_material),
+    lens_style = COALESCE(jobs.lens_style, excluded.lens_style),
+    lens_color = COALESCE(jobs.lens_color, excluded.lens_color),
+    coating = COALESCE(jobs.coating, excluded.coating),
+    coat_type = COALESCE(jobs.coat_type, excluded.coat_type),
+    lens_opc_r = COALESCE(jobs.lens_opc_r, excluded.lens_opc_r),
+    lens_opc_l = COALESCE(jobs.lens_opc_l, excluded.lens_opc_l),
+    frame_upc = COALESCE(jobs.frame_upc, excluded.frame_upc),
+    frame_name = COALESCE(jobs.frame_name, excluded.frame_name),
+    frame_style = COALESCE(jobs.frame_style, excluded.frame_style),
     updated_at = datetime('now')
 `);
 
 function upsertJobFromTrace(j) {
   if (!j || !j.invoice) return;
+  // Derive status from stage — stage is source of truth. Don't let stale 'ACTIVE'
+  // from the caller outlive a CANCELED/SHIPPED stage transition.
+  const stage = (j.stage || '').toUpperCase();
+  let status = (j.status || 'ACTIVE').toUpperCase();
+  if (stage === 'CANCELED') status = 'CANCELED';
+  else if (stage === 'SHIPPED' || stage === 'COMPLETE') status = 'SHIPPED';
   upsertJobFromTraceStmt.run(
     j.invoice, j.tray || null, j.stage || null, j.station || null, j.stationNum || null,
-    j.operator || null, j.machineId || null, (j.status || 'ACTIVE').toUpperCase(),
+    j.operator || null, j.machineId || null, status,
     j.hasBreakage ? 1 : 0, j.firstSeenAt || null, j.lastEventAt || null,
-    j.eventCount || 0, j.eventsJson || null, j.rush || null
+    j.eventCount || 0, j.eventsJson || null, j.rush || null,
+    j.reference || null, j.rxNumber || null, j.entryDate || null, j.entryTime || null,
+    j.department || null, j.jobType || null,
+    j.isHko ? 1 : 0, j.lensType || null, j.lensMaterial || null, j.lensStyle || null,
+    j.lensColor || null, j.coating || null,
+    j.coatType || null, j.lensOpcR || null, j.lensOpcL || null, j.frameUpc || null,
+    j.frameName || null, j.frameStyle || null
   );
 }
 
