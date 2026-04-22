@@ -3045,7 +3045,10 @@ Respond with a structured batching plan in this format:
     const result = npiEngine.computeCannibalization(labDb.db, id);
     return json(res, { ok: true, id, ...result });
   }
-  if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/') && !url.pathname.includes('/compute')) {
+  if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/')
+      && !url.pathname.includes('/compute')
+      && !url.pathname.endsWith('/export')
+      && !url.pathname.endsWith('/activate')) {
     const id = url.pathname.split('/').pop();
     return json(res, npiEngine.getScenario(labDb.db, id, netsuite));
   }
