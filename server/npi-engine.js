@@ -798,23 +798,36 @@ function formatSvStockingCsv(db, scenarioId) {
   const samplesByMat = {};
   for (const r of rows) samplesByMat[r.material] = (samplesByMat[r.material] || 0) + r.sample_count;
 
+  // Compute per-row initial_order_qty first so we can sum by material for the header
+  const rowQty = rows.map(r => {
+    const matSamples = samplesByMat[r.material] || 1;
+    const pctOfMat = r.sample_count / matSamples;
+    const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
+    return { ...r, pctOfMat, weeklyForBucket, qty: Math.ceil(weeklyForBucket * totals.weeksMultiplier) };
+  });
+  const orderQtyByMat = {};
+  for (const r of rowQty) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
+  const grandSum = rowQty.reduce((s, r) => s + r.qty, 0);
+
   const lines = [];
   lines.push(`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`);
   lines.push(`# Source: material_category | Window: last 12 months | R+L samples each`);
-  lines.push(`# Total SV projected weekly: ${totals.svProjectedWeekly} lenses/wk`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
-  lines.push(`# Total SV initial order: ${totals.svInitialOrder} lenses`);
+  lines.push(`#`);
+  lines.push(`# TOTAL SV INITIAL ORDER: ${grandSum} lenses`);
+  lines.push(`# By material (order quantity):`);
+  for (const [mat, q] of Object.entries(orderQtyByMat).sort((a, b) => b[1] - a[1])) {
+    lines.push(`#   ${mat}: ${q} lenses   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
+  }
+  lines.push(`#`);
+  lines.push(`# Per-material projection + sample detail:`);
   for (const [mat, n] of Object.entries(samplesByMat)) {
-    lines.push(`# ${mat}: ${n} Rx samples · projected ${projByMat[mat] || 0}/wk`);
+    lines.push(`#   ${mat}: ${n} Rx samples  ·  projected ${projByMat[mat] || 0}/wk  ·  order ${orderQtyByMat[mat] || 0}`);
   }
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
   lines.push(['material','sph_from','sph_to','cyl_from','cyl_to','add_from','add_to','sample_count','pct_of_material','weekly_projection','initial_order_qty'].join(','));
-  for (const r of rows) {
-    const matSamples = samplesByMat[r.material] || 1;
-    const pctOfMat = r.sample_count / matSamples;
-    const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
-    const qty = Math.ceil(weeklyForBucket * totals.weeksMultiplier);
+  for (const r of rowQty) {
     lines.push([
       csvEsc(r.material),
       r.sph_from.toFixed(2), r.sph_to.toFixed(2),
@@ -822,11 +835,13 @@ function formatSvStockingCsv(db, scenarioId) {
       r.add_from != null ? r.add_from.toFixed(2) : '',
       r.add_to != null ? r.add_to.toFixed(2) : '',
       r.sample_count,
-      (pctOfMat * 100).toFixed(2),
-      weeklyForBucket.toFixed(1),
-      qty,
+      (r.pctOfMat * 100).toFixed(2),
+      r.weeklyForBucket.toFixed(1),
+      r.qty,
     ].join(','));
   }
+  lines.push('');
+  lines.push(`# Grand total SV: ${grandSum} lenses`);
   return { csv: lines.join('\n'), totals };
 }
 
@@ -866,31 +881,45 @@ function formatSemiStockingCsv(db, scenarioId) {
   const totalsByMat = {};
   for (const r of rows) totalsByMat[r.material] = (totalsByMat[r.material] || 0) + r.weekly_consumption;
 
-  const lines = [];
-  lines.push(`# NPI Semi-Finished Stocking — ${csvEsc(totals.scenario.name || '')}`);
-  lines.push(`# Source: material_category | Window: last 12 months`);
-  lines.push(`# Total Semi projected weekly: ${totals.semiProjectedWeekly} pucks/wk`);
-  lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
-  lines.push(`# Total Semi initial order: ${totals.semiInitialOrder} pucks`);
-  lines.push(`# Note: base_curve=UNKNOWN means the SKU didn't have a known BC in lens_sku_properties.`);
-  lines.push(`# Generated: ${new Date().toISOString()}`);
-  lines.push('');
-  lines.push(['material','base_curve','sku_count','weekly_consumption','pct_of_material','weekly_projection','initial_order_qty'].join(','));
-  for (const r of rows) {
+  // Compute per-row qty + per-material subtotals first
+  const rowQty = rows.map(r => {
     const matTotal = totalsByMat[r.material] || 1;
     const pctOfMat = r.weekly_consumption / matTotal;
     const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
-    const qty = Math.ceil(weeklyForBucket * totals.weeksMultiplier);
+    return { ...r, pctOfMat, weeklyForBucket, qty: Math.ceil(weeklyForBucket * totals.weeksMultiplier) };
+  });
+  const orderQtyByMat = {};
+  for (const r of rowQty) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
+  const grandSum = rowQty.reduce((s, r) => s + r.qty, 0);
+
+  const lines = [];
+  lines.push(`# NPI Semi-Finished Stocking — ${csvEsc(totals.scenario.name || '')}`);
+  lines.push(`# Source: material_category | Window: last 12 months`);
+  lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
+  lines.push(`#`);
+  lines.push(`# TOTAL SEMI INITIAL ORDER: ${grandSum} pucks`);
+  lines.push(`# By material (order quantity):`);
+  for (const [mat, q] of Object.entries(orderQtyByMat).sort((a, b) => b[1] - a[1])) {
+    lines.push(`#   ${mat}: ${q} pucks   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
+  }
+  lines.push(`#`);
+  lines.push(`# Note: base_curve=UNKNOWN means the SKU has no known BC in lens_sku_properties.`);
+  lines.push(`# Generated: ${new Date().toISOString()}`);
+  lines.push('');
+  lines.push(['material','base_curve','sku_count','weekly_consumption','pct_of_material','weekly_projection','initial_order_qty'].join(','));
+  for (const r of rowQty) {
     lines.push([
       csvEsc(r.material),
       r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
       r.sku_count,
       r.weekly_consumption.toFixed(2),
-      (pctOfMat * 100).toFixed(2),
-      weeklyForBucket.toFixed(2),
-      qty,
+      (r.pctOfMat * 100).toFixed(2),
+      r.weeklyForBucket.toFixed(2),
+      r.qty,
     ].join(','));
   }
+  lines.push('');
+  lines.push(`# Grand total Semi: ${grandSum} pucks`);
   return { csv: lines.join('\n'), totals };
 }
 
