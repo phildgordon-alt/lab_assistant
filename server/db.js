@@ -3043,12 +3043,18 @@ function queryJobsShippedCounts(weekStartDate) {
  * Full aging report with zone/SLA calculations — replaces /api/aging/jobs in-memory computation
  */
 function queryJobsAgingFull() {
+  // Double-filter: BOTH status AND current_stage. status should already be
+  // 'CANCELED'/'SHIPPED' for those rows (per upsertJobFromTrace derivation and
+  // the backfill-jobs-classification one-shot), but belt-and-suspenders — if
+  // any stale row has status='ACTIVE' with current_stage='CANCELED' it still
+  // gets filtered out of the aging dashboard.
   return db.prepare(`
     SELECT invoice, tray, current_stage, current_station, days_in_lab, entry_date,
            coating, rush, operator, lens_style, lens_type, frame_name, first_seen_at,
            status
     FROM jobs
     WHERE status IN ('ACTIVE','Active')
+      AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE'))
     ORDER BY days_in_lab DESC
   `).all();
 }
