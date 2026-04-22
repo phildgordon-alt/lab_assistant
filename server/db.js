@@ -244,6 +244,20 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_sync_log_source ON sync_log(source, synced_at);
 
+  -- Sync heartbeats: one row per adapter/source. Updated on every successful
+  -- sync. The 01:30 data-health-check launchd job reads this table and Slacks
+  -- when any source hasn't checked in within its stale threshold. Catches the
+  -- exact silent-failure pattern that left picks_history frozen for 5 days.
+  CREATE TABLE IF NOT EXISTS sync_heartbeats (
+    source TEXT PRIMARY KEY,
+    last_success_at INTEGER NOT NULL,
+    last_row_count INTEGER,
+    last_error TEXT,
+    consecutive_errors INTEGER DEFAULT 0,
+    stale_threshold_ms INTEGER,
+    updated_at INTEGER DEFAULT (unixepoch() * 1000)
+  );
+
   -- Inventory materials (ItemPath)
   CREATE TABLE IF NOT EXISTS inventory (
     id TEXT PRIMARY KEY,
@@ -1211,6 +1225,48 @@ function getLastSync(source) {
     SELECT * FROM sync_log WHERE source = ? ORDER BY synced_at DESC LIMIT 1
   `);
   return stmt.get(source);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SYNC HEARTBEATS — one row per adapter. Updated on every successful run.
+// data-health-check.js reads this at 01:30 daily and Slacks on staleness.
+// ─────────────────────────────────────────────────────────────────────────────
+const recordHeartbeatSuccessStmt = db.prepare(`
+  INSERT INTO sync_heartbeats (source, last_success_at, last_row_count, last_error, consecutive_errors, stale_threshold_ms, updated_at)
+  VALUES (?, unixepoch() * 1000, ?, NULL, 0, ?, unixepoch() * 1000)
+  ON CONFLICT(source) DO UPDATE SET
+    last_success_at = unixepoch() * 1000,
+    last_row_count = excluded.last_row_count,
+    last_error = NULL,
+    consecutive_errors = 0,
+    stale_threshold_ms = COALESCE(excluded.stale_threshold_ms, sync_heartbeats.stale_threshold_ms),
+    updated_at = unixepoch() * 1000
+`);
+
+const recordHeartbeatErrorStmt = db.prepare(`
+  INSERT INTO sync_heartbeats (source, last_success_at, last_row_count, last_error, consecutive_errors, stale_threshold_ms, updated_at)
+  VALUES (?, 0, NULL, ?, 1, ?, unixepoch() * 1000)
+  ON CONFLICT(source) DO UPDATE SET
+    last_error = excluded.last_error,
+    consecutive_errors = sync_heartbeats.consecutive_errors + 1,
+    stale_threshold_ms = COALESCE(excluded.stale_threshold_ms, sync_heartbeats.stale_threshold_ms),
+    updated_at = unixepoch() * 1000
+`);
+
+function recordHeartbeat(source, rowCount = null, staleThresholdMs = null) {
+  try { recordHeartbeatSuccessStmt.run(source, rowCount, staleThresholdMs); } catch (e) { /* ignore */ }
+}
+function recordHeartbeatError(source, errorMsg, staleThresholdMs = null) {
+  try { recordHeartbeatErrorStmt.run(source, String(errorMsg || 'unknown').slice(0, 500), staleThresholdMs); } catch (e) { /* ignore */ }
+}
+function getStaleHeartbeats() {
+  return db.prepare(`
+    SELECT source, last_success_at, last_row_count, last_error, consecutive_errors, stale_threshold_ms
+    FROM sync_heartbeats
+    WHERE stale_threshold_ms IS NOT NULL
+      AND (unixepoch() * 1000 - last_success_at) > stale_threshold_ms
+    ORDER BY last_success_at ASC
+  `).all();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3182,6 +3238,9 @@ module.exports = {
   db,
   logSync,
   getLastSync,
+  recordHeartbeat,
+  recordHeartbeatError,
+  getStaleHeartbeats,
   // Upsert functions (called by adapters)
   upsertInventory,
   upsertAlerts,

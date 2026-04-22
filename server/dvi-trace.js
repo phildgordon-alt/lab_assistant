@@ -601,8 +601,15 @@ class DviTraceWatcher extends EventEmitter {
       });
       save();
       console.log(`[DVI-Trace] Saved ${this.jobs.size} jobs to SQLite + unified jobs`);
+      // Heartbeat: 2h stale threshold during business hours. Trace files grow
+      // continuously while lab is running, so no-write for 2h = real problem.
+      try { db.recordHeartbeat('dvi_trace', this.jobs.size, 2 * 60 * 60 * 1000); } catch {}
     } catch (e) {
       console.error(`[DVI-Trace] Failed to save to SQLite: ${e.message}`);
+      try {
+        const db = require('./db');
+        db.recordHeartbeatError('dvi_trace', e.message, 2 * 60 * 60 * 1000);
+      } catch {}
     }
   }
 

@@ -1222,6 +1222,9 @@ async function pickSync() {
     pickSyncStatus.picksRecorded += totalInserted;
     pickSyncStatus.consecutiveErrors = 0;
     console.log(`[pickSync] ✓ ${mode} — ${totalFetched} fetched across ${page + 1} page(s), ${totalInserted} new rows`);
+    // Heartbeat: 6h stale threshold. BACKFILL runs every 5 min, STEADY every 30.
+    // If no success in 6h, something is wrong and the 01:30 healthcheck will Slack.
+    try { db.recordHeartbeat('pickSync', totalInserted, 6 * 60 * 60 * 1000); } catch {}
 
     // If BACKFILL returned 0 from ItemPath AND we had 0 existing picks, mark as genuinely empty
     if (mode === 'BACKFILL' && totalFetched === 0 && missingDay && missingDay.count === 0) {
@@ -1240,6 +1243,7 @@ async function pickSync() {
     pickSyncStatus.lastRun = new Date().toISOString();
     pickSyncStatus.consecutiveErrors = (pickSyncStatus.consecutiveErrors || 0) + 1;
     console.error(`[pickSync] ERROR: ${e.message} (page ${page}, fetched ${totalFetched})`);
+    try { db.recordHeartbeatError('pickSync', e.message, 6 * 60 * 60 * 1000); } catch {}
   } finally {
     pickSyncRunning = false;
   }

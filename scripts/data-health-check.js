@@ -518,6 +518,70 @@ async function sendSlackSummary() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
+// STALE HEARTBEAT CHECK — every adapter that writes to sync_heartbeats gets
+// audited here. If any source hasn't succeeded within its stale_threshold_ms,
+// fire a Slack alert naming the source + staleness + last error. This is the
+// safety net that would have caught the 2026-04-17 pickSync 5-day cliff.
+// ═════════════════════════════════════════════════════════════════════════════
+
+async function checkStaleHeartbeats() {
+  log('Checking sync heartbeats');
+  let rows = [];
+  try {
+    rows = db.prepare(`
+      SELECT source, last_success_at, last_row_count, last_error, consecutive_errors, stale_threshold_ms
+      FROM sync_heartbeats
+      WHERE stale_threshold_ms IS NOT NULL
+    `).all();
+  } catch (e) {
+    log(`  heartbeat table not yet populated: ${e.message}`);
+    return;
+  }
+
+  if (rows.length === 0) {
+    log('  no heartbeats recorded yet — adapters have not run since last restart');
+    return;
+  }
+
+  const now = Date.now();
+  const stale = [];
+  const ok = [];
+  for (const r of rows) {
+    const ageMs = now - r.last_success_at;
+    const entry = {
+      source: r.source,
+      age_min: Math.round(ageMs / 60000),
+      threshold_min: Math.round(r.stale_threshold_ms / 60000),
+      consecutive_errors: r.consecutive_errors || 0,
+      last_error: r.last_error,
+      last_row_count: r.last_row_count,
+    };
+    if (ageMs > r.stale_threshold_ms) stale.push(entry);
+    else ok.push(entry);
+  }
+
+  for (const r of ok) log(`  ✓ ${r.source}: ${r.age_min}m ago (${r.last_row_count ?? '?'} rows, threshold ${r.threshold_min}m)`);
+  for (const r of stale) log(`  ✗ STALE ${r.source}: ${r.age_min}m ago (threshold ${r.threshold_min}m, ${r.consecutive_errors} consecutive errors, lastErr: ${r.last_error || 'none'})`);
+
+  if (stale.length > 0 && SLACK_WEBHOOK_URL) {
+    const bullets = stale.map(s =>
+      `• *${s.source}* — stale ${s.age_min} min (threshold ${s.threshold_min} min), ${s.consecutive_errors} consecutive errors${s.last_error ? `, lastErr: ${s.last_error}` : ''}`
+    ).join('\n');
+    const msg = `:rotating_light: *Lab_Assistant stale sync sources:*\n${bullets}\n\nAdapters should be self-rescheduling. Stale = silent death. Investigate now.`;
+    try {
+      await fetch(SLACK_WEBHOOK_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: msg }),
+      });
+      log(`  Slack alert fired for ${stale.length} stale source(s)`);
+    } catch (e) {
+      logError(`  Slack stale-heartbeat alert failed: ${e.message}`);
+    }
+  }
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
 // MAIN
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -544,7 +608,11 @@ async function main() {
     backfillDaily(dailyGaps);
     log('');
 
-    // 4. Summary & notification
+    // 4. Stale sync heartbeats (catches silent-dead adapters like the 2026-04-17 pickSync cliff)
+    await checkStaleHeartbeats();
+    log('');
+
+    // 5. Summary & notification
     await sendSlackSummary();
   } catch (e) {
     logError(`Unhandled error: ${e.message}`);
