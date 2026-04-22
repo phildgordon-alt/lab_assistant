@@ -3050,6 +3050,7 @@ Respond with a structured batching plan in this format:
       && !url.pathname.endsWith('/export')
       && !url.pathname.endsWith('/activate')
       && !url.pathname.endsWith('/rx-list.csv')
+      && !url.pathname.endsWith('/cannibalization-variance')
       && !url.pathname.includes('/variant-skus')
       && !url.pathname.includes('/placeholder-skus')
       && !url.pathname.includes('/quarantine-receipts')
@@ -3152,6 +3153,14 @@ Respond with a structured batching plan in this format:
     const tpl = labDb.getRxProfileTemplate(id);
     if (!tpl) { res.writeHead(404); return res.end('Template not found'); }
     return json(res, tpl);
+  }
+  // Projected vs actual cannibalization variance for a scenario. Computes
+  // recent-window actual consumption per source SKU and compares against the
+  // projected new_weekly that was stored at projection time. Read-only.
+  if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/cannibalization-variance')) {
+    const id = url.pathname.split('/')[4];
+    const windowWeeks = parseInt(url.searchParams.get('weeks') || '4', 10);
+    return json(res, npiEngine.getCannibalizationVariance(labDb.db, id, windowWeeks));
   }
   // Per-job Rx list CSV — one row per expected lens unit with placeholder SKU,
   // source SKU (cannibalizing) or bucket midpoint (standard_profile), and full

@@ -3732,8 +3732,27 @@ function InventoryTab({ ovenServerUrl, settings }) {
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.text, fontFamily: mono }}>{(npiSelected.initialOrderQty || 0).toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>INITIAL ORDER</div></div>
                           </div>
 
-                          {/* Export buttons — summary CSV + per-job Rx list CSV */}
+                          {/* Export buttons — summary CSV + per-job Rx list CSV + variance probe */}
                           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 6, marginBottom: 10 }}>
+                            <button
+                              onClick={async () => {
+                                const r = await fetch(`${ovenServerUrl}/api/npi/scenarios/${sc.id}/cannibalization-variance?weeks=4`);
+                                const d = await r.json();
+                                if (!d.rows || d.rows.length === 0) { alert(d.note || 'No variance data yet — cannibalization table empty.'); return; }
+                                const lines = [
+                                  `Projected-vs-Actual Cannibalization (last ${d.windowWeeks} weeks)`,
+                                  d.note ? `Note: ${d.note}` : '',
+                                  '',
+                                  'SKU | Projected New | Actual | Δ% vs Expected | Implied Adoption %',
+                                  ...d.rows.slice(0, 30).map(r => `${r.source_sku} | ${r.projected_new_weekly} | ${r.actual_weekly} | ${r.delta_vs_expected_pct ?? '—'} | ${r.implied_adoption_pct ?? '—'}`),
+                                ].filter(Boolean).join('\n');
+                                alert(lines);
+                              }}
+                              style={{ background: `${T.purple}20`, border: `1px solid ${T.purple}60`, borderRadius: 4, padding: '5px 12px', color: T.purple, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}
+                              title="Show projected-vs-actual cannibalization variance (4-week window) — meaningful post-activation"
+                            >
+                              📊 Variance
+                            </button>
                             <button
                               onClick={() => window.open(`${ovenServerUrl}/api/npi/scenarios/${sc.id}/export`, '_blank')}
                               style={{ background: `${T.blue}20`, border: `1px solid ${T.blue}60`, borderRadius: 4, padding: '5px 12px', color: T.blue, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}
@@ -3782,9 +3801,21 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               </div>
                               <div>
                                 <label id="npi-edit-source-label" style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>
-                                  {sc.source_type === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : sc.source_type === 'skus' ? 'SKUS (COMMA-SEP)' : sc.source_type === 'null_opc' ? 'N/A (CR39 AUTO)' : sc.source_type === 'standard_profile' ? 'N/A (SEE TEMPLATE BELOW)' : 'SKU PREFIX'}
+                                  {sc.source_type === 'proxy' ? 'CLOSEST SKU TO CANNIBALIZE' : sc.source_type === 'skus' ? 'SKUS (PASTE LIST)' : sc.source_type === 'null_opc' ? 'N/A (CR39 AUTO)' : sc.source_type === 'standard_profile' ? 'N/A (SEE TEMPLATE BELOW)' : 'SKU PREFIX'}
                                 </label>
-                                <input type="text" defaultValue={sc.proxy_sku || sc.source_value || ''} id="npi-edit-source" placeholder="e.g. 4800150916 or 4800,062" disabled={sc.source_type === 'null_opc' || sc.source_type === 'standard_profile'} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                                <textarea defaultValue={sc.proxy_sku || sc.source_value || ''} id="npi-edit-source" placeholder="Paste SKUs one per line, comma-separated, or space-separated. e.g.&#10;4800150916&#10;4800135297&#10;4800150908" disabled={sc.source_type === 'null_opc' || sc.source_type === 'standard_profile'} rows={2} onInput={(e) => {
+                                  const txt = e.target.value;
+                                  const parts = txt.split(/[\s,;\n\r]+/).map(s => s.trim()).filter(Boolean);
+                                  const cnt = document.getElementById('npi-edit-source-count');
+                                  if (cnt) cnt.textContent = parts.length > 0 ? `${parts.length} SKU${parts.length === 1 ? '' : 's'} parsed` : '';
+                                }} style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono, resize: 'vertical', minHeight: 28 }} />
+                                <div id="npi-edit-source-count" style={{ fontSize: 8, color: T.textDim, fontFamily: mono, marginTop: 2 }}>
+                                  {(() => {
+                                    const v = sc.proxy_sku || sc.source_value || '';
+                                    const n = v.split(/[\s,;\n\r]+/).map(s => s.trim()).filter(Boolean).length;
+                                    return n > 0 ? `${n} SKU${n === 1 ? '' : 's'} parsed` : '';
+                                  })()}
+                                </div>
                               </div>
                               <div>
                                 <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>NEW SKU PREFIX</label>
@@ -3840,7 +3871,11 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               <div style={{ display: 'flex', alignItems: 'flex-end' }}>
                                 <button onClick={async () => {
                                   const st = document.getElementById('npi-edit-source-type')?.value || 'prefix';
-                                  const srcVal = document.getElementById('npi-edit-source')?.value || null;
+                                  const rawSrc = document.getElementById('npi-edit-source')?.value || '';
+                                  // Normalize paste list: split on any whitespace/comma/semicolon, rejoin comma-separated
+                                  const srcVal = st === 'skus'
+                                    ? rawSrc.split(/[\s,;\n\r]+/).map(s => s.trim()).filter(Boolean).join(',')
+                                    : (rawSrc || null);
                                   const safetyRaw = document.getElementById('npi-edit-safety')?.value;
                                   const abcRaw = document.getElementById('npi-edit-abc')?.value;
                                   const stdTpl = document.getElementById('npi-edit-std-template')?.value;

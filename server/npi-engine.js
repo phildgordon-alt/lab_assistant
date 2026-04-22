@@ -417,9 +417,41 @@ function formatRxListCsv(expandedResult) {
     const s = String(v);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
+  const rows = expandedResult.rows || [];
+  const scenario = expandedResult.scenario || {};
+  const compute = expandedResult.compute || {};
+
+  // Aggregate breakdowns for the header so the operator sees totals at the top
+  const totalQty = rows.length;
+  const byPlaceholder = {};
+  const byMaterial = {};
+  const byLensType = { SV: 0, Surfacing: 0, Other: 0 };
+  for (const r of rows) {
+    byPlaceholder[r.placeholder_sku] = (byPlaceholder[r.placeholder_sku] || 0) + 1;
+    const mat = (r.material || '').toUpperCase();
+    if (mat) byMaterial[mat] = (byMaterial[mat] || 0) + 1;
+    const lt = r.lens_type;
+    if (lt === 'S' || lt === 'C' || lt === 'SV') byLensType.SV++;
+    else if (lt === 'P' || lt === 'Surfacing') byLensType.Surfacing++;
+    else byLensType.Other++;
+  }
+  const phLine = Object.entries(byPlaceholder).map(([k, n]) => `${k}=${n}`).join(' | ');
+  const matLine = Object.entries(byMaterial).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}=${n}`).join(' | ');
+
   const lines = [];
+  // ── Summary header (Excel treats # as regular text — Phil can filter/delete)
+  lines.push(`# NPI Rx List — ${esc(scenario.name || scenario.id || '')}`);
+  lines.push(`# Source type: ${scenario.source_type || ''}`);
+  lines.push(`# TOTAL LENSES TO ORDER: ${totalQty}`);
+  lines.push(`# SV: ${byLensType.SV}   Surfacing: ${byLensType.Surfacing}${byLensType.Other ? `   Other/Unknown: ${byLensType.Other}` : ''}`);
+  if (phLine) lines.push(`# By placeholder: ${phLine}`);
+  if (matLine) lines.push(`# By material: ${matLine}`);
+  lines.push(`# Lead time: ${compute.totalLeadTime || ''}wk | Safety: ${compute.safetyWeeks || ''}wk | ABC: ${compute.abcClass || ''}`);
+  lines.push(`# Generated: ${new Date().toISOString()}`);
+  lines.push('');
+  // ── Per-row data
   lines.push(['line','placeholder_sku','real_sku','source_sku','lens_type','material','base_curve','diameter','sph','cyl','axis','add','pd','confidence'].join(','));
-  for (const r of expandedResult.rows || []) {
+  for (const r of rows) {
     lines.push([
       r.line_no, esc(r.placeholder_sku), esc(r.real_sku), esc(r.source_sku), esc(r.lens_type),
       esc(r.material), r.base_curve ?? '', r.diameter ?? '',
@@ -427,7 +459,67 @@ function formatRxListCsv(expandedResult) {
       r.confidence ?? ''
     ].join(','));
   }
+  lines.push('');
+  lines.push(`# Grand total lenses: ${totalQty}`);
   return lines.join('\n');
 }
 
-module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows, formatRxListCsv };
+// ─────────────────────────────────────────────────────────────────────────────
+// PROJECTED vs ACTUAL CANNIBALIZATION VARIANCE
+// Compares each source SKU's projected lost_weekly (set at scenario
+// projection time) against its ACTUAL consumption over a recent window.
+// Post-activation (status >= on_the_water), source-SKU consumption should
+// start dropping by ~adoption_pct as the new product takes its share. If
+// the observed drop is much smaller, our projection was too aggressive;
+// if much larger, the new product is over-performing.
+//
+// For v1: on-demand (computed when UI requests), 4-week observation window.
+// No auto-adjust — operator reviews variance and decides. Future v2 could
+// auto-tune safety_stock_weeks for high-variance source SKUs.
+// ─────────────────────────────────────────────────────────────────────────────
+function getCannibalizationVariance(db, scenarioId, windowWeeks = 4) {
+  const scenario = db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(scenarioId);
+  if (!scenario) return { error: 'Scenario not found', rows: [] };
+  const canns = db.prepare(
+    'SELECT source_sku, current_weekly, lost_weekly, new_weekly FROM npi_cannibalization WHERE scenario_id = ? ORDER BY lost_weekly DESC'
+  ).all(scenarioId);
+  if (canns.length === 0) return { rows: [], note: 'No cannibalization rows yet' };
+
+  // Actual recent-window consumption per source SKU from lens_consumption_weekly
+  const recentStmt = db.prepare(`
+    SELECT sku, SUM(units_consumed) AS total, COUNT(DISTINCT week_start) AS weeks
+    FROM lens_consumption_weekly
+    WHERE sku = ? AND week_start >= date('now', ?)
+    GROUP BY sku
+  `);
+  const rows = canns.map(c => {
+    const actualWindow = recentStmt.get(c.source_sku, `-${windowWeeks * 7} days`) || { total: 0, weeks: 0 };
+    const actualWeekly = actualWindow.weeks > 0 ? Math.round((actualWindow.total / actualWindow.weeks) * 10) / 10 : 0;
+    // Expected post-activation: (current - lost) = new_weekly. Compare actual to that.
+    const expected = c.new_weekly;
+    const deltaPct = expected > 0 ? Math.round(((actualWeekly - expected) / expected) * 100) : null;
+    const impliedAdoption = c.current_weekly > 0
+      ? Math.round(((c.current_weekly - actualWeekly) / c.current_weekly) * 100)
+      : null;
+    return {
+      source_sku: c.source_sku,
+      projected_current_weekly: c.current_weekly,
+      projected_lost_weekly: c.lost_weekly,
+      projected_new_weekly: c.new_weekly,
+      actual_weekly: actualWeekly,
+      actual_weeks_sampled: actualWindow.weeks,
+      delta_vs_expected_pct: deltaPct,
+      implied_adoption_pct: impliedAdoption,
+    };
+  });
+  return {
+    scenario,
+    rows,
+    windowWeeks,
+    note: scenario.status === 'draft' || scenario.status === 'approved'
+      ? 'Scenario not yet live — variance tracking activates at status=received.'
+      : null,
+  };
+}
+
+module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows, formatRxListCsv, getCannibalizationVariance };
