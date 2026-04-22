@@ -3051,9 +3051,44 @@ Respond with a structured batching plan in this format:
       && !url.pathname.endsWith('/activate')
       && !url.pathname.endsWith('/rx-list.csv')
       && !url.pathname.includes('/variant-skus')
+      && !url.pathname.includes('/placeholder-skus')
       && !url.pathname.endsWith('/po-document')) {
     const id = url.pathname.split('/').pop();
     return json(res, npiEngine.getScenario(labDb.db, id, netsuite));
+  }
+  // Placeholder SKU routes
+  // GET    /api/npi/scenarios/:id/placeholder-skus
+  // POST   /api/npi/scenarios/:id/placeholder-skus           → add one (auto variant_index)
+  // POST   /api/npi/scenarios/:id/placeholder-skus/:code/map → { real_sku, supplier_sku? }
+  // DELETE /api/npi/scenarios/:id/placeholder-skus/:code
+  if (url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.includes('/placeholder-skus')) {
+    const parts = url.pathname.split('/'); // ['', 'api', 'npi', 'scenarios', id, 'placeholder-skus', code?, 'map'?]
+    const scenarioId = parts[4];
+    const code = parts[6] ? decodeURIComponent(parts[6]) : null;
+    const action = parts[7] || null;
+    try {
+      if (req.method === 'GET' && !code) {
+        return json(res, { placeholders: labDb.listPlaceholders(scenarioId) });
+      }
+      if (req.method === 'POST' && !code) {
+        const body = await readBody(req);
+        const ph = labDb.createPlaceholder(scenarioId, { label: body.label || null });
+        return json(res, { placeholder_code: ph });
+      }
+      if (req.method === 'POST' && code && action === 'map') {
+        const body = await readBody(req);
+        const result = labDb.mapPlaceholder(scenarioId, code, body.real_sku, body.supplier_sku || null);
+        return json(res, result);
+      }
+      if (req.method === 'DELETE' && code && !action) {
+        return json(res, labDb.removePlaceholder(scenarioId, code));
+      }
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: e.message }));
+    }
+    res.writeHead(404);
+    return res.end('Unknown placeholder route');
   }
   // List Rx profile templates (for standard_profile source-type dropdown)
   if (req.method==='GET' && url.pathname==='/api/rx-profile-templates') {

@@ -73,6 +73,31 @@ try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN abc_class TEXT"); } catch (e
 try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN standard_profile_template_id INTEGER REFERENCES rx_profile_templates(id)"); } catch (e) { /* already exists */ }
 try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN standard_profile_qty INTEGER"); } catch (e) { /* already exists */ }
 
+// Phase 4: placeholder SKUs for NPI ordering — the real supplier SKUs don't
+// exist until after the order is placed and received. Orders reference
+// placeholder codes; operator maps placeholder → real SKU when the supplier
+// sends the receiving manifest. On mapping, a lens_sku_params row is created
+// for the real SKU inheriting the scenario's abc_class + safety + lead times.
+// Placeholder is preserved after mapping for audit trail.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS npi_placeholder_skus (
+    placeholder_code  TEXT PRIMARY KEY,        -- e.g. 'NPI-{scenario_id}-V1'
+    scenario_id       TEXT NOT NULL,
+    variant_index     INTEGER NOT NULL,         -- 1-based
+    label             TEXT,                     -- optional descriptive label (material + BC etc.)
+    real_sku          TEXT,                     -- null until mapped
+    supplier_sku      TEXT,                     -- optional
+    status            TEXT DEFAULT 'pending',   -- 'pending' | 'mapped'
+    created_at        TEXT DEFAULT (datetime('now')),
+    mapped_at         TEXT,
+    notes             TEXT,
+    UNIQUE (scenario_id, variant_index),
+    FOREIGN KEY (scenario_id) REFERENCES npi_scenarios(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_npi_ph_scenario ON npi_placeholder_skus(scenario_id);
+  CREATE INDEX IF NOT EXISTS idx_npi_ph_real_sku ON npi_placeholder_skus(real_sku);
+`);
+
 // Lens Intelligence — SKU planning parameters (configurable per SKU)
 db.exec(`
   CREATE TABLE IF NOT EXISTS lens_sku_params (
@@ -1385,6 +1410,72 @@ function getRxProfileTemplate(id) {
 
 function listRxProfileTemplates() {
   return db.prepare(`SELECT * FROM rx_profile_templates ORDER BY lens_type, name`).all();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NPI PLACEHOLDER SKU helpers
+// ─────────────────────────────────────────────────────────────────────────────
+function listPlaceholders(scenarioId) {
+  return db.prepare(
+    `SELECT * FROM npi_placeholder_skus WHERE scenario_id = ? ORDER BY variant_index`
+  ).all(scenarioId);
+}
+
+// Auto-generate one placeholder for a scenario. Called on scenario create.
+// Returns the placeholder_code.
+function createPlaceholder(scenarioId, { label = null } = {}) {
+  const existing = db.prepare(
+    `SELECT MAX(variant_index) AS m FROM npi_placeholder_skus WHERE scenario_id = ?`
+  ).get(scenarioId);
+  const nextIdx = (existing?.m || 0) + 1;
+  const code = `NPI-${scenarioId}-V${nextIdx}`;
+  db.prepare(
+    `INSERT INTO npi_placeholder_skus (placeholder_code, scenario_id, variant_index, label, status)
+     VALUES (?, ?, ?, ?, 'pending')`
+  ).run(code, scenarioId, nextIdx, label);
+  return code;
+}
+
+// Map a placeholder → real SKU. Creates a lens_sku_params row for the real SKU
+// inheriting the scenario's abc_class, safety_stock_weeks, mfg/transit/fda.
+// INSERT OR IGNORE so if the real SKU already has a params row (prior receipt,
+// pre-existing catalog entry), we don't clobber it.
+function mapPlaceholder(scenarioId, placeholderCode, realSku, supplierSku = null) {
+  const scenario = db.prepare(`SELECT * FROM npi_scenarios WHERE id = ?`).get(scenarioId);
+  if (!scenario) throw new Error('Scenario not found');
+  const ph = db.prepare(
+    `SELECT * FROM npi_placeholder_skus WHERE placeholder_code = ? AND scenario_id = ?`
+  ).get(placeholderCode, scenarioId);
+  if (!ph) throw new Error('Placeholder not found');
+  if (!realSku || !/^[A-Za-z0-9._-]+$/.test(realSku)) throw new Error('Invalid real SKU format');
+
+  db.transaction(() => {
+    db.prepare(
+      `UPDATE npi_placeholder_skus SET real_sku = ?, supplier_sku = ?, status = 'mapped', mapped_at = datetime('now')
+       WHERE placeholder_code = ?`
+    ).run(realSku, supplierSku, placeholderCode);
+    // Inherit scenario params — INSERT OR IGNORE preserves any existing row
+    db.prepare(
+      `INSERT OR IGNORE INTO lens_sku_params
+       (sku, manufacturing_weeks, transit_weeks, fda_hold_weeks, safety_stock_weeks, abc_class, routing)
+       VALUES (?, ?, ?, ?, ?, ?, 'STOCK')`
+    ).run(
+      realSku,
+      scenario.manufacturing_weeks || 13,
+      scenario.transit_weeks || 4,
+      scenario.fda_hold_weeks || 2,
+      scenario.safety_stock_weeks || 4,
+      scenario.abc_class || 'B'
+    );
+  })();
+  return { placeholder_code: placeholderCode, real_sku: realSku };
+}
+
+function removePlaceholder(scenarioId, placeholderCode) {
+  const res = db.prepare(
+    `DELETE FROM npi_placeholder_skus WHERE placeholder_code = ? AND scenario_id = ?`
+  ).run(placeholderCode, scenarioId);
+  return { deleted: res.changes };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3402,6 +3493,10 @@ module.exports = {
   getSkuProperties,
   getRxProfileTemplate,
   listRxProfileTemplates,
+  listPlaceholders,
+  createPlaceholder,
+  mapPlaceholder,
+  removePlaceholder,
   SEED_SEMIFINISHED,
   // Upsert functions (called by adapters)
   upsertInventory,

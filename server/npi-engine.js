@@ -36,6 +36,14 @@ function createScenario(db, data) {
     data.standard_profile_template_id != null ? Number(data.standard_profile_template_id) : null,
     data.standard_profile_qty != null ? Number(data.standard_profile_qty) : null
   );
+  // Phase 4: auto-create one placeholder SKU — 'NPI-{id}-V1'. Operator adds
+  // more variants from the UI and maps each to a real SKU on receipt.
+  try {
+    db.prepare(
+      `INSERT INTO npi_placeholder_skus (placeholder_code, scenario_id, variant_index, label, status)
+       VALUES (?, ?, 1, ?, 'pending')`
+    ).run(`NPI-${id}-V1`, id, data.name || null);
+  } catch { /* placeholder table may not exist on first boot — fine */ }
   return id;
 }
 
@@ -293,8 +301,18 @@ function expandScenarioToPerJobRows(db, scenarioId) {
   if (!compute) return { error: 'Compute failed', rows: [] };
 
   const rows = [];
-  const placeholderStub = scenario.new_sku_prefix || `NPI-${scenarioId}`;
+  // Placeholder SKUs per scenario — cycle through in order. If none exist
+  // (old scenarios pre-Phase-4), fall back to new_sku_prefix.
+  const placeholders = db.prepare(
+    `SELECT * FROM npi_placeholder_skus WHERE scenario_id = ? ORDER BY variant_index`
+  ).all(scenarioId);
+  const phCodes = placeholders.length > 0
+    ? placeholders.map(p => p.placeholder_code)
+    : [scenario.new_sku_prefix || `NPI-${scenarioId}-V1`];
+  const phRealSku = new Map();
+  for (const p of placeholders) if (p.real_sku) phRealSku.set(p.placeholder_code, p.real_sku);
   let lineNo = 1;
+  const pickPlaceholder = (n) => phCodes[(n - 1) % phCodes.length];
 
   if (scenario.source_type === 'standard_profile') {
     const tplId = scenario.standard_profile_template_id;
@@ -316,10 +334,13 @@ function expandScenarioToPerJobRows(db, scenarioId) {
       for (let i = 0; i < target; i++) {
         // Row values: midpoint of bucket range, or null for Surfacing template
         const mid = (lo, hi) => (lo != null && hi != null) ? Math.round(((lo + hi) / 2) * 100) / 100 : null;
+        const thisLine = lineNo++;
+        const ph = pickPlaceholder(thisLine);
         rows.push({
-          line_no: lineNo++,
+          line_no: thisLine,
           source_sku: '',
-          placeholder_sku: placeholderStub,
+          placeholder_sku: ph,
+          real_sku: phRealSku.get(ph) || '',
           material: '',
           base_curve: b.base_curve,
           diameter: null,
@@ -364,10 +385,13 @@ function expandScenarioToPerJobRows(db, scenarioId) {
     const props = propsStmt.get(c.source_sku) || {};
     for (let i = 0; i < shareQty; i++) {
       const s = samples.length > 0 ? samples[i % samples.length] : {};
+      const thisLine = lineNo++;
+      const ph = pickPlaceholder(thisLine);
       rows.push({
-        line_no: lineNo++,
+        line_no: thisLine,
         source_sku: c.source_sku,
-        placeholder_sku: placeholderStub,
+        placeholder_sku: ph,
+        real_sku: phRealSku.get(ph) || '',
         material: (s.mat || props.material || '').toUpperCase(),
         base_curve: props.base_curve,
         diameter: props.diameter,
@@ -394,10 +418,10 @@ function formatRxListCsv(expandedResult) {
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = [];
-  lines.push(['line','placeholder_sku','source_sku','lens_type','material','base_curve','diameter','sph','cyl','axis','add','pd','confidence'].join(','));
+  lines.push(['line','placeholder_sku','real_sku','source_sku','lens_type','material','base_curve','diameter','sph','cyl','axis','add','pd','confidence'].join(','));
   for (const r of expandedResult.rows || []) {
     lines.push([
-      r.line_no, esc(r.placeholder_sku), esc(r.source_sku), esc(r.lens_type),
+      r.line_no, esc(r.placeholder_sku), esc(r.real_sku), esc(r.source_sku), esc(r.lens_type),
       esc(r.material), r.base_curve ?? '', r.diameter ?? '',
       r.sph ?? '', r.cyl ?? '', r.axis ?? '', r.add ?? '', r.pd ?? '',
       r.confidence ?? ''

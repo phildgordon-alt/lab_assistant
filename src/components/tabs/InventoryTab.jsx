@@ -599,6 +599,106 @@ function BinningDetailView({ view, serverUrl }) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ── NPI PLACEHOLDER SECTION (sub-component) ───────────────────
+// ══════════════════════════════════════════════════════════════
+// Shows the scenario's placeholder SKUs with mapping controls. Placeholders
+// are auto-generated at scenario creation (V1) and via the Add Variant
+// button. Each can be mapped to a real supplier SKU on receipt — mapping
+// creates/updates a lens_sku_params row for the real SKU inheriting the
+// scenario's abc_class / safety / lead times.
+function NpiPlaceholderSection({ scenarioId, ovenServerUrl }) {
+  const [list, setList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const reload = async () => {
+    try {
+      const r = await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/placeholder-skus`);
+      const d = await r.json();
+      setList(d?.placeholders || []);
+    } catch { setList([]); }
+    setLoading(false);
+  };
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [scenarioId]);
+
+  const addVariant = async () => {
+    const label = prompt('Variant label (e.g. "1.74 BC 4.0 SV")? Leave blank for none:') || null;
+    await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/placeholder-skus`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label })
+    });
+    await reload();
+  };
+
+  const mapReal = async (code) => {
+    const realSku = prompt('Enter real supplier SKU for ' + code + ':');
+    if (!realSku) return;
+    const supplierSku = prompt('Supplier-side SKU (optional, enter nothing to skip):') || null;
+    const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/placeholder-skus/${encodeURIComponent(code)}/map`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ real_sku: realSku, supplier_sku: supplierSku })
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      alert('Map failed: ' + (err.error || resp.status));
+      return;
+    }
+    await reload();
+  };
+
+  const removeRow = async (code) => {
+    if (!confirm('Remove placeholder ' + code + '?')) return;
+    await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/placeholder-skus/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    await reload();
+  };
+
+  if (loading) return null;
+  return (
+    <div style={{ marginBottom: 12, padding: 10, background: T.bg, borderRadius: 6, border: `1px solid ${T.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono }}>
+          PLACEHOLDER SKUs <span style={{ color: T.textMuted, fontWeight: 400 }}>({list.length} variant{list.length === 1 ? '' : 's'})</span>
+        </div>
+        <button onClick={addVariant} style={{ background: T.blue, border: 'none', borderRadius: 3, padding: '3px 10px', color: '#fff', fontSize: 9, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
+          + Add Variant
+        </button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, padding: '4px 0' }}>No placeholders yet — click Add Variant to create one.</div>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, fontFamily: mono }}>
+          <thead>
+            <tr style={{ background: T.surface }}>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>PLACEHOLDER</th>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>LABEL</th>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>REAL SKU</th>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>SUPPLIER SKU</th>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>STATUS</th>
+              <th style={{ padding: '4px 6px', textAlign: 'right', fontSize: 8, color: T.textDim }}>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(p => (
+              <tr key={p.placeholder_code}>
+                <td style={{ padding: '4px 6px', color: T.text, fontWeight: 600 }}>{p.placeholder_code}</td>
+                <td style={{ padding: '4px 6px', color: T.textMuted }}>{p.label || '—'}</td>
+                <td style={{ padding: '4px 6px', color: p.real_sku ? T.green : T.textDim, fontWeight: p.real_sku ? 700 : 400 }}>{p.real_sku || '(unmapped)'}</td>
+                <td style={{ padding: '4px 6px', color: T.textMuted }}>{p.supplier_sku || '—'}</td>
+                <td style={{ padding: '4px 6px', color: p.status === 'mapped' ? T.green : T.amber, fontSize: 9, fontWeight: 700 }}>{(p.status || 'pending').toUpperCase()}</td>
+                <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                  {p.status !== 'mapped' && (
+                    <button onClick={() => mapReal(p.placeholder_code)} style={{ background: T.green, border: 'none', borderRadius: 3, padding: '2px 8px', color: '#fff', fontSize: 9, fontWeight: 700, cursor: 'pointer', fontFamily: mono, marginRight: 4 }}>Map</button>
+                  )}
+                  <button onClick={() => removeRow(p.placeholder_code)} style={{ background: T.red, border: 'none', borderRadius: 3, padding: '2px 8px', color: '#fff', fontSize: 9, cursor: 'pointer', fontFamily: mono }}>Del</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // ── INVENTORY TAB ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 function InventoryTab({ ovenServerUrl, settings }) {
@@ -3664,6 +3764,9 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               </div>
                             </div>
                           </div>
+
+                          {/* Placeholder SKU section — auto-populated on scenario create; operator maps to real SKUs on receipt */}
+                          <NpiPlaceholderSection scenarioId={sc.id} ovenServerUrl={ovenServerUrl} />
 
                           {/* Cannibalization table */}
                           {(npiSelected.cannibalization || []).length > 0 && (
