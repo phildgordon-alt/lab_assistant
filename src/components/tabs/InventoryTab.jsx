@@ -699,6 +699,116 @@ function NpiPlaceholderSection({ scenarioId, ovenServerUrl }) {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ── NPI QUARANTINE SECTION (sub-component) ────────────────────
+// ══════════════════════════════════════════════════════════════
+// Tracks physical lens receipts tied to placeholder SKUs before the real
+// supplier SKU code is known. Each receipt goes 'quarantined' → 'released'
+// (auto on placeholder map with ItemPath qty snapshot) → 'reconciled' (operator
+// confirms the merge). Does NOT write to ItemPath — read-side badge only.
+function NpiQuarantineSection({ scenarioId, ovenServerUrl }) {
+  const [list, setList] = useState([]);
+  const [placeholders, setPlaceholders] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = async () => {
+    try {
+      const [rr, pr] = await Promise.all([
+        fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/quarantine-receipts`).then(r => r.json()),
+        fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/placeholder-skus`).then(r => r.json()),
+      ]);
+      setList(rr?.receipts || []);
+      setPlaceholders(pr?.placeholders || []);
+    } catch { setList([]); setPlaceholders([]); }
+    setLoading(false);
+  };
+  useEffect(() => { reload(); /* eslint-disable-next-line */ }, [scenarioId]);
+
+  const receive = async () => {
+    if (placeholders.length === 0) { alert('Add a placeholder SKU first.'); return; }
+    const codes = placeholders.map(p => p.placeholder_code).join('\n');
+    const code = prompt(`Receive under which placeholder?\n\nOptions:\n${codes}\n\nEnter code:`);
+    if (!code) return;
+    const qtyStr = prompt('Received qty:');
+    const qty = parseInt(qtyStr, 10);
+    if (!qty || qty <= 0) { alert('Invalid qty'); return; }
+    const supplierSku = prompt('Supplier-side SKU (optional):') || null;
+    const notes = prompt('Notes (optional):') || null;
+    const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/quarantine-receipts`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ placeholder_code: code, received_qty: qty, supplier_sku: supplierSku, notes })
+    });
+    if (!resp.ok) { const e = await resp.json().catch(() => ({})); alert('Receive failed: ' + (e.error || resp.status)); return; }
+    await reload();
+  };
+
+  const reconcile = async (receiptId) => {
+    const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/quarantine-receipts/${receiptId}/reconcile`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+    });
+    if (!resp.ok) { alert('Reconcile failed'); return; }
+    await reload();
+  };
+
+  const removeRow = async (receiptId) => {
+    if (!confirm('Remove this receipt? Only do this to correct a mistake.')) return;
+    await fetch(`${ovenServerUrl}/api/npi/scenarios/${scenarioId}/quarantine-receipts/${receiptId}`, { method: 'DELETE' });
+    await reload();
+  };
+
+  if (loading) return null;
+  const statusColor = (s) => s === 'reconciled' ? T.green : s === 'released' ? T.amber : T.blue;
+  return (
+    <div style={{ marginBottom: 12, padding: 10, background: T.bg, borderRadius: 6, border: `1px solid ${T.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, fontFamily: mono }}>
+          QUARANTINE RECEIPTS <span style={{ color: T.textMuted, fontWeight: 400 }}>({list.length} batch{list.length === 1 ? '' : 'es'})</span>
+        </div>
+        <button onClick={receive} style={{ background: T.blue, border: 'none', borderRadius: 3, padding: '3px 10px', color: '#fff', fontSize: 9, fontWeight: 700, cursor: 'pointer', fontFamily: mono }}>
+          + Receive
+        </button>
+      </div>
+      {list.length === 0 ? (
+        <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, padding: '4px 0' }}>
+          No receipts yet. Use + Receive when physical lenses arrive under a placeholder.
+        </div>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10, fontFamily: mono }}>
+          <thead>
+            <tr style={{ background: T.surface }}>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>PLACEHOLDER</th>
+              <th style={{ padding: '4px 6px', textAlign: 'right', fontSize: 8, color: T.textDim }}>QTY</th>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>RECEIVED</th>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>STATUS</th>
+              <th style={{ padding: '4px 6px', textAlign: 'left', fontSize: 8, color: T.textDim }}>REAL SKU</th>
+              <th style={{ padding: '4px 6px', textAlign: 'right', fontSize: 8, color: T.textDim }}>ITEMPATH QTY @ RELEASE</th>
+              <th style={{ padding: '4px 6px', textAlign: 'right', fontSize: 8, color: T.textDim }}>ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody>
+            {list.map(r => (
+              <tr key={r.id}>
+                <td style={{ padding: '4px 6px', color: T.text }}>{r.placeholder_code}</td>
+                <td style={{ padding: '4px 6px', color: T.text, textAlign: 'right', fontWeight: 700 }}>{r.received_qty}</td>
+                <td style={{ padding: '4px 6px', color: T.textMuted, fontSize: 9 }}>{(r.received_at || '').replace('T', ' ')}</td>
+                <td style={{ padding: '4px 6px', color: statusColor(r.status), fontWeight: 700, fontSize: 9 }}>{(r.status || 'quarantined').toUpperCase()}</td>
+                <td style={{ padding: '4px 6px', color: r.release_real_sku ? T.green : T.textDim }}>{r.release_real_sku || '—'}</td>
+                <td style={{ padding: '4px 6px', color: T.textMuted, textAlign: 'right' }}>{r.itempath_qty_at_release ?? '—'}</td>
+                <td style={{ padding: '4px 6px', textAlign: 'right' }}>
+                  {r.status === 'released' && (
+                    <button onClick={() => reconcile(r.id)} title="Confirm the merge of this quarantine batch with existing ItemPath stock. Check that the total matches physical count before confirming." style={{ background: T.green, border: 'none', borderRadius: 3, padding: '2px 8px', color: '#fff', fontSize: 9, fontWeight: 700, cursor: 'pointer', fontFamily: mono, marginRight: 4 }}>Reconcile</button>
+                  )}
+                  <button onClick={() => removeRow(r.id)} style={{ background: T.red, border: 'none', borderRadius: 3, padding: '2px 8px', color: '#fff', fontSize: 9, cursor: 'pointer', fontFamily: mono }}>Del</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 // ── INVENTORY TAB ─────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════
 function InventoryTab({ ovenServerUrl, settings }) {
@@ -3767,6 +3877,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
                           {/* Placeholder SKU section — auto-populated on scenario create; operator maps to real SKUs on receipt */}
                           <NpiPlaceholderSection scenarioId={sc.id} ovenServerUrl={ovenServerUrl} />
+                          {/* Quarantine receipts — physical lenses received under placeholders; release on map */}
+                          <NpiQuarantineSection scenarioId={sc.id} ovenServerUrl={ovenServerUrl} />
 
                           {/* Cannibalization table */}
                           {(npiSelected.cannibalization || []).length > 0 && (

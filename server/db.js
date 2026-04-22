@@ -98,6 +98,37 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_npi_ph_real_sku ON npi_placeholder_skus(real_sku);
 `);
 
+// Phase 5: quarantine inventory — physical lenses received under a placeholder
+// SKU before the supplier's real SKU code has been assigned. Held in
+// quarantine; on mapping placeholder → real SKU, the quarantine stock is
+// 'released' and the operator confirms the merge with any existing ItemPath
+// qty (dedup) to get it to 'reconciled'. Does NOT write to ItemPath — that's
+// the vendor's source of truth. The badge / status is read-side only.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS npi_quarantine_receipts (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    scenario_id               TEXT NOT NULL,
+    placeholder_code          TEXT NOT NULL,
+    received_qty              INTEGER NOT NULL,
+    received_at               TEXT NOT NULL,         -- PT-local ISO
+    received_by               TEXT,                  -- operator id
+    supplier_sku              TEXT,                  -- optional pre-mapping
+    notes                     TEXT,
+    status                    TEXT DEFAULT 'quarantined',  -- 'quarantined' | 'released' | 'reconciled'
+    released_at               TEXT,
+    release_real_sku          TEXT,
+    itempath_qty_at_release   INTEGER,
+    reconciled_at             TEXT,
+    reconciled_by             TEXT,
+    FOREIGN KEY (scenario_id) REFERENCES npi_scenarios(id) ON DELETE CASCADE,
+    FOREIGN KEY (placeholder_code) REFERENCES npi_placeholder_skus(placeholder_code) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_npi_qr_scenario ON npi_quarantine_receipts(scenario_id);
+  CREATE INDEX IF NOT EXISTS idx_npi_qr_placeholder ON npi_quarantine_receipts(placeholder_code);
+  CREATE INDEX IF NOT EXISTS idx_npi_qr_status ON npi_quarantine_receipts(status);
+  CREATE INDEX IF NOT EXISTS idx_npi_qr_real_sku ON npi_quarantine_receipts(release_real_sku);
+`);
+
 // Lens Intelligence — SKU planning parameters (configurable per SKU)
 db.exec(`
   CREATE TABLE IF NOT EXISTS lens_sku_params (
@@ -1440,7 +1471,7 @@ function createPlaceholder(scenarioId, { label = null } = {}) {
 // inheriting the scenario's abc_class, safety_stock_weeks, mfg/transit/fda.
 // INSERT OR IGNORE so if the real SKU already has a params row (prior receipt,
 // pre-existing catalog entry), we don't clobber it.
-function mapPlaceholder(scenarioId, placeholderCode, realSku, supplierSku = null) {
+function mapPlaceholder(scenarioId, placeholderCode, realSku, supplierSku = null, itempathQtySnapshot = null) {
   const scenario = db.prepare(`SELECT * FROM npi_scenarios WHERE id = ?`).get(scenarioId);
   if (!scenario) throw new Error('Scenario not found');
   const ph = db.prepare(
@@ -1449,6 +1480,8 @@ function mapPlaceholder(scenarioId, placeholderCode, realSku, supplierSku = null
   if (!ph) throw new Error('Placeholder not found');
   if (!realSku || !/^[A-Za-z0-9._-]+$/.test(realSku)) throw new Error('Invalid real SKU format');
 
+  let quarantineReleased = 0;
+  let quarantineTotalQty = 0;
   db.transaction(() => {
     db.prepare(
       `UPDATE npi_placeholder_skus SET real_sku = ?, supplier_sku = ?, status = 'mapped', mapped_at = datetime('now')
@@ -1467,8 +1500,33 @@ function mapPlaceholder(scenarioId, placeholderCode, realSku, supplierSku = null
       scenario.safety_stock_weeks || 4,
       scenario.abc_class || 'B'
     );
+    // Auto-release any quarantined stock for this placeholder. Caller passes
+    // the ItemPath qty snapshot so we capture what dedup baseline looked like
+    // at release time. Operator still needs to confirm-reconcile per receipt.
+    const quarantined = db.prepare(
+      `SELECT id, received_qty FROM npi_quarantine_receipts WHERE placeholder_code = ? AND status = 'quarantined'`
+    ).all(placeholderCode);
+    quarantineReleased = quarantined.length;
+    quarantineTotalQty = quarantined.reduce((s, r) => s + (r.received_qty || 0), 0);
+    if (quarantined.length > 0) {
+      const now = ptNowIso();
+      const stmt = db.prepare(
+        `UPDATE npi_quarantine_receipts
+         SET status = 'released', released_at = ?, release_real_sku = ?, itempath_qty_at_release = ?
+         WHERE id = ?`
+      );
+      for (const r of quarantined) stmt.run(now, realSku, itempathQtySnapshot, r.id);
+    }
   })();
-  return { placeholder_code: placeholderCode, real_sku: realSku };
+  return {
+    placeholder_code: placeholderCode,
+    real_sku: realSku,
+    quarantineReleased,
+    quarantineTotalQty,
+    itempathQtySnapshot,
+    proposedTotal: (itempathQtySnapshot || 0) + quarantineTotalQty,
+    needsReconcile: quarantineReleased > 0 && (itempathQtySnapshot || 0) > 0,
+  };
 }
 
 function removePlaceholder(scenarioId, placeholderCode) {
@@ -1476,6 +1534,70 @@ function removePlaceholder(scenarioId, placeholderCode) {
     `DELETE FROM npi_placeholder_skus WHERE placeholder_code = ? AND scenario_id = ?`
   ).run(placeholderCode, scenarioId);
   return { deleted: res.changes };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NPI QUARANTINE RECEIPTS — physical inventory received under a placeholder
+// ─────────────────────────────────────────────────────────────────────────────
+function listQuarantineReceipts(scenarioId) {
+  return db.prepare(
+    `SELECT * FROM npi_quarantine_receipts WHERE scenario_id = ? ORDER BY received_at DESC, id DESC`
+  ).all(scenarioId);
+}
+
+function ptNowIso() {
+  // Lab PT local ISO timestamp (matches feedback_lab_day_window pattern)
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+  const g = (t) => parts.find(p => p.type === t)?.value;
+  return `${g('year')}-${g('month')}-${g('day')}T${g('hour')}:${g('minute')}:${g('second')}`;
+}
+
+function receiveQuarantine(scenarioId, placeholderCode, { received_qty, received_by = null, supplier_sku = null, notes = null }) {
+  const qty = Number(received_qty);
+  if (!Number.isInteger(qty) || qty <= 0) throw new Error('received_qty must be a positive integer');
+  const ph = db.prepare(
+    `SELECT * FROM npi_placeholder_skus WHERE placeholder_code = ? AND scenario_id = ?`
+  ).get(placeholderCode, scenarioId);
+  if (!ph) throw new Error('Placeholder not found');
+  const info = db.prepare(
+    `INSERT INTO npi_quarantine_receipts (scenario_id, placeholder_code, received_qty, received_at, received_by, supplier_sku, notes, status)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'quarantined')`
+  ).run(scenarioId, placeholderCode, qty, ptNowIso(), received_by, supplier_sku, notes);
+  return { id: info.lastInsertRowid, scenarioId, placeholderCode, received_qty: qty };
+}
+
+function removeQuarantineReceipt(scenarioId, receiptId) {
+  const res = db.prepare(
+    `DELETE FROM npi_quarantine_receipts WHERE id = ? AND scenario_id = ?`
+  ).run(receiptId, scenarioId);
+  return { deleted: res.changes };
+}
+
+// Called by mapPlaceholder. Flips any 'quarantined' receipts for this
+// placeholder → 'released', stamps real_sku + itempath qty snapshot. Does NOT
+// mark reconciled — operator must confirm the merge first.
+function releaseQuarantineForPlaceholder(placeholderCode, realSku, itempathQtySnapshot) {
+  const now = ptNowIso();
+  const res = db.prepare(
+    `UPDATE npi_quarantine_receipts
+     SET status = 'released', released_at = ?, release_real_sku = ?, itempath_qty_at_release = ?
+     WHERE placeholder_code = ? AND status = 'quarantined'`
+  ).run(now, realSku, itempathQtySnapshot, placeholderCode);
+  return { released: res.changes };
+}
+
+function confirmQuarantineReconcile(scenarioId, receiptId, reconciledBy = null) {
+  const res = db.prepare(
+    `UPDATE npi_quarantine_receipts
+     SET status = 'reconciled', reconciled_at = ?, reconciled_by = ?
+     WHERE id = ? AND scenario_id = ? AND status = 'released'`
+  ).run(ptNowIso(), reconciledBy, receiptId, scenarioId);
+  return { reconciled: res.changes };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3497,6 +3619,11 @@ module.exports = {
   createPlaceholder,
   mapPlaceholder,
   removePlaceholder,
+  listQuarantineReceipts,
+  receiveQuarantine,
+  removeQuarantineReceipt,
+  releaseQuarantineForPlaceholder,
+  confirmQuarantineReconcile,
   SEED_SEMIFINISHED,
   // Upsert functions (called by adapters)
   upsertInventory,

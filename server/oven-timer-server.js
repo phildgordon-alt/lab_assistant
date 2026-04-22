@@ -3052,6 +3052,7 @@ Respond with a structured batching plan in this format:
       && !url.pathname.endsWith('/rx-list.csv')
       && !url.pathname.includes('/variant-skus')
       && !url.pathname.includes('/placeholder-skus')
+      && !url.pathname.includes('/quarantine-receipts')
       && !url.pathname.endsWith('/po-document')) {
     const id = url.pathname.split('/').pop();
     return json(res, npiEngine.getScenario(labDb.db, id, netsuite));
@@ -3060,6 +3061,8 @@ Respond with a structured batching plan in this format:
   // GET    /api/npi/scenarios/:id/placeholder-skus
   // POST   /api/npi/scenarios/:id/placeholder-skus           → add one (auto variant_index)
   // POST   /api/npi/scenarios/:id/placeholder-skus/:code/map → { real_sku, supplier_sku? }
+  //   On map, auto-releases any quarantined stock for this placeholder and
+  //   snapshots the current ItemPath qty for the real SKU for dedup tracking.
   // DELETE /api/npi/scenarios/:id/placeholder-skus/:code
   if (url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.includes('/placeholder-skus')) {
     const parts = url.pathname.split('/'); // ['', 'api', 'npi', 'scenarios', id, 'placeholder-skus', code?, 'map'?]
@@ -3077,7 +3080,16 @@ Respond with a structured batching plan in this format:
       }
       if (req.method === 'POST' && code && action === 'map') {
         const body = await readBody(req);
-        const result = labDb.mapPlaceholder(scenarioId, code, body.real_sku, body.supplier_sku || null);
+        // Snapshot current ItemPath qty for the real SKU so quarantine dedup
+        // knows the baseline at release time. ItemPath poll is cached — no
+        // extra API call, just reading in-memory state.
+        let itempathQty = null;
+        try {
+          const inv = itempath.getInventory ? itempath.getInventory() : null;
+          const m = (inv?.materials || []).find(x => x.sku === body.real_sku);
+          itempathQty = m ? (m.qty || 0) : 0;
+        } catch { /* itempath may not be initialized */ }
+        const result = labDb.mapPlaceholder(scenarioId, code, body.real_sku, body.supplier_sku || null, itempathQty);
         return json(res, result);
       }
       if (req.method === 'DELETE' && code && !action) {
@@ -3089,6 +3101,47 @@ Respond with a structured batching plan in this format:
     }
     res.writeHead(404);
     return res.end('Unknown placeholder route');
+  }
+  // Quarantine receipt routes — physical inventory received under a placeholder
+  // before supplier SKU is known. On placeholder → real SKU mapping, quarantine
+  // stock auto-releases with an ItemPath qty snapshot for dedup tracking.
+  // GET    /api/npi/scenarios/:id/quarantine-receipts
+  // POST   /api/npi/scenarios/:id/quarantine-receipts            → body: { placeholder_code, received_qty, supplier_sku?, notes?, received_by? }
+  // DELETE /api/npi/scenarios/:id/quarantine-receipts/:id
+  // POST   /api/npi/scenarios/:id/quarantine-receipts/:id/reconcile → body: { reconciled_by? }
+  if (url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.includes('/quarantine-receipts')) {
+    const parts = url.pathname.split('/');
+    const scenarioId = parts[4];
+    const rawId = parts[6] ? decodeURIComponent(parts[6]) : null;
+    const receiptId = rawId ? parseInt(rawId, 10) : null;
+    const action = parts[7] || null;
+    try {
+      if (req.method === 'GET' && !rawId) {
+        return json(res, { receipts: labDb.listQuarantineReceipts(scenarioId) });
+      }
+      if (req.method === 'POST' && !rawId) {
+        const body = await readBody(req);
+        const result = labDb.receiveQuarantine(scenarioId, body.placeholder_code, {
+          received_qty: body.received_qty,
+          received_by: body.received_by || null,
+          supplier_sku: body.supplier_sku || null,
+          notes: body.notes || null,
+        });
+        return json(res, result);
+      }
+      if (req.method === 'POST' && receiptId && action === 'reconcile') {
+        const body = await readBody(req);
+        return json(res, labDb.confirmQuarantineReconcile(scenarioId, receiptId, body.reconciled_by || null));
+      }
+      if (req.method === 'DELETE' && receiptId && !action) {
+        return json(res, labDb.removeQuarantineReceipt(scenarioId, receiptId));
+      }
+    } catch (e) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: e.message }));
+    }
+    res.writeHead(404);
+    return res.end('Unknown quarantine route');
   }
   // List Rx profile templates (for standard_profile source-type dropdown)
   if (req.method==='GET' && url.pathname==='/api/rx-profile-templates') {
