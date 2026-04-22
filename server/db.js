@@ -44,6 +44,8 @@ db.exec(`
     manufacturing_weeks REAL DEFAULT 13,
     transit_weeks REAL DEFAULT 4,
     fda_hold_weeks REAL DEFAULT 2,
+    safety_stock_weeks REAL,  -- optional override; null = derive from ABC class via model
+    abc_class TEXT,            -- optional override; null = auto-classify from projected volume
     status TEXT DEFAULT 'planning',
     launch_date TEXT,
     created_at TEXT DEFAULT (datetime('now')),
@@ -62,6 +64,10 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_npi_cann_scenario ON npi_cannibalization(scenario_id);
 `);
+
+// Migrate older databases: add safety_stock_weeks + abc_class columns if missing.
+try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN safety_stock_weeks REAL"); } catch (e) { /* already exists */ }
+try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN abc_class TEXT"); } catch (e) { /* already exists */ }
 
 // Lens Intelligence — SKU planning parameters (configurable per SKU)
 db.exec(`

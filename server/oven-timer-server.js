@@ -3114,10 +3114,15 @@ Respond with a structured batching plan in this format:
     lines.push(`Current Weekly Volume (cannibalized SKUs),${result.totalCurrentWeekly || 0}`);
     lines.push(`Source SKU Count,${result.sourceSkuCount || 0}`);
     lines.push('');
+    lines.push('# MODEL-DERIVED PARAMETERS');
+    lines.push('Metric,Value,Source');
+    lines.push(`ABC Class,${esc(result.abcClass || '')},${esc(result.abcClassSource || '')}`);
+    lines.push(`Safety Stock Weeks,${result.safetyWeeks || 0},${esc(result.safetyWeeksSource || '')}`);
+    lines.push('');
     lines.push('# INITIAL ORDER RECOMMENDATION');
     lines.push('Metric,Value');
     lines.push(`Initial Order Quantity,${result.initialOrderQty || 0}`);
-    lines.push(`Formula,(${totalLeadTime}wk lead + ${safetyWeeks}wk safety) * ${result.newProductWeeklyLenses || 0} lenses/wk`);
+    lines.push(`Formula,(${totalLeadTime}wk lead + ${result.safetyWeeks || 0}wk safety) * ${result.newProductWeeklyLenses || 0} lenses/wk`);
     lines.push('');
     // Section 2: cannibalization breakdown
     lines.push('# CANNIBALIZATION DETAIL');
@@ -3143,11 +3148,17 @@ Respond with a structured batching plan in this format:
       npiEngine.updateScenario(labDb.db, id, { status: 'received' });
       // Recompute cannibalization
       npiEngine.computeCannibalization(labDb.db, id);
-      // If new_sku_prefix is set, add the new SKU(s) to lens_sku_params so lens intelligence picks them up
+      // If new_sku_prefix is set, add the new SKU(s) to lens_sku_params so lens intelligence picks them up.
+      // Use the abc_class + safety_stock_weeks that computeCannibalization derived — not hardcoded 'B'/4.
       if (scenario.new_sku_prefix) {
-        labDb.db.prepare(`INSERT OR IGNORE INTO lens_sku_params (sku, abc_class, manufacturing_weeks, transit_weeks, fda_hold_weeks, routing)
-          VALUES (?, 'B', ?, ?, ?, 'STOCK')`).run(
-          scenario.new_sku_prefix, scenario.manufacturing_weeks || 13, scenario.transit_weeks || 4, scenario.fda_hold_weeks || 2
+        const comp = npiEngine.computeCannibalization(labDb.db, id) || {};
+        const abcForPrefix = comp.abcClass || 'B';
+        const safetyForPrefix = comp.safetyWeeks || 4;
+        labDb.db.prepare(`INSERT OR IGNORE INTO lens_sku_params (sku, abc_class, manufacturing_weeks, transit_weeks, fda_hold_weeks, safety_stock_weeks, routing)
+          VALUES (?, ?, ?, ?, ?, ?, 'STOCK')`).run(
+          scenario.new_sku_prefix, abcForPrefix,
+          scenario.manufacturing_weeks || 13, scenario.transit_weeks || 4, scenario.fda_hold_weeks || 2,
+          safetyForPrefix
         );
       }
       // Refresh lens intelligence to pick up the new adjustments

@@ -3500,11 +3500,19 @@ function InventoryTab({ ovenServerUrl, settings }) {
                         return (
                         <div style={{ marginTop: 12, padding: 12, background: T.surface, borderRadius: 8 }}>
                           {/* KPIs */}
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 6, marginBottom: 12 }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 6, marginBottom: 12 }}>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.blue, fontFamily: mono }}>{sc.adoption_pct}%</div><div style={{ fontSize: 8, color: T.textDim }}>ADOPTION</div></div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.amber, fontFamily: mono }}>{npiSelected.newProductWeeklyJobs || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>JOBS/WK</div></div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.green, fontFamily: mono }}>{npiSelected.newProductWeeklyLenses || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>LENSES/WK</div></div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.red, fontFamily: mono }}>{npiSelected.totalLostWeekly || 0}</div><div style={{ fontSize: 8, color: T.textDim }}>REDUCTION/WK</div></div>
+                            <div style={{ textAlign: 'center' }} title={npiSelected.abcClassSource || ''}>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: T.purple, fontFamily: mono }}>{npiSelected.abcClass || '—'}</div>
+                              <div style={{ fontSize: 8, color: T.textDim }}>ABC CLASS</div>
+                            </div>
+                            <div style={{ textAlign: 'center' }} title={npiSelected.safetyWeeksSource || ''}>
+                              <div style={{ fontSize: 18, fontWeight: 800, color: T.purple, fontFamily: mono }}>{npiSelected.safetyWeeks || '—'}<span style={{ fontSize: 10, color: T.textDim }}>wk</span></div>
+                              <div style={{ fontSize: 8, color: T.textDim }}>SAFETY</div>
+                            </div>
                             <div style={{ textAlign: 'center' }}><div style={{ fontSize: 18, fontWeight: 800, color: T.text, fontFamily: mono }}>{(npiSelected.initialOrderQty || 0).toLocaleString()}</div><div style={{ fontSize: 8, color: T.textDim }}>INITIAL ORDER</div></div>
                           </div>
 
@@ -3557,7 +3565,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <input type="text" defaultValue={sc.new_sku_prefix || ''} id="npi-edit-prefix" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
                               </div>
                             </div>
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 8, marginBottom: 8 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 8, marginBottom: 8 }}>
                               <div>
                                 <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>MFG (wk)</label>
                                 <input type="number" step="0.5" defaultValue={sc.manufacturing_weeks} id="npi-edit-mfg" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
@@ -3570,6 +3578,19 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>FDA (wk)</label>
                                 <input type="number" step="0.5" defaultValue={sc.fda_hold_weeks} id="npi-edit-fda" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
                               </div>
+                              <div title="Leave blank to use model default (ABC-based)">
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>SAFETY (wk)</label>
+                                <input type="number" step="0.5" defaultValue={sc.safety_stock_weeks || ''} placeholder="auto" id="npi-edit-safety" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
+                              </div>
+                              <div title="Leave blank to auto-classify by projected volume">
+                                <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>ABC CLASS</label>
+                                <select defaultValue={sc.abc_class || ''} id="npi-edit-abc" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }}>
+                                  <option value="">auto</option>
+                                  <option value="A">A</option>
+                                  <option value="B">B</option>
+                                  <option value="C">C</option>
+                                </select>
+                              </div>
                               <div>
                                 <label style={{ fontSize: 8, color: T.textDim, fontFamily: mono, display: 'block', marginBottom: 2 }}>LAUNCH DATE</label>
                                 <input type="date" defaultValue={sc.launch_date || ''} id="npi-edit-launch" style={{ width: '100%', padding: '5px 6px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 3, color: T.text, fontSize: 11, fontFamily: mono }} />
@@ -3578,6 +3599,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                 <button onClick={async () => {
                                   const st = document.getElementById('npi-edit-source-type')?.value || 'prefix';
                                   const srcVal = document.getElementById('npi-edit-source')?.value || null;
+                                  const safetyRaw = document.getElementById('npi-edit-safety')?.value;
+                                  const abcRaw = document.getElementById('npi-edit-abc')?.value;
                                   const body = {
                                     name: document.getElementById('npi-edit-name')?.value,
                                     adoption_pct: parseFloat(document.getElementById('npi-edit-adoption')?.value) || 50,
@@ -3588,6 +3611,8 @@ function InventoryTab({ ovenServerUrl, settings }) {
                                     manufacturing_weeks: parseFloat(document.getElementById('npi-edit-mfg')?.value) || 13,
                                     transit_weeks: parseFloat(document.getElementById('npi-edit-transit')?.value) || 4,
                                     fda_hold_weeks: parseFloat(document.getElementById('npi-edit-fda')?.value) || 2,
+                                    safety_stock_weeks: safetyRaw && !isNaN(parseFloat(safetyRaw)) ? parseFloat(safetyRaw) : null,
+                                    abc_class: abcRaw || null,
                                     launch_date: document.getElementById('npi-edit-launch')?.value || null,
                                   };
                                   const resp = await fetch(`${ovenServerUrl}/api/npi/scenarios/${sc.id}`, { method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(body) });

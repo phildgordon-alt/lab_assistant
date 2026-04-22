@@ -24,12 +24,15 @@ const VALID_STATUSES = ['draft', 'approved', 'in_production', 'on_the_water', 'r
 
 function createScenario(db, data) {
   const id = generateId();
-  db.prepare(`INSERT INTO npi_scenarios (id, name, description, new_sku_prefix, adoption_pct, source_type, source_value, proxy_sku, manufacturing_weeks, transit_weeks, fda_hold_weeks, status, launch_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  db.prepare(`INSERT INTO npi_scenarios (id, name, description, new_sku_prefix, adoption_pct, source_type, source_value, proxy_sku, manufacturing_weeks, transit_weeks, fda_hold_weeks, safety_stock_weeks, abc_class, status, launch_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id, data.name, data.description || null, data.new_sku_prefix || null,
     data.adoption_pct || 50, data.source_type || 'prefix', data.source_value || null,
     data.proxy_sku || null, data.manufacturing_weeks || 13, data.transit_weeks || 4,
-    data.fda_hold_weeks || 2, data.status || 'draft', data.launch_date || null
+    data.fda_hold_weeks || 2,
+    data.safety_stock_weeks != null ? data.safety_stock_weeks : null,
+    data.abc_class || null,
+    data.status || 'draft', data.launch_date || null
   );
   return id;
 }
@@ -165,9 +168,39 @@ function computeCannibalization(db, scenarioId) {
 
   // Compute new product demand
   const totalLeadTime = (scenario.manufacturing_weeks || 13) + (scenario.transit_weeks || 4) + (scenario.fda_hold_weeks || 2);
-  const safetyWeeks = 4;
   // totalLostWeekly is already in lens units (from ItemPath picks), NOT jobs
   const newProductWeeklyLenses = Math.round(totalLostWeekly);
+
+  // ABC class + safety stock now pulled from the lens intelligence model.
+  // Lens intel classifies by adjusted AVG MONTHLY: A>=100, B>=20, C<20.
+  // SAFETY_BY_CLASS: A=6wk, B=4wk, C=3wk (matches lens-intelligence.js:33).
+  // Model's use_woc_override flag (weeks-of-cover override) is honored too.
+  const SAFETY_BY_CLASS = { A: 6, B: 4, C: 3 };
+  const monthlyLenses = newProductWeeklyLenses * 4.33;
+  const autoAbcClass = monthlyLenses >= 100 ? 'A' : monthlyLenses >= 20 ? 'B' : 'C';
+  const abcClass = scenario.abc_class || autoAbcClass;
+  // Read model params from DB (key/value table populated by Lens Intelligence Model tab)
+  let modelParams = { use_woc_override: false, woc_target_weeks: 16 };
+  try {
+    const rows = db.prepare(`SELECT key, value FROM model_params WHERE key IN ('use_woc_override','woc_target_weeks')`).all();
+    for (const r of rows) {
+      if (r.key === 'use_woc_override') modelParams.use_woc_override = (r.value === 'true' || r.value === true);
+      else if (r.key === 'woc_target_weeks' && !isNaN(Number(r.value))) modelParams.woc_target_weeks = Number(r.value);
+    }
+  } catch { /* model_params table may not exist on older DBs */ }
+  let safetyWeeks;
+  let safetyWeeksSource;
+  if (scenario.safety_stock_weeks != null && scenario.safety_stock_weeks > 0) {
+    safetyWeeks = scenario.safety_stock_weeks;
+    safetyWeeksSource = 'scenario_override';
+  } else if (modelParams.use_woc_override) {
+    safetyWeeks = modelParams.woc_target_weeks;
+    safetyWeeksSource = 'model_woc_override';
+  } else {
+    safetyWeeks = SAFETY_BY_CLASS[abcClass];
+    safetyWeeksSource = `model_abc_${abcClass}`;
+  }
+
   const initialOrderQty = Math.ceil((totalLeadTime + safetyWeeks) * newProductWeeklyLenses);
 
   return {
@@ -177,6 +210,10 @@ function computeCannibalization(db, scenarioId) {
     totalLostWeekly: Math.round(totalLostWeekly),
     newProductWeeklyJobs: Math.round(totalLostWeekly),
     newProductWeeklyLenses,
+    abcClass,
+    abcClassSource: scenario.abc_class ? 'scenario_override' : 'auto_from_volume',
+    safetyWeeks,
+    safetyWeeksSource,
     initialOrderQty,
     totalLeadTime,
   };
