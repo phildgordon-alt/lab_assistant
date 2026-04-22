@@ -1852,13 +1852,15 @@ function queryShippedJobs(days = 7) {
 }
 
 function queryShippedStats(days = 7) {
+  // dvi_jobs_history.shipped_at is stored naive UTC via datetime('now').
+  // date('localtime') shifts to the server's local TZ (Mac Studio = PT at lab).
   const daily = db.prepare(`
-    SELECT date(shipped_at) as ship_date, COUNT(*) as count,
+    SELECT date(shipped_at, 'localtime') as ship_date, COUNT(*) as count,
            SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush_count,
            AVG(days_in_lab) as avg_days
     FROM dvi_jobs_history
     WHERE shipped_at >= datetime('now', '-' || ? || ' days')
-    GROUP BY date(shipped_at)
+    GROUP BY date(shipped_at, 'localtime')
     ORDER BY ship_date DESC
   `).all(days);
 
@@ -1871,12 +1873,14 @@ function queryShippedStats(days = 7) {
 }
 
 function queryCompletedPicks(days = 7) {
+  // picks_history.completed_at is offset-form or naive PT — substr(col,1,10)
+  // reads the PT date literal. date(col) would evaluate in UTC and mis-bucket.
   const daily = db.prepare(`
-    SELECT date(completed_at) as pick_date, COUNT(*) as order_count,
+    SELECT substr(completed_at, 1, 10) as pick_date, COUNT(*) as order_count,
            SUM(qty) as total_qty, COUNT(DISTINCT sku) as unique_skus
     FROM picks_history
     WHERE completed_at >= datetime('now', '-${days} days')
-    GROUP BY date(completed_at)
+    GROUP BY substr(completed_at, 1, 10)
     ORDER BY pick_date DESC
   `).all();
 
@@ -1897,14 +1901,15 @@ function queryCompletedPicks(days = 7) {
  * Used by InventoryAgent for stocking plans
  */
 function queryConsumption(days = 7) {
-  // Per-SKU consumption over the period
+  // Per-SKU consumption over the period. substr(col,1,10) = PT-local date;
+  // date() in UTC would double-count cross-midnight-UTC evening picks.
   const skuConsumption = db.prepare(`
     SELECT
       ph.sku,
       ph.name,
       SUM(ph.qty) as total_consumed,
-      COUNT(DISTINCT date(ph.completed_at)) as active_days,
-      ROUND(CAST(SUM(ph.qty) AS REAL) / NULLIF(COUNT(DISTINCT date(ph.completed_at)), 0), 1) as avg_daily_usage,
+      COUNT(DISTINCT substr(ph.completed_at, 1, 10)) as active_days,
+      ROUND(CAST(SUM(ph.qty) AS REAL) / NULLIF(COUNT(DISTINCT substr(ph.completed_at, 1, 10)), 0), 1) as avg_daily_usage,
       ph.warehouse
     FROM picks_history ph
     WHERE ph.completed_at >= datetime('now', '-' || ? || ' days')
