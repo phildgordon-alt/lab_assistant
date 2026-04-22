@@ -569,11 +569,14 @@ module.exports = {
     const metric = zoneMetrics[department];
     if (!metric) return [];
 
+    // ews_readings.ts is naive UTC (written via datetime('now')). 'localtime'
+    // shifts to PT so the trend buckets match lab shift boundaries instead of
+    // spilling evening readings into the next day.
     const rows = db.prepare(`
-      SELECT DATE(ts) as day, AVG(value) as avg_backlog, MAX(value) as max_backlog, COUNT(*) as samples
+      SELECT DATE(ts, 'localtime') as day, AVG(value) as avg_backlog, MAX(value) as max_backlog, COUNT(*) as samples
       FROM ews_readings
       WHERE metric = ? AND ts >= datetime('now', ?)
-      GROUP BY DATE(ts)
+      GROUP BY DATE(ts, 'localtime')
       ORDER BY day
     `).all(metric, `-${days} days`);
 

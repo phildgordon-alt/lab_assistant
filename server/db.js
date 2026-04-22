@@ -2128,7 +2128,17 @@ function getRecentDviImports(days = 30) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function refreshWarmLayer() {
-  const today = new Date().toISOString().split('T')[0];
+  // PT-local 'today' — UTC date would miss jobs shipped 5 PM - midnight PT.
+  const todayParts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).reduce((acc, p) => {
+    if (p.type === 'year') acc.y = p.value;
+    else if (p.type === 'month') acc.m = p.value;
+    else if (p.type === 'day') acc.d = p.value;
+    return acc;
+  }, {});
+  const today = `${todayParts.y}-${todayParts.m}-${todayParts.d}`;
 
   // Refresh throughput_daily
   const throughput = db.prepare(`
@@ -2145,9 +2155,10 @@ function refreshWarmLayer() {
     WHERE archived = 0 AND stage NOT IN ('CANCELED', 'SHIPPED')
   `).get();
 
+  // dvi_jobs_history.shipped_at is naive UTC — use 'localtime' to get PT date.
   const shipped = db.prepare(`
     SELECT COUNT(*) as count, SUM(CASE WHEN rush = 'Y' THEN 1 ELSE 0 END) as rush
-    FROM dvi_jobs_history WHERE date(shipped_at) = ?
+    FROM dvi_jobs_history WHERE date(shipped_at, 'localtime') = ?
   `).get(today);
 
   db.prepare(`
