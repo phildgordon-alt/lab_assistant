@@ -114,17 +114,29 @@ function computeCannibalization(db, scenarioId) {
       ORDER BY total DESC
     `).all(scenario.source_value);
   } else if (scenario.source_type === 'skus' && scenario.source_value) {
-    // Comma-separated list of specific SKUs
-    const skuList = scenario.source_value.split(',').map(s => s.trim()).filter(Boolean);
+    // Comma-separated (or whitespace-separated) list. Normalize + dedupe.
+    const skuList = [...new Set(
+      scenario.source_value.split(/[\s,;\n\r]+/).map(s => s.trim()).filter(Boolean)
+    )];
+    // Chunk the IN query. SQLite's default SQLITE_MAX_VARIABLE_NUMBER varies
+    // (999 in older builds, 32766 in newer) — and large IN lists cost more
+    // per-param anyway. 500 per batch is safe + fast. Aggregate across
+    // batches and re-sort at the end.
     if (skuList.length > 0) {
-      const placeholders = skuList.map(() => '?').join(',');
-      sourceSkus = db.prepare(`
-        SELECT sku, SUM(units_consumed) as total, COUNT(DISTINCT week_start) as weeks
-        FROM lens_consumption_weekly
-        WHERE sku IN (${placeholders})
-        GROUP BY sku
-        ORDER BY total DESC
-      `).all(...skuList);
+      const CHUNK = 500;
+      const byKey = new Map(); // sku → { total, weeks (max across batches, but each batch sees its own rows) }
+      for (let i = 0; i < skuList.length; i += CHUNK) {
+        const chunk = skuList.slice(i, i + CHUNK);
+        const placeholders = chunk.map(() => '?').join(',');
+        const rows = db.prepare(`
+          SELECT sku, SUM(units_consumed) as total, COUNT(DISTINCT week_start) as weeks
+          FROM lens_consumption_weekly
+          WHERE sku IN (${placeholders})
+          GROUP BY sku
+        `).all(...chunk);
+        for (const r of rows) byKey.set(r.sku, r);
+      }
+      sourceSkus = [...byKey.values()].sort((a, b) => b.total - a.total);
     }
   } else if (scenario.source_type === 'proxy' && scenario.proxy_sku) {
     // Use proxy SKU's consumption as the estimate for the new product
