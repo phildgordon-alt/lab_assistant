@@ -3180,10 +3180,13 @@ function getProductionDaily(days = 14) {
 
 // ── Hourly pick/put stats (DB-backed, replaces in-memory counters) ──────────
 // picks_history has mixed `completed_at` formats:
-//   - Suffixed (-07:00): SQLite interprets as UTC. Subtract 7h to get PT.
-//   - Bare ISO: already PT-local. Use strftime directly.
-// CASE handles both. PT offset hardcoded to -7 (PDT); swap to -8 in PST
-// (verify with `date` on prod when DST flips).
+//   - Suffixed (-07:00 / -08:00 / Z): SQLite parses as a UTC-anchored moment.
+//     Use 'localtime' modifier to convert to the server's local TZ. Mac Studio
+//     runs in America/Los_Angeles, so 'localtime' is PT and handles DST
+//     automatically (was hardcoded -7 which breaks when PST kicks in Nov).
+//   - Bare ISO (no suffix): already PT-local. strftime('%H') returns the
+//     literal hour component without converting.
+// CASE handles both. No more hardcoded offset → no more DST-flip bug.
 //
 // Lab day = 5 AM PT → 5 AM PT next day. Caller passes both bounds as ISO.
 // Result shape: { WH1: {0..23: N}, WH2: {...}, WH3: {...} } — zeros omitted.
@@ -3192,7 +3195,7 @@ function _labHourFromCompletedAt() {
   return `CAST(
     CASE
       WHEN completed_at LIKE '%-0%' OR completed_at LIKE '%+0%' OR completed_at LIKE '%Z'
-      THEN strftime('%H', datetime(completed_at, '-7 hours'))
+      THEN strftime('%H', datetime(completed_at, 'localtime'))
       ELSE strftime('%H', completed_at)
     END AS INTEGER
   )`;
@@ -3201,7 +3204,7 @@ function _labHourFromCreationDate() {
   return `CAST(
     CASE
       WHEN creation_date LIKE '%-0%' OR creation_date LIKE '%+0%' OR creation_date LIKE '%Z'
-      THEN strftime('%H', datetime(creation_date, '-7 hours'))
+      THEN strftime('%H', datetime(creation_date, 'localtime'))
       ELSE strftime('%H', creation_date)
     END AS INTEGER
   )`;
