@@ -1,0 +1,10 @@
+#!/bin/bash
+DB="/Users/Shared/lab_assistant/data/lab_assistant.db"
+echo "=== Total rows ==="
+sqlite3 $DB "SELECT COUNT(*) FROM dvi_shipped_jobs;"
+echo "=== With frame_upc ==="
+sqlite3 $DB "SELECT COUNT(*) FROM dvi_shipped_jobs WHERE frame_upc IS NOT NULL AND frame_upc != '';"
+echo "=== Sample frame_upc ==="
+sqlite3 $DB "SELECT invoice, frame_upc, frame_name FROM dvi_shipped_jobs WHERE frame_upc IS NOT NULL LIMIT 5;"
+echo "=== Daily counts ==="
+sqlite3 $DB "SELECT ship_date, COUNT(*) as jobs, COUNT(lens_opc_r) as r, COUNT(lens_opc_l) as l, COUNT(frame_upc) as frames FROM dvi_shipped_jobs WHERE is_hko=0 AND ship_date >= '2026-03-28' GROUP BY ship_date;"

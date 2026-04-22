@@ -25,3 +25,10 @@ npm-debug.log*
 # Data files (generated at runtime)
 oven-runs.json
 data/
+
+# Runtime-generated adapter caches (rewritten every poll cycle)
+server/som-data.json
+server/*-data.json
+server/lab-assistant.db
+server/data/
+
