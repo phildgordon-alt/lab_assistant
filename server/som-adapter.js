@@ -97,6 +97,14 @@ function classifyTool(remainingPct, kind) {
 // In-memory state
 let devices = [];
 let conveyors = [];
+// Silent-0-row protection: if MySQL returns an empty result after we previously
+// had data, something is broken (connection, query, permissions) — don't
+// overwrite good cached state with zero rows. Track consecutive suspicious
+// polls and alert after SUSPICIOUS_POLL_THRESHOLD.
+let prevDeviceCount = 0;
+let prevConveyorCount = 0;
+let consecutiveSuspiciousPolls = 0;
+const SUSPICIOUS_POLL_THRESHOLD = 3;
 let oee = [];
 let orders = { byDepartment: [], today: [], total: 0, todayTotal: 0 };
 let activeJobs = []; // Individual WIP jobs with department + DVI job#
@@ -548,7 +556,7 @@ async function poll() {
       WHERE isActive = 1 OR isActive IS NULL
     `);
 
-    devices = deviceRows.map(row => {
+    const newDevices = deviceRows.map(row => {
       const statusInfo = DEVICE_STATUS[row.Status] || { label: row.Status || 'Unknown', color: 'gray', severity: 'unknown' };
       const ledInfo = parseLEDStatus(row.LEDStatus);
       const category = categorizeDevice(row.Model, row.TypeDescr, row.Device);
@@ -584,7 +592,7 @@ async function poll() {
       FROM production_conveyor_device
     `);
 
-    conveyors = conveyorRows.map(row => {
+    const newConveyors = conveyorRows.map(row => {
       const statusInfo = CONVEYOR_STATUS[row.Status] || CONVEYOR_STATUS[0];
       return {
         id: row.Device,
@@ -597,6 +605,32 @@ async function poll() {
         lastUpdate: row.Time
       };
     });
+
+    // Silent-0-row guard: SOM registry tables should never return 0 rows when the
+    // lab is running. If we previously had data and the query just returned zero,
+    // something broke (connection reset mid-query, permission drop, etc.). Don't
+    // overwrite the cached state; keep serving last-known-good and alert.
+    const suspiciousDrop =
+      (prevDeviceCount > 0 && newDevices.length === 0) ||
+      (prevConveyorCount > 0 && newConveyors.length === 0);
+    if (suspiciousDrop) {
+      consecutiveSuspiciousPolls++;
+      console.error(`[SOM] SUSPICIOUS 0-row result — prev ${prevDeviceCount} devices/${prevConveyorCount} conveyors, now ${newDevices.length}/${newConveyors.length}. Keeping prior cache. (consecutive: ${consecutiveSuspiciousPolls})`);
+      if (consecutiveSuspiciousPolls === SUSPICIOUS_POLL_THRESHOLD) {
+        // Only fire once at exact threshold to avoid Slack flooding
+        try {
+          postSlackAlert(`:warning: *SOM silent 0-row poll* — MySQL returned 0 devices/conveyors on ${consecutiveSuspiciousPolls} consecutive polls. Prior cache (${prevDeviceCount}/${prevConveyorCount}) retained. Investigate DB connection/permissions.`);
+        } catch {}
+      }
+      isLive = false;
+      connectionError = `0-row result for ${consecutiveSuspiciousPolls} consecutive polls`;
+      return false;
+    }
+    consecutiveSuspiciousPolls = 0;
+    prevDeviceCount = newDevices.length;
+    prevConveyorCount = newConveyors.length;
+    devices = newDevices;
+    conveyors = newConveyors;
 
     // Query recent OEE data (last 24 hours)
     try {
