@@ -24,15 +24,17 @@ const VALID_STATUSES = ['draft', 'approved', 'in_production', 'on_the_water', 'r
 
 function createScenario(db, data) {
   const id = generateId();
-  db.prepare(`INSERT INTO npi_scenarios (id, name, description, new_sku_prefix, adoption_pct, source_type, source_value, proxy_sku, manufacturing_weeks, transit_weeks, fda_hold_weeks, safety_stock_weeks, abc_class, status, launch_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+  db.prepare(`INSERT INTO npi_scenarios (id, name, description, new_sku_prefix, adoption_pct, source_type, source_value, proxy_sku, manufacturing_weeks, transit_weeks, fda_hold_weeks, safety_stock_weeks, abc_class, status, launch_date, standard_profile_template_id, standard_profile_qty)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
     id, data.name, data.description || null, data.new_sku_prefix || null,
     data.adoption_pct || 50, data.source_type || 'prefix', data.source_value || null,
     data.proxy_sku || null, data.manufacturing_weeks || 13, data.transit_weeks || 4,
     data.fda_hold_weeks || 2,
     data.safety_stock_weeks != null ? data.safety_stock_weeks : null,
     data.abc_class || null,
-    data.status || 'draft', data.launch_date || null
+    data.status || 'draft', data.launch_date || null,
+    data.standard_profile_template_id != null ? Number(data.standard_profile_template_id) : null,
+    data.standard_profile_qty != null ? Number(data.standard_profile_qty) : null
   );
   return id;
 }
@@ -144,6 +146,33 @@ function computeCannibalization(db, scenarioId) {
       GROUP BY sku
       ORDER BY total DESC
     `).all();
+  } else if (scenario.source_type === 'standard_profile') {
+    // Non-cannibalizing NPI — no source SKUs, no cannibalization rows.
+    // User specifies standard_profile_template_id + standard_profile_qty.
+    // The initial order qty is the user's total directly (no lead-time math
+    // applied because they're already saying "I want N lenses").
+    // Short-circuit: clear any stale cannibalization rows and return.
+    db.prepare('DELETE FROM npi_cannibalization WHERE scenario_id = ?').run(scenarioId);
+    const totalLeadTime = (scenario.manufacturing_weeks || 13) + (scenario.transit_weeks || 4) + (scenario.fda_hold_weeks || 2);
+    const qty = Number(scenario.standard_profile_qty) || 0;
+    const tpl = scenario.standard_profile_template_id
+      ? db.prepare('SELECT * FROM rx_profile_templates WHERE id = ?').get(scenario.standard_profile_template_id)
+      : null;
+    return {
+      scenario,
+      sourceSkuCount: 0,
+      totalCurrentWeekly: 0,
+      totalLostWeekly: 0,
+      newProductWeeklyJobs: 0,
+      newProductWeeklyLenses: 0,
+      abcClass: scenario.abc_class || 'B',
+      abcClassSource: scenario.abc_class ? 'scenario_override' : 'default',
+      safetyWeeks: scenario.safety_stock_weeks || 4,
+      safetyWeeksSource: 'standard_profile',
+      initialOrderQty: qty,
+      totalLeadTime,
+      standardProfile: { template: tpl, qty },
+    };
   }
 
   // Compute cannibalization per source SKU
@@ -242,4 +271,139 @@ function getActiveAdjustments(db) {
   return adjustments;
 }
 
-module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments };
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPAND TO PER-JOB RX LIST
+// Produces one row per expected demand unit. For cannibalizing scenarios:
+// for each source SKU, allocate qty proportionally to its lost_weekly share
+// of the total, then emit rows by replaying that SKU's historical Rx samples
+// (cycling with replacement if needed). For standard_profile: expand template
+// buckets by pct_of_total and emit rows at the bucket midpoint (or, for
+// Surfacing, by base_curve only — pucks have no Rx).
+//
+// Output shape: array of {
+//   line_no, source_sku, placeholder_sku, material, base_curve, diameter,
+//   lens_type, sph, cyl, axis, add, pd, confidence
+// }
+// ─────────────────────────────────────────────────────────────────────────────
+function expandScenarioToPerJobRows(db, scenarioId) {
+  const scenario = db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(scenarioId);
+  if (!scenario) return { error: 'Scenario not found', rows: [] };
+
+  const compute = computeCannibalization(db, scenarioId);
+  if (!compute) return { error: 'Compute failed', rows: [] };
+
+  const rows = [];
+  const placeholderStub = scenario.new_sku_prefix || `NPI-${scenarioId}`;
+  let lineNo = 1;
+
+  if (scenario.source_type === 'standard_profile') {
+    const tplId = scenario.standard_profile_template_id;
+    const qty = Number(scenario.standard_profile_qty) || 0;
+    if (!tplId || qty <= 0) return { error: 'standard_profile scenario missing template_id or qty', rows: [] };
+    const tpl = db.prepare('SELECT * FROM rx_profile_templates WHERE id = ?').get(tplId);
+    const buckets = db.prepare('SELECT * FROM rx_profile_buckets WHERE template_id = ? ORDER BY pct_of_total DESC').all(tplId);
+    if (!tpl || buckets.length === 0) return { error: 'Template has no buckets — populate via backfill or edit', rows: [] };
+
+    // Allocate qty proportionally across buckets; round up so totals don't under-ship
+    const allocations = buckets.map(b => ({ b, target: Math.round(qty * b.pct_of_total) }));
+    // Correct rounding drift — if the sum isn't exactly qty, adjust the largest bucket
+    const allocated = allocations.reduce((s, a) => s + a.target, 0);
+    if (allocated !== qty && allocations.length > 0) {
+      allocations.sort((a, b) => b.target - a.target);
+      allocations[0].target += (qty - allocated);
+    }
+    for (const { b, target } of allocations) {
+      for (let i = 0; i < target; i++) {
+        // Row values: midpoint of bucket range, or null for Surfacing template
+        const mid = (lo, hi) => (lo != null && hi != null) ? Math.round(((lo + hi) / 2) * 100) / 100 : null;
+        rows.push({
+          line_no: lineNo++,
+          source_sku: '',
+          placeholder_sku: placeholderStub,
+          material: '',
+          base_curve: b.base_curve,
+          diameter: null,
+          lens_type: tpl.lens_type,
+          sph: mid(b.sph_min, b.sph_max),
+          cyl: mid(b.cyl_min, b.cyl_max),
+          axis: null,
+          add: mid(b.add_min, b.add_max),
+          pd: null,
+          confidence: b.sample_count,
+        });
+      }
+    }
+    return { rows, scenario, compute, source: 'standard_profile', templateName: tpl.name };
+  }
+
+  // Cannibalizing source types — allocate by lost_weekly share, replay historical Rx
+  const canns = db.prepare(
+    'SELECT * FROM npi_cannibalization WHERE scenario_id = ? AND lost_weekly > 0 ORDER BY lost_weekly DESC'
+  ).all(scenarioId);
+  if (canns.length === 0) return { error: 'No cannibalization rows — run compute first', rows: [] };
+
+  const totalLost = canns.reduce((s, c) => s + (c.lost_weekly || 0), 0);
+  if (totalLost <= 0) return { error: 'Zero total lost_weekly', rows: [] };
+  const initialOrderQty = compute.initialOrderQty || 0;
+
+  // Prepared statement to pull Rx samples per source SKU from the jobs table
+  const rxStmt = db.prepare(`
+    SELECT rx_r_sphere AS sph, rx_r_cylinder AS cyl, rx_r_axis AS axis, rx_r_add AS add_pow, rx_r_pd AS pd, lens_material AS mat, lens_type, lens_style
+    FROM jobs WHERE lens_opc_r = ? AND rx_r_sphere IS NOT NULL AND rx_r_sphere != ''
+    UNION ALL
+    SELECT rx_l_sphere, rx_l_cylinder, rx_l_axis, rx_l_add, rx_l_pd, lens_material, lens_type, lens_style
+    FROM jobs WHERE lens_opc_l = ? AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
+    LIMIT 5000
+  `);
+  const propsStmt = db.prepare('SELECT material, lens_type_modal, base_curve, diameter, sample_job_count FROM lens_sku_properties WHERE sku = ?');
+
+  for (const c of canns) {
+    const shareQty = Math.round((c.lost_weekly / totalLost) * initialOrderQty);
+    if (shareQty <= 0) continue;
+    const samples = rxStmt.all(c.source_sku, c.source_sku);
+    const props = propsStmt.get(c.source_sku) || {};
+    for (let i = 0; i < shareQty; i++) {
+      const s = samples.length > 0 ? samples[i % samples.length] : {};
+      rows.push({
+        line_no: lineNo++,
+        source_sku: c.source_sku,
+        placeholder_sku: placeholderStub,
+        material: (s.mat || props.material || '').toUpperCase(),
+        base_curve: props.base_curve,
+        diameter: props.diameter,
+        lens_type: s.lens_type || props.lens_type_modal || '',
+        sph: parseFloat(s.sph) || null,
+        cyl: parseFloat(s.cyl) || null,
+        axis: parseFloat(s.axis) || null,
+        add: parseFloat(s.add_pow) || null,
+        pd: parseFloat(s.pd) || null,
+        confidence: props.sample_job_count || samples.length || 0,
+      });
+    }
+  }
+  return { rows, scenario, compute, source: 'cannibalizing' };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CSV FORMATTER — the per-job Rx list for Excel download
+// ─────────────────────────────────────────────────────────────────────────────
+function formatRxListCsv(expandedResult) {
+  const esc = (v) => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [];
+  lines.push(['line','placeholder_sku','source_sku','lens_type','material','base_curve','diameter','sph','cyl','axis','add','pd','confidence'].join(','));
+  for (const r of expandedResult.rows || []) {
+    lines.push([
+      r.line_no, esc(r.placeholder_sku), esc(r.source_sku), esc(r.lens_type),
+      esc(r.material), r.base_curve ?? '', r.diameter ?? '',
+      r.sph ?? '', r.cyl ?? '', r.axis ?? '', r.add ?? '', r.pd ?? '',
+      r.confidence ?? ''
+    ].join(','));
+  }
+  return lines.join('\n');
+}
+
+module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows, formatRxListCsv };

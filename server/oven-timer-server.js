@@ -3048,9 +3048,32 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/')
       && !url.pathname.includes('/compute')
       && !url.pathname.endsWith('/export')
-      && !url.pathname.endsWith('/activate')) {
+      && !url.pathname.endsWith('/activate')
+      && !url.pathname.endsWith('/rx-list.csv')
+      && !url.pathname.includes('/variant-skus')
+      && !url.pathname.endsWith('/po-document')) {
     const id = url.pathname.split('/').pop();
     return json(res, npiEngine.getScenario(labDb.db, id, netsuite));
+  }
+  // Per-job Rx list CSV — one row per expected lens unit with placeholder SKU,
+  // source SKU (cannibalizing) or bucket midpoint (standard_profile), and full
+  // Rx fields. Excel-friendly.
+  if (req.method==='GET' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/rx-list.csv')) {
+    const id = url.pathname.split('/')[4];
+    const expanded = npiEngine.expandScenarioToPerJobRows(labDb.db, id);
+    if (expanded.error) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: expanded.error }));
+    }
+    const csv = npiEngine.formatRxListCsv(expanded);
+    const scn = expanded.scenario || {};
+    const safeName = (scn.name || 'scenario').replace(/[^A-Za-z0-9_-]/g, '_');
+    const filename = `npi-rx-list-${safeName}-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    return res.end(csv);
   }
   if (req.method==='PUT' && url.pathname.startsWith('/api/npi/scenarios/')) {
     const id = url.pathname.split('/').pop();

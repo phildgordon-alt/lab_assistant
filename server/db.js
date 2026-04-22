@@ -68,6 +68,10 @@ db.exec(`
 // Migrate older databases: add safety_stock_weeks + abc_class columns if missing.
 try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN safety_stock_weeks REAL"); } catch (e) { /* already exists */ }
 try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN abc_class TEXT"); } catch (e) { /* already exists */ }
+// Phase 2: non-cannibalizing NPI — standard_profile source type needs
+// template_id + total_qty on the scenario.
+try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN standard_profile_template_id INTEGER REFERENCES rx_profile_templates(id)"); } catch (e) { /* already exists */ }
+try { db.exec("ALTER TABLE npi_scenarios ADD COLUMN standard_profile_qty INTEGER"); } catch (e) { /* already exists */ }
 
 // Lens Intelligence — SKU planning parameters (configurable per SKU)
 db.exec(`
