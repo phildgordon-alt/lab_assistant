@@ -225,6 +225,28 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_lsp_last_agg      ON lens_sku_properties(last_aggregated_at);
 `);
 
+// Seed lens_sku_properties with known semi-finished SKUs + base curves from
+// server/lib/semifinished-seed.js (one-time transcription of Phil's
+// Lens_Planning_V3.xlsx Semi_finSkus sheet). Runs on startup. Upserts:
+// material + base_curve + lens_type_modal='P' (pucks). Preserves any already-
+// populated sample_job_count / Rx range data from the backfill.
+try {
+  const { SEMI_FINISHED_SEED } = require('./lib/semifinished-seed');
+  const upsertSeed = db.prepare(`
+    INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count, last_aggregated_at)
+    VALUES (?, ?, 'P', ?, 0, datetime('now'))
+    ON CONFLICT(sku) DO UPDATE SET
+      material        = COALESCE(lens_sku_properties.material, excluded.material),
+      lens_type_modal = COALESCE(lens_sku_properties.lens_type_modal, excluded.lens_type_modal),
+      base_curve      = COALESCE(excluded.base_curve, lens_sku_properties.base_curve)
+  `);
+  db.transaction(() => {
+    for (const s of SEMI_FINISHED_SEED) upsertSeed.run(s.sku, s.material, s.base_curve);
+  })();
+} catch (e) {
+  console.warn('[DB] Failed to seed semi-finished properties:', e.message);
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // RX PROFILE TEMPLATES — standard prescription distribution for non-cannibalizing
 // NPI. Two default templates: "Standard SV" and "Standard Surfacing" auto-derived

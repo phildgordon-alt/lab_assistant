@@ -748,6 +748,9 @@ function formatSvStockingCsv(db, scenarioId) {
   const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
   const placeholders = svMaterials.map(() => '?').join(',');
   // UNION R+L; bucket sph by 2.00D, cyl by 1.00D, add by 0.50D
+  // jobs.entry_date is DVI MM/DD/YY format (e.g. '03/18/26'), NOT ISO. Convert
+  // inline so we can compare against an ISO :since parameter.
+  const entryDateIso = `('20' || substr(entry_date,7,2) || '-' || substr(entry_date,1,2) || '-' || substr(entry_date,4,2))`;
   const sql = `
     WITH samples AS (
       SELECT lens_material AS material,
@@ -759,7 +762,7 @@ function formatSvStockingCsv(db, scenarioId) {
         AND lens_material IN (${placeholders})
         AND lens_opc_r IS NOT NULL AND lens_opc_r != ''
         AND rx_r_sphere IS NOT NULL AND rx_r_sphere != ''
-        AND substr(entry_date, 1, 10) >= ?
+        AND ${entryDateIso} >= ?
       UNION ALL
       SELECT lens_material,
              CAST(rx_l_sphere AS REAL),
@@ -770,7 +773,7 @@ function formatSvStockingCsv(db, scenarioId) {
         AND lens_material IN (${placeholders})
         AND lens_opc_l IS NOT NULL AND lens_opc_l != ''
         AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
-        AND substr(entry_date, 1, 10) >= ?
+        AND ${entryDateIso} >= ?
     )
     SELECT
       material,
