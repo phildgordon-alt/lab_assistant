@@ -2037,14 +2037,28 @@ function takeInventorySnapshot() {
 }
 
 function updateDailyPickStats() {
-  const today = new Date().toISOString().split('T')[0];
+  // Use PT-local date, not UTC. The lab runs 5 AM - midnight PT; evening picks
+  // (5 PM PT onward) land on "tomorrow" in UTC. toISOString().split('T')[0]
+  // gives UTC date which is wrong for lab-local daily stats.
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date()).reduce((acc, p) => {
+    if (p.type === 'year') acc.y = p.value;
+    else if (p.type === 'month') acc.m = p.value;
+    else if (p.type === 'day') acc.d = p.value;
+    return acc;
+  }, {});
+  const todayPt = `${today.y}-${today.m}-${today.d}`;
 
-  // Count completed picks for today from history
+  // Count completed picks for today from history. substr(col,1,10) reads the
+  // PT-local date from the stored string (offset-form and naive rows both
+  // have YYYY-MM-DD prefix that's already PT).
   const stats = db.prepare(`
     SELECT COUNT(*) as count, SUM(qty) as qty
     FROM picks_history
-    WHERE date(completed_at) = ?
-  `).get(today);
+    WHERE substr(completed_at, 1, 10) = ?
+  `).get(todayPt);
 
   if (stats.count > 0) {
     db.prepare(`
@@ -2053,7 +2067,7 @@ function updateDailyPickStats() {
       ON CONFLICT(stat_date) DO UPDATE SET
         picks_completed = excluded.picks_completed,
         picks_qty = excluded.picks_qty
-    `).run(today, stats.count, stats.qty || 0);
+    `).run(todayPt, stats.count, stats.qty || 0);
   }
 }
 

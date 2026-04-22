@@ -1951,12 +1951,15 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/itempath/picksync-health') {
     const status = itempath.getPickSyncStatus();
     const totals = labDb.db.prepare(`SELECT MAX(completed_at) AS maxCompleted, COUNT(*) AS totalRows FROM picks_history`).get();
+    // substr(col,1,10) reads the PT-local date directly from the stored string
+    // (offset-form and naive-noon both have YYYY-MM-DD in their first 10 chars).
+    // date(col) evaluates in UTC and misattributes PT evening activity to tomorrow.
     const perDay = labDb.db.prepare(`
-      SELECT date(completed_at) AS date, COUNT(*) AS count
+      SELECT substr(completed_at, 1, 10) AS date, COUNT(*) AS count
       FROM picks_history
       WHERE completed_at >= datetime('now', '-30 days')
-      GROUP BY date(completed_at)
-      ORDER BY date(completed_at) DESC
+      GROUP BY substr(completed_at, 1, 10)
+      ORDER BY substr(completed_at, 1, 10) DESC
     `).all();
     // Expected picks per day: weekday ~2500, Sat ~300, Sun 0
     const expectedFor = (dateStr) => {
