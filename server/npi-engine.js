@@ -703,6 +703,25 @@ function csvEsc(v) {
   return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
+// Resolve placeholder SKUs for a scenario: ordered code list + real_sku map.
+// Falls back to a single synthetic V1 code when the table is empty (covers
+// scenarios created before the placeholder table existed or freshly-wiped
+// rows). multiVariant flag drives the "verify supplier mapping" CSV warning.
+function resolvePlaceholders(db, scenarioId) {
+  let phRows = [];
+  try {
+    phRows = db.prepare(
+      `SELECT placeholder_code, real_sku FROM npi_placeholder_skus WHERE scenario_id = ? ORDER BY variant_index`
+    ).all(scenarioId);
+  } catch { /* table may not exist on first boot — fall through to fallback */ }
+  const phCodes = phRows.length > 0
+    ? phRows.map(p => p.placeholder_code)
+    : [`NPI-${scenarioId}-V1`];
+  const phRealSku = new Map();
+  for (const p of phRows) if (p.real_sku) phRealSku.set(p.placeholder_code, p.real_sku);
+  return { phCodes, phRealSku, multiVariant: phCodes.length > 1 };
+}
+
 function computeMaterialCategoryScenarioTotals(db, scenarioId) {
   const scenario = db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(scenarioId);
   if (!scenario) return { error: 'Scenario not found' };
@@ -742,13 +761,31 @@ function formatSvStockingCsv(db, scenarioId) {
   const totals = computeMaterialCategoryScenarioTotals(db, scenarioId);
   if (totals.error) return { error: totals.error };
   const svMaterials = totals.projRows.filter(r => r.lens_type_class === 'SV').map(r => r.material_code);
+
+  // Pull the raw operator-selected SV materials so we can surface any that
+  // were dropped upstream (e.g. material has no lens_sku_properties rows of
+  // the right lens_type_modal → projection inner-join drops it → svMaterials
+  // arrives empty, and the operator has no clue their selection was ignored).
+  const selectedSvMaterials = db.prepare(
+    `SELECT material_code FROM npi_scenario_material_targets
+     WHERE scenario_id = ? AND lens_type_class = 'SV'
+     ORDER BY material_code`
+  ).all(scenarioId).map(r => r.material_code);
+  const droppedSelections = selectedSvMaterials.filter(m => !svMaterials.includes(m));
+
   if (svMaterials.length === 0) {
-    return { csv: '# No SV materials selected for cannibalization.\n' };
+    const headerLines = [`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`];
+    for (const m of droppedSelections) {
+      headerLines.push(`# WARNING: material ${m} selected but no consumption in window`);
+    }
+    headerLines.push('# No SV materials selected for cannibalization.');
+    return { csv: headerLines.join('\n') + '\n' };
   }
-  const since = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
   const placeholders = svMaterials.map(() => '?').join(',');
   // UNION R+L; bucket sph by 2.00D, cyl by 1.00D, add by 0.50D
-  // jobs.entry_date is DVI MM/DD/YY format. Convert to ISO for :since compare.
+  // jobs.entry_date is DVI MM/DD/YY format. Convert to ISO for 12-month compare.
+  // Window uses SQLite localtime to match Semi formatter and Phil's "reason in
+  // PT" rule — removes the ≤1-day UTC/PT drift the JS `since` had.
   const entryDateIso = `('20' || substr(entry_date,7,2) || '-' || substr(entry_date,1,2) || '-' || substr(entry_date,4,2))`;
   // Rx values in jobs table are stored as integer × 100 (e.g. -175 = -1.75D).
   // Normalize by dividing by 100 unconditionally (all values are in that encoding
@@ -756,7 +793,7 @@ function formatSvStockingCsv(db, scenarioId) {
   const norm = (col) => `ROUND(CAST(${col} AS REAL) / 100.0 / 0.25) * 0.25`;
   const sql = `
     WITH samples AS (
-      SELECT lens_opc_r AS sku, lens_material AS material,
+      SELECT lens_material AS material,
              ${norm('rx_r_sphere')} AS sph,
              COALESCE(${norm('rx_r_cylinder')}, 0) AS cyl,
              COALESCE(${norm('rx_r_add')}, 0)      AS add_pwr
@@ -765,9 +802,9 @@ function formatSvStockingCsv(db, scenarioId) {
         AND lens_material IN (${placeholders})
         AND lens_opc_r IS NOT NULL AND lens_opc_r != ''
         AND rx_r_sphere IS NOT NULL AND rx_r_sphere != ''
-        AND ${entryDateIso} >= ?
+        AND ${entryDateIso} >= date('now','-12 months','localtime')
       UNION ALL
-      SELECT lens_opc_l, lens_material,
+      SELECT lens_material,
              ${norm('rx_l_sphere')},
              COALESCE(${norm('rx_l_cylinder')}, 0),
              COALESCE(${norm('rx_l_add')}, 0)
@@ -776,17 +813,16 @@ function formatSvStockingCsv(db, scenarioId) {
         AND lens_material IN (${placeholders})
         AND lens_opc_l IS NOT NULL AND lens_opc_l != ''
         AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
-        AND ${entryDateIso} >= ?
+        AND ${entryDateIso} >= date('now','-12 months','localtime')
     )
-    -- One row per (source_sku, material, sph, cyl, add) — stock SKUs usually
-    -- collapse to one row each (each SKU has one Rx). sample_count = how many
-    -- times that exact Rx/SKU was used historically. Order by material then sku.
-    SELECT sku AS source_sku, material, sph, cyl, add_pwr, COUNT(*) AS sample_count
+    -- One row per unique prescription we've actually used. No bucketing.
+    -- sample_count = total historical usage of that exact Rx in that material.
+    SELECT material, sph, cyl, add_pwr, COUNT(*) AS sample_count
     FROM samples
-    GROUP BY sku, material, sph, cyl, add_pwr
-    ORDER BY material, source_sku
+    GROUP BY material, sph, cyl, add_pwr
+    ORDER BY material, sph, cyl, add_pwr
   `;
-  const params = [...svMaterials, since, ...svMaterials, since];
+  const params = [...svMaterials, ...svMaterials];
   const rows = db.prepare(sql).all(...params);
   const totalSamples = rows.reduce((s, r) => s + r.sample_count, 0) || 1;
 
@@ -797,39 +833,86 @@ function formatSvStockingCsv(db, scenarioId) {
   const samplesByMat = {};
   for (const r of rows) samplesByMat[r.material] = (samplesByMat[r.material] || 0) + r.sample_count;
 
-  // Per-row qty — each row = one historical (source_sku, Rx). sample_count
-  // is raw usage count over the window. Project forward: that count / total
-  // samples in material × projected_weekly for material × (lead + safety)
-  // weeks = qty to order.
-  const rowQty = rows.map(r => {
+  // Pull placeholder SKUs for the scenario — these are the placeholders for the
+  // NEW product we're ordering (real supplier SKUs don't exist yet). Phil's
+  // call: do NOT cycle across variants. Stamp every row with V1 only. If the
+  // scenario has multiple variants, emit a stronger warning explaining the
+  // other variants exist but are not stamped anywhere in this CSV.
+  const { phCodes, phRealSku, multiVariant } = resolvePlaceholders(db, scenarioId);
+  const firstVariant = phCodes[0];
+
+  // Defense-in-depth against malformed entry_date. The SV SQL's entryDateIso
+  // expression assumes DVI MM/DD/YY (8 chars). Any other format silently
+  // produces a garbage comparison string and drops the row. Observed on prod:
+  // ~44% of jobs have ISO 'YYYY-MM-DD' (10 chars) and are being silently
+  // dropped by this filter today. Count them and surface in the header so
+  // Phil can decide whether to fix the underlying format mismatch. We do NOT
+  // filter, reformat, or "helpfully" coerce — just count.
+  const badDates = db.prepare(`
+    SELECT COUNT(*) AS n FROM jobs
+    WHERE lens_type IN ('S','C')
+      AND lens_material IN (${placeholders})
+      AND entry_date IS NOT NULL
+      AND entry_date != ''
+      AND (
+        LENGTH(entry_date) != 8
+        OR substr(entry_date, 3, 1) != '/'
+        OR substr(entry_date, 6, 1) != '/'
+      )
+  `).get(...svMaterials);
+
+  // Per-row qty — each row = one unique (material, Rx). Project forward:
+  // (rowSampleCount / matSampleCount) × matProjectedWeekly × (lead+safety wk).
+  const rowQty = rows.map((r) => {
     const matSamples = samplesByMat[r.material] || 1;
     const pctOfMat = r.sample_count / matSamples;
     const weeklyForRow = (projByMat[r.material] || 0) * pctOfMat;
-    return { ...r, pctOfMat, weeklyForRow, qty: Math.ceil(weeklyForRow * totals.weeksMultiplier) };
+    return {
+      ...r,
+      placeholder_sku: firstVariant,
+      real_sku: phRealSku.get(firstVariant) || '',
+      pctOfMat, weeklyForRow,
+      qty: Math.ceil(weeklyForRow * totals.weeksMultiplier),
+    };
   });
   const orderQtyByMat = {};
   for (const r of rowQty) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
   const grandSum = rowQty.reduce((s, r) => s + r.qty, 0);
+
+  // Defense against silent-0-row bug (bit Phil previously): any material the
+  // operator selected but which produced ZERO data rows gets a warning comment.
+  const seenMats = new Set(rows.map(r => r.material));
+  const missingMats = svMaterials.filter(m => !seenMats.has(m));
 
   const lines = [];
   lines.push(`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`);
   lines.push(`# Source: material_category | Window: last 12 months | R+L samples counted separately`);
   lines.push(`# Rx granularity: 0.25D (standard supplier stocking grid)`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
+  if (multiVariant) {
+    lines.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
+    lines.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
+    lines.push(`# or prescriptions in the UI before splitting the order.`);
+  }
   lines.push(`#`);
   lines.push(`# TOTAL SV INITIAL ORDER: ${grandSum} lenses`);
   lines.push(`# By material (order quantity):`);
   for (const [mat, q] of Object.entries(orderQtyByMat).sort((a, b) => b[1] - a[1])) {
     lines.push(`#   ${mat}: ${q} lenses   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
   }
+  for (const m of missingMats) {
+    lines.push(`# WARNING: material ${m} selected but no consumption in window`);
+  }
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  // Columns match Phil's reference format: sku, material, sph, cyl, qty.
-  // add included for progressive/bifocal; zero for plain SV.
-  lines.push(['source_sku','material','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
+  // One row per unique prescription we actually used (material × sph × cyl × add).
+  // qty = what to order of that Rx to match our historical usage scaled forward
+  // over (lead + safety) weeks at the chosen adoption %.
+  lines.push(['placeholder_sku','real_sku','material','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
   for (const r of rowQty) {
     lines.push([
-      csvEsc(r.source_sku),
+      csvEsc(r.placeholder_sku),
+      csvEsc(r.real_sku),
       csvEsc(r.material),
       (r.sph || 0).toFixed(2),
       (r.cyl || 0).toFixed(2),
@@ -875,39 +958,65 @@ function formatSemiStockingCsv(db, scenarioId) {
   `;
   const rows = db.prepare(sql).all(...semiMaterials);
 
+  const { phCodes, phRealSku, multiVariant } = resolvePlaceholders(db, scenarioId);
+
   const projByMat = {};
   for (const r of totals.projRows) if (r.lens_type_class === 'SEMI') projByMat[r.material_code] = r.projected_weekly;
   const totalsByMat = {};
   for (const r of rows) totalsByMat[r.material] = (totalsByMat[r.material] || 0) + r.weekly_consumption;
 
   // Compute per-row qty + per-material subtotals first
+  // Phil's call: don't mix variants across rows. Every row stamped with V1 only.
+  // Additional variants are flagged in a header comment; operator maps them in UI.
+  const firstVariant = phCodes[0];
   const rowQty = rows.map(r => {
     const matTotal = totalsByMat[r.material] || 1;
     const pctOfMat = r.weekly_consumption / matTotal;
     const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
-    return { ...r, pctOfMat, weeklyForBucket, qty: Math.ceil(weeklyForBucket * totals.weeksMultiplier) };
+    return {
+      ...r,
+      placeholder_sku: firstVariant,
+      real_sku: phRealSku.get(firstVariant) || '',
+      pctOfMat, weeklyForBucket,
+      qty: Math.ceil(weeklyForBucket * totals.weeksMultiplier),
+    };
   });
   const orderQtyByMat = {};
   for (const r of rowQty) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
   const grandSum = rowQty.reduce((s, r) => s + r.qty, 0);
 
+  // Same silent-0-row defense as SV: warn on any selected material that
+  // produced zero data rows.
+  const seenMats = new Set(rows.map(r => r.material));
+  const missingMats = semiMaterials.filter(m => !seenMats.has(m));
+
   const lines = [];
   lines.push(`# NPI Semi-Finished Stocking — ${csvEsc(totals.scenario.name || '')}`);
   lines.push(`# Source: material_category | Window: last 12 months`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
+  if (multiVariant) {
+    lines.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
+    lines.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
+    lines.push(`# or prescriptions in the UI before splitting the order.`);
+  }
   lines.push(`#`);
   lines.push(`# TOTAL SEMI INITIAL ORDER: ${grandSum} pucks`);
   lines.push(`# By material (order quantity):`);
   for (const [mat, q] of Object.entries(orderQtyByMat).sort((a, b) => b[1] - a[1])) {
     lines.push(`#   ${mat}: ${q} pucks   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
   }
+  for (const m of missingMats) {
+    lines.push(`# WARNING: material ${m} selected but no consumption in window`);
+  }
   lines.push(`#`);
   lines.push(`# Note: base_curve=UNKNOWN means the SKU has no known BC in lens_sku_properties.`);
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  lines.push(['material','base_curve','sku_count','weekly_consumption','pct_of_material','weekly_projection','initial_order_qty'].join(','));
+  lines.push(['placeholder_sku','real_sku','material','base_curve','sku_count','weekly_consumption','pct_of_material','weekly_projection','initial_order_qty'].join(','));
   for (const r of rowQty) {
     lines.push([
+      csvEsc(r.placeholder_sku),
+      csvEsc(r.real_sku),
       csvEsc(r.material),
       r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
       r.sku_count,
