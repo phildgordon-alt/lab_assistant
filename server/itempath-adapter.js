@@ -938,6 +938,8 @@ async function poll() {
     const cacheSizeLabel = cacheSize > 1048576 ? `${(cacheSize/1048576).toFixed(1)} MB` : `${(cacheSize/1024).toFixed(0)} KB`;
     const totalMs = Date.now() - pollStart;
     console.log(`[ItemPath] ✓ Sync: ${materials.length} SKUs, ${activePicks.length} active orders, ${alerts.length} alerts, ${normalizedLocations.length} locations | cache=${cacheSizeLabel} | ${totalMs}ms total`);
+    // Heartbeat: 15 min threshold. Poll runs every 5 min — 15 min stale = 3 missed polls.
+    try { require('./db').recordHeartbeat('itempath_poll', materials.length, 15 * 60 * 1000); } catch {}
 
     // Inventory gap detection: alert if SKU or location count drops sharply (>20%)
     // Skip first sync (prevSkuCount=0) — establishes baseline

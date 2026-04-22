@@ -188,6 +188,9 @@ async function poll() {
       }
     });
     save();
+    // Heartbeat: 24h threshold — Looker ETL is daily. If it hasn't run in 24h,
+    // cron or credentials are broken.
+    try { db.recordHeartbeat('looker', rows.length, 24 * 60 * 60 * 1000); } catch {}
 
     // Enrich unified jobs table with Looker data
     try {

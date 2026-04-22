@@ -831,6 +831,8 @@ async function poll() {
     } catch (e) { console.warn('[SOM] SQLite persist error:', e.message); }
 
     console.log(`[SOM] Poll #${pollCount} - LIVE: ${devices.length} devices, ${conveyors.length} conveyors, ${orders.todayTotal} jobs today, ${alerts.length} alerts, ${machineSummaries.length} machine summaries, ${toolAlerts.length} machine alerts`);
+    // Heartbeat: 5 min threshold. SOM polls every 30s — 5 min stale = 10 missed polls.
+    try { require('./db').recordHeartbeat('som', devices.length, 5 * 60 * 1000); } catch {}
     return true;
 
   } catch (err) {

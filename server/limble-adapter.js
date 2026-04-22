@@ -695,6 +695,8 @@ async function poll() {
 
     await sendSlackAlerts(tasks, assets);
     console.log(`[Limble] ✓ Sync: ${assets.length} assets, ${tasks.length} tasks, ${downtime.length} downtime records`);
+    // Heartbeat: 2h threshold. Limble polls every 30-60 min — 2h = 2-4 missed polls.
+    try { require('./db').recordHeartbeat('limble', assets.length, 2 * 60 * 60 * 1000); } catch {}
 
     // Write to SQLite for AI agent queries
     try {

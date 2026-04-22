@@ -251,6 +251,8 @@ async function poll() {
     const elapsed = Date.now() - start;
     const totalQty = Object.values(inventory).reduce((s, i) => s + i.qty, 0);
     console.log(`[NetSuite] Poll #${pollCount}: ${Object.keys(inventory).length} SKUs, ${Math.round(totalQty)} units at Irvine 2 (${elapsed}ms)`);
+    // Heartbeat: 30 min threshold. NetSuite polls every 5 min — 30 min = 6 missed polls.
+    try { require('./db').recordHeartbeat('netsuite', Object.keys(inventory).length, 30 * 60 * 1000); } catch {}
 
   } catch (err) {
     syncError = err.message;
