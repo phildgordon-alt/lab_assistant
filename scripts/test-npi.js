@@ -146,6 +146,14 @@ db.exec(`
     updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (scenario_id, material_code, lens_type_class)
   );
+  -- Added for per-donor-SKU stocking CSV rebuild: lens-intelligence forecast cache.
+  -- Real schema in lens-intelligence.js has many more columns; we only need the
+  -- ones the new formatters read (sku, projected_weekly, computed_at).
+  CREATE TABLE lens_inventory_status (
+    sku              TEXT PRIMARY KEY,
+    projected_weekly REAL DEFAULT 0,
+    computed_at      TEXT
+  );
 `);
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -347,18 +355,28 @@ function weekStartIso() {
   return m.toISOString().slice(0, 10);
 }
 
-section('formatSvStockingCsv');
-test('S1: header has placeholder_sku,real_sku; data row encodes sph=-1.75,cyl=-0.50,add=0.00; grand total matches', () => {
+// Helper: get current ISO timestamp (datetime('now') format) for computed_at
+function nowIsoUtc() {
+  const d = new Date();
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+// Helper: ISO timestamp N days ago for stale-forecast tests
+function isoDaysAgo(n) {
+  const d = new Date(Date.now() - n * 86400000);
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+section('formatSvStockingCsv (per-donor × Rx)');
+test('S1: header has new column order; donor row encodes sph=-1.75,cyl=-0.50,add=0.00; grand total matches', () => {
   const id = npiEngine.createScenario(db, { name: 'SV H67 launch', source_type: 'material_category', adoption_pct: 50 });
-  // Targets drive projection — SV, material H67, 50% adoption
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'H67', 'SV', 50);
-  // A SV lens_sku_properties row so projection finds H67 via the JOIN
   db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
     .run('H67-STD-S1', 'H67', 'S', 10);
-  // Consumption so projected_weekly is non-zero
-  db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`).run('H67-STD-S1', weekStartIso(), 100);
-  // 3 jobs with -1.75 / -0.50 / 0 (stored as int×100 TEXT)
+  // Persist demand-sensing forecast for this donor — fresh
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('H67-STD-S1', 5.0, nowIsoUtc());
+  // 3 jobs at -1.75/-0.50/0
   const today = todayMMDDYY();
   for (let i = 1; i <= 3; i++) {
     db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -368,23 +386,22 @@ test('S1: header has placeholder_sku,real_sku; data row encodes sph=-1.75,cyl=-0
   assert.ok(!out.error, out.error || '');
   const csv = out.csv;
   const headerLine = csv.split('\n').find(l => l.startsWith('placeholder_sku,'));
-  assert.ok(headerLine, 'header with placeholder_sku first column present');
-  assert.ok(headerLine.startsWith('placeholder_sku,real_sku,material,sph,cyl,add,'), `header order: ${headerLine}`);
-  const dataRows = csv.split('\n').filter(l => /^NPI-/.test(l) || /^[A-Za-z]/.test(l) === false && /^\[?\"/.test(l));
-  // Simpler: data rows are the ones after the header and before the trailing Grand total comment
+  assert.ok(headerLine, 'data column header present');
+  assert.ok(headerLine.startsWith('placeholder_sku,real_sku,donor_sku,material,sph,cyl,add,sample_count,weekly_projection,initial_order_qty'),
+    `header order: ${headerLine}`);
   const idxHeader = csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
   assert.ok(tail.length >= 1, 'at least one data row');
   const firstData = tail[0].split(',');
-  assert.equal(firstData[3], '-1.75', `sph=-1.75, got ${firstData[3]}`);
-  assert.equal(firstData[4], '-0.50', `cyl=-0.50, got ${firstData[4]}`);
-  assert.equal(firstData[5], '0.00',  `add=0.00, got ${firstData[5]}`);
-  // Every data row has non-empty placeholder_sku
+  assert.equal(firstData[2], 'H67-STD-S1', `donor_sku=H67-STD-S1, got ${firstData[2]}`);
+  assert.equal(firstData[3], 'H67', `material=H67, got ${firstData[3]}`);
+  assert.equal(firstData[4], '-1.75', `sph=-1.75, got ${firstData[4]}`);
+  assert.equal(firstData[5], '-0.50', `cyl=-0.50, got ${firstData[5]}`);
+  assert.equal(firstData[6], '0.00', `add=0.00, got ${firstData[6]}`);
   for (const row of tail) {
     const cells = row.split(',');
     assert.ok(cells[0] && cells[0].length > 0, `placeholder_sku non-empty: row "${row}"`);
   }
-  // Grand total line matches sum of qty
   const grandLine = csv.split('\n').find(l => l.startsWith('# Grand total SV:'));
   assert.ok(grandLine, 'grand total line present');
   const grandVal = Number(grandLine.replace(/[^\d]/g, ''));
@@ -392,41 +409,37 @@ test('S1: header has placeholder_sku,real_sku; data row encodes sph=-1.75,cyl=-0
   assert.equal(grandVal, sumQty, `grand total ${grandVal} === sum-of-qty ${sumQty}`);
 });
 
-test('S2: missing-material warning emitted when a selected material has no consumption', () => {
+test('S2: missing-material warning when target expands to zero donor SKUs', () => {
   const id = npiEngine.createScenario(db, { name: 'SV S2 missing', source_type: 'material_category', adoption_pct: 50 });
-  // Two SV materials in targets. Only S2-MAT-A has properties + consumption + jobs.
+  // Two SV materials in targets. Only S2-MAT-A has lens_sku_properties.
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'S2-MAT-A', 'SV', 50);
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'S2-MAT-B', 'SV', 50);
   db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
     .run('S2-A-SKU', 'S2-MAT-A', 'S', 5);
-  // Also give MAT-B a property row so projection returns it (so svMaterials
-  // contains it) — the warning path triggers because the jobs-table SQL
-  // finds no rows for MAT-B.
-  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
-    .run('S2-B-SKU', 'S2-MAT-B', 'S', 5);
-  db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`).run('S2-A-SKU', weekStartIso(), 80);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S2-A-SKU', 8.0, nowIsoUtc());
   const today = todayMMDDYY();
   db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run('S2-JOB-1', 'S2-A-SKU', 'S2-A-SKU', 'S2-MAT-A', 'S', '-100', '0', '0', today);
   const out = npiEngine.formatSvStockingCsv(db, id);
   assert.ok(!out.error, out.error || '');
-  assert.ok(out.csv.includes('# WARNING: material S2-MAT-B selected but no consumption in window'),
+  assert.ok(out.csv.includes('# WARNING: selected material S2-MAT-B had ZERO donor SKUs after expansion'),
     'missing-material warning present for S2-MAT-B');
-  assert.ok(!out.csv.includes('# WARNING: material S2-MAT-A'),
-    'no warning for material that did produce rows');
+  assert.ok(!out.csv.includes('selected material S2-MAT-A had ZERO'),
+    'no warning for material that produced donors');
 });
 
-test('S3: NULL cyl + NULL add → plano row preserved (cyl=0.00, add=0.00)', () => {
+test('S3: NULL cyl + NULL add → plano row preserved (cyl=0.00, add=0.00) under new column indices', () => {
   const id = npiEngine.createScenario(db, { name: 'SV S3 plano', source_type: 'material_category', adoption_pct: 50 });
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'S3-MAT', 'SV', 50);
   db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
     .run('S3-SKU', 'S3-MAT', 'S', 5);
-  db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`).run('S3-SKU', weekStartIso(), 50);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S3-SKU', 4.0, nowIsoUtc());
   const today = todayMMDDYY();
-  // NULL cyl and NULL add — plano Rx
   db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run('S3-JOB-1', 'S3-SKU', 'S3-SKU', 'S3-MAT', 'S', '-200', null, null, today);
   const out = npiEngine.formatSvStockingCsv(db, id);
@@ -434,17 +447,19 @@ test('S3: NULL cyl + NULL add → plano row preserved (cyl=0.00, add=0.00)', () 
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
   assert.ok(tail.length >= 1, 'plano row present');
   const cells = tail[0].split(',');
-  assert.equal(cells[4], '0.00', `cyl=0.00 for NULL input, got ${cells[4]}`);
-  assert.equal(cells[5], '0.00', `add=0.00 for NULL input, got ${cells[5]}`);
+  assert.equal(cells[4], '-2.00', `sph=-2.00, got ${cells[4]}`);
+  assert.equal(cells[5], '0.00', `cyl=0.00 for NULL input, got ${cells[5]}`);
+  assert.equal(cells[6], '0.00', `add=0.00 for NULL input, got ${cells[6]}`);
 });
 
-test('S4: rx_r_sphere=-175 (int×100 encoding) decodes to sph=-1.75', () => {
+test('S4: rx_r_sphere=-175 (int×100 encoding) decodes to sph=-1.75 at column index 4', () => {
   const id = npiEngine.createScenario(db, { name: 'SV S4 decode', source_type: 'material_category', adoption_pct: 50 });
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'S4-MAT', 'SV', 50);
   db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
     .run('S4-SKU', 'S4-MAT', 'S', 5);
-  db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`).run('S4-SKU', weekStartIso(), 40);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S4-SKU', 3.0, nowIsoUtc());
   const today = todayMMDDYY();
   db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run('S4-JOB-1', 'S4-SKU', 'S4-SKU', 'S4-MAT', 'S', '-175', '-25', '0', today);
@@ -453,11 +468,139 @@ test('S4: rx_r_sphere=-175 (int×100 encoding) decodes to sph=-1.75', () => {
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
   assert.ok(tail.length >= 1);
   const cells = tail[0].split(',');
-  assert.equal(cells[3], '-1.75', `sph=-1.75, got ${cells[3]}`);
+  assert.equal(cells[4], '-1.75', `sph=-1.75, got ${cells[4]}`);
 });
 
-section('formatSemiStockingCsv');
-test('M1: header has placeholder_sku,real_sku first; two BC rows, each with non-empty placeholder', () => {
+test('S5: two donors in same material, distinct Rx histograms → distinct rows per (donor × Rx)', () => {
+  const id = npiEngine.createScenario(db, { name: 'SV S5 multi-donor', source_type: 'material_category', adoption_pct: 50 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'S5-MAT', 'SV', 50);
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+    .run('S5-DONOR-A', 'S5-MAT', 'S', 5);
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+    .run('S5-DONOR-B', 'S5-MAT', 'S', 5);
+  // Distinct forecasts per donor — proves each row uses its OWN projected_weekly
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S5-DONOR-A', 10.0, nowIsoUtc());
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S5-DONOR-B', 4.0, nowIsoUtc());
+  const today = todayMMDDYY();
+  // Donor A: only -1.00/-0.25/0
+  db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run('S5-A-1', 'S5-DONOR-A', 'S5-DONOR-A', 'S5-MAT', 'S', '-100', '-25', '0', today);
+  // Donor B: only -3.00/-0.50/0
+  db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run('S5-B-1', 'S5-DONOR-B', 'S5-DONOR-B', 'S5-MAT', 'S', '-300', '-50', '0', today);
+  const out = npiEngine.formatSvStockingCsv(db, id);
+  const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
+  const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
+  // Should have rows for both donors
+  const donorASrows = tail.filter(r => r.split(',')[2] === 'S5-DONOR-A');
+  const donorBSrows = tail.filter(r => r.split(',')[2] === 'S5-DONOR-B');
+  assert.ok(donorASrows.length >= 1, `at least one row for S5-DONOR-A, got ${donorASrows.length}`);
+  assert.ok(donorBSrows.length >= 1, `at least one row for S5-DONOR-B, got ${donorBSrows.length}`);
+  // Donor A's weekly_projection (col 8) should reflect 10.0 × adoption (R+L = 2 samples, 1 unique Rx → all in one row)
+  const aWeekly = Number(donorASrows[0].split(',')[8]);
+  const bWeekly = Number(donorBSrows[0].split(',')[8]);
+  // adoption_pct=50 → 10*0.5=5.0 for A, 4*0.5=2.0 for B (single Rx each → pctOfDonor=1.0)
+  assert.ok(Math.abs(aWeekly - 5.0) < 0.05, `A weekly_projection ~5.0, got ${aWeekly}`);
+  assert.ok(Math.abs(bWeekly - 2.0) < 0.05, `B weekly_projection ~2.0, got ${bWeekly}`);
+});
+
+test('S6: NULL projected_weekly → fallback to lens_consumption_weekly avg; no consumption either → skip', () => {
+  const id = npiEngine.createScenario(db, { name: 'SV S6 fallback', source_type: 'material_category', adoption_pct: 50 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'S6-MAT', 'SV', 50);
+  // Donor A: NULL projected_weekly but has consumption → fallback path
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+    .run('S6-FALLBACK', 'S6-MAT', 'S', 5);
+  // No lens_inventory_status row at all → projected_weekly = NULL via LEFT JOIN
+  db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`)
+    .run('S6-FALLBACK', weekStartIso(), 20);
+  // Donor B: no projected_weekly AND no consumption → skip
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+    .run('S6-NO-DATA', 'S6-MAT', 'S', 5);
+  const today = todayMMDDYY();
+  db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run('S6-FB-JOB', 'S6-FALLBACK', 'S6-FALLBACK', 'S6-MAT', 'S', '-100', '0', '0', today);
+  const out = npiEngine.formatSvStockingCsv(db, id);
+  assert.ok(out.csv.includes('# WARNING: donor_sku S6-FALLBACK has no demand-sensing projection — fell back to flat 12mo average'),
+    'fallback warning present for S6-FALLBACK');
+  assert.ok(out.csv.includes('# WARNING: donor_sku S6-NO-DATA has no consumption — skipped'),
+    'no-data warning present for S6-NO-DATA');
+  // Fallback donor should still produce a data row
+  const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
+  const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
+  const fbRows = tail.filter(r => r.split(',')[2] === 'S6-FALLBACK');
+  assert.ok(fbRows.length >= 1, 'fallback donor still emits row');
+  const noDataRows = tail.filter(r => r.split(',')[2] === 'S6-NO-DATA');
+  assert.equal(noDataRows.length, 0, 'no-data donor produces zero rows');
+});
+
+test('S7: donor with forecast but zero matching jobs → "no Rx history in window — skipped"', () => {
+  const id = npiEngine.createScenario(db, { name: 'SV S7 no-history', source_type: 'material_category', adoption_pct: 50 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'S7-MAT', 'SV', 50);
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+    .run('S7-DONOR', 'S7-MAT', 'S', 5);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S7-DONOR', 5.0, nowIsoUtc());
+  // No jobs whatsoever for S7-DONOR
+  const out = npiEngine.formatSvStockingCsv(db, id);
+  assert.ok(out.csv.includes('# WARNING: donor_sku S7-DONOR has forecast but no Rx history in window — skipped'),
+    'no-history warning present');
+  const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
+  const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
+  const s7Rows = tail.filter(r => r.split(',')[2] === 'S7-DONOR');
+  assert.equal(s7Rows.length, 0, 'no rows for S7-DONOR');
+});
+
+test('S8: per-donor sum of weekly_projection ≈ donor.projected_weekly × adoption_pct/100', () => {
+  const id = npiEngine.createScenario(db, { name: 'SV S8 sum', source_type: 'material_category', adoption_pct: 60 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'S8-MAT', 'SV', 60);
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+    .run('S8-DONOR', 'S8-MAT', 'S', 5);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S8-DONOR', 12.0, nowIsoUtc());
+  const today = todayMMDDYY();
+  // Three distinct Rx values → three rows whose sum should = 12 * 0.6 = 7.2
+  for (const sph of ['-100', '-200', '-300']) {
+    db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(`S8-${sph}`, 'S8-DONOR', 'S8-DONOR', 'S8-MAT', 'S', sph, '0', '0', today);
+  }
+  const out = npiEngine.formatSvStockingCsv(db, id);
+  const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
+  const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
+  const s8Rows = tail.filter(r => r.split(',')[2] === 'S8-DONOR');
+  const sumWeekly = s8Rows.reduce((s, r) => s + Number(r.split(',')[8]), 0);
+  const expected = 12.0 * 60 / 100; // 7.2
+  assert.ok(Math.abs(sumWeekly - expected) < 0.05,
+    `sum weekly_projection ${sumWeekly.toFixed(3)} ≈ ${expected} (within 0.05)`);
+});
+
+test('S9: stale-forecast warning when computed_at is 5 days ago', () => {
+  const id = npiEngine.createScenario(db, { name: 'SV S9 stale', source_type: 'material_category', adoption_pct: 50 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'S9-MAT', 'SV', 50);
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+    .run('S9-DONOR', 'S9-MAT', 'S', 5);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('S9-DONOR', 5.0, isoDaysAgo(5));
+  const today = todayMMDDYY();
+  db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run('S9-J1', 'S9-DONOR', 'S9-DONOR', 'S9-MAT', 'S', '-100', '0', '0', today);
+  const out = npiEngine.formatSvStockingCsv(db, id);
+  assert.ok(out.csv.includes('# WARNING: forecast last computed 5 days ago'),
+    `stale-forecast warning present, header was: ${out.csv.split('\n').slice(0, 12).join('\n')}`);
+  // And output is still emitted (warn-don't-block)
+  const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
+  const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
+  assert.ok(tail.length >= 1, 'data rows still emitted despite stale forecast');
+});
+
+section('formatSemiStockingCsv (per-donor)');
+test('M1: header has new column order; one row per donor (no per-BC aggregation)', () => {
   const id = npiEngine.createScenario(db, { name: 'Semi M1', source_type: 'material_category', adoption_pct: 50 });
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'M1-H67', 'SEMI', 50);
@@ -465,75 +608,136 @@ test('M1: header has placeholder_sku,real_sku first; two BC rows, each with non-
     .run('M1-H67-BC4', 'M1-H67', 'P', 4.0, 5);
   db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
     .run('M1-H67-BC6', 'M1-H67', 'P', 6.0, 5);
-  const ws = weekStartIso();
-  db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`).run('M1-H67-BC4', ws, 20);
-  db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`).run('M1-H67-BC6', ws, 30);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('M1-H67-BC4', 2.0, nowIsoUtc());
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('M1-H67-BC6', 3.0, nowIsoUtc());
   const out = npiEngine.formatSemiStockingCsv(db, id);
   assert.ok(!out.error, out.error || '');
   const lines = out.csv.split('\n');
   const header = lines.find(l => l.startsWith('placeholder_sku,'));
-  assert.ok(header, 'header with placeholder_sku first column present');
-  assert.ok(header.startsWith('placeholder_sku,real_sku,material,base_curve,'), `header order: ${header}`);
+  assert.ok(header, 'data column header present');
+  assert.ok(header.startsWith('placeholder_sku,real_sku,donor_sku,material,base_curve,sample_count,weekly_projection,initial_order_qty'),
+    `header order: ${header}`);
   const idxHeader = lines.findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = lines.slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
-  assert.equal(tail.length, 2, `2 data rows (BC=4,6), got ${tail.length}`);
+  assert.equal(tail.length, 2, `2 data rows (one per donor SKU), got ${tail.length}`);
+  // Verify donor_sku column populated
   for (const row of tail) {
     const cells = row.split(',');
     assert.ok(cells[0] && cells[0].length > 0, `placeholder_sku non-empty: row "${row}"`);
+    assert.ok(cells[2] && cells[2].length > 0, `donor_sku non-empty: row "${row}"`);
   }
 });
 
-test('M2: two materials — pct_of_material sums to 100 ± 0.02 per material', () => {
+test('M2: two materials — each donor row uses its own forecast × adoption_pct (no pct_of_material redistribution)', () => {
   const id = npiEngine.createScenario(db, { name: 'Semi M2', source_type: 'material_category', adoption_pct: 50 });
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'M2-H67', 'SEMI', 50);
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'M2-B67', 'SEMI', 50);
-  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
-    .run('M2-H67-BC4', 'M2-H67', 'P', 4.0, 5);
-  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
-    .run('M2-H67-BC6', 'M2-H67', 'P', 6.0, 5);
-  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
-    .run('M2-B67-BC4', 'M2-B67', 'P', 4.0, 5);
-  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
-    .run('M2-B67-BC6', 'M2-B67', 'P', 6.0, 5);
-  const ws = weekStartIso();
-  for (const [sku, n] of [['M2-H67-BC4',10], ['M2-H67-BC6',30], ['M2-B67-BC4',15], ['M2-B67-BC6',25]]) {
-    db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`).run(sku, ws, n);
+  for (const sku of ['M2-H67-BC4', 'M2-H67-BC6', 'M2-B67-BC4', 'M2-B67-BC6']) {
+    const mat = sku.startsWith('M2-H67') ? 'M2-H67' : 'M2-B67';
+    const bc = sku.endsWith('BC4') ? 4.0 : 6.0;
+    db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
+      .run(sku, mat, 'P', bc, 5);
+  }
+  // Distinct projected_weekly per donor
+  const forecasts = { 'M2-H67-BC4': 4, 'M2-H67-BC6': 6, 'M2-B67-BC4': 8, 'M2-B67-BC6': 12 };
+  for (const [sku, fw] of Object.entries(forecasts)) {
+    db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+      .run(sku, fw, nowIsoUtc());
   }
   const out = npiEngine.formatSemiStockingCsv(db, id);
   const lines = out.csv.split('\n');
   const idxHeader = lines.findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = lines.slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
-  // Columns after prepend: placeholder_sku, real_sku, material, base_curve, sku_count,
-  // weekly_consumption, pct_of_material, weekly_projection, initial_order_qty
-  const pctByMat = {};
+  assert.equal(tail.length, 4, `4 data rows (one per donor), got ${tail.length}`);
+  // weekly_projection column index = 6 (placeholder, real, donor, material, base_curve, sample_count, weekly_projection, qty)
   for (const row of tail) {
     const c = row.split(',');
-    const mat = c[2];
-    const pct = Number(c[6]);
-    pctByMat[mat] = (pctByMat[mat] || 0) + pct;
-  }
-  for (const [mat, sum] of Object.entries(pctByMat)) {
-    assert.ok(Math.abs(sum - 100) <= 0.02, `pct sum for ${mat} = ${sum}, expected 100 ± 0.02`);
+    const donor = c[2];
+    const weekly = Number(c[6]);
+    const expected = forecasts[donor] * 0.5;
+    assert.ok(Math.abs(weekly - expected) < 0.05,
+      `${donor}: weekly ${weekly} ≈ ${expected} (forecast × adoption_pct/100)`);
   }
 });
 
 test('M3: semi material short-circuits when selected material has no properties rows', () => {
-  // Phil's brief asked for "# Grand total Semi: 0" + missing-material warning
-  // when a selected material has no lens_sku_properties rows. In practice,
-  // getMaterialCategoryProjection inner-joins on lens_sku_properties with
-  // lens_type_modal='P' — so a material with no such row is dropped before
-  // formatSemiStockingCsv sees it, and the formatter hits its empty-semi
-  // short-circuit. This is the realistic observable behavior for that setup.
   const id = npiEngine.createScenario(db, { name: 'Semi M3', source_type: 'material_category', adoption_pct: 50 });
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'M3-ORPHAN', 'SEMI', 50);
-  // No lens_sku_properties row for M3-ORPHAN — projection drops it.
   const out = npiEngine.formatSemiStockingCsv(db, id);
   assert.ok(!out.error, out.error || '');
   assert.ok(out.csv.includes('No semi-finished materials selected'),
-    'short-circuit message when projection returns empty semi set');
+    'short-circuit message when getDonorSkusForScenario returns empty');
+});
+
+test('M4: NULL base_curve → row with base_curve=UNKNOWN AND warning', () => {
+  const id = npiEngine.createScenario(db, { name: 'Semi M4 unknown BC', source_type: 'material_category', adoption_pct: 50 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'M4-MAT', 'SEMI', 50);
+  // base_curve NULL
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
+    .run('M4-NOBC-DONOR', 'M4-MAT', 'P', null, 3);
+  db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+    .run('M4-NOBC-DONOR', 5.0, nowIsoUtc());
+  const out = npiEngine.formatSemiStockingCsv(db, id);
+  assert.ok(out.csv.includes('# WARNING: donor_sku M4-NOBC-DONOR has UNKNOWN base_curve'),
+    'unknown base_curve warning present');
+  const lines = out.csv.split('\n');
+  const idxHeader = lines.findIndex(l => l.startsWith('placeholder_sku,'));
+  const tail = lines.slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
+  assert.equal(tail.length, 1, 'still emits 1 row despite unknown BC');
+  const cells = tail[0].split(',');
+  assert.equal(cells[4], 'UNKNOWN', `base_curve cell = UNKNOWN, got ${cells[4]}`);
+});
+
+test('M5: grand total Semi = sum of data-row qty', () => {
+  const id = npiEngine.createScenario(db, { name: 'Semi M5 total', source_type: 'material_category', adoption_pct: 50 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'M5-MAT', 'SEMI', 50);
+  for (const [sku, fw] of [['M5-DONOR-A', 6], ['M5-DONOR-B', 4]]) {
+    db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count) VALUES (?, ?, ?, ?, ?)`)
+      .run(sku, 'M5-MAT', 'P', 5.0, 3);
+    db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
+      .run(sku, fw, nowIsoUtc());
+  }
+  const out = npiEngine.formatSemiStockingCsv(db, id);
+  const lines = out.csv.split('\n');
+  const idxHeader = lines.findIndex(l => l.startsWith('placeholder_sku,'));
+  const tail = lines.slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
+  // initial_order_qty is the last column (index 7)
+  const sumQty = tail.reduce((s, r) => s + Number(r.split(',').slice(-1)[0]), 0);
+  const grandLine = lines.find(l => l.startsWith('# Grand total Semi:'));
+  assert.ok(grandLine, 'grand total Semi line present');
+  const grandVal = Number(grandLine.replace(/[^\d]/g, ''));
+  assert.equal(grandVal, sumQty, `grand total ${grandVal} === sum-of-qty ${sumQty}`);
+});
+
+section('computeCannibalization — donor expansion regression');
+test('C1: material_category scenario writes one npi_cannibalization row per donor SKU', () => {
+  const id = npiEngine.createScenario(db, { name: 'C1 cannib donors', source_type: 'material_category', adoption_pct: 40 });
+  db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
+    .run(id, 'C1-MAT', 'SV', 40);
+  // Three donor SKUs in this material
+  for (const sku of ['C1-DONOR-A', 'C1-DONOR-B', 'C1-DONOR-C']) {
+    db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, sample_job_count) VALUES (?, ?, ?, ?)`)
+      .run(sku, 'C1-MAT', 'S', 5);
+    // Need consumption history so the cannibalization writer keeps the row
+    db.prepare(`INSERT INTO lens_consumption_weekly (sku, week_start, units_consumed) VALUES (?, ?, ?)`)
+      .run(sku, weekStartIso(), 50);
+  }
+  const r = npiEngine.computeCannibalization(db, id);
+  assert.ok(r, 'returns result');
+  const cannRows = db.prepare(`SELECT * FROM npi_cannibalization WHERE scenario_id = ? ORDER BY source_sku`).all(id);
+  // One row per donor SKU expanded — proves donor-reduction wiring intact
+  const donorSkus = new Set(cannRows.map(c => c.source_sku));
+  assert.equal(donorSkus.size, 3, `3 distinct donor SKUs in npi_cannibalization, got ${donorSkus.size}`);
+  for (const sku of ['C1-DONOR-A', 'C1-DONOR-B', 'C1-DONOR-C']) {
+    assert.ok(donorSkus.has(sku), `${sku} present in npi_cannibalization`);
+  }
 });
 
 section('Placeholder cycling');

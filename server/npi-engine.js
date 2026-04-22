@@ -722,6 +722,60 @@ function resolvePlaceholders(db, scenarioId) {
   return { phCodes, phRealSku, multiVariant: phCodes.length > 1 };
 }
 
+// Per-donor expansion for material_category scenarios. For each (material × class)
+// target row, return one entry per matching SKU in lens_sku_properties, joined to
+// lens_inventory_status for the persisted demand-sensing forecast (projected_weekly)
+// and computed_at timestamp. Caller decides fallback if projected_weekly is NULL/0.
+//
+// Returns: [{ sku, material_code, adoption_pct, base_curve, sample_job_count,
+//             projected_weekly, computed_at }]
+function getDonorSkusForScenario(db, scenarioId, lensTypeClass) {
+  const modalClause = lensTypeClass === 'SV'
+    ? `p.lens_type_modal IN ('S','C')`
+    : `p.lens_type_modal = 'P'`;
+  // lens_inventory_status may not exist on first boot — try/catch guards the JOIN.
+  try {
+    return db.prepare(`
+      SELECT
+        p.sku                  AS sku,
+        t.material_code        AS material_code,
+        t.adoption_pct         AS adoption_pct,
+        p.base_curve           AS base_curve,
+        p.sample_job_count     AS sample_job_count,
+        lis.projected_weekly   AS projected_weekly,
+        lis.computed_at        AS computed_at
+      FROM npi_scenario_material_targets t
+      JOIN lens_sku_properties p
+        ON p.material = t.material_code
+       AND ${modalClause}
+      LEFT JOIN lens_inventory_status lis
+        ON lis.sku = p.sku
+      WHERE t.scenario_id = ?
+        AND t.lens_type_class = ?
+      ORDER BY t.material_code, p.sku
+    `).all(scenarioId, lensTypeClass);
+  } catch {
+    // Fall back without the LEFT JOIN if lens_inventory_status doesn't exist.
+    return db.prepare(`
+      SELECT
+        p.sku                  AS sku,
+        t.material_code        AS material_code,
+        t.adoption_pct         AS adoption_pct,
+        p.base_curve           AS base_curve,
+        p.sample_job_count     AS sample_job_count,
+        NULL                   AS projected_weekly,
+        NULL                   AS computed_at
+      FROM npi_scenario_material_targets t
+      JOIN lens_sku_properties p
+        ON p.material = t.material_code
+       AND ${modalClause}
+      WHERE t.scenario_id = ?
+        AND t.lens_type_class = ?
+      ORDER BY t.material_code, p.sku
+    `).all(scenarioId, lensTypeClass);
+  }
+}
+
 function computeMaterialCategoryScenarioTotals(db, scenarioId) {
   const scenario = db.prepare('SELECT * FROM npi_scenarios WHERE id = ?').get(scenarioId);
   if (!scenario) return { error: 'Scenario not found' };
@@ -755,144 +809,195 @@ function computeMaterialCategoryScenarioTotals(db, scenarioId) {
   };
 }
 
-// SV Rx bucket CSV — per-bucket qty. Axis ignored (not stocked by axis).
-// Counts R+L as separate samples.
+// SV stocking CSV — one row per (donor_sku × Rx). Per-donor expansion replaces
+// the bulk material aggregate. Each donor's persisted lens-intelligence forecast
+// is split across its own historical Rx histogram, then scaled by adoption_pct
+// × (lead+safety) weeks. Falls back to lens_consumption_weekly avg if the
+// per-donor forecast is missing. Header still uses computeMaterialCategoryScenarioTotals
+// for lead/safety/ABC.
 function formatSvStockingCsv(db, scenarioId) {
   const totals = computeMaterialCategoryScenarioTotals(db, scenarioId);
   if (totals.error) return { error: totals.error };
-  const svMaterials = totals.projRows.filter(r => r.lens_type_class === 'SV').map(r => r.material_code);
 
   // Pull the raw operator-selected SV materials so we can surface any that
-  // were dropped upstream (e.g. material has no lens_sku_properties rows of
-  // the right lens_type_modal → projection inner-join drops it → svMaterials
-  // arrives empty, and the operator has no clue their selection was ignored).
+  // were dropped upstream (no lens_sku_properties rows of the right modal).
   const selectedSvMaterials = db.prepare(
     `SELECT material_code FROM npi_scenario_material_targets
      WHERE scenario_id = ? AND lens_type_class = 'SV'
      ORDER BY material_code`
   ).all(scenarioId).map(r => r.material_code);
-  const droppedSelections = selectedSvMaterials.filter(m => !svMaterials.includes(m));
 
-  if (svMaterials.length === 0) {
-    const headerLines = [`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`];
-    for (const m of droppedSelections) {
-      headerLines.push(`# WARNING: material ${m} selected but no consumption in window`);
-    }
-    headerLines.push('# No SV materials selected for cannibalization.');
-    return { csv: headerLines.join('\n') + '\n' };
-  }
-  const placeholders = svMaterials.map(() => '?').join(',');
-  // UNION R+L; bucket sph by 2.00D, cyl by 1.00D, add by 0.50D
-  // jobs.entry_date is DVI MM/DD/YY format. Convert to ISO for 12-month compare.
-  // Window uses SQLite localtime to match Semi formatter and Phil's "reason in
-  // PT" rule — removes the ≤1-day UTC/PT drift the JS `since` had.
-  const entryDateIso = `('20' || substr(entry_date,7,2) || '-' || substr(entry_date,1,2) || '-' || substr(entry_date,4,2))`;
-  // Rx values in jobs table are stored as integer × 100 (e.g. -175 = -1.75D).
-  // Normalize by dividing by 100 unconditionally (all values are in that encoding
-  // per DB samples) and snap to 0.25D standard Rx grid.
-  const norm = (col) => `ROUND(CAST(${col} AS REAL) / 100.0 / 0.25) * 0.25`;
-  const sql = `
-    WITH samples AS (
-      SELECT lens_material AS material,
-             ${norm('rx_r_sphere')} AS sph,
-             COALESCE(${norm('rx_r_cylinder')}, 0) AS cyl,
-             COALESCE(${norm('rx_r_add')}, 0)      AS add_pwr
-      FROM jobs
-      WHERE lens_type IN ('S','C')
-        AND lens_material IN (${placeholders})
-        AND lens_opc_r IS NOT NULL AND lens_opc_r != ''
-        AND rx_r_sphere IS NOT NULL AND rx_r_sphere != ''
-        AND ${entryDateIso} >= date('now','-12 months','localtime')
-      UNION ALL
-      SELECT lens_material,
-             ${norm('rx_l_sphere')},
-             COALESCE(${norm('rx_l_cylinder')}, 0),
-             COALESCE(${norm('rx_l_add')}, 0)
-      FROM jobs
-      WHERE lens_type IN ('S','C')
-        AND lens_material IN (${placeholders})
-        AND lens_opc_l IS NOT NULL AND lens_opc_l != ''
-        AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
-        AND ${entryDateIso} >= date('now','-12 months','localtime')
-    )
-    -- One row per unique prescription we've actually used. No bucketing.
-    -- sample_count = total historical usage of that exact Rx in that material.
-    SELECT material, sph, cyl, add_pwr, COUNT(*) AS sample_count
-    FROM samples
-    GROUP BY material, sph, cyl, add_pwr
-    ORDER BY material, sph, cyl, add_pwr
-  `;
-  const params = [...svMaterials, ...svMaterials];
-  const rows = db.prepare(sql).all(...params);
-  const totalSamples = rows.reduce((s, r) => s + r.sample_count, 0) || 1;
-
-  // Per-material projected_weekly lookup
-  const projByMat = {};
-  for (const r of totals.projRows) if (r.lens_type_class === 'SV') projByMat[r.material_code] = r.projected_weekly;
-  // Per-material total samples
-  const samplesByMat = {};
-  for (const r of rows) samplesByMat[r.material] = (samplesByMat[r.material] || 0) + r.sample_count;
-
-  // Pull placeholder SKUs for the scenario — these are the placeholders for the
-  // NEW product we're ordering (real supplier SKUs don't exist yet). Phil's
-  // call: do NOT cycle across variants. Stamp every row with V1 only. If the
-  // scenario has multiple variants, emit a stronger warning explaining the
-  // other variants exist but are not stamped anywhere in this CSV.
+  const donors = getDonorSkusForScenario(db, scenarioId, 'SV');
   const { phCodes, phRealSku, multiVariant } = resolvePlaceholders(db, scenarioId);
   const firstVariant = phCodes[0];
 
-  // Defense-in-depth against malformed entry_date. The SV SQL's entryDateIso
-  // expression assumes DVI MM/DD/YY (8 chars). Any other format silently
-  // produces a garbage comparison string and drops the row. Observed on prod:
-  // ~44% of jobs have ISO 'YYYY-MM-DD' (10 chars) and are being silently
-  // dropped by this filter today. Count them and surface in the header so
-  // Phil can decide whether to fix the underlying format mismatch. We do NOT
-  // filter, reformat, or "helpfully" coerce — just count.
-  const badDates = db.prepare(`
-    SELECT COUNT(*) AS n FROM jobs
-    WHERE lens_type IN ('S','C')
-      AND lens_material IN (${placeholders})
-      AND entry_date IS NOT NULL
-      AND entry_date != ''
-      AND (
-        LENGTH(entry_date) != 8
-        OR substr(entry_date, 3, 1) != '/'
-        OR substr(entry_date, 6, 1) != '/'
-      )
-  `).get(...svMaterials);
+  // Empty-SV early-out: still emit dropped-selection warnings so the operator
+  // knows their material picks were ignored.
+  if (donors.length === 0) {
+    const droppedSelections = selectedSvMaterials.slice();
+    const headerLines = [`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`];
+    for (const m of droppedSelections) {
+      headerLines.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
+    }
+    headerLines.push('# No SV donor SKUs found for selected materials.');
+    return { csv: headerLines.join('\n') + '\n' };
+  }
 
-  // Per-row qty — each row = one unique (material, Rx). Project forward:
-  // (rowSampleCount / matSampleCount) × matProjectedWeekly × (lead+safety wk).
-  const rowQty = rows.map((r) => {
-    const matSamples = samplesByMat[r.material] || 1;
-    const pctOfMat = r.sample_count / matSamples;
-    const weeklyForRow = (projByMat[r.material] || 0) * pctOfMat;
-    return {
-      ...r,
-      placeholder_sku: firstVariant,
-      real_sku: phRealSku.get(firstVariant) || '',
-      pctOfMat, weeklyForRow,
-      qty: Math.ceil(weeklyForRow * totals.weeksMultiplier),
-    };
+  // Same Rx normalization as before: int×100 → decimal, snap to 0.25D.
+  const norm = (col) => `ROUND(CAST(${col} AS REAL) / 100.0 / 0.25) * 0.25`;
+  const entryDateIso = `('20' || substr(entry_date,7,2) || '-' || substr(entry_date,1,2) || '-' || substr(entry_date,4,2))`;
+
+  // Per-donor Rx histogram: UNION R + L matches on lens_opc_r / lens_opc_l.
+  const rxStmt = db.prepare(`
+    SELECT sph, cyl, add_pwr, COUNT(*) AS sample_count FROM (
+      SELECT ${norm('rx_r_sphere')} AS sph,
+             COALESCE(${norm('rx_r_cylinder')}, 0) AS cyl,
+             COALESCE(${norm('rx_r_add')}, 0)      AS add_pwr
+      FROM jobs
+      WHERE lens_opc_r = ?
+        AND lens_type IN ('S','C')
+        AND rx_r_sphere IS NOT NULL AND rx_r_sphere != ''
+        AND ${entryDateIso} >= date('now','-12 months','localtime')
+      UNION ALL
+      SELECT ${norm('rx_l_sphere')},
+             COALESCE(${norm('rx_l_cylinder')}, 0),
+             COALESCE(${norm('rx_l_add')}, 0)
+      FROM jobs
+      WHERE lens_opc_l = ?
+        AND lens_type IN ('S','C')
+        AND rx_l_sphere IS NOT NULL AND rx_l_sphere != ''
+        AND ${entryDateIso} >= date('now','-12 months','localtime')
+    )
+    GROUP BY sph, cyl, add_pwr
+  `);
+
+  // Fallback consumption avg per donor when projected_weekly is NULL/0.
+  const fallbackAvgStmt = db.prepare(`
+    SELECT SUM(units_consumed) * 1.0 / NULLIF(COUNT(DISTINCT week_start), 0) AS avg
+    FROM lens_consumption_weekly
+    WHERE sku = ? AND week_start >= date('now','-12 months','localtime')
+  `);
+
+  const warnings = [];
+  const dataRows = [];
+
+  for (const d of donors) {
+    let forecast = d.projected_weekly;
+    if (forecast === null || forecast === undefined || forecast === 0) {
+      const fb = fallbackAvgStmt.get(d.sku);
+      const fbAvg = fb && fb.avg != null ? fb.avg : 0;
+      if (fbAvg <= 0) {
+        warnings.push(`# WARNING: donor_sku ${d.sku} has no consumption — skipped`);
+        continue;
+      }
+      forecast = fbAvg;
+      warnings.push(`# WARNING: donor_sku ${d.sku} has no demand-sensing projection — fell back to flat 12mo average`);
+    }
+
+    const hist = rxStmt.all(d.sku, d.sku);
+    if (hist.length === 0) {
+      warnings.push(`# WARNING: donor_sku ${d.sku} has forecast but no Rx history in window — skipped`);
+      continue;
+    }
+
+    const donorSamples = hist.reduce((s, r) => s + r.sample_count, 0);
+    if (donorSamples <= 0) {
+      warnings.push(`# WARNING: donor_sku ${d.sku} has forecast but no Rx history in window — skipped`);
+      continue;
+    }
+
+    for (const rx of hist) {
+      const pctOfDonor = rx.sample_count / donorSamples;
+      const weeklyForRow = forecast * pctOfDonor * ((d.adoption_pct || 50) / 100);
+      const qty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
+      dataRows.push({
+        placeholder_sku: firstVariant,
+        real_sku: phRealSku.get(firstVariant) || '',
+        donor_sku: d.sku,
+        material: d.material_code,
+        sph: rx.sph || 0,
+        cyl: rx.cyl || 0,
+        add_pwr: rx.add_pwr || 0,
+        sample_count: rx.sample_count,
+        weeklyForRow,
+        qty,
+      });
+    }
+  }
+
+  // Sort: material → donor_sku → sph → cyl → add
+  dataRows.sort((a, b) => {
+    if (a.material !== b.material) return String(a.material).localeCompare(String(b.material));
+    if (a.donor_sku !== b.donor_sku) return String(a.donor_sku).localeCompare(String(b.donor_sku));
+    if (a.sph !== b.sph) return a.sph - b.sph;
+    if (a.cyl !== b.cyl) return a.cyl - b.cyl;
+    return a.add_pwr - b.add_pwr;
   });
-  const orderQtyByMat = {};
-  for (const r of rowQty) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
-  const grandSum = rowQty.reduce((s, r) => s + r.qty, 0);
 
-  // Defense against silent-0-row bug (bit Phil previously): any material the
-  // operator selected but which produced ZERO data rows gets a warning comment.
-  const seenMats = new Set(rows.map(r => r.material));
-  const missingMats = svMaterials.filter(m => !seenMats.has(m));
+  // Header aggregates
+  const orderQtyByMat = {};
+  for (const r of dataRows) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
+  const grandSum = dataRows.reduce((s, r) => s + r.qty, 0);
+
+  // Missing-material warning: a selected material that produced no donor rows at all.
+  const seenMats = new Set(donors.map(d => d.material_code));
+  const missingMats = selectedSvMaterials.filter(m => !seenMats.has(m));
+
+  // Forecast freshness — MAX(computed_at) across the donor SKUs in this scenario.
+  const donorSkuList = donors.map(d => d.sku);
+  let staleDays = null;
+  if (donorSkuList.length > 0) {
+    try {
+      const ph = donorSkuList.map(() => '?').join(',');
+      const fr = db.prepare(
+        `SELECT MAX(computed_at) AS maxc FROM lens_inventory_status WHERE sku IN (${ph})`
+      ).get(...donorSkuList);
+      if (fr && fr.maxc) {
+        const ageRow = db.prepare(
+          `SELECT CAST((julianday('now') - julianday(?)) AS INTEGER) AS days`
+        ).get(fr.maxc);
+        if (ageRow && ageRow.days != null) staleDays = ageRow.days;
+      }
+    } catch { /* lens_inventory_status absent — skip freshness check */ }
+  }
+
+  // Malformed entry_date probe: count jobs with non-DVI entry_date format that
+  // would have been silently dropped by the per-donor Rx history filter.
+  let badDates = { n: 0 };
+  if (donorSkuList.length > 0) {
+    try {
+      const ph = donorSkuList.map(() => '?').join(',');
+      // Probe is a single read; we measure both opc_r and opc_l.
+      badDates = db.prepare(`
+        SELECT COUNT(*) AS n FROM jobs
+        WHERE lens_type IN ('S','C')
+          AND (lens_opc_r IN (${ph}) OR lens_opc_l IN (${ph}))
+          AND entry_date IS NOT NULL
+          AND entry_date != ''
+          AND (
+            LENGTH(entry_date) != 8
+            OR substr(entry_date, 3, 1) != '/'
+            OR substr(entry_date, 6, 1) != '/'
+          )
+      `).get(...donorSkuList, ...donorSkuList);
+    } catch { /* ignore */ }
+  }
 
   const lines = [];
   lines.push(`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`);
-  lines.push(`# Source: material_category | Window: last 12 months | R+L samples counted separately`);
+  lines.push(`# Source: material_category | Per-donor-SKU × Rx | Window: last 12 months | R+L samples counted separately`);
   lines.push(`# Rx granularity: 0.25D (standard supplier stocking grid)`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
+  if (staleDays !== null && staleDays > 3) {
+    lines.push(`# WARNING: forecast last computed ${staleDays} days ago — consider running Lens Intelligence model first`);
+  }
   if (multiVariant) {
     lines.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
     lines.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
     lines.push(`# or prescriptions in the UI before splitting the order.`);
+  }
+  if (badDates && badDates.n > 0) {
+    lines.push(`# NOTE: ${badDates.n} jobs with non-DVI entry_date format were skipped from Rx histogram`);
   }
   lines.push(`#`);
   lines.push(`# TOTAL SV INITIAL ORDER: ${grandSum} lenses`);
@@ -901,18 +1006,17 @@ function formatSvStockingCsv(db, scenarioId) {
     lines.push(`#   ${mat}: ${q} lenses   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
   }
   for (const m of missingMats) {
-    lines.push(`# WARNING: material ${m} selected but no consumption in window`);
+    lines.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
   }
+  for (const w of warnings) lines.push(w);
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  // One row per unique prescription we actually used (material × sph × cyl × add).
-  // qty = what to order of that Rx to match our historical usage scaled forward
-  // over (lead + safety) weeks at the chosen adoption %.
-  lines.push(['placeholder_sku','real_sku','material','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
-  for (const r of rowQty) {
+  lines.push(['placeholder_sku','real_sku','donor_sku','material','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
+  for (const r of dataRows) {
     lines.push([
       csvEsc(r.placeholder_sku),
       csvEsc(r.real_sku),
+      csvEsc(r.donor_sku),
       csvEsc(r.material),
       (r.sph || 0).toFixed(2),
       (r.cyl || 0).toFixed(2),
@@ -927,73 +1031,109 @@ function formatSvStockingCsv(db, scenarioId) {
   return { csv: lines.join('\n'), totals };
 }
 
-// Semi stocking CSV — one row per (material, base_curve). No Rx (pucks are
-// surfaced after stocking). Weighted by weekly consumption.
+// Semi stocking CSV — one row per donor SKU. base_curve comes from
+// lens_sku_properties.base_curve. No Rx (pucks are surfaced after stocking).
+// Per-donor forecast × adoption_pct × (lead+safety) weeks; same fallback chain
+// as SV (lens_inventory_status → lens_consumption_weekly → skip).
 function formatSemiStockingCsv(db, scenarioId) {
   const totals = computeMaterialCategoryScenarioTotals(db, scenarioId);
   if (totals.error) return { error: totals.error };
-  const semiMaterials = totals.projRows.filter(r => r.lens_type_class === 'SEMI').map(r => r.material_code);
-  if (semiMaterials.length === 0) {
+
+  const selectedSemiMaterials = db.prepare(
+    `SELECT material_code FROM npi_scenario_material_targets
+     WHERE scenario_id = ? AND lens_type_class = 'SEMI'
+     ORDER BY material_code`
+  ).all(scenarioId).map(r => r.material_code);
+
+  const donors = getDonorSkusForScenario(db, scenarioId, 'SEMI');
+  const { phCodes, phRealSku, multiVariant } = resolvePlaceholders(db, scenarioId);
+  const firstVariant = phCodes[0];
+
+  if (donors.length === 0) {
     return { csv: '# No semi-finished materials selected for cannibalization.\n' };
   }
-  const placeholders = semiMaterials.map(() => '?').join(',');
-  // base_curve + weekly consumption per SKU
-  const sql = `
-    SELECT
-      p.material,
-      p.base_curve,
-      COUNT(DISTINCT p.sku) AS sku_count,
-      ROUND(COALESCE(SUM(cw.weekly_avg), 0), 2) AS weekly_consumption
-    FROM lens_sku_properties p
-    LEFT JOIN (
-      SELECT sku, SUM(units_consumed) * 1.0 / NULLIF(COUNT(DISTINCT week_start), 0) AS weekly_avg
-      FROM lens_consumption_weekly
-      WHERE week_start >= date('now', '-12 months', 'localtime')
-      GROUP BY sku
-    ) cw ON cw.sku = p.sku
-    WHERE p.lens_type_modal = 'P'
-      AND p.material IN (${placeholders})
-    GROUP BY p.material, p.base_curve
-    ORDER BY p.material, p.base_curve
-  `;
-  const rows = db.prepare(sql).all(...semiMaterials);
 
-  const { phCodes, phRealSku, multiVariant } = resolvePlaceholders(db, scenarioId);
+  const fallbackAvgStmt = db.prepare(`
+    SELECT SUM(units_consumed) * 1.0 / NULLIF(COUNT(DISTINCT week_start), 0) AS avg
+    FROM lens_consumption_weekly
+    WHERE sku = ? AND week_start >= date('now','-12 months','localtime')
+  `);
 
-  const projByMat = {};
-  for (const r of totals.projRows) if (r.lens_type_class === 'SEMI') projByMat[r.material_code] = r.projected_weekly;
-  const totalsByMat = {};
-  for (const r of rows) totalsByMat[r.material] = (totalsByMat[r.material] || 0) + r.weekly_consumption;
+  const warnings = [];
+  const dataRows = [];
 
-  // Compute per-row qty + per-material subtotals first
-  // Phil's call: don't mix variants across rows. Every row stamped with V1 only.
-  // Additional variants are flagged in a header comment; operator maps them in UI.
-  const firstVariant = phCodes[0];
-  const rowQty = rows.map(r => {
-    const matTotal = totalsByMat[r.material] || 1;
-    const pctOfMat = r.weekly_consumption / matTotal;
-    const weeklyForBucket = (projByMat[r.material] || 0) * pctOfMat;
-    return {
-      ...r,
+  for (const d of donors) {
+    let forecast = d.projected_weekly;
+    if (forecast === null || forecast === undefined || forecast === 0) {
+      const fb = fallbackAvgStmt.get(d.sku);
+      const fbAvg = fb && fb.avg != null ? fb.avg : 0;
+      if (fbAvg <= 0) {
+        warnings.push(`# WARNING: donor_sku ${d.sku} has no consumption — skipped`);
+        continue;
+      }
+      forecast = fbAvg;
+      warnings.push(`# WARNING: donor_sku ${d.sku} has no demand-sensing projection — fell back to flat 12mo average`);
+    }
+
+    if (d.base_curve === null || d.base_curve === undefined) {
+      warnings.push(`# WARNING: donor_sku ${d.sku} has UNKNOWN base_curve`);
+    }
+
+    const weeklyForRow = forecast * ((d.adoption_pct || 50) / 100);
+    const qty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
+    dataRows.push({
       placeholder_sku: firstVariant,
       real_sku: phRealSku.get(firstVariant) || '',
-      pctOfMat, weeklyForBucket,
-      qty: Math.ceil(weeklyForBucket * totals.weeksMultiplier),
-    };
-  });
-  const orderQtyByMat = {};
-  for (const r of rowQty) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
-  const grandSum = rowQty.reduce((s, r) => s + r.qty, 0);
+      donor_sku: d.sku,
+      material: d.material_code,
+      base_curve: d.base_curve,
+      sample_count: d.sample_job_count || 0,
+      weeklyForRow,
+      qty,
+    });
+  }
 
-  // Same silent-0-row defense as SV: warn on any selected material that
-  // produced zero data rows.
-  const seenMats = new Set(rows.map(r => r.material));
-  const missingMats = semiMaterials.filter(m => !seenMats.has(m));
+  // Sort: material → donor_sku → base_curve
+  dataRows.sort((a, b) => {
+    if (a.material !== b.material) return String(a.material).localeCompare(String(b.material));
+    if (a.donor_sku !== b.donor_sku) return String(a.donor_sku).localeCompare(String(b.donor_sku));
+    const ax = a.base_curve == null ? Infinity : a.base_curve;
+    const bx = b.base_curve == null ? Infinity : b.base_curve;
+    return ax - bx;
+  });
+
+  const orderQtyByMat = {};
+  for (const r of dataRows) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
+  const grandSum = dataRows.reduce((s, r) => s + r.qty, 0);
+
+  const seenMats = new Set(donors.map(d => d.material_code));
+  const missingMats = selectedSemiMaterials.filter(m => !seenMats.has(m));
+
+  // Forecast freshness across donor SKUs
+  const donorSkuList = donors.map(d => d.sku);
+  let staleDays = null;
+  if (donorSkuList.length > 0) {
+    try {
+      const ph = donorSkuList.map(() => '?').join(',');
+      const fr = db.prepare(
+        `SELECT MAX(computed_at) AS maxc FROM lens_inventory_status WHERE sku IN (${ph})`
+      ).get(...donorSkuList);
+      if (fr && fr.maxc) {
+        const ageRow = db.prepare(
+          `SELECT CAST((julianday('now') - julianday(?)) AS INTEGER) AS days`
+        ).get(fr.maxc);
+        if (ageRow && ageRow.days != null) staleDays = ageRow.days;
+      }
+    } catch { /* ignore */ }
+  }
 
   const lines = [];
   lines.push(`# NPI Semi-Finished Stocking — ${csvEsc(totals.scenario.name || '')}`);
-  lines.push(`# Source: material_category | Window: last 12 months`);
+  lines.push(`# Source: material_category | Per-donor-SKU | Window: last 12 months`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
+  if (staleDays !== null && staleDays > 3) {
+    lines.push(`# WARNING: forecast last computed ${staleDays} days ago — consider running Lens Intelligence model first`);
+  }
   if (multiVariant) {
     lines.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
     lines.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
@@ -1006,23 +1146,23 @@ function formatSemiStockingCsv(db, scenarioId) {
     lines.push(`#   ${mat}: ${q} pucks   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
   }
   for (const m of missingMats) {
-    lines.push(`# WARNING: material ${m} selected but no consumption in window`);
+    lines.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
   }
+  for (const w of warnings) lines.push(w);
   lines.push(`#`);
   lines.push(`# Note: base_curve=UNKNOWN means the SKU has no known BC in lens_sku_properties.`);
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  lines.push(['placeholder_sku','real_sku','material','base_curve','sku_count','weekly_consumption','pct_of_material','weekly_projection','initial_order_qty'].join(','));
-  for (const r of rowQty) {
+  lines.push(['placeholder_sku','real_sku','donor_sku','material','base_curve','sample_count','weekly_projection','initial_order_qty'].join(','));
+  for (const r of dataRows) {
     lines.push([
       csvEsc(r.placeholder_sku),
       csvEsc(r.real_sku),
+      csvEsc(r.donor_sku),
       csvEsc(r.material),
       r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
-      r.sku_count,
-      r.weekly_consumption.toFixed(2),
-      (r.pctOfMat * 100).toFixed(2),
-      r.weeklyForBucket.toFixed(2),
+      r.sample_count,
+      r.weeklyForRow.toFixed(2),
       r.qty,
     ].join(','));
   }
