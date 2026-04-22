@@ -677,6 +677,23 @@ async function poll() {
     const rawMaterials = materialsResp.materials || materialsResp.data || materialsResp || [];
     const materials   = rawMaterials.map(normalizeMaterial);
 
+    // Silent-0-row guard: /api/materials returning 0 when we previously had
+    // thousands of SKUs means ItemPath is broken (auth failure, proxy timeout
+    // returning '{}', query filter bug) — not that inventory suddenly vanished.
+    // Don't overwrite cache; log + alert and abort this poll.
+    if (cache.prevSkuCount > 100 && materials.length === 0) {
+      cache.consecutiveEmptyMaterials = (cache.consecutiveEmptyMaterials || 0) + 1;
+      const msg = `[ItemPath] ⚠️ SUSPICIOUS 0-SKU response — prev ${cache.prevSkuCount} → now 0. Keeping prior cache. (consecutive: ${cache.consecutiveEmptyMaterials})`;
+      console.error(msg);
+      cache.syncStatus = 'suspect';
+      cache.syncError = '0-row materials result';
+      if (cache.consecutiveEmptyMaterials === 3) {
+        try { sendSlackInventoryAlert(`:warning: ItemPath /api/materials returned 0 SKUs on 3 consecutive polls (prev=${cache.prevSkuCount}). Cache retained. Investigate.`); } catch {}
+      }
+      return;
+    }
+    cache.consecutiveEmptyMaterials = 0;
+
     // Filter orders by "In Process" status (active picks)
     const allOrders   = (ordersResp.orders || ordersResp.data || ordersResp || []);
     const activeOrders = allOrders.filter(o => o.status === 'In Process');
