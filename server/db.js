@@ -89,28 +89,94 @@ db.exec(`
 try { db.exec("ALTER TABLE lens_sku_params ADD COLUMN routing TEXT DEFAULT 'STOCK'"); } catch {}
 try { db.exec("ALTER TABLE lens_sku_params ADD COLUMN sku_type TEXT"); } catch {}
 
-// Populate known semi-finished SKUs (31 from Lens_Planning_V3.xlsx Semi_finSkus sheet)
-// These are the source of truth — 4800/2650 prefixes that are semi-finished, not finished stock
-const KNOWN_SEMIFINISHED = [
-  // Semi Poly
+// Seed well-known semi-finished SKUs (historical hardcoded list — still used for
+// the very first bootstrap when lens_sku_properties is empty; after the 12-month
+// aggregation backfill runs, lens_sku_properties.lens_type_modal='P' becomes the
+// authoritative source). See also: getSemifinishedSkus() below.
+const SEED_SEMIFINISHED = [
   '4800135412', '4800135420', '4800135438', '4800154660',
-  // Semi Poly Bluelight
   '4800135339', '4800135347', '4800135354', '4800135362',
-  // Semi H67
   '4800150924', '4800150932', '4800135305', '4800150940', '4800150957',
-  // Semi H67 Blue Light
   '4800150882', '4800150890', '4800135297', '4800150908', '4800150916', '4800150965',
-  // Semi Photochromic PLY + 67
   '265007922', '265007930', '265007948', '265007955', '265007963', '265007971', '265007989',
-  // Semi Photochromic 67
   '265008466', '265008474', '265008482', '265008490', '265008508',
 ];
 try {
   const upsert = db.prepare(`INSERT INTO lens_sku_params (sku, sku_type, routing) VALUES (?, 'semifinished', 'STOCK')
     ON CONFLICT(sku) DO UPDATE SET sku_type = 'semifinished'`);
-  const run = db.transaction(() => { for (const sku of KNOWN_SEMIFINISHED) upsert.run(sku); });
+  const run = db.transaction(() => { for (const sku of SEED_SEMIFINISHED) upsert.run(sku); });
   run();
 } catch (e) { console.error('[DB] Failed to seed semi-finished SKUs:', e.message); }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LENS SKU PROPERTIES — aggregated from 12 months of live DVI XML / jobs data
+// Populated by scripts/backfill-lens-sku-properties.js. Holds EMPIRICAL per-SKU
+// material / base curve / Rx ranges. Different from lens_sku_params (parametric
+// planning) — this is observational truth from actual jobs.
+// ─────────────────────────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS lens_sku_properties (
+    sku                 TEXT PRIMARY KEY,
+    material            TEXT,           -- modal lens_material (coded enum: BLY, PLY, B67, H67, SPY)
+    material_conf       REAL,           -- 0..1 fraction of jobs agreeing on modal material
+    lens_type_modal     TEXT,           -- S, P, or C — drives SV/Surfacing classification
+    base_curve          REAL,           -- parsed from lensStyle or provided via lens_sku_params
+    diameter            INTEGER,        -- semi-finished blank diameter (not frame eye_size)
+    sph_min             REAL,
+    sph_max             REAL,
+    cyl_min             REAL,
+    cyl_max             REAL,
+    add_min             REAL,           -- progressive/bifocal only — null for SV
+    add_max             REAL,
+    eye_size_min        INTEGER,        -- frame eye size range this SKU has been cut to
+    eye_size_max        INTEGER,
+    common_coatings     TEXT,           -- JSON array of top coatings with counts
+    typical_thick       TEXT,
+    sample_job_count    INTEGER NOT NULL DEFAULT 0,   -- confidence signal
+    first_seen          TEXT,           -- MIN(entry_date) in aggregation window
+    last_seen           TEXT,           -- MAX(entry_date)
+    last_aggregated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_lsp_material      ON lens_sku_properties(material);
+  CREATE INDEX IF NOT EXISTS idx_lsp_lens_type     ON lens_sku_properties(lens_type_modal);
+  CREATE INDEX IF NOT EXISTS idx_lsp_last_agg      ON lens_sku_properties(last_aggregated_at);
+`);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RX PROFILE TEMPLATES — standard prescription distribution for non-cannibalizing
+// NPI. Two default templates: "Standard SV" and "Standard Surfacing" auto-derived
+// from 12 months of live consumption. Editable in the UI after derivation.
+//
+// Expansion: to emit N per-job rows for a scenario of type='standard_profile',
+// sample N buckets weighted by pct_of_total and emit a row per sample.
+// ─────────────────────────────────────────────────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rx_profile_templates (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    lens_type   TEXT NOT NULL,              -- 'SV' or 'Surfacing'
+    description TEXT,
+    is_default  INTEGER DEFAULT 0,          -- 1 = the system-derived default for its lens_type
+    source      TEXT,                        -- 'auto_12mo', 'manual', 'imported'
+    created_at  TEXT DEFAULT (datetime('now')),
+    updated_at  TEXT DEFAULT (datetime('now'))
+  );
+  CREATE TABLE IF NOT EXISTS rx_profile_buckets (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    template_id   INTEGER NOT NULL,
+    sph_min       REAL,                      -- SV: populated; Surfacing: null (pucks have no Rx)
+    sph_max       REAL,
+    cyl_min       REAL,
+    cyl_max       REAL,
+    add_min       REAL,
+    add_max       REAL,
+    base_curve    REAL,                      -- Surfacing: populated; SV: null
+    pct_of_total  REAL NOT NULL,             -- 0..1 share of total demand
+    sample_count  INTEGER DEFAULT 0,
+    FOREIGN KEY (template_id) REFERENCES rx_profile_templates(id) ON DELETE CASCADE
+  );
+  CREATE INDEX IF NOT EXISTS idx_rxpb_template ON rx_profile_buckets(template_id);
+`);
 
 // Lens Intelligence — inventory health, stockout prediction, reorder recommendations
 db.exec(`
@@ -1273,6 +1339,48 @@ function getStaleHeartbeats() {
       AND (unixepoch() * 1000 - last_success_at) > stale_threshold_ms
     ORDER BY last_success_at ASC
   `).all();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SEMI-FINISHED SKU LOOKUP — replaces the three hardcoded KNOWN_SEMIFINISHED
+// Sets that used to exist in db.js, long-tail-analysis.js, lens-intelligence.js.
+// Primary source: lens_sku_properties.lens_type_modal = 'P' (aggregated from
+// 12 months of live data by backfill-lens-sku-properties.js).
+// Union with the bootstrap seed list so the app works before backfill runs.
+// Returns a Set for O(1) membership checks.
+// ─────────────────────────────────────────────────────────────────────────────
+function getSemifinishedSkus() {
+  const set = new Set(SEED_SEMIFINISHED);
+  try {
+    const rows = db.prepare(
+      `SELECT sku FROM lens_sku_properties WHERE lens_type_modal = 'P'`
+    ).all();
+    for (const r of rows) set.add(r.sku);
+  } catch { /* lens_sku_properties may not exist on first boot */ }
+  try {
+    const rows = db.prepare(
+      `SELECT sku FROM lens_sku_params WHERE sku_type = 'semifinished'`
+    ).all();
+    for (const r of rows) set.add(r.sku);
+  } catch { /* fine */ }
+  return set;
+}
+
+function getSkuProperties(sku) {
+  return db.prepare(`SELECT * FROM lens_sku_properties WHERE sku = ?`).get(sku);
+}
+
+function getRxProfileTemplate(id) {
+  const tpl = db.prepare(`SELECT * FROM rx_profile_templates WHERE id = ?`).get(id);
+  if (!tpl) return null;
+  tpl.buckets = db.prepare(
+    `SELECT * FROM rx_profile_buckets WHERE template_id = ? ORDER BY pct_of_total DESC`
+  ).all(id);
+  return tpl;
+}
+
+function listRxProfileTemplates() {
+  return db.prepare(`SELECT * FROM rx_profile_templates ORDER BY lens_type, name`).all();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3286,6 +3394,11 @@ module.exports = {
   recordHeartbeat,
   recordHeartbeatError,
   getStaleHeartbeats,
+  getSemifinishedSkus,
+  getSkuProperties,
+  getRxProfileTemplate,
+  listRxProfileTemplates,
+  SEED_SEMIFINISHED,
   // Upsert functions (called by adapters)
   upsertInventory,
   upsertAlerts,

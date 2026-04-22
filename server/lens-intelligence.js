@@ -19,6 +19,9 @@
 'use strict';
 
 let computeTimer = null;
+let _semifinishedSet = null;  // lazy-loaded from db.getSemifinishedSkus() on first use;
+                               // invalidate via invalidateSemifinishedCache() after backfill
+function invalidateSemifinishedCache() { _semifinishedSet = null; }
 
 // Default lead times (overridden by lens_sku_params per SKU)
 const DEFAULTS = {
@@ -396,26 +399,16 @@ function computeAll(db, itempath, netsuite) {
       const fdaWeeks = params.fda_hold_weeks;
       const totalLeadTime = mfgWeeks + transitWeeks + fdaWeeks;
 
-      // Detect SKU type: check params override first, then prefix detection
-      // Some 4800 SKUs are semi-finished (e.g., 4800135438, 4800154660)
-      // All 31 semi-finished SKUs from Lens_Planning_V3.xlsx Semi_finSkus sheet
-      const KNOWN_SEMIFINISHED = new Set([
-        // Semi Poly
-        '4800135412', '4800135420', '4800135438', '4800154660',
-        // Semi Poly Bluelight
-        '4800135339', '4800135347', '4800135354', '4800135362',
-        // Semi H67
-        '4800150924', '4800150932', '4800135305', '4800150940', '4800150957',
-        // Semi H67 Blue Light
-        '4800150882', '4800150890', '4800135297', '4800150908', '4800150916', '4800150965',
-        // Semi Photochromic PLY + 67
-        '265007922', '265007930', '265007948', '265007955', '265007963', '265007971', '265007989',
-        // Semi Photochromic 67
-        '265008466', '265008474', '265008482', '265008490', '265008508',
-      ]);
+      // Detect SKU type: check params override first, then live table lookup,
+      // then prefix detection as last-resort bootstrap.
+      // Source of truth (post-backfill): lens_sku_properties.lens_type_modal='P'
+      // See db.js:getSemifinishedSkus() — unions live table + seed list.
+      if (!_semifinishedSet) {
+        _semifinishedSet = require('./db').getSemifinishedSkus();
+      }
       let skuType = params.sku_type || null; // explicit override from lens_sku_params
       if (!skuType) {
-        if (KNOWN_SEMIFINISHED.has(sku)) skuType = 'semifinished';
+        if (_semifinishedSet.has(sku)) skuType = 'semifinished';
         else if (/^(SF_|062|026|001)/.test(sku)) skuType = 'semifinished';
         else skuType = 'finished';
       }
