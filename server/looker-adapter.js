@@ -152,6 +152,20 @@ async function poll() {
     const rows = await fetchJobs();
     console.log(`[Looker] Fetched ${rows.length} job-lens rows from API`);
 
+    // Silent-0-row guard: if Looker returned 0 rows AND looker_jobs currently
+    // has rows, that's auth/query failure, not genuine empty data. DELETE+INSERT
+    // would wipe historical data. Keep what we have and abort this cycle.
+    if (rows.length === 0) {
+      const existing = db.db.prepare('SELECT COUNT(*) AS n FROM looker_jobs').get().n;
+      if (existing > 0) {
+        console.error(`[Looker] ⚠️ SUSPICIOUS 0-row result — looker_jobs has ${existing} prior rows, keeping them. Investigate Looker auth / query.`);
+        cache.syncStatus = 'suspect';
+        cache.syncError = '0-row result with non-empty prior table';
+        cache.lastPoll = new Date().toISOString();
+        return;
+      }
+    }
+
     // Save to SQLite
     const del = db.db.prepare('DELETE FROM looker_jobs');
     const ins = db.db.prepare(`INSERT OR REPLACE INTO looker_jobs
