@@ -171,6 +171,8 @@ function trackCompletedOrders(currentOrders) {
   const hour = new Date().getHours();
   let completedPicks = 0;
   let completedPuts = 0;
+  const historyLines = []; // dual-writer to picks_history — INSERT OR IGNORE on pick_id
+
   if (previousOrderMap.size > 0) {
     for (const [orderId, info] of previousOrderMap) {
       if (!currentIds.has(orderId)) {
@@ -184,6 +186,24 @@ function trackCompletedOrders(currentOrders) {
             dailyPickTotals[wh] += 1;
             hourlyPicks[wh][hour] = (hourlyPicks[wh][hour] || 0) + 1;
             completedPicks += 1;
+            // Dual-writer: a completed pick (disappeared from active set) — emit
+            // to picks_history. If pickSync later fetches the same line via
+            // /api/order_lines, INSERT OR IGNORE on pick_id='hist-<line.id>'
+            // drops the duplicate. Protects picks_history from pickSync stalls.
+            if (info.lines && info.lines.length > 0) {
+              const completedAt = new Date().toISOString();
+              for (const l of info.lines) {
+                if (!l.id || !l.materialName || !(l.quantityConfirmed > 0)) continue;
+                historyLines.push({
+                  id: l.id,
+                  materialName: l.materialName,
+                  quantityConfirmed: l.quantityConfirmed,
+                  orderName: info.reference || orderId,
+                  warehouseName: info.warehouse,
+                  modifiedDate: l.modifiedDate || completedAt,
+                });
+              }
+            }
           }
         }
       }
@@ -196,6 +216,17 @@ function trackCompletedOrders(currentOrders) {
   if (completedPuts > 0) {
     console.log(`[ItemPath] +${completedPuts} completed puts (WH1: ${dailyPutTotals.WH1}, WH2: ${dailyPutTotals.WH2}, WH3: ${dailyPutTotals.WH3})`);
   }
+  if (historyLines.length > 0) {
+    try {
+      const db = require('./db');
+      const { inserted } = db.upsertPicksHistory(historyLines);
+      if (inserted > 0) {
+        console.log(`[ItemPath] poll→picks_history: ${inserted} new rows from ${historyLines.length} completed pick lines (dual-writer)`);
+      }
+    } catch (e) {
+      console.warn(`[ItemPath] poll→picks_history write failed: ${e.message}`);
+    }
+  }
   if (completedPicks > 0 || completedPuts > 0) {
     saveDailyTotals();
   }
@@ -206,11 +237,19 @@ function trackCompletedOrders(currentOrders) {
     const id = o.orderId || o.id;
     const rawWh = o.warehouseName || o.warehouse || 'Unknown';
     const normWh = /kitchen/i.test(rawWh) || /wh3/i.test(rawWh) ? 'WH3' : /wh2/i.test(rawWh) ? 'WH2' : /wh1/i.test(rawWh) ? 'WH1' : rawWh;
+    // Slim line payload for disappearance write — only fields upsertPicksHistory needs
+    const lines = (o.order_lines || []).map(l => ({
+      id: l.id,
+      materialName: l.materialName || l.material?.name || '',
+      quantityConfirmed: Math.abs(parseFloat(l.quantityConfirmed || l.quantity) || 0),
+      modifiedDate: l.modifiedDate,
+    })).filter(l => l.id && l.materialName && l.quantityConfirmed > 0);
     previousOrderMap.set(id, {
       warehouse: normWh,
       lineCount: (o.order_lines || []).reduce((sum, l) => sum + (parseFloat(l.quantity) || 0), 0) || (o.lines || []).length || 3,
       reference: o.reference || o.name,
       isPut: isPutOrder(o),
+      lines,
     });
   }
 }
