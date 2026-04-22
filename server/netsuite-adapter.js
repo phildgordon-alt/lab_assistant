@@ -39,6 +39,7 @@ const BASE_URL = `https://${ACCOUNT}.suitetalk.api.netsuite.com`;
 let inventory = {};      // SKU → { qty, name, itemId, lastSync }
 let lastSync = null;
 let syncError = null;
+let consecutiveEmptyPolls = 0; // silent-0-row guard counter
 let pollTimer = null;
 let pollCount = 0;
 let _receiptWarnLogged = false;
@@ -213,6 +214,20 @@ async function poll() {
     const lensCount = Object.values(newInventory).filter(i => i.category === 'Lenses').length;
     const frameTopCount = Object.values(newInventory).filter(i => i.category !== 'Lenses' && i.category !== 'Other').length;
     console.log(`[NetSuite] Lenses: ${lensCount} (matched by OPC itemId), Frames/Tops: ${frameTopCount} (matched by UPC)`);
+
+    // Silent-0-row guard: SuiteQL returning 0 items when we had thousands prior
+    // means auth failed, location filter misconfigured, or NetSuite maintenance.
+    // Previous behavior replaced inventory{} with empty map, wiping the whole
+    // reconciliation baseline. Keep prior snapshot instead.
+    const prevSkuCount = Object.keys(inventory).length;
+    const newSkuCount = Object.keys(newInventory).length;
+    if (prevSkuCount > 100 && newSkuCount === 0) {
+      consecutiveEmptyPolls = (typeof consecutiveEmptyPolls === 'number' ? consecutiveEmptyPolls : 0) + 1;
+      console.error(`[NetSuite] ⚠️ SUSPICIOUS 0-SKU response — prev ${prevSkuCount} → now 0. Keeping prior snapshot. (consecutive: ${consecutiveEmptyPolls})`);
+      syncError = '0-row result with non-empty prior';
+      return;
+    }
+    consecutiveEmptyPolls = 0;
 
     inventory = newInventory;
     lastSync = new Date().toISOString();

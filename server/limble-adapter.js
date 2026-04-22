@@ -657,6 +657,22 @@ async function poll() {
     const tasks    = allTasks.filter(t => !t.template);
     const downtime = extractArray(downtimeResp, ['data', 'downtimes', 'downtime', 'items', 'results']).map(normalizeDowntime);
     const parts    = extractArray(partsResp, ['data', 'parts', 'items', 'results']).map(normalizePart);
+
+    // Silent-0-row guard: Limble's safeFetch swallows errors and returns [],
+    // so an auth drop looks identical to an empty response. The lab has 50+
+    // assets registered — a 0-asset response after a successful prior poll
+    // means the API call failed, not that assets vanished.
+    const prevAssetCount = (cache.assets || []).length;
+    if (prevAssetCount > 5 && assets.length === 0) {
+      cache.consecutiveEmptyAssets = (cache.consecutiveEmptyAssets || 0) + 1;
+      console.error(`[Limble] ⚠️ SUSPICIOUS 0-asset response — prev ${prevAssetCount} → now 0. Keeping prior cache. (consecutive: ${cache.consecutiveEmptyAssets})`);
+      cache.syncStatus = 'suspect';
+      cache.syncError = '0-asset result after non-empty prior';
+      cache.lastSync = new Date().toISOString();
+      return;
+    }
+    cache.consecutiveEmptyAssets = 0;
+
     const stats    = computeStats(assets, tasks, downtime);
 
     // Compute derived lists for UI
