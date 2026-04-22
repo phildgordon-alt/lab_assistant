@@ -1997,10 +1997,10 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
     const rows = labDb.db.prepare(`
-      SELECT date(completed_at) as date, warehouse, COUNT(*) as picks, SUM(qty) as total_qty
+      SELECT substr(completed_at, 1, 10) as date, warehouse, COUNT(*) as picks, SUM(qty) as total_qty
       FROM picks_history
-      WHERE completed_at > datetime('now', ?)      GROUP BY date(completed_at), warehouse
-      ORDER BY date(completed_at) DESC
+      WHERE completed_at > datetime('now', ?)      GROUP BY substr(completed_at, 1, 10), warehouse
+      ORDER BY substr(completed_at, 1, 10) DESC
     `).all(`-${days} days`);
     // Pivot into { date, WH1, WH2, total }
     const byDate = {};
@@ -2159,7 +2159,7 @@ Respond with a structured batching plan in this format:
       try {
         const ipRows = labDb.db.prepare(`
           SELECT sku, COUNT(*) as total_qty FROM picks_history
-          WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
+          WHERE completed_at IS NOT NULL AND substr(completed_at, 1, 10) >= ? AND substr(completed_at, 1, 10) <= ?
                      GROUP BY sku
         `).all(from, to);
         for (const r of ipRows) {
@@ -2169,7 +2169,7 @@ Respond with a structured batching plan in this format:
           if (type === 'lens') kardexLenses += r.total_qty; else kardexFrames += r.total_qty;
         }
         // Daily totals
-        const ipDailyAll = labDb.db.prepare('SELECT date(completed_at) as date, sku, COUNT(*) as qty FROM picks_history WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ? GROUP BY date(completed_at), sku').all(from, to);
+        const ipDailyAll = labDb.db.prepare('SELECT substr(completed_at, 1, 10) as date, sku, COUNT(*) as qty FROM picks_history WHERE completed_at IS NOT NULL AND substr(completed_at, 1, 10) >= ? AND substr(completed_at, 1, 10) <= ? GROUP BY substr(completed_at, 1, 10), sku').all(from, to);
         for (const r of ipDailyAll) {
           if (!isLensOrFrame(r.sku)) continue;
           if (!dailyMap[r.date]) dailyMap[r.date] = { date: r.date, kardex: 0, netsuite: 0, breakages: 0 };
@@ -3275,10 +3275,10 @@ Respond with a structured batching plan in this format:
 
     // ItemPath: pick events from picks_history — COUNT not SUM(qty) since qty can be >1 on order_lines
     const ipDailyRows = labDb.db.prepare(`
-      SELECT date(completed_at) as date, sku, COUNT(*) as qty
+      SELECT substr(completed_at, 1, 10) as date, sku, COUNT(*) as qty
       FROM picks_history
-      WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
-             GROUP BY date(completed_at), sku
+      WHERE completed_at IS NOT NULL AND substr(completed_at, 1, 10) >= ? AND substr(completed_at, 1, 10) <= ?
+             GROUP BY substr(completed_at, 1, 10), sku
     `).all(fromDate, today);
 
     const ipByDate = {};
@@ -6298,7 +6298,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       const ipRows = labDb.db.prepare(`
         SELECT sku, warehouse, SUM(qty) as qty, COUNT(*) as txns
         FROM picks_history
-        WHERE completed_at IS NOT NULL AND date(completed_at) >= ? AND date(completed_at) <= ?
+        WHERE completed_at IS NOT NULL AND substr(completed_at, 1, 10) >= ? AND substr(completed_at, 1, 10) <= ?
         GROUP BY sku, warehouse
       `).all(from, to);
 
@@ -6453,10 +6453,10 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
     // Each row = one line item (one SKU on one order) = one transaction
     // COUNT(*) = number of transactions, SUM(qty) = number of items
     const ipRows = labDb.db.prepare(`
-      SELECT date(completed_at) as date, COUNT(*) as transactions, SUM(qty) as items, warehouse
+      SELECT substr(completed_at, 1, 10) as date, COUNT(*) as transactions, SUM(qty) as items, warehouse
       FROM picks_history
-      WHERE completed_at > datetime('now', ?)      GROUP BY date(completed_at), warehouse
-      ORDER BY date(completed_at) DESC
+      WHERE completed_at > datetime('now', ?)      GROUP BY substr(completed_at, 1, 10), warehouse
+      ORDER BY substr(completed_at, 1, 10) DESC
     `).all(`-${days} days`);
     const ipByDate = {};
     for (const r of ipRows) {

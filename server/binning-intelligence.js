@@ -118,11 +118,13 @@ function analyzeSwapThresholds(daysThreshold = 3) {
     ORDER BY qty ASC
   `).all();
 
-  // Get consumption rates from picks_history (last 14 days)
+  // Get consumption rates from picks_history (last 14 days). Use substr(col,1,10)
+  // for PT-local date distinction; date(col) evaluates in UTC and over-counts
+  // active_days when evening picks straddle UTC midnight.
   const consumption = db.prepare(`
     SELECT sku, SUM(qty) as total_consumed,
-           COUNT(DISTINCT date(completed_at)) as active_days,
-           ROUND(CAST(SUM(qty) AS REAL) / NULLIF(COUNT(DISTINCT date(completed_at)), 0), 2) as daily_rate
+           COUNT(DISTINCT substr(completed_at, 1, 10)) as active_days,
+           ROUND(CAST(SUM(qty) AS REAL) / NULLIF(COUNT(DISTINCT substr(completed_at, 1, 10)), 0), 2) as daily_rate
     FROM picks_history
     WHERE completed_at >= datetime('now', '-14 days')
     GROUP BY sku

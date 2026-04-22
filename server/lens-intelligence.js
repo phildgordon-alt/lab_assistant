@@ -163,12 +163,14 @@ function buildWeeklyConsumption(db) {
     console.log(`[Lens Intel] Looker consumption: ${lkRows.length} rows (all dates)`);
   } catch (e) { console.log('[Lens Intel] Looker not available:', e.message); }
 
-  // 2. ItemPath picks_history for March 6+ — OVERRIDES Looker for these dates
+  // 2. ItemPath picks_history for March 6+ — OVERRIDES Looker for these dates.
+  // substr(col,1,10) reads PT-local date from offset-form strings; date(col)
+  // would evaluate in UTC and mis-attribute evening PT picks to the next day.
   const ipRows = db.prepare(`
-    SELECT sku, date(completed_at) as date, SUM(qty) as qty
+    SELECT sku, substr(completed_at, 1, 10) as date, SUM(qty) as qty
     FROM picks_history
-    WHERE completed_at IS NOT NULL AND date(completed_at) >= ?
-    GROUP BY sku, date(completed_at)
+    WHERE completed_at IS NOT NULL AND substr(completed_at, 1, 10) >= ?
+    GROUP BY sku, substr(completed_at, 1, 10)
   `).all(CUTOVER_DATE);
   for (const r of ipRows) {
     if (!dailyBySku[r.sku]) dailyBySku[r.sku] = {};
