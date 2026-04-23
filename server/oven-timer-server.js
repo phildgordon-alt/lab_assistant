@@ -1951,11 +1951,20 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/itempath/picksync-health') {
     const status = itempath.getPickSyncStatus();
     const totals = labDb.db.prepare(`SELECT MAX(completed_at) AS maxCompleted, COUNT(*) AS totalRows FROM picks_history`).get();
+    // pickSync rebuild (2026-04-22): split per-day count by source so the
+    // dashboard can show real-time captures vs after-the-fact recovery.
+    //   instant   = live + tx (caught at pick time)
+    //   recovered = backfill + recovered (filled in after the fact)
+    //   total     = all rows (incl. NULL legacy)
+    //   missing   = max(0, expected - total)
     // substr(col,1,10) reads the PT-local date directly from the stored string
     // (offset-form and naive-noon both have YYYY-MM-DD in their first 10 chars).
     // date(col) evaluates in UTC and misattributes PT evening activity to tomorrow.
     const perDay = labDb.db.prepare(`
-      SELECT substr(completed_at, 1, 10) AS date, COUNT(*) AS count
+      SELECT substr(completed_at, 1, 10) AS date,
+             SUM(CASE WHEN source IN ('live','tx') THEN 1 ELSE 0 END) AS instant,
+             SUM(CASE WHEN source IN ('backfill','recovered') THEN 1 ELSE 0 END) AS recovered,
+             COUNT(*) AS count
       FROM picks_history
       WHERE completed_at >= datetime('now', '-30 days')
       GROUP BY substr(completed_at, 1, 10)
@@ -1966,12 +1975,22 @@ Respond with a structured batching plan in this format:
       const d = new Date(dateStr + 'T12:00:00Z').getUTCDay();
       return d === 0 ? 0 : (d === 6 ? 300 : 2500);
     };
-    const coverage = perDay.map(r => ({
-      date: r.date,
-      count: r.count,
-      expected: expectedFor(r.date),
-      pct: expectedFor(r.date) ? Math.min(100, Math.round((r.count / expectedFor(r.date)) * 100)) : null,
-    }));
+    const coverage = perDay.map(r => {
+      const expected = expectedFor(r.date);
+      const instant = r.instant || 0;
+      const recovered = r.recovered || 0;
+      const count = r.count || 0;
+      const missing = expected > 0 ? Math.max(0, expected - count) : 0;
+      return {
+        date: r.date,
+        count,
+        instant,
+        recovered,
+        missing,
+        expected,
+        pct: expected ? Math.min(100, Math.round((count / expected) * 100)) : null,
+      };
+    });
     const now = Date.now();
     const maxCompletedMs = totals.maxCompleted ? new Date(totals.maxCompleted).getTime() : null;
     const gapHours = maxCompletedMs ? Math.round((now - maxCompletedMs) / 3600000 * 10) / 10 : null;
@@ -1992,6 +2011,17 @@ Respond with a structured batching plan in this format:
       perDayCoverage: coverage,
       asOf: new Date().toISOString(),
     });
+  }
+  // POST /api/itempath/picksync-health/run-now — manually trigger a pickSync run
+  // pickSync rebuild (2026-04-22): re-entrancy guard inside the adapter; clicking
+  // during an in-flight run is a safe no-op.
+  if (req.method==='POST' && url.pathname==='/api/itempath/picksync-health/run-now') {
+    try {
+      const result = await itempath.triggerPickSyncNow();
+      return json(res, result);
+    } catch (e) {
+      return json(res, { status: 'error', error: e.message }, 500);
+    }
   }
   // GET /api/inventory/picks/history?days=30 — daily pick totals from picks_history
   if (req.method==='GET' && url.pathname==='/api/inventory/picks/history') {

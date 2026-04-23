@@ -54,16 +54,37 @@
   .day-row:last-child { border-bottom: none; }
   .day-date { color: var(--text-dim); }
   .day-count { color: var(--text); text-align: right; }
-  .bar-wrap { height: 10px; background: var(--surface2); border-radius: 5px; overflow: hidden; }
-  .bar { height: 100%; border-radius: 5px; transition: width 0.4s ease; }
+  .bar-wrap {
+    height: 10px; background: var(--surface2); border-radius: 5px; overflow: hidden;
+    display: flex; flex-direction: row;
+  }
+  .bar { height: 100%; transition: width 0.4s ease; }
   .bar.good { background: var(--good); }
   .bar.warn { background: var(--warn); }
   .bar.bad { background: var(--bad); }
   .bar.neutral { background: var(--neutral); }
+  /* Tri-segment bar: instant | recovered | missing.
+     pickSync rebuild (2026-04-22) — visual key for which writer captured each pick. */
+  .seg-instant   { background: var(--good);    }
+  .seg-recovered { background: var(--warn);    }
+  .seg-missing   { background: var(--neutral); }
   .day-pct { text-align: right; color: var(--text-dim); font-size: 12px; }
   .day-pct.good { color: var(--good); }
   .day-pct.warn { color: var(--warn); }
   .day-pct.bad { color: var(--bad); }
+
+  .toolbar { display: flex; gap: 12px; align-items: center; margin-bottom: 16px; }
+  .legend { display: flex; gap: 16px; font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+  .legend-item { display: flex; align-items: center; gap: 6px; }
+  .legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
+  button.run-now {
+    background: var(--accent); color: #06121F; border: none; border-radius: 6px;
+    padding: 8px 14px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.05em;
+    text-transform: uppercase; font-weight: 600; cursor: pointer;
+  }
+  button.run-now:hover { filter: brightness(1.1); }
+  button.run-now:disabled { background: var(--neutral); color: var(--text-dim); cursor: wait; }
+  .run-status { color: var(--text-dim); font-size: 12px; font-family: var(--mono); }
 
   .footer { margin-top: 20px; color: var(--text-dim); font-size: 12px; font-family: var(--mono); text-align: center; }
   .loading { color: var(--text-dim); }
@@ -104,6 +125,16 @@
 
 <div class="days-section">
   <h2>Daily Coverage — Last 30 Days</h2>
+  <div class="toolbar">
+    <button id="runNowBtn" class="run-now" type="button">Run Now</button>
+    <span id="runStatus" class="run-status"></span>
+    <span style="flex:1"></span>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-swatch seg-instant"></span>instant (live + tx)</div>
+      <div class="legend-item"><span class="legend-swatch seg-recovered"></span>recovered (backfill)</div>
+      <div class="legend-item"><span class="legend-swatch seg-missing"></span>missing</div>
+    </div>
+  </div>
   <div id="dayList" class="loading">Loading…</div>
 </div>
 
@@ -180,7 +211,10 @@ async function refresh() {
       eb.classList.remove('active');
     }
 
-    // Per-day list
+    // Per-day list — tri-segment bar (instant / recovered / missing) toward expected.
+    // pickSync rebuild (2026-04-22): the legacy pct-fill bar collapsed all
+    // sources into one color. Now each day's bar tells the operator where
+    // their data came from at a glance.
     const list = document.getElementById('dayList');
     if (cov.length === 0) { list.innerHTML = '<div class="loading">No data</div>'; return; }
     list.innerHTML = '';
@@ -190,12 +224,36 @@ async function refresh() {
       row.className = 'day-row';
       const pctShown = c.pct === null ? '' : c.pct + '%';
       const pctClass = c.pct === null ? 'neutral' : (c.pct >= 80 ? 'good' : c.pct >= 10 ? 'warn' : 'bad');
-      const width = c.pct === null ? 0 : Math.max(c.pct, 2);
+      // Segments are widths IN the bar-wrap (which is 100% of its grid cell).
+      // Day with no expected (Sunday) → single neutral hairline.
+      let barHtml;
+      if (!c.expected) {
+        barHtml = '<div class="bar seg-missing" style="width:100%"></div>';
+      } else {
+        const exp = c.expected;
+        const instantPct   = Math.min(100, (c.instant   / exp) * 100);
+        const recoveredPct = Math.min(100, (c.recovered / exp) * 100);
+        // Cap combined non-missing at 100% so a day that overshoots `expected`
+        // doesn't push the missing segment negative.
+        const filledPct = Math.min(100, instantPct + recoveredPct);
+        const missingPct = Math.max(0, 100 - filledPct);
+        barHtml =
+          '<div class="bar seg-instant" style="width:'   + instantPct.toFixed(2)   + '%"></div>' +
+          '<div class="bar seg-recovered" style="width:' + recoveredPct.toFixed(2) + '%"></div>' +
+          '<div class="bar seg-missing" style="width:'   + missingPct.toFixed(2)   + '%"></div>';
+      }
       row.innerHTML =
         '<div class="day-date">' + c.date + '</div>' +
         '<div class="day-count">' + c.count.toLocaleString() + '</div>' +
-        '<div class="bar-wrap"><div class="bar ' + barClass(c.pct) + '" style="width:' + width + '%"></div></div>' +
+        '<div class="bar-wrap">' + barHtml + '</div>' +
         '<div class="day-pct ' + pctClass + '">' + pctShown + '</div>';
+      // Tooltip: numeric breakdown for hover.
+      row.title =
+        c.date + '\n' +
+        'instant:   ' + (c.instant   || 0).toLocaleString() + '\n' +
+        'recovered: ' + (c.recovered || 0).toLocaleString() + '\n' +
+        'missing:   ' + (c.missing   || 0).toLocaleString() + '\n' +
+        'expected:  ' + (c.expected  || 0).toLocaleString();
       list.appendChild(row);
     }
 
@@ -204,6 +262,33 @@ async function refresh() {
     document.getElementById('footer').textContent = 'fetch failed: ' + e.message;
   }
 }
+
+// pickSync rebuild (2026-04-22): manual trigger button. Calls the
+// async-fire-and-forget endpoint, then refreshes the dashboard.
+document.getElementById('runNowBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('runNowBtn');
+  const status = document.getElementById('runStatus');
+  btn.disabled = true;
+  status.textContent = 'starting…';
+  try {
+    const r = await fetch(SERVER + '/api/itempath/picksync-health/run-now', { method: 'POST' });
+    const data = await r.json();
+    if (data.status === 'started') {
+      status.textContent = 'started ' + new Date(data.triggered_at).toLocaleTimeString();
+    } else if (data.status === 'already_running') {
+      status.textContent = 'already running — no-op';
+    } else if (data.status === 'error') {
+      status.textContent = 'error: ' + data.error;
+    } else {
+      status.textContent = JSON.stringify(data);
+    }
+  } catch (e) {
+    status.textContent = 'fetch failed: ' + e.message;
+  } finally {
+    // Re-enable after a short hold so users don't spam-click; refresh dashboard.
+    setTimeout(() => { btn.disabled = false; refresh(); }, 1500);
+  }
+});
 
 refresh();
 setInterval(refresh, 10000);

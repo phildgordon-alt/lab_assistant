@@ -524,6 +524,13 @@ try {
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_picks_hist_pick_id ON picks_history(pick_id)`);
 } catch (e) { /* index may already exist */ }
 
+// pickSync rebuild (2026-04-22): tag every row with the writer that produced it.
+// Values: 'live' (dual-writer), 'tx' (transaction-writer, gap closer),
+// 'backfill' (pickSync historical), 'recovered' (one-shot picks→picks_history).
+// NULL = legacy rows written before this column existed.
+try { db.exec(`ALTER TABLE picks_history ADD COLUMN source TEXT DEFAULT NULL`); } catch (e) { /* already exists */ }
+try { db.exec(`CREATE INDEX IF NOT EXISTS idx_picks_hist_source ON picks_history(source)`); } catch (e) { /* already exists */ }
+
 // Transactions — persistent mirror of ItemPath /api/transactions (append-only, forever retention).
 // Split: hot table (scalar columns) + transactions_raw (JSON blob) to keep hot-table scan-friendly.
 db.exec(`
@@ -1864,14 +1871,21 @@ function upsertPicks(picks) {
 const { normalizeWarehouse } = require('./itempath-normalize');
 
 const upsertPicksHistoryStmt = db.prepare(`
-  INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT OR IGNORE INTO picks_history (pick_id, order_id, sku, name, qty, picked, warehouse, completed_at, source)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const PICKS_HISTORY_MAX_QTY = 10000; // sanity clamp: no legitimate pick is 10k+ units
 
-function upsertPicksHistory(lines) {
+// pickSync rebuild (2026-04-22): callers now pass `source` so we can
+// distinguish real-time captures ('live'/'tx') from after-the-fact
+// recovery ('backfill'/'recovered'). Default null preserves callers
+// that haven't been migrated yet (none should remain in tree).
+function upsertPicksHistory(lines, source) {
   let inserted = 0, skipped = 0, rejected = 0;
+  const src = source || null;
+  // Allow callers to pass a custom pick_id prefix per line via line.pickId.
+  // (Used by tx-writer to dedupe against live-writer rows on the same pick.)
   const save = db.transaction(() => {
     for (const line of lines) {
       const sku = line.materialName || '';
@@ -1885,8 +1899,10 @@ function upsertPicksHistory(lines) {
       const orderName = line.orderName || line.orderId || '';
       const wh = normalizeWarehouse(line.warehouseName || line.costCenterName || '');
       const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
-      const pickId = `hist-${line.id || line.orderLineId || ''}`;
-      const result = upsertPicksHistoryStmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt);
+      // Caller may supply a fully-formed pickId (tx-writer / recovery script) — honor it.
+      // Otherwise fall back to the legacy 'hist-<order_line.id>' shape.
+      const pickId = line.pickId || `hist-${line.id || line.orderLineId || ''}`;
+      const result = upsertPicksHistoryStmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt, src);
       if (result.changes > 0) inserted++;
     }
   });

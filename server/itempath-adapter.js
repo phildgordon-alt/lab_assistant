@@ -219,9 +219,9 @@ function trackCompletedOrders(currentOrders) {
   if (historyLines.length > 0) {
     try {
       const db = require('./db');
-      const { inserted } = db.upsertPicksHistory(historyLines);
+      const { inserted } = db.upsertPicksHistory(historyLines, 'live');
       if (inserted > 0) {
-        console.log(`[ItemPath] poll→picks_history: ${inserted} new rows from ${historyLines.length} completed pick lines (dual-writer)`);
+        console.log(`[ItemPath] poll→picks_history (live-writer): ${inserted} new rows from ${historyLines.length} completed pick lines`);
       }
     } catch (e) {
       console.warn(`[ItemPath] poll→picks_history write failed: ${e.message}`);
@@ -257,6 +257,15 @@ function trackCompletedOrders(currentOrders) {
 // Track last successful pick sync time — persisted to daily-picks.json
 // On startup: loaded from disk, capped at 30 min ago. Reset to midnight on day rollover.
 let lastPickSyncTime = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+
+// pickSync rebuild (2026-04-22): tx-writer window cursor.
+// /api/transactions?type=4&after=<lastPickTxFetch> is queried every poll (5 min).
+// Each successful poll advances this to the poll start time, with a 10-min
+// overlap on the next call so a poll that lands mid-pick can't drop rows.
+// 5 min poll + 10 min lookback = 15 min window → well below the 500-row cap on a
+// busy day (~12 picks/min peak ≈ 180 rows in 15 min; 3-line jobs ≈ 540 max,
+// still under cap with normal multi-line variability).
+let lastPickTxFetch = new Date(Date.now() - 10 * 60 * 1000).toISOString();
 
 // Load on module init (AFTER lastPickSyncTime is declared)
 loadDailyTotals();
@@ -672,11 +681,24 @@ async function poll() {
     const materialsResp = cachedMaterialsResp || { materials: [] };
 
     // Light calls every 60s: orders + transactions only
+    // pickSync rebuild (2026-04-22): pickTxResp keeps `after: todayStart` because
+    // the hourly-stats aggregation below (lines ~777-848) needs all-of-today's
+    // pick transactions to compute per-hour totals. The new tx-writer fetches a
+    // small ~15-min window separately (after this Promise.all) so it can write
+    // every completed pick to picks_history without being capped by limit=500
+    // on busy days. The two fetches together = 1 extra /api/transactions call
+    // per poll (5-min interval = +12 calls/hour ≈ +288/day, well below the
+    // 15K conservation threshold).
+    const pickTxFetchStart = new Date().toISOString();
     const [ordersResp, txResp, pickTxResp, putTxResp, warehousesResp] = await Promise.all([
       ipFetch('/api/orders',    { limit: 200, status: 'In Process' }),
       ipFetch('/api/transactions', { after: todayStart, limit: 200 }).catch(() => ({ transactions: [] })),
-      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),
-      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 500 }).catch(() => ({ transactions: [] })),
+      // limit=20000 sized for 4k jobs/day × 3.2 picks/job × 1.5x headroom — scales ~14 months
+      // of growth from current 1,200 jobs/day. Don't lower without recomputing against current
+      // job rate. Drift check: original working value was 5000 (commit 3eb73ff 2026-03-10),
+      // silently reverted to 500 in 02e8e77 2026-03-17 — causing daily truncation and picks_history gaps.
+      ipFetch('/api/transactions', { type: 4, after: todayStart, limit: 20000 }).catch(() => ({ transactions: [] })),  // Pick lines today
+      ipFetch('/api/transactions', { type: 3, after: todayStart, limit: 20000 }).catch(() => ({ transactions: [] })),  // Put lines today
       ipFetch('/api/warehouses').catch(() => ({ warehouses: [] })),
     ]);
     // Locations: cached for 60 min — reference data that rarely changes
@@ -745,6 +767,14 @@ async function poll() {
     const recentTx    = (txResp.transactions || txResp.data || txResp || []).map(normalizeTransaction);
     const pickTxList  = (pickTxResp.transactions || pickTxResp.data || pickTxResp || []);
     const putTxList   = (putTxResp.transactions || putTxResp.data || putTxResp || []);
+
+    // Saturation alert — warn at 80% of the 20000 limit. Single log per poll, not per row.
+    if (pickTxList.length > 16000) {
+      console.warn(`[ItemPath] ⚠️ pick transactions response at ${pickTxList.length}/20000 — approaching limit, consider raising ceiling`);
+    }
+    if (putTxList.length > 16000) {
+      console.warn(`[ItemPath] ⚠️ put transactions response at ${putTxList.length}/20000 — approaching limit, consider raising ceiling`);
+    }
     const alerts      = detectAlerts(materials);
     const warehouses  = (warehousesResp.warehouses || []).map(w => ({ id: w.id, name: w.name }));
 
@@ -847,6 +877,15 @@ async function poll() {
     const whNames = new Set(pickTxList.map(tx => tx.warehouseName).filter(Boolean));
     console.log(`[ItemPath] Picks: tx=${txPickSum} (WH1:${txPicksTotal.WH1} WH2:${txPicksTotal.WH2} WH3/Kitchen:${txPicksTotal.WH3} manual:${txManualPicks}), inc=${incPickSum}, using ${txPickSum > 0 ? 'txn' : 'incremental'} (${pickTxList.length} tx lines, warehouses: ${[...whNames].join(', ')})`);
     console.log(`[ItemPath] Puts: tx=${txPutSum}, inc=${incPutSum}, using ${txPutSum > 0 ? 'txn' : 'incremental'} (${putTxList.length} tx lines)`);
+
+    // pickSync rebuild (2026-04-22, layer 2 2026-04-23):
+    // The heavy-poll tx→picks_history writer was removed in favor of a dedicated
+    // 30s delta-poll loop (pollTransactionsDelta). The pickTxList fetch above
+    // STAYS — hourly stats aggregation at lines ~796-848 depends on it. Cursor
+    // advance is preserved for diagnostics + restart cap (loadDailyTotals).
+    if (pickTxList.length > 0) {
+      lastPickTxFetch = pickTxFetchStart;
+    }
 
     // Calculate warehouse stats from orders (active/queued counts)
     const warehouseStats = {};
@@ -1155,8 +1194,13 @@ function findMissingDay() {
       if (dow === 0 || dow === 6) continue; // skip weekends
       const dateStr = labDateString(d);
       const count = covered.get(dateStr) || 0;
-      // Skip days where ItemPath confirmed 0 picks (holidays/closures)
-      if (backfillAttempted.has(dateStr) && count === 0) continue;
+      // Skip days we've already given up on. Two cases land here now:
+      //   (a) original behaviour — ItemPath confirmed 0 picks (holiday/closure)
+      //   (b) pickSync rebuild (2026-04-22) — backfill returned < 50 NEW rows
+      //       on a partially-covered day; further attempts won't recover more.
+      // The pickSync_attempted_days table is the persistent gravestone for
+      // both cases, so a single membership check is the right gate.
+      if (backfillAttempted.has(dateStr)) continue;
       if (count < 2500) { // threshold: normal workday 3000-5000 picks (3 per job)
         return { date: d, dateStr, count };
       }
@@ -1233,24 +1277,74 @@ async function pickSync() {
   try {
     console.log(`[pickSync] ${mode} mode: ${windowStart.toISOString()} → ${queryWindowEnd.toISOString()}`);
 
+    // pickSync rebuild (2026-04-22): BACKFILL switches from /api/order_lines
+    // to /api/transactions?type=4. order_lines uses modifiedDate which is the
+    // last-touched timestamp — picks that started the prior day and were
+    // touched on the gap day appear under the wrong day. /api/transactions
+    // uses creationDate which is the actual pick completion timestamp, the
+    // same field the live tx-writer uses. pick_id keys collide on
+    // 'tx-<transaction_id>' so the two paths cannot duplicate each other.
+    // Page size, pause, max-pages, timeout all unchanged.
+    const useTransactions = (mode === 'BACKFILL');
+
     while (page < PICK_SYNC_MAX_PAGES) {
       if (isConservationMode()) { console.warn('[pickSync] Conservation mode tripped mid-run — stopping'); break; }
 
-      const data = await ipFetch('/api/order_lines', {
-        directionType: 2, status: 'processed',
-        'modifiedDate[gte]': windowStart.toISOString(),
-        'modifiedDate[lte]': queryWindowEnd.toISOString(),
-        limit: PICK_SYNC_PAGE_SIZE, page,
-      }, { timeout: 120000 });
+      let lines;
+      let writerSource;
+      if (useTransactions) {
+        const data = await ipFetch('/api/transactions', {
+          type: 4,
+          after: windowStart.toISOString(),
+          before: queryWindowEnd.toISOString(),
+          limit: PICK_SYNC_PAGE_SIZE, page,
+        }, { timeout: 120000 });
+        const rawTx = data.transactions || data.data || [];
+        // Map tx → upsertPicksHistory shape with explicit pickId for tx-key dedupe.
+        lines = [];
+        for (const tx of rawTx) {
+          if (!tx || !tx.id) continue;
+          const sku = tx.materialName || '';
+          const qty = Math.abs(parseFloat(tx.quantityConfirmed) || 0);
+          if (!sku || qty <= 0) continue;
+          lines.push({
+            pickId: `tx-${tx.id}`,
+            id: tx.id,
+            materialName: sku,
+            quantityConfirmed: qty,
+            orderName: tx.orderName || tx.orderId || tx.id,
+            warehouseName: tx.warehouseName || '',
+            modifiedDate: tx.creationDate || tx.modifiedDate || windowStart.toISOString(),
+          });
+        }
+        // Page sizing decision is based on raw response length, not filtered
+        // length, so a page of all-skip rows still counts as a "full page".
+        totalFetched += rawTx.length;
+        writerSource = 'backfill';
+        if (rawTx.length === 0) break;
+        if (lines.length > 0) {
+          const { inserted } = db.upsertPicksHistory(lines, writerSource);
+          totalInserted += inserted;
+        }
+        if (rawTx.length < PICK_SYNC_PAGE_SIZE) break; // short page → done
+      } else {
+        const data = await ipFetch('/api/order_lines', {
+          directionType: 2, status: 'processed',
+          'modifiedDate[gte]': windowStart.toISOString(),
+          'modifiedDate[lte]': queryWindowEnd.toISOString(),
+          limit: PICK_SYNC_PAGE_SIZE, page,
+        }, { timeout: 120000 });
 
-      const lines = data.order_lines || [];
-      totalFetched += lines.length;
-      if (lines.length === 0) break;
+        lines = data.order_lines || [];
+        totalFetched += lines.length;
+        if (lines.length === 0) break;
 
-      const { inserted } = db.upsertPicksHistory(lines);
-      totalInserted += inserted;
+        // GAP / STEADY paths still use the legacy hist-<order_line.id> pickId.
+        const { inserted } = db.upsertPicksHistory(lines, 'backfill');
+        totalInserted += inserted;
 
-      if (lines.length < PICK_SYNC_PAGE_SIZE) break; // short page → done
+        if (lines.length < PICK_SYNC_PAGE_SIZE) break; // short page → done
+      }
       page++;
       if (page < PICK_SYNC_MAX_PAGES) await new Promise(r => setTimeout(r, PICK_SYNC_PAGE_PAUSE_MS));
     }
@@ -1267,11 +1361,31 @@ async function pickSync() {
     // If no success in 6h, something is wrong and the 01:30 healthcheck will Slack.
     try { db.recordHeartbeat('pickSync', totalInserted, 6 * 60 * 60 * 1000); } catch {}
 
-    // If BACKFILL returned 0 from ItemPath AND we had 0 existing picks, mark as genuinely empty
-    if (mode === 'BACKFILL' && totalFetched === 0 && missingDay && missingDay.count === 0) {
-      backfillAttempted.add(missingDay.dateStr);
-      try { db.db.prepare(`INSERT OR IGNORE INTO pickSync_attempted_days (date) VALUES (?)`).run(missingDay.dateStr); } catch (e) { /* ignore */ }
-      console.log(`[pickSync] Marking ${missingDay.dateStr} as empty (ItemPath returned 0, we had 0) — will skip`);
+    // BACKFILL completion logic — mark "attempted" so the 5-min retry loop
+    // doesn't keep beating its head against a day that has no more rows.
+    if (mode === 'BACKFILL' && missingDay) {
+      let markAttempted = false;
+      let reason = '';
+      // Original guard: ItemPath returned 0 and we already had 0.
+      if (totalFetched === 0 && missingDay.count === 0) {
+        markAttempted = true;
+        reason = 'ItemPath returned 0, we had 0 — genuinely empty';
+      }
+      // pickSync rebuild (2026-04-22): NEW loop guard. After a backfill run
+      // that recovered fewer than 50 NEW rows on a day that already has some
+      // coverage (count > 0), accept that we've squeezed everything out of
+      // ItemPath for this day. Without this guard, days where the DB has
+      // 1854 rows and ItemPath has 1900 would re-trigger BACKFILL every
+      // 5 minutes forever.
+      else if (totalInserted < 50 && missingDay.count > 0) {
+        markAttempted = true;
+        reason = `inserted ${totalInserted} new rows on day with existing count ${missingDay.count} — diminishing returns`;
+      }
+      if (markAttempted) {
+        backfillAttempted.add(missingDay.dateStr);
+        try { db.db.prepare(`INSERT OR IGNORE INTO pickSync_attempted_days (date) VALUES (?)`).run(missingDay.dateStr); } catch (e) { /* ignore */ }
+        console.log(`[pickSync] Marking ${missingDay.dateStr} attempted (${reason}) — will skip on subsequent runs`);
+      }
     }
 
     if (page === PICK_SYNC_MAX_PAGES - 1) {
@@ -1357,6 +1471,17 @@ function getPickSyncStatus() {
     dailyApiCalls,
     conservationMode: isConservationMode(),
     ...pickSyncStatus,
+    deltaPoll: {
+      interval:           _deltaPollState.interval,
+      lastRunAt:          _deltaPollState.lastRunAt,
+      lastLatencyMs:      _deltaPollState.lastLatencyMs,
+      lastBatchSize:      _deltaPollState.lastBatchSize,
+      lastCursor:         _deltaPollState.lastCursor,
+      lastError:          _deltaPollState.lastError,
+      consecutiveSlow:    _deltaPollState.consecutiveSlow,
+      consecutiveErrors:  _deltaPollState.consecutiveErrors,
+      consecutiveFast:    _deltaPollState.consecutiveFast,
+    },
   };
 }
 
@@ -1580,6 +1705,192 @@ function getAIContext() {
 // ─────────────────────────────────────────────────────────────────────────────
 // START — kick off polling loop
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// DELTA POLL (2026-04-23) — dedicated 30s cursor-based picks_history writer
+// ─────────────────────────────────────────────────────────────────────────────
+// Replaces the bundled tx-writer that previously fired inside trackCompletedOrders
+// after every heavy poll. Two endpoints (type=4 picks, type=3 puts) polled with
+// a small `after=<cursor>` window so the response body stays tiny (usually 0-20
+// rows). Adaptive interval backs off under stress so we don't worsen incidents.
+//
+// Cursor: max(completed_at) from picks_history where source IN (live,tx,backfill)
+//   minus a 30s safety overlap. INSERT OR IGNORE on pick_id ('tx-<id>') means
+//   the overlap is harmless. Falls back to (now - 5 min) on a cold table.
+//
+// Adaptive interval tiers: 30s → 60s → 120s → 300s. Escalates after 3 consecutive
+// slow (>500ms) or error responses; ratchets back down after 10 fast successes.
+const DELTA_POLL_TIERS = [30000, 60000, 120000, 300000];
+const DELTA_POLL_SLOW_MS = 500;
+const DELTA_POLL_PAGE_SIZE = 500;
+const DELTA_POLL_MAX_PAGES = 10;
+const DELTA_POLL_OVERLAP_MS = 30 * 1000;
+const DELTA_POLL_FALLBACK_MS = 5 * 60 * 1000;
+const DELTA_POLL_RATCHET_DOWN_FAST = 10;
+
+let _deltaPollState = {
+  interval:           DELTA_POLL_TIERS[0],
+  consecutiveSlow:    0,
+  consecutiveErrors:  0,
+  consecutiveFast:    0,
+  lastRunAt:          null,
+  lastLatencyMs:      null,
+  lastBatchSize:      null,
+  lastError:          null,
+  lastCursor:         null,
+};
+let _deltaPollTimer = null;
+
+function _currentTierIndex() {
+  const idx = DELTA_POLL_TIERS.indexOf(_deltaPollState.interval);
+  return idx === -1 ? 0 : idx;
+}
+
+function _bumpInterval() {
+  const idx = _currentTierIndex();
+  if (idx < DELTA_POLL_TIERS.length - 1) {
+    _deltaPollState.interval = DELTA_POLL_TIERS[idx + 1];
+    console.warn(`[ItemPath] delta-poll: backing off to ${_deltaPollState.interval / 1000}s (consecutive slow=${_deltaPollState.consecutiveSlow} errors=${_deltaPollState.consecutiveErrors})`);
+  }
+}
+
+function _ratchetDownInterval() {
+  const idx = _currentTierIndex();
+  if (idx > 0) {
+    _deltaPollState.interval = DELTA_POLL_TIERS[idx - 1];
+    console.log(`[ItemPath] delta-poll: ratcheting back to ${_deltaPollState.interval / 1000}s (10 consecutive fast calls)`);
+  }
+}
+
+function _deriveDeltaCursor(db) {
+  try {
+    const row = db.db.prepare(`
+      SELECT MAX(completed_at) AS max_completed
+      FROM picks_history
+      WHERE source IN ('live','tx','backfill') AND completed_at IS NOT NULL
+    `).get();
+    if (row && row.max_completed) {
+      const t = new Date(row.max_completed).getTime();
+      if (!Number.isNaN(t)) return new Date(t - DELTA_POLL_OVERLAP_MS).toISOString();
+    }
+  } catch (e) {
+    console.warn(`[ItemPath] delta-poll: cursor derivation failed (${e.message}), using fallback`);
+  }
+  return new Date(Date.now() - DELTA_POLL_FALLBACK_MS).toISOString();
+}
+
+async function _fetchDeltaPage(ipFetchFn, type, cursor) {
+  return ipFetchFn('/api/transactions', { type, after: cursor, limit: DELTA_POLL_PAGE_SIZE }, { timeout: 30000 });
+}
+
+function _txToLine(tx) {
+  if (!tx || !tx.id) return null;
+  const sku = tx.materialName || '';
+  const qty = Math.abs(parseFloat(tx.quantityConfirmed) || 0);
+  if (!sku || qty <= 0) return null;
+  return {
+    pickId: `tx-${tx.id}`,
+    id: tx.id,
+    materialName: sku,
+    quantityConfirmed: qty,
+    orderName: tx.orderName || tx.orderId || tx.id,
+    warehouseName: tx.warehouseName || '',
+    modifiedDate: tx.creationDate || tx.modifiedDate || new Date().toISOString(),
+  };
+}
+
+async function _drainType(ipFetchFn, db, type, startCursor) {
+  let cursor = startCursor;
+  let totalLines = 0;
+  let totalInserted = 0;
+  for (let p = 0; p < DELTA_POLL_MAX_PAGES; p++) {
+    const resp = await _fetchDeltaPage(ipFetchFn, type, cursor);
+    const rawTx = (resp && (resp.transactions || resp.data || resp)) || [];
+    if (!Array.isArray(rawTx) || rawTx.length === 0) break;
+    const lines = [];
+    for (const tx of rawTx) {
+      const line = _txToLine(tx);
+      if (line) lines.push(line);
+    }
+    if (lines.length > 0) {
+      const { inserted } = db.upsertPicksHistory(lines, 'tx');
+      totalInserted += inserted;
+    }
+    totalLines += rawTx.length;
+    if (rawTx.length < DELTA_POLL_PAGE_SIZE) break;
+    // Advance cursor to last row's creationDate to fetch the next page.
+    const last = rawTx[rawTx.length - 1];
+    const lastTs = last && (last.creationDate || last.modifiedDate);
+    if (!lastTs) break;
+    cursor = lastTs;
+  }
+  return { fetched: totalLines, inserted: totalInserted };
+}
+
+// Exported so tests can call it directly with an injected ipFetch + db.
+async function pollTransactionsDelta(ipFetchFn = ipFetch, dbModule = null) {
+  const db = dbModule || require('./db');
+  if (isConservationMode()) {
+    console.log('[ItemPath] delta-poll: skipping (conservation mode)');
+    return { skipped: true };
+  }
+  const cursor = _deriveDeltaCursor(db);
+  _deltaPollState.lastCursor = cursor;
+  const t0 = Date.now();
+  try {
+    const picks = await _drainType(ipFetchFn, db, 4, cursor);
+    const puts  = await _drainType(ipFetchFn, db, 3, cursor);
+    const latency = Date.now() - t0;
+    _deltaPollState.lastRunAt = new Date().toISOString();
+    _deltaPollState.lastLatencyMs = latency;
+    _deltaPollState.lastBatchSize = picks.fetched + puts.fetched;
+    _deltaPollState.lastError = null;
+    console.log(`[ItemPath] delta-poll: picks=${picks.inserted}/${picks.fetched} puts=${puts.inserted}/${puts.fetched} latency=${latency}ms (cursor=${cursor})`);
+    if (latency > DELTA_POLL_SLOW_MS) {
+      _deltaPollState.consecutiveSlow++;
+      _deltaPollState.consecutiveFast = 0;
+      if (_deltaPollState.consecutiveSlow >= 3) {
+        _bumpInterval();
+        _deltaPollState.consecutiveSlow = 0;
+      }
+    } else {
+      _deltaPollState.consecutiveSlow = 0;
+      _deltaPollState.consecutiveErrors = 0;
+      _deltaPollState.consecutiveFast++;
+      if (_deltaPollState.interval > DELTA_POLL_TIERS[0] && _deltaPollState.consecutiveFast >= DELTA_POLL_RATCHET_DOWN_FAST) {
+        _ratchetDownInterval();
+        _deltaPollState.consecutiveFast = 0;
+      }
+    }
+    return { picks, puts, latency, cursor };
+  } catch (e) {
+    const latency = Date.now() - t0;
+    _deltaPollState.lastRunAt = new Date().toISOString();
+    _deltaPollState.lastLatencyMs = latency;
+    _deltaPollState.lastError = e.message;
+    _deltaPollState.consecutiveErrors++;
+    _deltaPollState.consecutiveFast = 0;
+    console.warn(`[ItemPath] delta-poll error: ${e.message} (latency=${latency}ms, consecutive=${_deltaPollState.consecutiveErrors})`);
+    if (_deltaPollState.consecutiveErrors >= 3) {
+      _bumpInterval();
+      _deltaPollState.consecutiveErrors = 0;
+    }
+    return { error: e.message, latency, cursor };
+  }
+}
+
+function _scheduleDeltaPoll() {
+  if (_deltaPollTimer) clearTimeout(_deltaPollTimer);
+  _deltaPollTimer = setTimeout(async () => {
+    try { await pollTransactionsDelta(); }
+    catch (e) { console.error('[ItemPath] delta-poll chain error:', e.message); }
+    try { _scheduleDeltaPoll(); }
+    catch (e) {
+      console.error('[ItemPath] delta-poll reschedule error, fixed 60s retry:', e.message);
+      setTimeout(() => _scheduleDeltaPoll(), 60000);
+    }
+  }, _deltaPollState.interval);
+}
+
 function start() {
   console.log(`[ItemPath] Starting — ${CONFIG.mockMode ? 'MOCK MODE' : CONFIG.baseUrl} — poll every ${CONFIG.pollInterval/1000}s`);
 
@@ -1697,7 +2008,11 @@ function start() {
   // ItemPath polls every 60s, so 90 min stale = ~90 missed polls
   setInterval(() => freshnessCheck(), 5 * 60 * 1000);
 
-  console.log('[ItemPath] Pick sync: every 30 min (30s delay). Reconciliation: every 30 min (2min delay). Freshness watchdog: every 5 min.');
+  // Delta poll (2026-04-23): 5s delay then self-rescheduling 30s loop with
+  // adaptive backoff. Replaces the heavy-poll tx→picks_history writer.
+  setTimeout(() => _scheduleDeltaPoll(), 5000);
+
+  console.log('[ItemPath] Pick sync: every 30 min (30s delay). Reconciliation: every 30 min (2min delay). Freshness watchdog: every 5 min. Delta poll: 30s adaptive (5s delay).');
 }
 
 // Freshness watchdog — alert if data is stale
@@ -1789,4 +2104,14 @@ function getLocationContents() {
   return cache.locationContents || [];
 }
 
-module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock, getLocationContents, getPickSyncStatus };
+// pickSync rebuild (2026-04-22): expose pickSync + isPickSyncRunning so the
+// /api/itempath/picksync-health/run-now endpoint can trigger a fresh run.
+function isPickSyncRunning() { return pickSyncRunning; }
+async function triggerPickSyncNow() {
+  if (pickSyncRunning) return { status: 'already_running' };
+  // Don't await — endpoint returns immediately.
+  pickSync().catch(e => console.error('[pickSync] triggerPickSyncNow error:', e.message));
+  return { status: 'started', triggered_at: new Date().toISOString() };
+}
+
+module.exports = { start, getInventory, getPicks, getAlerts, getWarehouses, getVLMs, getPutWall, getAIContext, getHealth, setDailyPicks, setDailyPuts, getDailyPicks, getWarehouseStock, getLocationContents, getPickSyncStatus, isPickSyncRunning, triggerPickSyncNow, pollTransactionsDelta, _deltaPollInternals: { state: () => _deltaPollState, deriveCursor: _deriveDeltaCursor, tiers: DELTA_POLL_TIERS } };
