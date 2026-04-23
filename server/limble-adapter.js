@@ -606,11 +606,13 @@ async function poll() {
     // Fetch all tasks - the API's status filter doesn't work as expected
     // Completed tasks have status=1 but dateCompleted>0, not status=2
     // So we fetch ALL tasks and filter ourselves
-    const [assetsResp, partsResp, downtimeResp] = await Promise.all([
+    const [assetsResp, partsResp] = await Promise.all([
       safeFetch('/v2/assets', { limit: 500 }),
       safeFetch('/v2/parts', { limit: 500 }),
-      safeFetch('/v2/downtimes', { limit: 500 }),
     ]);
+    // /v2/downtimes removed — endpoint doesn't exist in current Limble API.
+    // Downtime stats calculated from tasks (work orders) in computeStats().
+    const downtimeResp = { data: [] };
 
     // Fetch ALL tasks in pages (Limble returns oldest first)
     let allTasksRaw = [];

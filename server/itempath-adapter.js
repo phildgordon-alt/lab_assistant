@@ -1778,8 +1778,31 @@ function _deriveDeltaCursor(db) {
   return new Date(Date.now() - DELTA_POLL_FALLBACK_MS).toISOString();
 }
 
+// Dedicated fetch path for delta-poll — bypasses _fetchQueue so a heavy
+// materials/locations page hanging on the shared queue can't starve us.
+// Still counts toward trackApiCall()'s conservation-mode threshold.
+async function _deltaFetch(endpointPath, params = {}, options = {}) {
+  const timeout = options.timeout || 15000; // tighter than ipFetch's 30s default
+  const url = new URL(`${CONFIG.baseUrl}${endpointPath}`);
+  Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  trackApiCall();
+  const resp = await fetch(url.toString(), {
+    headers: authHeaders(),
+    signal: AbortSignal.timeout(timeout),
+  });
+  if (!resp.ok) throw new Error(`ItemPath ${endpointPath} → HTTP ${resp.status}`);
+  const text = await resp.text();
+  const sizeKB = (text.length / 1024).toFixed(1);
+  console.log(`[ItemPath] [#${dailyApiCalls}] (delta) ${endpointPath}${url.search} → ${sizeKB} KB`);
+  return JSON.parse(text);
+}
+
 async function _fetchDeltaPage(ipFetchFn, type, cursor) {
-  return ipFetchFn('/api/transactions', { type, after: cursor, limit: DELTA_POLL_PAGE_SIZE }, { timeout: 30000 });
+  // If no custom fetch is injected (tests), prefer _deltaFetch which bypasses
+  // the serialized _fetchQueue. Tests pass their own ipFetchFn, so this
+  // substitution is invisible to them.
+  const fn = (ipFetchFn === ipFetch) ? _deltaFetch : ipFetchFn;
+  return fn('/api/transactions', { type, after: cursor, limit: DELTA_POLL_PAGE_SIZE }, { timeout: 30000 });
 }
 
 function _txToLine(tx) {
@@ -1836,9 +1859,28 @@ async function pollTransactionsDelta(ipFetchFn = ipFetch, dbModule = null) {
   const cursor = _deriveDeltaCursor(db);
   _deltaPollState.lastCursor = cursor;
   const t0 = Date.now();
-  try {
+  console.log(`[ItemPath] delta-poll: tick start cursor=${cursor} interval=${_deltaPollState.interval/1000}s`);
+
+  // Hard per-tick watchdog — if fetches hang past 60s, abort and log.
+  // _fetchQueue head-of-line issues can block past AbortSignal in practice,
+  // so we enforce a total-runtime cap independent of the underlying fetch.
+  const WATCHDOG_MS = 60000;
+  let watchdogTimer = null;
+  const watchdog = new Promise((_, reject) => {
+    watchdogTimer = setTimeout(
+      () => reject(new Error(`delta-poll watchdog timeout (${WATCHDOG_MS/1000}s)`)),
+      WATCHDOG_MS
+    );
+  });
+  const work = (async () => {
     const picks = await _drainType(ipFetchFn, db, 4, cursor);
     const puts  = await _drainType(ipFetchFn, db, 3, cursor);
+    return { picks, puts };
+  })();
+
+  try {
+    const { picks, puts } = await Promise.race([work, watchdog]);
+    if (watchdogTimer) clearTimeout(watchdogTimer);
     const latency = Date.now() - t0;
     _deltaPollState.lastRunAt = new Date().toISOString();
     _deltaPollState.lastLatencyMs = latency;
@@ -1863,6 +1905,7 @@ async function pollTransactionsDelta(ipFetchFn = ipFetch, dbModule = null) {
     }
     return { picks, puts, latency, cursor };
   } catch (e) {
+    if (watchdogTimer) clearTimeout(watchdogTimer);
     const latency = Date.now() - t0;
     _deltaPollState.lastRunAt = new Date().toISOString();
     _deltaPollState.lastLatencyMs = latency;
@@ -1880,14 +1923,13 @@ async function pollTransactionsDelta(ipFetchFn = ipFetch, dbModule = null) {
 
 function _scheduleDeltaPoll() {
   if (_deltaPollTimer) clearTimeout(_deltaPollTimer);
-  _deltaPollTimer = setTimeout(async () => {
-    try { await pollTransactionsDelta(); }
-    catch (e) { console.error('[ItemPath] delta-poll chain error:', e.message); }
-    try { _scheduleDeltaPoll(); }
-    catch (e) {
-      console.error('[ItemPath] delta-poll reschedule error, fixed 60s retry:', e.message);
-      setTimeout(() => _scheduleDeltaPoll(), 60000);
-    }
+  _deltaPollTimer = setTimeout(() => {
+    // Reschedule FIRST so a hung pollTransactionsDelta cannot break the chain.
+    // Concurrent ticks are safe — INSERT OR IGNORE on pick_id dedupes.
+    _scheduleDeltaPoll();
+    pollTransactionsDelta().catch((e) =>
+      console.error('[ItemPath] delta-poll chain error:', e.message)
+    );
   }, _deltaPollState.interval);
 }
 

@@ -712,6 +712,62 @@ test('safety cap — 10 consecutive full pages stops the loop', async () => {
   assert.equal(calls, 10);
 });
 
+// ─── T12: hung ipFetch must not block the next scheduled tick ───────────────
+// Reproduces the 2026-04-22 crash-loop: a hung fetch on one tick used to
+// block the entire delta-poll chain (no next tick scheduled → silent death).
+// The fix schedules the next tick BEFORE awaiting — concurrent ticks are safe
+// because INSERT OR IGNORE on pick_id dedupes.
+section('T12: hung ipFetch does not break the delta-poll chain');
+test('rescheduling fires even while the prior tick is still awaiting', async () => {
+  // Local mirror of _scheduleDeltaPoll's "reschedule first, then await"
+  // pattern. Keep this in lockstep with itempath-adapter.js#_scheduleDeltaPoll.
+  const INTERVAL_MS = 10;           // tiny interval so the test stays fast
+  const TICK_DEADLINE_MS = 200;     // bound on how long we wait for ≥2 ticks
+  const tickStarts = [];
+  let timer = null;
+  let stopped = false;
+
+  // A fetch that never resolves — simulates the hung head-of-line case.
+  let resolveHung;
+  const hungFetch = () => new Promise((resolve) => { resolveHung = resolve; });
+
+  // Minimal pollTransactionsDelta stub — records tick start, then awaits the
+  // hung fetch. If scheduling works, a SECOND tick start must still occur
+  // before we even resolve the first.
+  async function pollStub() {
+    tickStarts.push(Date.now());
+    await hungFetch();
+    return { ok: true };
+  }
+
+  function schedule() {
+    if (timer) clearTimeout(timer);
+    if (stopped) return;
+    timer = setTimeout(() => {
+      // Reschedule FIRST — the fix under test.
+      schedule();
+      // Then await the (hung) work — errors must not break the chain.
+      pollStub().catch(() => {});
+    }, INTERVAL_MS);
+  }
+
+  schedule();
+
+  // Wait until at least 2 tick starts are observed or the deadline fires.
+  const start = Date.now();
+  while (tickStarts.length < 2 && Date.now() - start < TICK_DEADLINE_MS) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  // Cleanup before assertions so test failures don't leave timers running.
+  stopped = true;
+  if (timer) clearTimeout(timer);
+  if (resolveHung) resolveHung({ transactions: [] });
+
+  assert.ok(tickStarts.length >= 2,
+    `expected >=2 tick starts while first tick hung; got ${tickStarts.length}`);
+});
+
 // ═════════════════════════════════════════════════════════════════════════════
 (async () => {
   for (const step of pendingTests) await step();

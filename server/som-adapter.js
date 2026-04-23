@@ -538,6 +538,9 @@ async function poll() {
 
   // Try to connect if not connected
   if (!connection) {
+    // Exponential backoff when SOM is unreachable — don't hammer it every 30s
+    if (failCount >= 6 && pollCount % 30 !== 0) return false;  // retry every ~15 min
+    if (failCount >= 3 && pollCount % 10 !== 0) return false;  // retry every ~5 min
     const connected = await connect();
     if (!connected) {
       console.warn(`[SOM] Poll #${pollCount} - OFFLINE (${connectionError})`);
@@ -602,7 +605,7 @@ async function poll() {
         statusColor: statusInfo.color,
         severity: statusInfo.severity,
         event: row.Event,
-        lastUpdate: row.Time
+        lastUpdate: row.Time ? new Date(row.Time).toISOString() : null
       };
     });
 
@@ -753,8 +756,8 @@ async function poll() {
         zone: DEPARTMENTS[r.dept]?.zone || 'unknown',
         prevDept: r.prevDept,
         side: r.Side,
-        entryDate: r.EntryDate,
-        entryTime: r.EntryTime,
+        entryDate: r.EntryDate ? new Date(r.EntryDate).toISOString().slice(0, 10) : null,
+        entryTime: r.EntryTime ? (r.EntryTime instanceof Date ? r.EntryTime.toISOString().slice(11, 19) : String(r.EntryTime)) : null,
         frameNo: r.frameNo,
         frameRef: r.frameRef,
         lds: r.lds,

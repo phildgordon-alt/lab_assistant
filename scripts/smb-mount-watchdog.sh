@@ -91,7 +91,7 @@ log "TRACE directory missing — mounting SMB share"
 mkdir -p "$MOUNT_POINT" 2>/dev/null
 
 # Mount
-mount -t smbfs "$SMB_URL" "$MOUNT_POINT" 2>&1
+mount_smbfs "$SMB_URL" "$MOUNT_POINT" 2>&1
 MOUNT_RC=$?
 
 if [ $MOUNT_RC -ne 0 ]; then
@@ -105,11 +105,11 @@ if [ ! -d "$TRACE_DIR" ]; then
     exit 1
 fi
 
-log "Mount restored. Triggering trace recovery..."
+log "Mount restored."
 
 # Give the mount a moment to stabilize
 sleep 2
 
-# Trigger trace recovery via Lab Server API
-RESULT=$(curl -s -X POST "${LAB_SERVER}/api/dvi/trace/recover" -o /dev/null -w "%{http_code}" 2>&1)
-log "Recovery triggered (HTTP $RESULT)"
+# /api/dvi/trace/recover removed per Apr-17 incident plan (W2 followup):
+# dvi-trace now self-heals via its own polling loop; the explicit POST was
+# causing double-recovery races and is no longer needed.

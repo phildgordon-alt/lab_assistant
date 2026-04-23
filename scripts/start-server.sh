@@ -6,7 +6,7 @@
 #
 
 MOUNT_SRC="//dvi:dvi@192.168.0.27/visdir"
-MOUNT_DST="/Users/Shared/lab_assistant/data/dvi/mount"
+MOUNT_DST="/Users/Shared/lab_assistant/data/dvi/visdir"
 
 # Mount DVI share if not already mounted
 if ! mount | grep -q "$MOUNT_DST"; then
