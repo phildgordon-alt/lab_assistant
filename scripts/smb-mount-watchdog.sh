@@ -60,11 +60,12 @@ check_liveness() {
 
 # Check if visdir is an active mount point
 if mount | grep -q "$MOUNT_POINT"; then
-    # Mount exists — verify it's responsive (15s timeout prevents hang on stale mount).
-    # 5s was too tight: legitimate SMB ls under launchd context can take 5-10s when DVI is
-    # writing to the share, causing the watchdog to false-positive every minute and trigger
-    # a remount-thrash loop (mount → ls timeout → unmount → remount fails with EPERM).
-    if /usr/bin/perl -e 'alarm 15; exec @ARGV' /bin/ls "$TRACE_DIR" >/dev/null 2>&1; then
+    # Mount exists — verify it's responsive. Use `test -d` (single stat() syscall, microseconds)
+    # instead of `ls` (full directory enumeration, slow on SMB with 100+ files). `ls` was
+    # taking >15s on a 165-file TRACE directory under launchd context, false-positiving
+    # every cycle and triggering a remount thrash loop. `test -d` only hangs if the mount
+    # is truly wedged at the inode layer; check_liveness below still verifies fresh data.
+    if /usr/bin/perl -e 'alarm 15; exec @ARGV' /bin/test -d "$TRACE_DIR" >/dev/null 2>&1; then
         # ls returned — might still be a zombie serving cached data. Run liveness
         # check during business hours only (off-hours idle is legitimate).
         if in_business_hours; then
