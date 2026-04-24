@@ -236,8 +236,17 @@ try {
     INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve, sample_job_count, last_aggregated_at)
     VALUES (?, ?, 'P', ?, 0, datetime('now'))
     ON CONFLICT(sku) DO UPDATE SET
+      -- material/base_curve: COALESCE preserves existing (backfill from DVI XML
+      -- may have richer data than the seed transcription).
+      -- lens_type_modal: SEED IS AUTHORITATIVE — Phil's XLS is the source of
+      -- truth for puck-vs-stock classification. The DVI backfill can mis-label
+      -- a semi-finished puck as 'S' if it gets cut as SV in DVI for any reason
+      -- (mis-route, tool error, etc.); without forcing 'P' here, that
+      -- mis-label sticks forever and the SKU gets pulled into SV NPI scenarios
+      -- as a donor (inflating order with high-myopia outliers) AND excluded
+      -- from semi NPI scenarios. Force 'P' on every startup.
       material        = COALESCE(lens_sku_properties.material, excluded.material),
-      lens_type_modal = COALESCE(lens_sku_properties.lens_type_modal, excluded.lens_type_modal),
+      lens_type_modal = excluded.lens_type_modal,
       base_curve      = COALESCE(excluded.base_curve, lens_sku_properties.base_curve)
   `);
   db.transaction(() => {
