@@ -27,26 +27,25 @@ if [ -f "$NSMB" ]; then
 fi
 
 echo "Writing $NSMB..."
+# Verified options for Darwin 25.3.0 (macOS): notify_off, protocol_vers_map,
+# signing_required all confirmed in `man nsmb.conf` 2026-04-23. Earlier
+# draft also included dir_cache_max/dir_cache_min/validate_neg_off — those
+# do NOT exist on this version (grep on man page returned empty). Removed.
 sudo tee "$NSMB" > /dev/null <<EOF
 [default]
 # Disable change-notify to stop directory-cache poisoning from lease breaks.
 # Without this, macOS smbfs can return empty enumerations after a Windows
-# client writes to a directory we have cached.
+# client writes to a directory we have cached. THE primary fix for the
+# intermittent ENOENT / empty-ls problem.
 notify_off=yes
 
-# Force SMB2/SMB3, never fall back to SMB1 (deprecated, buggy with macOS clients
-# on directories with 100+ entries).
+# Force SMB2/SMB3 only, never fall back to SMB1 (default value 7 = 1+2+3).
+# SMB1 is deprecated and has known macOS interop bugs on directories with
+# 100+ entries — TRACE/ has 165 LT*.DAT files, right in the danger zone.
 protocol_vers_map=6
-
-# Reduce directory-cache aggression (smaller cache = fewer stale reads).
-dir_cache_max=60
-dir_cache_min=30
 
 # Don't require server signing (DVI Windows host may not negotiate it).
 signing_required=no
-
-# Skip negotiate validation (some legacy Windows hosts fail this).
-validate_neg_off=yes
 EOF
 
 sudo chmod 644 "$NSMB"
