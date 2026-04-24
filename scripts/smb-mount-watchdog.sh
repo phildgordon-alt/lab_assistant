@@ -40,8 +40,12 @@ check_liveness() {
     local newest
     newest=$(ls -t "$TRACE_DIR"/LT*.DAT 2>/dev/null | head -1)
     if [ -z "$newest" ]; then
-        log "liveness: no LT*.DAT in TRACE — treating as stale"
-        return 1
+        # Files not enumerable this cycle — could be a transient SMB read hiccup
+        # (we've seen ls succeed seconds after returning empty). Don't trigger a
+        # remount on this alone; let next cycle retry. If TRULY empty (DVI
+        # decommissioned the share), we'll see this every cycle and can act manually.
+        log "liveness: no LT*.DAT visible this cycle — passing (will retry next cycle)"
+        return 0
     fi
     local mtime
     mtime=$(stat -f "%m" "$newest" 2>/dev/null)
