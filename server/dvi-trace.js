@@ -212,26 +212,70 @@ class DviTraceWatcher extends EventEmitter {
   }
 
   _startPolling() {
-    // Delay history load to avoid SMB connection race with dvi-sync
+    // TRUST SQLite first. If loadFromDb() restored jobs, skip the historical
+    // file replay — cold-start used to revert SHIPPED→WIP whenever an SMB
+    // hiccup made any one LT*.DAT file fail mid-replay (the "WIP doubled"
+    // bug). Instead, look up the persisted byte offset for today's file and
+    // tail-forward from there.
+    //
+    // loadHistory() only runs when:
+    //   - SQLite is empty (cold-cold start — must rebuild from files), OR
+    //   - the stale-data sentinel in loadFromDb() fired (>24h old → clears
+    //     jobs and returns 0, same code path as cold-cold)
+    //   - manual /api/dvi/trace/recover (handled by recover() — unchanged)
+    const liveOnlyStart = async () => {
+      const todayFile = getTodayFilename();
+      let offset = 0;
+      try {
+        const db = require('./db');
+        const persisted = db.getDviTraceOffset(todayFile);
+        if (persisted != null) offset = persisted;
+      } catch (e) {
+        console.warn(`[DVI-Trace] Could not read persisted offset for ${todayFile}: ${e.message}`);
+      }
+      this.currentFile = todayFile;
+      this.byteOffset = offset;
+      this.partialLine = '';
+      console.log(`[DVI-Trace] Cold-start TRUST-SQLITE: ${this.jobs.size} jobs restored, resuming ${todayFile} at byte ${offset}`);
+    };
+
     const startHistory = async () => {
       await new Promise(r => setTimeout(r, 3000));
       await this.loadHistory();
       // Save after history load merges new data with restored state
       this.saveToDb();
     };
-    startHistory().then(() => {
+
+    const beginLive = () => {
       this._liveMode = true;
       this.poll();
       this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
       this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
       this._startSelfHealing();
-    }).catch(err => {
+    };
+
+    // If SQLite restore loaded any jobs, trust it and skip history replay.
+    // (loadFromDb() clears jobs and returns 0 in the stale-data case, which
+    // routes to the legacy loadHistory() path below — the safety net.)
+    if (this.jobs.size > 0) {
+      liveOnlyStart()
+        .then(beginLive)
+        .catch(err => {
+          console.error('[DVI-Trace] Trust-SQLite cold-start failed, falling back to history replay:', err.message);
+          startHistory().then(beginLive).catch(err2 => {
+            console.error('[DVI-Trace] History load failed, starting live poll anyway:', err2.message);
+            beginLive();
+          });
+        });
+      return;
+    }
+
+    // Cold-cold start (or stale-data sentinel fired): SQLite empty → must
+    // rebuild WIP from trace files. This is the original behavior.
+    console.log('[DVI-Trace] Cold-cold start (SQLite empty or stale) — falling back to loadHistory()');
+    startHistory().then(beginLive).catch(err => {
       console.error('[DVI-Trace] History load failed, starting live poll anyway:', err.message);
-      this._liveMode = true;
-      this.poll();
-      this.timer = setInterval(() => this.poll(), POLL_INTERVAL);
-      this._checkpointTimer = setInterval(() => this.saveToDb(), 5 * 60 * 1000);
-      this._startSelfHealing();
+      beginLive();
     });
   }
 
@@ -626,10 +670,23 @@ class DviTraceWatcher extends EventEmitter {
     if (this.currentFile !== filename) {
       if (this.currentFile) {
         console.log(`[DVI-Trace] Day rolled: ${this.currentFile} → ${filename}`);
+        // Persist final offset for the OLD file so a restart on the next day
+        // can still tail-forward into it if needed (defensive — tail-forward
+        // is keyed off today's file, but storing yesterday's final offset
+        // makes the offsets table a complete log).
+        try {
+          const db = require('./db');
+          db.setDviTraceOffset(this.currentFile, this.byteOffset);
+        } catch (e) { /* non-fatal */ }
       }
       this.currentFile = filename;
       this.byteOffset = 0;
       this.partialLine = '';
+      // Seed the new day's offset row at 0 so cold-start has something to read.
+      try {
+        const db = require('./db');
+        db.setDviTraceOffset(this.currentFile, 0);
+      } catch (e) { /* non-fatal */ }
     }
 
     // ── Staleness detection: reconnect SMB if no new data in 2 min ──
@@ -694,6 +751,14 @@ class DviTraceWatcher extends EventEmitter {
         this.processEvent(evt);
         parsed++;
       }
+
+      // Persist new byte offset to SQLite so cold-start can resume here.
+      // Cheap UPSERT, no transaction. Persist whenever offset advanced even
+      // if no events were parsed (header-only growth still moves the cursor).
+      try {
+        const db = require('./db');
+        db.setDviTraceOffset(this.currentFile, this.byteOffset);
+      } catch (e) { /* non-fatal — next poll will retry */ }
 
       if (parsed > 0) {
         console.log(`[DVI-Trace] +${parsed} events (${prevOffset}→${fileSize} bytes), ${this.jobs.size} jobs total`);

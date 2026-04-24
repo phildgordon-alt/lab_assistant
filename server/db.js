@@ -909,6 +909,15 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_trace_firstseen ON dvi_trace_jobs(first_seen_ms);
   CREATE INDEX IF NOT EXISTS idx_trace_status ON dvi_trace_jobs(status);
 
+  -- DVI Trace per-file byte offsets — survives server restarts so cold-start
+  -- can tail-forward from the last successfully-processed byte instead of
+  -- replaying the whole file (which corrupts WIP if any read fails).
+  CREATE TABLE IF NOT EXISTS dvi_trace_offsets (
+    filename TEXT PRIMARY KEY,
+    byte_offset INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
+  );
+
   -- Daily production stats (aggregate for trend queries)
   CREATE TABLE IF NOT EXISTS daily_stats (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3787,6 +3796,36 @@ function setDeltaCursor(type, isoString, ms) {
   }
 }
 
+// ── DVI Trace per-file byte offsets ─────────────────────────────────────────
+// Cold-start uses these to tail-forward from the last successfully-processed
+// byte rather than replaying the file. UPSERT, no transaction overhead.
+const _getDviTraceOffsetStmt = db.prepare(
+  `SELECT byte_offset FROM dvi_trace_offsets WHERE filename = ?`
+);
+const _setDviTraceOffsetStmt = db.prepare(`
+  INSERT INTO dvi_trace_offsets (filename, byte_offset, updated_at)
+  VALUES (?, ?, ?)
+  ON CONFLICT(filename) DO UPDATE SET byte_offset = excluded.byte_offset, updated_at = excluded.updated_at
+`);
+function getDviTraceOffset(filename) {
+  if (!filename) return null;
+  try {
+    const row = _getDviTraceOffsetStmt.get(filename);
+    return row && Number.isFinite(row.byte_offset) ? row.byte_offset : null;
+  } catch (e) {
+    return null;
+  }
+}
+function setDviTraceOffset(filename, offset) {
+  if (!filename) return;
+  const off = Number.isFinite(offset) ? offset : 0;
+  try {
+    _setDviTraceOffsetStmt.run(filename, off, Date.now());
+  } catch (e) {
+    // non-fatal — next poll will try again
+  }
+}
+
 module.exports = {
   db,
   logSync,
@@ -3821,6 +3860,9 @@ module.exports = {
   // Delta-poll cursor persistence (itempath-adapter)
   getDeltaCursor,
   setDeltaCursor,
+  // DVI Trace per-file byte offset persistence (cold-start tail-forward)
+  getDviTraceOffset,
+  setDviTraceOffset,
   upsertTransactions,
   // DB-backed hourly stats (side-by-side with in-memory; see verify endpoint)
   getHourlyPickStats,
