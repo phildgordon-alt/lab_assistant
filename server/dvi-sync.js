@@ -232,15 +232,22 @@ class LocalClient {
   async listFiles(shareName, remotePath, patterns) {
     const fullPath = this._resolvePath(shareName, remotePath);
 
-    try {
-      await fs.promises.access(fullPath);
-    } catch {
-      console.warn(`[DVI-Sync] LocalClient: path not found: ${fullPath}`);
-      return [];
-    }
-
-    // Use async readdir to avoid blocking the event loop on large directories (25K+ files over SMB)
-    const fileNames = await fs.promises.readdir(fullPath);
+    // Use execFile('/bin/ls') instead of fs.promises.readdir — async fs operations
+    // hang indefinitely on macOS SMB mounts (macOS SMB driver + libuv incompatibility).
+    // Same pattern as dvi-trace.js. Filter '.' and '..' from output.
+    const fileNames = await new Promise((resolve) => {
+      execFile('/bin/ls', [fullPath], { timeout: 10000 }, (err, stdout) => {
+        if (err) {
+          if (err.killed) console.warn(`[DVI-Sync] LocalClient: ls timed out on ${fullPath}`);
+          else if (err.code !== 0) console.warn(`[DVI-Sync] LocalClient: path not found: ${fullPath}`);
+          return resolve([]);
+        }
+        const names = stdout.split('\n')
+          .map(n => n.trim())
+          .filter(n => n && n !== '.' && n !== '..');
+        resolve(names);
+      });
+    });
 
     const regexes = patterns.map(p => new RegExp('^' + p.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i'));
 
@@ -268,7 +275,18 @@ class LocalClient {
 
   async deleteFile(shareName, remotePath) {
     const fullPath = this._resolvePath(shareName, remotePath);
-    return fs.promises.unlink(fullPath);
+    // Use execFile('/bin/rm') instead of fs.promises.unlink — same SMB hang risk
+    // as readdir on macOS. Sync unlink would block the event loop; rm via spawn
+    // gives us a timeout.
+    return new Promise((resolve, reject) => {
+      execFile('/bin/rm', [fullPath], { timeout: 5000 }, (err) => {
+        if (err) {
+          if (err.killed) return reject(new Error(`ETIMEDOUT: rm ${path.basename(fullPath)} killed after 5s`));
+          return reject(err);
+        }
+        resolve();
+      });
+    });
   }
 
   async close() {
@@ -402,6 +420,7 @@ class DviSyncService extends EventEmitter {
     syncState.lastPoll = new Date().toISOString();
     syncState.status = 'polling';
 
+    let filesProcessed = 0;
     try {
       // List files matching patterns
       const files = await this.client.listFiles(
@@ -413,41 +432,47 @@ class DviSyncService extends EventEmitter {
       if (files.length === 0) {
         syncState.lastError = null;
         syncState.status = 'idle';
-        return;
+      } else {
+        // For copy mode, skip files we already have locally
+        let toProcess = files;
+        if (sync.action === 'copy') {
+          await fs.promises.mkdir(sync.dest, { recursive: true });
+          // Read local directory once and use a Set for O(1) lookup instead of
+          // calling existsSync per file (25K+ calls blocks the event loop)
+          const localFiles = new Set(await fs.promises.readdir(sync.dest));
+          toProcess = files.filter(f => !localFiles.has(f.name));
+        }
+
+        if (toProcess.length === 0) {
+          syncState.lastError = null;
+          syncState.status = 'idle';
+        } else {
+          // Limit batch size to avoid overwhelming SMB connection
+          const batchSize = sync.batchSize || 50;
+          const batch = toProcess.slice(0, batchSize);
+
+          syncState.status = 'processing';
+          console.log(`[DVI-Sync] ${sync.name}: Found ${files.length} files, ${toProcess.length} new, processing ${batch.length}`);
+
+          // Process each file
+          for (const file of batch) {
+            await this.processFile(sync, file);
+          }
+          filesProcessed = batch.length;
+
+          syncState.lastSuccess = new Date().toISOString();
+          syncState.lastError = null;
+          syncState.status = 'idle';
+          saveState();
+        }
       }
 
-      // For copy mode, skip files we already have locally
-      let toProcess = files;
-      if (sync.action === 'copy') {
-        await fs.promises.mkdir(sync.dest, { recursive: true });
-        // Read local directory once and use a Set for O(1) lookup instead of
-        // calling existsSync per file (25K+ calls blocks the event loop)
-        const localFiles = new Set(await fs.promises.readdir(sync.dest));
-        toProcess = files.filter(f => !localFiles.has(f.name));
-      }
-
-      if (toProcess.length === 0) {
-        syncState.lastError = null;
-        syncState.status = 'idle';
-        return;
-      }
-
-      // Limit batch size to avoid overwhelming SMB connection
-      const batchSize = sync.batchSize || 50;
-      const batch = toProcess.slice(0, batchSize);
-
-      syncState.status = 'processing';
-      console.log(`[DVI-Sync] ${sync.name}: Found ${files.length} files, ${toProcess.length} new, processing ${batch.length}`);
-
-      // Process each file
-      for (const file of batch) {
-        await this.processFile(sync, file);
-      }
-
-      syncState.lastSuccess = new Date().toISOString();
-      syncState.lastError = null;
-      syncState.status = 'idle';
-      saveState();
+      // Aggregate heartbeat (60 min stale threshold). Fires on EVERY successful
+      // listFiles — even with zero files to process — so a quiet sync still
+      // proves the SMB mount and adapter are alive. pollSync runs per-sync
+      // (breakage / jobs / shipped / daily); all overwrite the same 'dvi_sync'
+      // row, so most-recent-success across any sync is the staleness signal.
+      try { require('./db').recordHeartbeat('dvi_sync', filesProcessed, 60 * 60 * 1000); } catch {}
 
     } catch (err) {
       syncState.status = 'error';
@@ -457,6 +482,7 @@ class DviSyncService extends EventEmitter {
       state.stats.lastError = { sync: sync.id, error: err.message, at: new Date().toISOString() };
 
       console.error(`[DVI-Sync] ${sync.name} error:`, err.message);
+      try { require('./db').recordHeartbeatError('dvi_sync', err.message, 60 * 60 * 1000); } catch {}
       this.emit('error', { sync: sync.id, error: err });
     }
   }

@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { jitterInterval } = require('./utils/jitter');
 
 let mysql;
 try {
@@ -870,13 +871,15 @@ module.exports = {
     loadThresholds();
     loadFromDisk();
 
-    // Start initial poll asynchronously (don't block server startup)
-    poll().catch(e => console.error('[SOM] Initial poll failed:', e.message));
-
-    // Start polling interval
-    pollInterval = setInterval(async () => {
-      await poll();
-    }, SOM_POLL_INTERVAL);
+    // Jittered: defer first poll AND each interval by ±20%. Spec-accepted
+    // tradeoff vs tight 30s cadence — Phil wants alignment-prevention more
+    // than perfect 30s rhythm.
+    setTimeout(() => {
+      poll().catch(e => console.error('[SOM] Initial poll failed:', e.message));
+      pollInterval = setInterval(async () => {
+        await poll();
+      }, jitterInterval(SOM_POLL_INTERVAL));
+    }, jitterInterval(SOM_POLL_INTERVAL));
   },
 
   /**

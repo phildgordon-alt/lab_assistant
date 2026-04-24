@@ -19,6 +19,7 @@
 const crypto = require('crypto');
 const https = require('https');
 const querystring = require('querystring');
+const { jitterInterval } = require('./utils/jitter');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION
@@ -736,14 +737,23 @@ function start() {
   console.log(`[NetSuite] Starting adapter — account ${ACCOUNT}, location Irvine 2`);
   console.log(`[NetSuite] Poll interval: ${POLL_INTERVAL}ms`);
 
-  // Initial poll after 10s (let other adapters start first)
-  setTimeout(() => { poll(); fetchOpenPOs(); }, 10000);
   // Consumption sync after 60s (heavy query, let everything else start first)
   setTimeout(() => syncConsumption(), 60000);
-  // Inventory every 5 minutes, POs every 10 minutes, consumption every 30 minutes
-  pollTimer = setInterval(() => poll(), POLL_INTERVAL);
-  setInterval(() => fetchOpenPOs(), 600000);
   setInterval(() => syncConsumption(), 1800000);
+
+  // Jittered inventory poll (5 min, ±20%) — first fire AND interval jittered
+  // so we don't align with ItemPath / Limble / other pollers.
+  const PO_INTERVAL = 600000;
+  setTimeout(() => {
+    poll();
+    pollTimer = setInterval(() => poll(), jitterInterval(POLL_INTERVAL));
+  }, jitterInterval(POLL_INTERVAL));
+
+  // Jittered PO poll (10 min, ±20%) — independent jitter from inventory poll.
+  setTimeout(() => {
+    fetchOpenPOs();
+    setInterval(() => fetchOpenPOs(), jitterInterval(PO_INTERVAL));
+  }, jitterInterval(PO_INTERVAL));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

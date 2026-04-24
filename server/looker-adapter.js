@@ -13,12 +13,14 @@
 
 'use strict';
 
+const { jitterInterval } = require('./utils/jitter');
+
 const CONFIG = {
   baseUrl:       process.env.LOOKER_URL || '',
   clientId:      process.env.LOOKER_CLIENT_ID || '',
   clientSecret:  process.env.LOOKER_CLIENT_SECRET || '',
   apiPort:       19999,
-  pollInterval:  parseInt(process.env.LOOKER_POLL_MS || '300000'), // 5 min
+  pollInterval:  parseInt(process.env.LOOKER_POLL_MS || '14400000'), // Looker is daily ETL — polling every 4hr is sufficient given 24h heartbeat threshold.
 };
 
 let accessToken = null;
@@ -166,13 +168,13 @@ async function poll() {
       }
     }
 
-    // Save to SQLite
-    const del = db.db.prepare('DELETE FROM looker_jobs');
+    // Save to SQLite — upsert pattern (INSERT OR REPLACE keyed on PRIMARY KEY(job_id, opc)).
+    // No DELETE before insert: if process crashes mid-write, previously committed rows survive.
+    // After a successful full commit, prune rows outside the YTD fetch window.
     const ins = db.db.prepare(`INSERT OR REPLACE INTO looker_jobs
       (job_id, order_number, dvi_id, sent_from_lab_date, dvi_destination, frame_upc, opc, count_lenses, count_breakages)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const save = db.db.transaction(() => {
-      del.run();
       for (const r of rows) {
         ins.run(
           r['poms_jobs.job_id'] || '',
@@ -188,6 +190,17 @@ async function poll() {
       }
     });
     save();
+    // Prune rows from prior years that are no longer in the YTD fetch window.
+    // Runs outside the upsert transaction so a prune failure never rolls back good data.
+    try {
+      const pruneYear = new Date().getFullYear();
+      const pruned = db.db.prepare(
+        `DELETE FROM looker_jobs WHERE sent_from_lab_date < ?`
+      ).run(`${pruneYear}-01-01`);
+      if (pruned.changes > 0) console.log(`[Looker] Pruned ${pruned.changes} rows from prior year(s)`);
+    } catch (pruneErr) {
+      console.warn('[Looker] Prune error (non-fatal):', pruneErr.message);
+    }
     // Heartbeat: 24h threshold — Looker ETL is daily. If it hasn't run in 24h,
     // cron or credentials are broken.
     try { db.recordHeartbeat('looker', rows.length, 24 * 60 * 60 * 1000); } catch {}
@@ -243,8 +256,12 @@ function start() {
     return;
   }
   console.log('[Looker] Starting — polling every', CONFIG.pollInterval / 1000, 's');
-  setTimeout(() => poll(), 10000);
-  pollTimer = setInterval(() => poll(), CONFIG.pollInterval);
+  // Jittered: ±20% on first poll AND each interval. With 4hr cadence, jitter
+  // window is ~48 min — plenty to break alignment with other pollers/cron.
+  setTimeout(() => {
+    poll();
+    pollTimer = setInterval(() => poll(), jitterInterval(CONFIG.pollInterval));
+  }, jitterInterval(CONFIG.pollInterval));
 }
 
 function stop() {

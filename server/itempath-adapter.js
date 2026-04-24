@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const { jitterInterval } = require('./utils/jitter');
 
 /**
  * itempath-adapter.js
@@ -1007,6 +1008,10 @@ async function poll() {
       syncStatus: 'ok',
       syncError:  null,
     };
+    // Canonical 'itempath' heartbeat (30 min stale threshold per principles doc).
+    // Coexists with the 'itempath_poll' 15-min heartbeat below — different sources
+    // give us two staleness tiers in data-health-check.
+    try { require('./db').recordHeartbeat('itempath', materials.length, 30 * 60 * 1000); } catch {}
 
     await sendSlackAlerts(alerts);
     updatePreviousQty(materials);  // Track for next poll's drop detection
@@ -2045,8 +2050,12 @@ function start() {
     console.log(`[ItemPath] No SQLite data yet — will fetch from API: ${e.message}`);
   }
 
-  poll();
-  setInterval(poll, CONFIG.pollInterval);
+  // Jittered heavy poll: defer first poll AND each interval by ±20% so the
+  // 5-min poll doesn't align with pickSync / countReconciliation / freshnessCheck.
+  setTimeout(() => {
+    poll();
+    setInterval(poll, jitterInterval(CONFIG.pollInterval));
+  }, jitterInterval(CONFIG.pollInterval));
 
   // Pick sync: 30s delay then adaptive interval.
   // BACKFILL mode: 5 min between runs (catch up fast).

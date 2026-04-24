@@ -28,6 +28,8 @@
 
 'use strict';
 
+const { jitterInterval } = require('./utils/jitter');
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURATION — set via environment variables
 // ─────────────────────────────────────────────────────────────────────────────
@@ -37,6 +39,11 @@ const CONFIG = {
   clientSecret:  process.env.LIMBLE_CLIENT_SECRET || '',
   pollInterval:  parseInt(process.env.LIMBLE_POLL_MS || '60000'),  // 60s default
   mockMode:      !process.env.LIMBLE_CLIENT_ID || !process.env.LIMBLE_CLIENT_SECRET,  // auto-mock if no credentials
+  // Incremental task fetch — only tasks updated since last successful poll.
+  // Speculative: Limble v2 API ?updatedAfter support not confirmed in docs.
+  // Defaults OFF — set LIMBLE_USE_CURSOR=true to enable. If Limble ignores the
+  // param, behavior is identical to a full fetch (no harm, no load reduction).
+  useCursor:     process.env.LIMBLE_USE_CURSOR === 'true',
 
   // Equipment categories to track (lab optical equipment)
   equipmentCategories: [
@@ -593,15 +600,20 @@ async function poll() {
 
   try {
     // Parallel fetch — Limble API v2 endpoints
-    // Wrap each fetch to handle individual failures gracefully
+    // safeFetch: propagates a sentinel error object so callers can distinguish
+    // auth/network failure from a legitimately empty response.
+    // Returning [] on error is wrong — it makes a 401 look like no data, which
+    // defeats the silent-0-row guard on assets.
+    const FETCH_ERROR = Symbol('FETCH_ERROR');
     const safeFetch = async (path, params) => {
       try {
         return await limbleFetch(path, params);
       } catch (e) {
         console.warn(`[Limble] ${path} failed:`, e.message);
-        return [];
+        return { [FETCH_ERROR]: true, message: e.message };
       }
     };
+    const isFetchError = (v) => v && typeof v === 'object' && v[FETCH_ERROR] === true;
 
     // Fetch all tasks - the API's status filter doesn't work as expected
     // Completed tasks have status=1 but dateCompleted>0, not status=2
@@ -614,22 +626,61 @@ async function poll() {
     // Downtime stats calculated from tasks (work orders) in computeStats().
     const downtimeResp = { data: [] };
 
-    // Fetch ALL tasks in pages (Limble returns oldest first)
+    // Propagate asset fetch error to silent-0-row guard below.
+    // If assetsResp is an error sentinel, pass it through — guard will catch it.
+    if (isFetchError(assetsResp)) {
+      cache.syncStatus = 'error';
+      cache.syncError = `assets fetch failed: ${assetsResp.message}`;
+      cache.lastSync = new Date().toISOString();
+      console.error('[Limble] Assets fetch failed — keeping prior cache:', assetsResp.message);
+      return;
+    }
+
+    // Fetch tasks — incremental cursor if LIMBLE_USE_CURSOR=true, full fetch otherwise.
+    // ?updatedAfter is SPECULATIVE (not confirmed in Limble v2 docs). If Limble ignores
+    // it, the full task list is returned and behavior is identical to the old full fetch.
     let allTasksRaw = [];
     let page = 1;
     const batchSize = 1000;
     let hasMore = true;
     const maxPages = 30; // Safety limit: 30k tasks max
 
+    // Load persisted cursor (Unix seconds — Limble timestamps are Unix seconds)
+    const db = require('./db');
+    const LIMBLE_CURSOR_KEY = 10; // Unique key in delta_poll_cursor table; 3/4 are ItemPath
+    let taskCursor = null;
+    if (CONFIG.useCursor) {
+      const raw = db.getDeltaCursor(LIMBLE_CURSOR_KEY);
+      taskCursor = raw ? parseInt(raw, 10) : null;
+      if (taskCursor) console.log(`[Limble] Incremental fetch — updatedAfter=${new Date(taskCursor * 1000).toISOString()}`);
+    }
+
+    let maxUpdatedAt = taskCursor || 0; // Track highest updatedAt seen in this poll
+
     while (hasMore && page <= maxPages) {
-      const batch = await safeFetch('/v2/tasks', { limit: batchSize, page });
-      if (Array.isArray(batch) && batch.length > 0) {
+      const params = { limit: batchSize, page };
+      if (CONFIG.useCursor && taskCursor) params.updatedAfter = taskCursor;
+      const batch = await safeFetch('/v2/tasks', params);
+      if (isFetchError(batch)) {
+        console.warn('[Limble] Task page fetch failed:', batch.message);
+        hasMore = false;
+      } else if (Array.isArray(batch) && batch.length > 0) {
         allTasksRaw = allTasksRaw.concat(batch);
+        // Track max updatedAt for cursor advancement
+        for (const t of batch) {
+          const ts = t.lastEdited || t.dateCompleted || t.createdDate || 0;
+          if (ts > maxUpdatedAt) maxUpdatedAt = ts;
+        }
         hasMore = batch.length === batchSize;
         page++;
       } else {
         hasMore = false;
       }
+    }
+
+    // Persist cursor after successful task fetch
+    if (CONFIG.useCursor && maxUpdatedAt > 0) {
+      db.setDeltaCursor(LIMBLE_CURSOR_KEY, String(maxUpdatedAt), Date.now());
     }
 
     // Now we have all tasks - split into open/in-progress/completed ourselves
@@ -908,8 +959,12 @@ function start() {
   } else {
     console.log(`[Limble] Starting — ${CONFIG.baseUrl} — ClientID: ${CONFIG.clientId.slice(0,8)}... — poll every ${CONFIG.pollInterval/1000}s`);
   }
-  poll();  // immediate first fetch
-  setInterval(poll, CONFIG.pollInterval);
+  // Jittered: ±20% on first poll AND each interval to prevent alignment with
+  // other 60s pollers.
+  setTimeout(() => {
+    poll();
+    setInterval(poll, jitterInterval(CONFIG.pollInterval));
+  }, jitterInterval(CONFIG.pollInterval));
 }
 
 module.exports = { start, getAssets, getTasks, getDowntime, getParts, getStats, getAIContext, sendSlackMessage };
