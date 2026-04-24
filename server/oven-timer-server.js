@@ -1962,7 +1962,7 @@ Respond with a structured batching plan in this format:
     // date(col) evaluates in UTC and misattributes PT evening activity to tomorrow.
     const perDay = labDb.db.prepare(`
       SELECT substr(completed_at, 1, 10) AS date,
-             SUM(CASE WHEN source IN ('live','tx') THEN 1 ELSE 0 END) AS instant,
+             SUM(CASE WHEN source IN ('live','tx') OR source IS NULL THEN 1 ELSE 0 END) AS instant,
              SUM(CASE WHEN source IN ('backfill','recovered') THEN 1 ELSE 0 END) AS recovered,
              COUNT(*) AS count
       FROM picks_history
