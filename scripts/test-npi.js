@@ -425,10 +425,15 @@ test('S2: missing-material warning when target expands to zero donor SKUs', () =
     .run('S2-JOB-1', 'S2-A-SKU', 'S2-A-SKU', 'S2-MAT-A', 'S', '-100', '0', '0', today);
   const out = npiEngine.formatSvStockingCsv(db, id);
   assert.ok(!out.error, out.error || '');
-  assert.ok(out.csv.includes('# WARNING: selected material S2-MAT-B had ZERO donor SKUs after expansion'),
-    'missing-material warning present for S2-MAT-B');
-  assert.ok(!out.csv.includes('selected material S2-MAT-A had ZERO'),
+  // Post-2026-04-22: warnings live on the returned object, NOT the CSV body
+  // (supplier-facing CSV must be clean — Phil was hand-stripping 600+ lines).
+  assert.ok(Array.isArray(out.warnings), 'warnings array on result');
+  assert.ok(out.warnings.some(w => w.includes('selected material S2-MAT-B had ZERO donor SKUs after expansion')),
+    'missing-material warning present for S2-MAT-B in warnings array');
+  assert.ok(!out.warnings.some(w => w.includes('selected material S2-MAT-A had ZERO')),
     'no warning for material that produced donors');
+  assert.ok(!out.csv.includes('# WARNING:'), 'CSV body has no # WARNING: lines');
+  assert.ok(!out.csv.includes('# NOTE:'), 'CSV body has no # NOTE: lines');
 });
 
 test('S3: NULL cyl + NULL add → plano row preserved (cyl=0.00, add=0.00) under new column indices', () => {
@@ -524,10 +529,12 @@ test('S6: NULL projected_weekly → fallback to lens_consumption_weekly avg; no 
   db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run('S6-FB-JOB', 'S6-FALLBACK', 'S6-FALLBACK', 'S6-MAT', 'S', '-100', '0', '0', today);
   const out = npiEngine.formatSvStockingCsv(db, id);
-  assert.ok(out.csv.includes('# WARNING: donor_sku S6-FALLBACK has no demand-sensing projection — fell back to flat 12mo average'),
-    'fallback warning present for S6-FALLBACK');
-  assert.ok(out.csv.includes('# WARNING: donor_sku S6-NO-DATA has no consumption — skipped'),
-    'no-data warning present for S6-NO-DATA');
+  assert.ok(Array.isArray(out.warnings), 'warnings array on result');
+  assert.ok(out.warnings.some(w => w.includes('donor_sku S6-FALLBACK has no demand-sensing projection — fell back to flat 12mo average')),
+    'fallback warning present for S6-FALLBACK in warnings array');
+  assert.ok(out.warnings.some(w => w.includes('donor_sku S6-NO-DATA has no consumption — skipped')),
+    'no-data warning present for S6-NO-DATA in warnings array');
+  assert.ok(!out.csv.includes('# WARNING:'), 'CSV body has no # WARNING: lines');
   // Fallback donor should still produce a data row
   const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
@@ -547,8 +554,10 @@ test('S7: donor with forecast but zero matching jobs → "no Rx history in windo
     .run('S7-DONOR', 5.0, nowIsoUtc());
   // No jobs whatsoever for S7-DONOR
   const out = npiEngine.formatSvStockingCsv(db, id);
-  assert.ok(out.csv.includes('# WARNING: donor_sku S7-DONOR has forecast but no Rx history in window — skipped'),
-    'no-history warning present');
+  assert.ok(Array.isArray(out.warnings), 'warnings array on result');
+  assert.ok(out.warnings.some(w => w.includes('donor_sku S7-DONOR has forecast but no Rx history in window — skipped')),
+    'no-history warning present in warnings array');
+  assert.ok(!out.csv.includes('# WARNING:'), 'CSV body has no # WARNING: lines');
   const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
   const s7Rows = tail.filter(r => r.split(',')[2] === 'S7-DONOR');
@@ -591,8 +600,12 @@ test('S9: stale-forecast warning when computed_at is 5 days ago', () => {
   db.prepare(`INSERT INTO jobs (invoice, lens_opc_r, lens_opc_l, lens_material, lens_type, rx_r_sphere, rx_r_cylinder, rx_r_add, entry_date) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
     .run('S9-J1', 'S9-DONOR', 'S9-DONOR', 'S9-MAT', 'S', '-100', '0', '0', today);
   const out = npiEngine.formatSvStockingCsv(db, id);
-  assert.ok(out.csv.includes('# WARNING: forecast last computed 5 days ago'),
-    `stale-forecast warning present, header was: ${out.csv.split('\n').slice(0, 12).join('\n')}`);
+  // Post-2026-04-22: warnings live on the returned object, NOT the CSV body
+  // (Phil ships these CSVs to suppliers; supplier-facing file stays clean).
+  assert.ok(Array.isArray(out.warnings), 'warnings array on result');
+  assert.ok(out.warnings.some(w => w.includes('forecast last computed 5 days ago')),
+    `stale-forecast warning present in warnings array, got: ${JSON.stringify(out.warnings)}`);
+  assert.ok(!out.csv.includes('# WARNING:'), 'CSV body has no # WARNING: lines');
   // And output is still emitted (warn-don't-block)
   const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
@@ -684,8 +697,11 @@ test('M4: NULL base_curve → row with base_curve=UNKNOWN AND warning', () => {
   db.prepare(`INSERT INTO lens_inventory_status (sku, projected_weekly, computed_at) VALUES (?, ?, ?)`)
     .run('M4-NOBC-DONOR', 5.0, nowIsoUtc());
   const out = npiEngine.formatSemiStockingCsv(db, id);
-  assert.ok(out.csv.includes('# WARNING: donor_sku M4-NOBC-DONOR has UNKNOWN base_curve'),
-    'unknown base_curve warning present');
+  // Post-2026-04-22: warnings live on the returned object, NOT the CSV body.
+  assert.ok(Array.isArray(out.warnings), 'warnings array on result');
+  assert.ok(out.warnings.some(w => w.includes('donor_sku M4-NOBC-DONOR has UNKNOWN base_curve')),
+    'unknown base_curve warning present in warnings array');
+  assert.ok(!out.csv.includes('# WARNING:'), 'CSV body has no # WARNING: lines');
   const lines = out.csv.split('\n');
   const idxHeader = lines.findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = lines.slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
@@ -786,9 +802,14 @@ test('A2: multi-variant — V2 + V3 inserted; all rows stamped with V1 only + st
       .run(`A2-JOB-${i}`, 'A2-SKU', 'A2-SKU', 'A2-MAT', 'S', String(-100 - i * 25), '-25', '0', today);
   }
   const out = npiEngine.formatSvStockingCsv(db, id);
-  assert.ok(out.csv.includes('# NOTE: scenario has 3 placeholder variants'), 'strong multi-variant warning present');
-  assert.ok(out.csv.includes('All rows stamped with'), 'warning explains V1-only stamping');
-  assert.ok(out.csv.includes('Additional variants are NOT included'), 'warning explains other variants excluded');
+  // Post-2026-04-22: NOTE/WARNING lines live on the returned object, NOT the CSV body.
+  assert.ok(Array.isArray(out.warnings), 'warnings array on result');
+  const joined = out.warnings.join('\n');
+  assert.ok(joined.includes('# NOTE: scenario has 3 placeholder variants'), 'strong multi-variant warning present in warnings array');
+  assert.ok(joined.includes('All rows stamped with'), 'warning explains V1-only stamping');
+  assert.ok(joined.includes('Additional variants are NOT included'), 'warning explains other variants excluded');
+  assert.ok(!out.csv.includes('# WARNING:'), 'CSV body has no # WARNING: lines');
+  assert.ok(!out.csv.includes('# NOTE:'), 'CSV body has no # NOTE: lines');
   const lines = out.csv.split('\n');
   const idxHeader = lines.findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = lines.slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
