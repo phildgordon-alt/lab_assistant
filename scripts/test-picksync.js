@@ -75,8 +75,35 @@ function makeDb() {
       date TEXT PRIMARY KEY,
       attempted_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE delta_poll_cursor (
+      type INTEGER PRIMARY KEY,
+      cursor TEXT,
+      updated_at INTEGER
+    );
   `);
   return db;
+}
+
+// Mirror of db.js:getDeltaCursor / setDeltaCursor — used by the local
+// _deriveDeltaCursor mirror and by the _drainType persistence call.
+function makeDeltaCursorAccessors(db) {
+  const getStmt = db.prepare(`SELECT cursor FROM delta_poll_cursor WHERE type = ?`);
+  const setStmt = db.prepare(`
+    INSERT INTO delta_poll_cursor (type, cursor, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(type) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
+  `);
+  return {
+    getDeltaCursor(type) {
+      const row = getStmt.get(type);
+      return row && row.cursor ? row.cursor : null;
+    },
+    setDeltaCursor(type, isoString, ms) {
+      if (!isoString) return;
+      setStmt.run(type, isoString, ms || Date.now());
+    },
+  };
 }
 
 // Mirror of db.js:upsertPicksHistory (post-rebuild). Kept here so tests can run
@@ -397,7 +424,18 @@ function makeDeltaState() {
   };
 }
 
-function deriveDeltaCursor(db) {
+function deriveDeltaCursor(db, type, accessors) {
+  // Take the HIGHER of (a) persisted per-type cursor and (b) max(completed_at)
+  // from picks_history minus 30s overlap. Mirrors itempath-adapter.js.
+  let dbCursorMs = -Infinity;
+  let historyCursorMs = -Infinity;
+  if (type !== undefined && type !== null && accessors) {
+    const persisted = accessors.getDeltaCursor(type);
+    if (persisted) {
+      const t = new Date(persisted).getTime();
+      if (!Number.isNaN(t)) dbCursorMs = t;
+    }
+  }
   const row = db.prepare(`
     SELECT MAX(completed_at) AS max_completed
     FROM picks_history
@@ -405,8 +443,10 @@ function deriveDeltaCursor(db) {
   `).get();
   if (row && row.max_completed) {
     const t = new Date(row.max_completed).getTime();
-    if (!Number.isNaN(t)) return new Date(t - DELTA_POLL_OVERLAP_MS).toISOString();
+    if (!Number.isNaN(t)) historyCursorMs = t - DELTA_POLL_OVERLAP_MS;
   }
+  const best = Math.max(dbCursorMs, historyCursorMs);
+  if (Number.isFinite(best)) return new Date(best).toISOString();
   return new Date(Date.now() - DELTA_POLL_FALLBACK_MS).toISOString();
 }
 
@@ -426,7 +466,7 @@ function txToLine(tx) {
   };
 }
 
-async function drainType(ipFetchFn, upsert, type, startCursor) {
+async function drainType(ipFetchFn, upsert, type, startCursor, accessors) {
   let cursor = startCursor;
   let totalLines = 0, totalInserted = 0, pages = 0;
   for (let p = 0; p < DELTA_POLL_MAX_PAGES; p++) {
@@ -436,28 +476,40 @@ async function drainType(ipFetchFn, upsert, type, startCursor) {
     pages++;
     const lines = [];
     for (const tx of rawTx) { const l = txToLine(tx); if (l) lines.push(l); }
+    let pageInserted = 0;
     if (lines.length > 0) {
       const { inserted } = upsert(lines, 'tx');
+      pageInserted = inserted;
       totalInserted += inserted;
     }
     totalLines += rawTx.length;
-    if (rawTx.length < DELTA_POLL_PAGE_SIZE) break;
     const last = rawTx[rawTx.length - 1];
     const lastTs = last && (last.creationDate || last.modifiedDate);
+    if (lastTs && accessors) {
+      let toPersist = lastTs;
+      if (pageInserted === 0 && rawTx.length === DELTA_POLL_PAGE_SIZE) {
+        const ms = new Date(lastTs).getTime();
+        if (!Number.isNaN(ms)) toPersist = new Date(ms + 1).toISOString();
+      }
+      accessors.setDeltaCursor(type, toPersist, Date.now());
+    }
+    if (rawTx.length < DELTA_POLL_PAGE_SIZE) break;
     if (!lastTs) break;
     cursor = lastTs;
   }
   return { fetched: totalLines, inserted: totalInserted, pages };
 }
 
-async function pollTransactionsDelta(state, ipFetchFn, db, upsert, conservation = false) {
+async function pollTransactionsDelta(state, ipFetchFn, db, upsert, conservation = false, accessors = null) {
   if (conservation) return { skipped: true };
-  const cursor = deriveDeltaCursor(db);
-  state.lastCursor = cursor;
+  const picksCursor = deriveDeltaCursor(db, 4, accessors);
+  const putsCursor  = deriveDeltaCursor(db, 3, accessors);
+  state.lastCursor = (new Date(picksCursor).getTime() <= new Date(putsCursor).getTime())
+    ? picksCursor : putsCursor;
   const t0 = Date.now();
   try {
-    const picks = await drainType(ipFetchFn, upsert, 4, cursor);
-    const puts  = await drainType(ipFetchFn, upsert, 3, cursor);
+    const picks = await drainType(ipFetchFn, upsert, 4, picksCursor, accessors);
+    const puts  = await drainType(ipFetchFn, upsert, 3, putsCursor,  accessors);
     const latency = Date.now() - t0;
     state.lastRunAt = new Date().toISOString();
     state.lastLatencyMs = latency;
@@ -481,7 +533,7 @@ async function pollTransactionsDelta(state, ipFetchFn, db, upsert, conservation 
         state.consecutiveFast = 0;
       }
     }
-    return { picks, puts, latency, cursor };
+    return { picks, puts, latency, picksCursor, putsCursor };
   } catch (e) {
     const latency = Date.now() - t0;
     state.lastError = e.message;
@@ -492,7 +544,7 @@ async function pollTransactionsDelta(state, ipFetchFn, db, upsert, conservation 
       if (idx < DELTA_POLL_TIERS.length - 1) state.interval = DELTA_POLL_TIERS[idx + 1];
       state.consecutiveErrors = 0;
     }
-    return { error: e.message, latency, cursor };
+    return { error: e.message, latency, picksCursor, putsCursor };
   }
 }
 
@@ -766,6 +818,95 @@ test('rescheduling fires even while the prior tick is still awaiting', async () 
 
   assert.ok(tickStarts.length >= 2,
     `expected >=2 tick starts while first tick hung; got ${tickStarts.length}`);
+});
+
+// ─── T13: cursor advances on all-dupes tick ─────────────────────────────────
+// Reproduces the §3 stuck-cursor bug: a full page where every row is already
+// in picks_history (INSERT OR IGNORE returns inserted=0). Without persistence
+// + the +1ms tie-break, MAX(completed_at) doesn't move and the next tick
+// refetches the same window forever.
+section('T13: cursor advances even when every fetched row is a dupe');
+test('full page of all-dupes persists cursor + bumps by +1ms', async () => {
+  const db = makeDb();
+  const upsert = makeUpsertPicksHistory(db);
+  const accessors = makeDeltaCursorAccessors(db);
+  const state = makeDeltaState();
+
+  // Seed picks_history with 500 rows that the next fetch will return verbatim.
+  const dupePage = [];
+  for (let i = 0; i < 500; i++) {
+    const ts = `2026-04-22T10:${String(Math.floor(i/60)).padStart(2,'0')}:${String(i%60).padStart(2,'0')}.000Z`;
+    dupePage.push({
+      id: `dup-${i}`, materialName: 'M', quantityConfirmed: 1,
+      orderName: `O-${i}`, warehouseName: 'WH1',
+      creationDate: ts,
+    });
+    // Pre-insert so that the tx-writer's pickId 'tx-dup-N' is ALREADY in history.
+    upsert([{
+      pickId: `tx-dup-${i}`, id: `dup-${i}`, materialName: 'M', quantityConfirmed: 1,
+      orderName: `O-${i}`, warehouseName: 'WH1', modifiedDate: ts,
+    }], 'tx');
+  }
+  const lastTs = dupePage[dupePage.length - 1].creationDate;
+
+  const ipFetchFn = async (_p, params) => {
+    if (params.type !== 4) return { transactions: [] };
+    // Return the same dupe page only ONCE; subsequent calls return empty so
+    // the safety cap doesn't fire. After the first page we expect cursor to
+    // be persisted at lastTs+1ms — page 2 fetch should use that as `after`.
+    if (params.after === lastTs || params.after === new Date(new Date(lastTs).getTime()+1).toISOString()) {
+      return { transactions: [] };
+    }
+    return { transactions: dupePage };
+  };
+
+  const before = accessors.getDeltaCursor(4);
+  assert.equal(before, null, 'no persisted cursor before tick');
+
+  const result = await pollTransactionsDelta(state, ipFetchFn, db, upsert, false, accessors);
+  assert.equal(result.picks.fetched, 500);
+  assert.equal(result.picks.inserted, 0, 'all rows were dupes');
+
+  const after = accessors.getDeltaCursor(4);
+  assert.ok(after, 'cursor was persisted');
+  const expectedMs = new Date(lastTs).getTime() + 1;
+  assert.equal(new Date(after).getTime(), expectedMs,
+    `cursor bumped by +1ms (got ${after}, expected ${new Date(expectedMs).toISOString()})`);
+});
+
+// ─── T14: persisted cursor survives "process restart" ───────────────────────
+// Restart simulated by discarding the in-memory state and re-deriving from db.
+// The persisted cursor must outrank the picks_history MAX(completed_at) when
+// it's higher (the all-dupes-bumped case).
+section('T14: persisted cursor survives a process restart');
+test('after restart, deriveDeltaCursor returns the persisted cursor (not the history MAX)', () => {
+  const db = makeDb();
+  const upsert = makeUpsertPicksHistory(db);
+  const accessors = makeDeltaCursorAccessors(db);
+
+  // Seed picks_history with rows up to 10:00:00. Then persist a cursor at 11:00:00 —
+  // simulates the all-dupes bump landing past the history MAX.
+  upsert([{
+    id: 'a', materialName: 'X', quantityConfirmed: 1, orderName: 'O', warehouseName: 'WH1',
+    modifiedDate: '2026-04-22T10:00:00.000Z',
+  }], 'live');
+  const persistedAt = '2026-04-22T11:00:00.001Z';
+  accessors.setDeltaCursor(4, persistedAt, Date.now());
+
+  // "Restart": new derivation call with no in-memory state.
+  const c4 = deriveDeltaCursor(db, 4, accessors);
+  assert.equal(c4, persistedAt,
+    'persisted cursor wins over history MAX when it is higher');
+
+  // Sanity: type=3 has no persisted cursor → falls back to history MAX - 30s.
+  const c3 = deriveDeltaCursor(db, 3, accessors);
+  assert.equal(c3, '2026-04-22T09:59:30.000Z');
+
+  // And: persisted cursor BEHIND history MAX → history wins.
+  accessors.setDeltaCursor(3, '2026-04-21T00:00:00.000Z', Date.now());
+  const c3b = deriveDeltaCursor(db, 3, accessors);
+  assert.equal(c3b, '2026-04-22T09:59:30.000Z',
+    'history MAX-30s wins when it is higher than the persisted cursor');
 });
 
 // ═════════════════════════════════════════════════════════════════════════════

@@ -718,6 +718,33 @@ class DviTraceWatcher extends EventEmitter {
     }
   }
 
+  // Detect benign "file doesn't exist yet" errors from cat/SMB. Returns true if
+  // the error is a missing-file condition (today's LT file not created yet, OR
+  // intermittent SMB ENOENT during a high-frequency poll). Caller resolves null,
+  // poll() handles `if (!data) return` correctly.
+  _isBenignMissingFileError(err) {
+    if (!err) return false;
+    if (err.code === 'ENOENT') return true;
+    const msg = err.message || '';
+    if (/No such file or directory/i.test(msg)) return true;
+    const stderr = (err.stderr || '').toString();
+    if (/cat:.*No such file/i.test(stderr)) return true;
+    return false;
+  }
+
+  // Throttled warn — once per hour per file — so silenced ENOENTs aren't fully
+  // invisible if they persist for hours (e.g. mount disappeared, not just
+  // pre-first-event-of-the-day).
+  _warnMissingFileOncePerHour(filename) {
+    if (!this._missingFileWarnAt) this._missingFileWarnAt = new Map();
+    const now = Date.now();
+    const last = this._missingFileWarnAt.get(filename) || 0;
+    if (now - last >= 3600000) {
+      console.warn(`[DVI-Trace] ${filename}: missing (silenced repeats for 1h) — DVI may not have written today's file yet, or transient SMB ENOENT`);
+      this._missingFileWarnAt.set(filename, now);
+    }
+  }
+
   // Sync read via cat child process — killable if SMB mount hangs.
   // fs.readFileSync hangs forever on macOS SMB stalls; cat can be killed after timeout.
   readFile(remotePath) {
@@ -734,6 +761,10 @@ class DviTraceWatcher extends EventEmitter {
       } catch (err) {
         if (err.killed) {
           return Promise.reject(new Error(`ETIMEDOUT: cat ${filename} killed after 10s (SMB mount hung)`));
+        }
+        if (this._isBenignMissingFileError(err)) {
+          this._warnMissingFileOncePerHour(filename);
+          return Promise.resolve(null);
         }
         return Promise.reject(err);
       }
@@ -763,6 +794,10 @@ class DviTraceWatcher extends EventEmitter {
         }, (err, stdout) => {
           if (err) {
             if (err.killed) return reject(new Error(`ETIMEDOUT: cat ${filename} killed after 15s (SMB mount hung)`));
+            if (this._isBenignMissingFileError(err)) {
+              this._warnMissingFileOncePerHour(filename);
+              return resolve(null);
+            }
             return reject(err);
           }
           resolve(stdout);

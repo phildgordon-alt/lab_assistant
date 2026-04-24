@@ -1761,7 +1761,23 @@ function _ratchetDownInterval() {
   }
 }
 
-function _deriveDeltaCursor(db) {
+function _deriveDeltaCursor(db, type) {
+  // Take the HIGHER of (a) persisted per-type cursor and (b) max(completed_at) in
+  // picks_history minus the 30s overlap. This breaks the all-dupes cliff: when a
+  // tick fetches 5000 rows that all hit INSERT OR IGNORE, MAX doesn't move — but
+  // _drainType has persisted the last fetched row's creationDate, so the next
+  // tick resumes AFTER it instead of refetching the same window.
+  let dbCursorMs = -Infinity;
+  let historyCursorMs = -Infinity;
+  try {
+    if (type !== undefined && type !== null && typeof db.getDeltaCursor === 'function') {
+      const persisted = db.getDeltaCursor(type);
+      if (persisted) {
+        const t = new Date(persisted).getTime();
+        if (!Number.isNaN(t)) dbCursorMs = t;
+      }
+    }
+  } catch (e) { /* fall through */ }
   try {
     const row = db.db.prepare(`
       SELECT MAX(completed_at) AS max_completed
@@ -1770,11 +1786,13 @@ function _deriveDeltaCursor(db) {
     `).get();
     if (row && row.max_completed) {
       const t = new Date(row.max_completed).getTime();
-      if (!Number.isNaN(t)) return new Date(t - DELTA_POLL_OVERLAP_MS).toISOString();
+      if (!Number.isNaN(t)) historyCursorMs = t - DELTA_POLL_OVERLAP_MS;
     }
   } catch (e) {
     console.warn(`[ItemPath] delta-poll: cursor derivation failed (${e.message}), using fallback`);
   }
+  const best = Math.max(dbCursorMs, historyCursorMs);
+  if (Number.isFinite(best)) return new Date(best).toISOString();
   return new Date(Date.now() - DELTA_POLL_FALLBACK_MS).toISOString();
 }
 
@@ -1825,28 +1843,47 @@ async function _drainType(ipFetchFn, db, type, startCursor) {
   let cursor = startCursor;
   let totalLines = 0;
   let totalInserted = 0;
+  let pages = 0;
   for (let p = 0; p < DELTA_POLL_MAX_PAGES; p++) {
     const resp = await _fetchDeltaPage(ipFetchFn, type, cursor);
     const rawTx = (resp && (resp.transactions || resp.data || resp)) || [];
     if (!Array.isArray(rawTx) || rawTx.length === 0) break;
+    pages++;
     const lines = [];
     for (const tx of rawTx) {
       const line = _txToLine(tx);
       if (line) lines.push(line);
     }
+    let pageInserted = 0;
     if (lines.length > 0) {
       const { inserted } = db.upsertPicksHistory(lines, 'tx');
+      pageInserted = inserted;
       totalInserted += inserted;
     }
     totalLines += rawTx.length;
-    if (rawTx.length < DELTA_POLL_PAGE_SIZE) break;
-    // Advance cursor to last row's creationDate to fetch the next page.
+    // Persist cursor BEFORE moving to next page. Use the last fetched row's
+    // creationDate (the natural pagination key) regardless of insert outcome.
     const last = rawTx[rawTx.length - 1];
     const lastTs = last && (last.creationDate || last.modifiedDate);
+    if (lastTs && typeof db.setDeltaCursor === 'function') {
+      // Tie-break: if every row was a dupe AND the page was full, MAX won't
+      // advance and the next tick would refetch the same window forever. Bump
+      // by +1ms so we step past the cliff. INSERT OR IGNORE keeps it safe.
+      let toPersist = lastTs;
+      if (pageInserted === 0 && rawTx.length === DELTA_POLL_PAGE_SIZE) {
+        const ms = new Date(lastTs).getTime();
+        if (!Number.isNaN(ms)) {
+          toPersist = new Date(ms + 1).toISOString();
+          console.warn(`[ItemPath] delta-poll: bumped cursor +1ms (all-dupes tick on type=${type})`);
+        }
+      }
+      db.setDeltaCursor(type, toPersist, Date.now());
+    }
+    if (rawTx.length < DELTA_POLL_PAGE_SIZE) break;
     if (!lastTs) break;
     cursor = lastTs;
   }
-  return { fetched: totalLines, inserted: totalInserted };
+  return { fetched: totalLines, inserted: totalInserted, pages };
 }
 
 // Exported so tests can call it directly with an injected ipFetch + db.
@@ -1856,10 +1893,17 @@ async function pollTransactionsDelta(ipFetchFn = ipFetch, dbModule = null) {
     console.log('[ItemPath] delta-poll: skipping (conservation mode)');
     return { skipped: true };
   }
-  const cursor = _deriveDeltaCursor(db);
+  // Per-type cursor (picks=4, puts=3): each endpoint has its own pagination
+  // boundary persisted in delta_poll_cursor. Falls back to picks_history
+  // MAX(completed_at) and finally to (now - 5min) on a cold table.
+  const picksCursor = _deriveDeltaCursor(db, 4);
+  const putsCursor  = _deriveDeltaCursor(db, 3);
+  // Keep `cursor` as the older of the two for downstream logging compat.
+  const cursor = (new Date(picksCursor).getTime() <= new Date(putsCursor).getTime())
+    ? picksCursor : putsCursor;
   _deltaPollState.lastCursor = cursor;
   const t0 = Date.now();
-  console.log(`[ItemPath] delta-poll: tick start cursor=${cursor} interval=${_deltaPollState.interval/1000}s`);
+  console.log(`[ItemPath] delta-poll: tick start picksCursor=${picksCursor} putsCursor=${putsCursor} interval=${_deltaPollState.interval/1000}s`);
 
   // Hard per-tick watchdog — if fetches hang past 60s, abort and log.
   // _fetchQueue head-of-line issues can block past AbortSignal in practice,
@@ -1873,8 +1917,8 @@ async function pollTransactionsDelta(ipFetchFn = ipFetch, dbModule = null) {
     );
   });
   const work = (async () => {
-    const picks = await _drainType(ipFetchFn, db, 4, cursor);
-    const puts  = await _drainType(ipFetchFn, db, 3, cursor);
+    const picks = await _drainType(ipFetchFn, db, 4, picksCursor);
+    const puts  = await _drainType(ipFetchFn, db, 3, putsCursor);
     return { picks, puts };
   })();
 

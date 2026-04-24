@@ -531,6 +531,18 @@ try {
 try { db.exec(`ALTER TABLE picks_history ADD COLUMN source TEXT DEFAULT NULL`); } catch (e) { /* already exists */ }
 try { db.exec(`CREATE INDEX IF NOT EXISTS idx_picks_hist_source ON picks_history(source)`); } catch (e) { /* already exists */ }
 
+// Delta-poll cursor persistence (2026-04-23 §3 fix): single-row-per-type cursor
+// store so the in-memory cursor survives process restarts AND so consecutive
+// all-dupe ticks can advance past the stuck max(completed_at) cliff.
+// Keys: type=4 (picks), type=3 (puts).
+db.exec(`
+  CREATE TABLE IF NOT EXISTS delta_poll_cursor (
+    type INTEGER PRIMARY KEY,
+    cursor TEXT,
+    updated_at INTEGER
+  );
+`);
+
 // Transactions — persistent mirror of ItemPath /api/transactions (append-only, forever retention).
 // Split: hot table (scalar columns) + transactions_raw (JSON blob) to keep hot-table scan-friendly.
 db.exec(`
@@ -3746,6 +3758,35 @@ function getHourlyStatsCached(labDayStartUtcIso, labDayEndUtcIso) {
   return { picks, puts, cached: false, ageMs: 0 };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DELTA POLL CURSOR (2026-04-23 §3): per-type cursor persistence so the
+// itempath-adapter delta-poll can resume after restart AND can advance past
+// all-dupe ticks (where MAX(completed_at) doesn't move because every fetched
+// row hit INSERT OR IGNORE).
+// ─────────────────────────────────────────────────────────────────────────────
+const _getDeltaCursorStmt = db.prepare(`SELECT cursor FROM delta_poll_cursor WHERE type = ?`);
+const _setDeltaCursorStmt = db.prepare(`
+  INSERT INTO delta_poll_cursor (type, cursor, updated_at)
+  VALUES (?, ?, ?)
+  ON CONFLICT(type) DO UPDATE SET cursor = excluded.cursor, updated_at = excluded.updated_at
+`);
+function getDeltaCursor(type) {
+  try {
+    const row = _getDeltaCursorStmt.get(type);
+    return row && row.cursor ? row.cursor : null;
+  } catch (e) {
+    return null;
+  }
+}
+function setDeltaCursor(type, isoString, ms) {
+  if (!isoString) return;
+  try {
+    _setDeltaCursorStmt.run(type, isoString, ms || Date.now());
+  } catch (e) {
+    // non-fatal — next tick will try again
+  }
+}
+
 module.exports = {
   db,
   logSync,
@@ -3777,6 +3818,9 @@ module.exports = {
   upsertAlerts,
   upsertPicks,
   upsertPicksHistory,
+  // Delta-poll cursor persistence (itempath-adapter)
+  getDeltaCursor,
+  setDeltaCursor,
   upsertTransactions,
   // DB-backed hourly stats (side-by-side with in-memory; see verify endpoint)
   getHourlyPickStats,

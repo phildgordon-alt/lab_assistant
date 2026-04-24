@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  DISABLED — 2026-04-22
+  This plist was a third mounter of //dvi@192.168.0.27/visdir and caused mount stacking
+  (with smb-mount-watchdog + start-server.sh) that produced intermittent ENOENT.
+  smb-mount-watchdog.sh (60s LaunchAgent) is now the sole mounter.
+  Do not re-enable this plist. If this file is loaded on prod, unload it:
+    launchctl unload ~/Library/LaunchAgents/com.paireyewear.labassistant.dvimount.plist
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
     <string>com.paireyewear.labassistant.dvimount</string>
+    <key>Disabled</key>
+    <true/>
     <key>ProgramArguments</key>
     <array>
-        <string>/sbin/mount_smbfs</string>
-        <string>//dvi:dvi@192.168.0.27/visdir</string>
-        <string>/Users/Shared/lab_assistant/data/dvi/visdir</string>
+        <string>/bin/true</string>
     </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>StartInterval</key>
-    <integer>300</integer>
-    <key>StandardErrorPath</key>
-    <string>/Users/Shared/lab_assistant/server/data/dvimount-error.log</string>
-    <key>StandardOutPath</key>
-    <string>/Users/Shared/lab_assistant/server/data/dvimount.log</string>
 </dict>
 </plist>
