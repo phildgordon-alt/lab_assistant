@@ -130,6 +130,9 @@ function makeTier3Update(db) {
 }
 
 // ── Mirror of Tier 3 lookup. ──
+// INNER JOIN (not LEFT): filters to picks whose SKU is a known lens SKU,
+// so ORDER BY completed_at DESC LIMIT 1 picks the most recent LENS pick
+// rather than a more-recent frame pick whose UPC isn't in lens_sku_properties.
 function makeTier3Lookup(db) {
   return db.prepare(`
     SELECT ph.sku        AS sku,
@@ -137,7 +140,7 @@ function makeTier3Lookup(db) {
            lsp.lens_type_modal AS lens_type_modal,
            lsp.base_curve AS base_curve
     FROM picks_history ph
-    LEFT JOIN lens_sku_properties lsp ON lsp.sku = ph.sku
+    JOIN lens_sku_properties lsp ON lsp.sku = ph.sku
     WHERE ph.order_id = ?
     ORDER BY ph.completed_at DESC
     LIMIT 1
@@ -312,17 +315,40 @@ test('candidate with no source returns tier=null', () => {
 
 // ─── T4b: pick exists but SKU not in lens_sku_properties → also skip. ──────
 section('T4b: pick exists but SKU has no lens_sku_properties row → skip');
-test('Tier 3 lookup returns row with NULL lens_type_modal+material → skip', () => {
+test('Tier 3 lookup returns no row when SKU unknown (INNER JOIN) → skip', () => {
   const db = makeDb();
   db.prepare(`INSERT INTO jobs (invoice, status, current_stage) VALUES ('100005', 'ACTIVE', 'CUTTING')`).run();
   db.prepare(`INSERT INTO picks_history (pick_id, order_id, sku, completed_at) VALUES ('p5', '100005', 'UNKNOWN-SKU', '2026-04-22T09:00:00Z')`).run();
-  // No lens_sku_properties row → LEFT JOIN returns NULL for material/lens_type_modal.
+  // No lens_sku_properties row → INNER JOIN drops the pick → lookup returns no row.
   const backfill = makeBackfill(db);
 
   const r = backfill('100005', { tier1Xml: null, tier2Xml: null });
   assert.equal(r.tier, null);
   const row = db.prepare(`SELECT * FROM jobs WHERE invoice = '100005'`).get();
   assert.equal(row.lens_type, null);
+});
+
+// ─── T8: lens + frame picks for same order, frame picked LAST → pick LENS ──
+section('T8: multi-pick order — frame pick is most recent, lens pick must win');
+test('Tier 3 picks the lens pick (older completed_at) over the frame pick (newer)', () => {
+  const db = makeDb();
+  db.prepare(`INSERT INTO jobs (invoice, status, current_stage) VALUES ('100008', 'ACTIVE', 'ASSEMBLY')`).run();
+  // Lens pick: older completed_at, SKU IS in lens_sku_properties.
+  db.prepare(`INSERT INTO picks_history (pick_id, order_id, sku, completed_at) VALUES ('p8-lens',  '100008', '4800135412',   '2026-04-22T09:00:00Z')`).run();
+  // Frame pick: NEWER completed_at, SKU is a frame UPC, NOT in lens_sku_properties.
+  db.prepare(`INSERT INTO picks_history (pick_id, order_id, sku, completed_at) VALUES ('p8-frame', '100008', '196016590793', '2026-04-22T10:00:00Z')`).run();
+  db.prepare(`INSERT INTO lens_sku_properties (sku, material, lens_type_modal, base_curve) VALUES ('4800135412', 'PLY', 'P', 4.0)`).run();
+  // Note: NO lens_sku_properties row for the frame UPC '196016590793'.
+  const backfill = makeBackfill(db);
+
+  const r = backfill('100008', { tier1Xml: null, tier2Xml: null });
+  assert.equal(r.tier, 3, 'Tier 3 must resolve, not silently skip');
+  assert.equal(r.tier3.lens_opc_r, '4800135412', 'must pick the LENS SKU, not the frame UPC');
+  const row = db.prepare(`SELECT * FROM jobs WHERE invoice = '100008'`).get();
+  assert.equal(row.lens_type, 'P', 'lens_type filled from lens_type_modal');
+  assert.equal(row.lens_material, 'PLY');
+  assert.equal(row.lens_opc_r, '4800135412', 'lens SKU written, not frame UPC');
+  assert.equal(row.current_stage, 'ASSEMBLY', 'current_stage preserved');
 });
 
 // ─── T5: parseTraceLine validation ──────────────────────────────────────────

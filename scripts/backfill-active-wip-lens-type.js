@@ -172,13 +172,21 @@ function main() {
   // / base_curve. Those columns live on lens_sku_properties (the empirical
   // 12-month aggregation table). Verified via sqlite_master on dev DB.
   // Use lens_sku_properties for the parametric lookup.
+  //
+  // INNER JOIN (not LEFT) — each order has multiple picks (lens + frame).
+  // A LEFT JOIN + ORDER BY completed_at DESC LIMIT 1 returns the most recent
+  // pick of any kind: when the frame was picked last, ph.sku is a frame UPC
+  // not in lens_sku_properties, the join yields NULL material/lens_type_modal,
+  // and Tier 3 silently skips. The INNER JOIN filters picks down to those
+  // whose SKU IS in lens_sku_properties (i.e. lens picks), so LIMIT 1 then
+  // correctly picks the most recent LENS pick.
   const tier3Lookup = db.prepare(`
     SELECT ph.sku        AS sku,
            lsp.material  AS material,
            lsp.lens_type_modal AS lens_type_modal,
            lsp.base_curve AS base_curve
     FROM picks_history ph
-    LEFT JOIN lens_sku_properties lsp ON lsp.sku = ph.sku
+    JOIN lens_sku_properties lsp ON lsp.sku = ph.sku
     WHERE ph.order_id = ?
     ORDER BY ph.completed_at DESC
     LIMIT 1
