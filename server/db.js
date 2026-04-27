@@ -3278,6 +3278,11 @@ const upsertJobFromTraceStmt = db.prepare(`
 
 function upsertJobFromTrace(j) {
   if (!j || !j.invoice) return;
+  // Defense-in-depth: parseTraceLine() now drops non-numeric invoices, but a
+  // bad caller (test harness, future code path, or a SQLite restore from a
+  // corrupted dvi_trace_jobs row) can still reach here. Reject anything that
+  // isn't an all-digit invoice ≥4 chars so the jobs PK stays clean.
+  if (!/^\d{4,}$/.test(String(j.invoice))) return;
   // Derive status from stage — stage is source of truth. Don't let stale 'ACTIVE'
   // from the caller outlive a CANCELED/SHIPPED stage transition.
   const stage = (j.stage || '').toUpperCase();

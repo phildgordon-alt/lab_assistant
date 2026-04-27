@@ -56,6 +56,12 @@ function getTodayFilename() {
   return `LT${yy}${mm}${dd}.DAT`;
 }
 
+// Module-level counter for malformed lines dropped by invoice validation.
+// Logged every 100 hits so silent corruption (e.g. a half-written tail line, a
+// junk row produced by a DVI station bug) doesn't go unnoticed but also
+// doesn't spam the log on cold-start replay of a corrupted historical file.
+let _corruptLineCount = 0;
+
 function parseTraceLine(line) {
   const parts = line.split('\t');
   if (parts.length < 6) return null;
@@ -73,6 +79,17 @@ function parseTraceLine(line) {
   const logPort = (parts[10] || '').trim();
 
   if (!invNum || !station) return null;
+  // Invoice numbers are always all-digit, ≥4 chars. Anything else is a
+  // malformed line — a date leaked into the invoice column ('20260413'), a
+  // tiny tray-only row ('11', '1'), or alphabetic garbage. Drop it so the
+  // jobs table never gets seeded with a non-numeric primary key (the
+  // 19-row corruption we are cleaning up downstream came in this way).
+  if (!/^\d{4,}$/.test(invNum)) {
+    if (++_corruptLineCount % 100 === 0) {
+      console.warn(`[DVI-Trace] dropped ${_corruptLineCount} malformed lines (sample invoice='${invNum}')`);
+    }
+    return null;
+  }
 
   return {
     tray,
@@ -391,6 +408,13 @@ class DviTraceWatcher extends EventEmitter {
 
           const text = data.toString('utf8');
           const lines = text.split(/\r?\n/);
+          // Mirror the live-poll partialLine handling: if the file doesn't
+          // end in a newline, the last "line" is a half-written record (DVI
+          // was mid-append when we read). Drop it so we never parse a
+          // truncated row at the file boundary. The byte offset stays at
+          // data.length anyway — the next live poll re-reads from there
+          // and will pick up the now-complete line.
+          if (!/\n$/.test(text) && lines.length > 0) lines.pop();
           let parsed = 0;
 
           for (const line of lines) {

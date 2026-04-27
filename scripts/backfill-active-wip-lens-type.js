@@ -29,7 +29,8 @@ const path = require('path');
 
 const ROOT = path.resolve(__dirname, '..');
 const DB_PATH = path.join(ROOT, 'data', 'lab_assistant.db');
-const JOBS_DIR = path.join(ROOT, 'data', 'dvi', 'jobs');
+const JOBS_DIR = path.join(ROOT, 'data', 'dvi', 'jobs');           // Tier 1: inbound XML
+const SHIPPED_DIR = path.join(ROOT, 'data', 'dvi', 'shipped');     // Tier 2: SHIPLOG XML
 const REPORTS_DIR = path.join(ROOT, 'data', 'backfill-reports');
 
 const APPLY = process.argv.includes('--apply');
@@ -165,16 +166,80 @@ function main() {
       updated_at    = datetime('now')
   `);
 
+  // Tier 3 lookup — picks_history JOIN lens_sku_properties.
+  // NOTE: planner spec said `lens_sku_params` but that table only holds
+  // planning weeks/ABC class — it does NOT carry material / lens_type_modal
+  // / base_curve. Those columns live on lens_sku_properties (the empirical
+  // 12-month aggregation table). Verified via sqlite_master on dev DB.
+  // Use lens_sku_properties for the parametric lookup.
+  const tier3Lookup = db.prepare(`
+    SELECT ph.sku        AS sku,
+           lsp.material  AS material,
+           lsp.lens_type_modal AS lens_type_modal,
+           lsp.base_curve AS base_curve
+    FROM picks_history ph
+    LEFT JOIN lens_sku_properties lsp ON lsp.sku = ph.sku
+    WHERE ph.order_id = ?
+    ORDER BY ph.completed_at DESC
+    LIMIT 1
+  `);
+
+  // Tier 3 writer — UPDATE-only with COALESCE. Does NOT touch status /
+  // current_stage. Distinct from upsertJobClassificationFromXML because we
+  // only have a small slice of fields (sku, material, lens_type_modal).
+  const tier3Update = db.prepare(`
+    UPDATE jobs SET
+      lens_type     = COALESCE(lens_type, @lens_type),
+      lens_material = COALESCE(lens_material, @lens_material),
+      lens_opc_r    = COALESCE(lens_opc_r, @lens_opc_r),
+      updated_at    = datetime('now')
+    WHERE invoice = @invoice
+  `);
+
   const stats = {
     examined: 0,
-    wouldFill: 0,         // dry-run: would have writeable lens_type
-    filled: 0,            // apply: actually filled
-    missingXml: 0,
+    // Per-tier success counters (apply mode = filled, dry mode = would-fill).
+    tier1Filled: 0,    // inbound XML resolved
+    tier2Filled: 0,    // SHIPLOG XML resolved
+    tier3Filled: 0,    // picks_history → lens_sku_properties resolved
+    noSource: 0,       // skipped: no XML, no usable pick row
     parseError: 0,
     noLensTypeInXml: 0,
     errors: 0,
     byType: {},
+    byTier: { 1: 0, 2: 0, 3: 0 },
   };
+
+  // Try Tier 1 (inbound XML) → returns parsed object or null.
+  function tryTier1(invoice) {
+    const xmlPath = path.join(JOBS_DIR, `${invoice}.xml`);
+    let raw;
+    try { raw = fs.readFileSync(xmlPath, 'utf8'); } catch { return null; }
+    return parseDviXmlClassification(raw);
+  }
+
+  // Try Tier 2 (SHIPLOG XML) → returns parsed object or null.
+  function tryTier2(invoice) {
+    const xmlPath = path.join(SHIPPED_DIR, `${invoice}.xml`);
+    let raw;
+    try { raw = fs.readFileSync(xmlPath, 'utf8'); } catch { return null; }
+    return parseDviXmlClassification(raw);
+  }
+
+  // Try Tier 3 (picks_history → lens_sku_properties) → returns
+  // { lens_type, lens_material, lens_opc_r } or null.
+  // lens_type_modal codes: 'S' single-vision, 'P' puck/surfacing,
+  // 'C' (other / kept as-is — only fills if NULL).
+  function tryTier3(invoice) {
+    const row = tier3Lookup.get(invoice);
+    if (!row) return null;                       // no pick row
+    if (!row.lens_type_modal && !row.material) return null; // SKU not in lens_sku_properties
+    return {
+      lens_type:     row.lens_type_modal || null,
+      lens_material: row.material || null,
+      lens_opc_r:    row.sku || null,
+    };
+  }
 
   const tx = db.transaction((rows) => {
     for (const row of rows) {
@@ -182,31 +247,71 @@ function main() {
       if (stats.examined % 100 === 0) {
         process.stdout.write(`\r  progress: ${stats.examined}/${rows.length}`);
       }
-      const xmlPath = path.join(JOBS_DIR, `${row.invoice}.xml`);
-      let raw;
-      try { raw = fs.readFileSync(xmlPath, 'utf8'); }
-      catch {
-        stats.missingXml++;
-        reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\tmissing-xml`);
-        continue;
-      }
-      let parsed;
-      try { parsed = parseDviXmlClassification(raw); }
-      catch (e) {
-        stats.parseError++;
-        reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\tparse-error:${e.message}`);
-        continue;
-      }
-      if (!parsed.lensType) {
-        stats.noLensTypeInXml++;
-        reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\txml-has-no-lensType`);
-        continue;
-      }
-      stats.wouldFill++;
-      stats.byType[parsed.lensType] = (stats.byType[parsed.lensType] || 0) + 1;
 
-      if (APPLY) {
+      // Per-job tier resolution: 1 → 2 → 3 → skip.
+      // Each tier returns a result if it fully resolved, else falls through.
+      let tier = null;
+      let parsed = null;
+      let tier3Result = null;
+
+      // ── Tier 1 ──
+      try {
+        parsed = tryTier1(row.invoice);
+      } catch (e) {
+        stats.parseError++;
+        reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\ttier1-parse-error:${e.message}`);
+        // Don't continue — fall through to tier 2.
+        parsed = null;
+      }
+      if (parsed && parsed.lensType) {
+        tier = 1;
+      } else if (parsed) {
+        // Inbound XML existed but had no lensType. Don't double-count as
+        // missing — try the next tier silently.
+        parsed = null;
+      }
+
+      // ── Tier 2 ──
+      if (!tier) {
         try {
+          parsed = tryTier2(row.invoice);
+        } catch (e) {
+          stats.parseError++;
+          reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\ttier2-parse-error:${e.message}`);
+          parsed = null;
+        }
+        if (parsed && parsed.lensType) {
+          tier = 2;
+        } else {
+          parsed = null;
+        }
+      }
+
+      // ── Tier 3 ──
+      if (!tier) {
+        tier3Result = tryTier3(row.invoice);
+        if (tier3Result && tier3Result.lens_type) {
+          tier = 3;
+        }
+      }
+
+      if (!tier) {
+        stats.noSource++;
+        reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\tno-source-available`);
+        continue;
+      }
+
+      stats.byTier[tier]++;
+      const fillType = tier === 3 ? tier3Result.lens_type : parsed.lensType;
+      stats.byType[fillType] = (stats.byType[fillType] || 0) + 1;
+      if (tier === 1) stats.tier1Filled++;
+      else if (tier === 2) stats.tier2Filled++;
+      else if (tier === 3) stats.tier3Filled++;
+
+      if (!APPLY) continue;
+
+      try {
+        if (tier === 1 || tier === 2) {
           upsert.run({
             invoice:       row.invoice,
             reference:     parsed.reference || null,
@@ -228,11 +333,17 @@ function main() {
             frame_name:    parsed.frameName || null,
             frame_style:   parsed.frameStyle || null,
           });
-          stats.filled++;
-        } catch (e) {
-          stats.errors++;
-          reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\twrite-error:${e.message}`);
+        } else {
+          tier3Update.run({
+            invoice:       row.invoice,
+            lens_type:     tier3Result.lens_type,
+            lens_material: tier3Result.lens_material,
+            lens_opc_r:    tier3Result.lens_opc_r,
+          });
         }
+      } catch (e) {
+        stats.errors++;
+        reportLines.push(`${row.invoice}\t${row.current_stage || ''}\t${row.current_station || ''}\ttier${tier}-write-error:${e.message}`);
       }
     }
   });
@@ -242,11 +353,14 @@ function main() {
   fs.writeFileSync(reportPath, reportLines.join('\n') + '\n');
   console.log(`[backfill] wrote report: ${reportPath}`);
 
+  const totalFilled = stats.tier1Filled + stats.tier2Filled + stats.tier3Filled;
   if (APPLY) {
     console.log(`[backfill] examined: ${stats.examined}`);
-    console.log(`[backfill] filled: ${stats.filled}`);
-    console.log(`[backfill] missing xml: ${stats.missingXml}`);
-    console.log(`[backfill] xml-has-no-lensType: ${stats.noLensTypeInXml}`);
+    console.log(`[backfill] filled total: ${totalFilled}`);
+    console.log(`[backfill]   tier1 inbound XML:   ${stats.tier1Filled}`);
+    console.log(`[backfill]   tier2 SHIPLOG XML:   ${stats.tier2Filled}`);
+    console.log(`[backfill]   tier3 picks_history: ${stats.tier3Filled}`);
+    console.log(`[backfill] no source available: ${stats.noSource}`);
     console.log(`[backfill] parse errors: ${stats.parseError}`);
     console.log(`[backfill] write errors: ${stats.errors}`);
     console.log(`[backfill] new lens_type distribution:`, stats.byType);
@@ -255,7 +369,12 @@ function main() {
     `).get().n;
     console.log(`[backfill] post-apply ACTIVE rows still NULL lens_type: ${remaining}`);
   } else {
-    console.log(`[backfill] DRY RUN — would fill ${stats.wouldFill} jobs, ${stats.missingXml} missing XML, ${stats.noLensTypeInXml} XML present but no lensType, ${stats.parseError} parse errors.`);
+    console.log(`[backfill] DRY RUN — would fill ${totalFilled} jobs total:`);
+    console.log(`[backfill]   tier1 inbound XML:   ${stats.tier1Filled}`);
+    console.log(`[backfill]   tier2 SHIPLOG XML:   ${stats.tier2Filled}`);
+    console.log(`[backfill]   tier3 picks_history: ${stats.tier3Filled}`);
+    console.log(`[backfill]   no source available: ${stats.noSource}`);
+    console.log(`[backfill]   parse errors:        ${stats.parseError}`);
     console.log(`[backfill] new lens_type distribution (would-be):`, stats.byType);
     console.log(`[backfill] re-run with --apply to commit.`);
   }
