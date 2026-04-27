@@ -2947,12 +2947,29 @@ function convertDate(raw) {
   return raw; // already ISO or unknown format
 }
 
+// Back-prop: dvi_shipped_jobs is the authoritative XML ground truth for SHIP.
+// If the trace ever misses a SHIP event (e.g. partial-replay-overwrite bug pre
+// commit 6126095), the unified jobs row can be left at SHIPPING forever. Flip
+// it here in the same transaction as the XML upsert so the two tables can't drift.
+// Idempotent — WHERE clause skips already-SHIPPED rows.
+const backPropShippedToJobsStmt = db.prepare(`
+  UPDATE jobs
+  SET status = 'SHIPPED', current_stage = 'SHIPPED', updated_at = datetime('now')
+  WHERE invoice = ?
+    AND (status != 'SHIPPED' OR current_stage IS NULL OR current_stage != 'SHIPPED')
+`);
+
+const upsertShippedJobTxn = db.transaction((args, invoice) => {
+  upsertShippedJobStmt.run(...args);
+  backPropShippedToJobsStmt.run(invoice);
+});
+
 function upsertShippedJob(p) {
   if (!p || !p.invoice) return;
   const rx = p.rx || {};
   const R = rx.R || {};
   const L = rx.L || {};
-  upsertShippedJobStmt.run(
+  const args = [
     p.invoice, p.reference || null, p.tray || null, p.rxNum || null,
     convertDate(p.entryDate), p.entryTime || null,
     convertDate(p.shipDate), p.shipTime || null,
@@ -2965,8 +2982,9 @@ function upsertShippedJob(p) {
     p.frameUpc || null, p.frameName || null, p.frameStyle || null, p.frameSku || null, p.frameMfr || null, p.frameColor || null,
     p.eyeSize || null, p.bridge || null, p.edgeType || null,
     R.sphere || null, R.cylinder || null, R.axis || null, R.pd || null, R.add || null,
-    L.sphere || null, L.cylinder || null, L.axis || null, L.pd || null, L.add || null
-  );
+    L.sphere || null, L.cylinder || null, L.axis || null, L.pd || null, L.add || null,
+  ];
+  upsertShippedJobTxn(args, p.invoice);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3363,6 +3381,83 @@ function upsertJobFromXML(p) {
     p.eyeSize || null, p.bridge || null, p.edgeType || null,
     R.sphere || null, R.cylinder || null, R.axis || null, R.pd || null, R.add || null,
     L.sphere || null, L.cylinder || null, L.axis || null, L.pd || null, L.add || null
+  );
+}
+
+// ── Classification-only enrichment from inbound XML ─────────────────────────
+// Backfills `lens_type`, `coating`, `lens_material`, `frame_*`, etc. on rows
+// born via the trace path (which never carries lensType). This is the missing
+// write that left 88% of active WIP with NULL lens_type. Pure UPDATE for
+// classification slots — does NOT touch status, current_stage, current_station,
+// first_seen_at, last_event_at, or any trace-derived fields. If the row
+// doesn't yet exist (XML landed before first trace event), seed with
+// status='ACTIVE' and current_stage='INCOMING'.
+const upsertJobClassificationFromXMLStmt = db.prepare(`
+  INSERT INTO jobs (invoice, reference, rx_number, entry_date, entry_time,
+                    department, job_type, is_hko,
+                    lens_type, lens_material, lens_style, lens_color,
+                    coating, coat_type, lens_opc_r, lens_opc_l,
+                    frame_upc, frame_name, frame_style,
+                    status, current_stage, updated_at)
+  VALUES (?, ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?,
+          'ACTIVE', 'INCOMING', datetime('now'))
+  ON CONFLICT(invoice) DO UPDATE SET
+    reference     = COALESCE(jobs.reference,     excluded.reference),
+    rx_number     = COALESCE(jobs.rx_number,     excluded.rx_number),
+    entry_date    = COALESCE(jobs.entry_date,    excluded.entry_date),
+    entry_time    = COALESCE(jobs.entry_time,    excluded.entry_time),
+    department    = COALESCE(jobs.department,    excluded.department),
+    job_type      = COALESCE(jobs.job_type,      excluded.job_type),
+    is_hko        = MAX(jobs.is_hko, excluded.is_hko),
+    lens_type     = COALESCE(jobs.lens_type,     excluded.lens_type),
+    lens_material = COALESCE(jobs.lens_material, excluded.lens_material),
+    lens_style    = COALESCE(jobs.lens_style,    excluded.lens_style),
+    lens_color    = COALESCE(jobs.lens_color,    excluded.lens_color),
+    coating       = COALESCE(jobs.coating,       excluded.coating),
+    coat_type     = COALESCE(jobs.coat_type,     excluded.coat_type),
+    lens_opc_r    = COALESCE(jobs.lens_opc_r,    excluded.lens_opc_r),
+    lens_opc_l    = COALESCE(jobs.lens_opc_l,    excluded.lens_opc_l),
+    frame_upc     = COALESCE(jobs.frame_upc,     excluded.frame_upc),
+    frame_name    = COALESCE(jobs.frame_name,    excluded.frame_name),
+    frame_style   = COALESCE(jobs.frame_style,   excluded.frame_style),
+    -- Do NOT change status / current_stage on an existing row — those are
+    -- owned by upsertJobFromTrace (active WIP) and upsertJobFromXML (SHIPPED).
+    -- This UPSERT must never transition SHIPPED → ACTIVE or COATING → INCOMING.
+    updated_at    = datetime('now')
+`);
+
+function upsertJobClassificationFromXML(p) {
+  if (!p || !p.invoice) return;
+  // parseDviXml() emits lensMat/lensOpc; upsertJobFromXML reads
+  // lensMaterial/lensOpcR (a pre-existing field-name mismatch, out of scope
+  // here per the spec — see notes). Accept either shape so callers using the
+  // raw parser output don't silently drop these fields.
+  const lensMaterial = p.lensMaterial != null ? p.lensMaterial : p.lensMat;
+  const lensOpcR     = p.lensOpcR     != null ? p.lensOpcR     : p.lensOpc;
+  upsertJobClassificationFromXMLStmt.run(
+    p.invoice,
+    p.reference || null,
+    p.rxNum || p.rxNumber || null,
+    p.entryDate || null,
+    p.entryTime || null,
+    p.department || null,
+    p.jobType || null,
+    p.isHko ? 1 : 0,
+    p.lensType || null,
+    lensMaterial || null,
+    p.lensStyle || null,
+    p.lensColor || null,
+    p.coating || null,
+    p.coatType || null,
+    lensOpcR || null,
+    p.lensOpcL || null,
+    p.frameUpc || null,
+    p.frameName || null,
+    p.frameStyle || null
   );
 }
 
@@ -3934,6 +4029,7 @@ module.exports = {
   // Unified jobs table
   upsertJobFromTrace,
   upsertJobFromXML,
+  upsertJobClassificationFromXML,
   upsertJobFromSOM,
   upsertJobFromLooker,
   insertJobEvent,

@@ -18,6 +18,26 @@ process.on('unhandledRejection', (reason) => {
   try { fs.appendFileSync(logFile, msg); } catch {}
 });
 
+// Sidecar warnings log for NPI export endpoints. The supplier-facing CSV
+// strips all `# WARNING:` / `# NOTE:` lines (Phil ships those CSVs verbatim
+// to manufacturers). Anything stripped is appended here for audit + recovery.
+// One log file per scenario per kind (sv|semi) per day; appended on every
+// export so multiple downloads accumulate.
+function writeNpiExportWarnings(scenarioId, kind, dateIso, warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return;
+  try {
+    const dir = path.join(__dirname, '..', 'data', 'npi-export-warnings');
+    fs.mkdirSync(dir, { recursive: true });
+    const safeId = String(scenarioId).replace(/[^A-Za-z0-9_-]/g, '_');
+    const file = path.join(dir, `${safeId}-${kind}-${dateIso}.log`);
+    const ts = new Date().toISOString();
+    const body = warnings.map(w => `${ts}\t${w}`).join('\n') + '\n';
+    fs.appendFileSync(file, body);
+  } catch (e) {
+    console.error(`[NPI-Export] Failed to write warnings sidecar: ${e.message}`);
+  }
+}
+
 // ── Startup guard ──────────────────────────────────────────────
 // Refuse to start if another oven-timer-server.js is already running.
 // On 2026-04-04 someone launched this file manually from Terminal.app on
@@ -82,6 +102,25 @@ const { URL } = require('url');
 
 // ── SQLite database (shared with gateway MCP tools) ────────────
 const labDb = require('./db');
+
+// ── Startup self-heal: dvi_shipped_jobs → jobs back-prop ────────
+// Any job whose invoice is in dvi_shipped_jobs (XML ground truth) but whose
+// jobs row hasn't been flipped to SHIPPED. Catches drift between XML landing
+// and trace missing the SHIP event (root cause of the 20,345-row pile-up
+// cleaned up on prod before this fix shipped). Idempotent — safe on every boot,
+// safe to run alongside the in-line back-prop in upsertShippedJob.
+try {
+  const result = labDb.db.prepare(`
+    UPDATE jobs SET status='SHIPPED', current_stage='SHIPPED', updated_at = datetime('now')
+    WHERE invoice IN (SELECT invoice FROM dvi_shipped_jobs)
+      AND (status != 'SHIPPED' OR current_stage IS NULL OR current_stage != 'SHIPPED')
+  `).run();
+  if (result.changes > 0) {
+    console.log(`[startup] self-heal: flipped ${result.changes} jobs to SHIPPED based on dvi_shipped_jobs XML truth`);
+  }
+} catch (e) {
+  console.warn(`[startup] self-heal failed: ${e.message}`);
+}
 
 // ── Knowledge Base ──────────────────────────────────────────────
 const knowledge = require('./knowledge-adapter');
@@ -634,12 +673,36 @@ if (process.env.DEMO_MODE === 'true') {
   }, 2000);
 }
 
+// Persist classification fields from a freshly-arrived inbound DVI XML to the
+// jobs table. Fills the gap where trace-born rows have NULL lens_type (the
+// trace path never carries lensType). Reuses parseDviXml — no second parser.
+// Safe by design: upsertJobClassificationFromXML is UPDATE-mostly with COALESCE
+// on every classification slot, and never touches status / current_stage on
+// rows that already exist. See db.js for the full UPSERT body.
+function persistInboundXmlToJobsTable(evt) {
+  try {
+    if (!evt || !evt.path) return;
+    if (!fs.existsSync(evt.path)) return;
+    const xml = fs.readFileSync(evt.path, 'utf8');
+    const parsed = parseDviXml(xml);
+    if (!parsed || !parsed.invoice) return;
+    labDb.upsertJobClassificationFromXML(parsed);
+  } catch (e) {
+    console.error(`[DVI-Sync] persistInboundXmlToJobsTable failed: ${e.message}`);
+  }
+}
+
 // Also reload when dvi-sync copies new files
 dviSync.on('file', (evt) => {
   try {
     if (evt && evt.sync === 'jobs') {
       setTimeout(() => {
-        try { loadDviJobIndex(); }
+        try {
+          loadDviJobIndex();
+          // NEW: also persist classification fields to the jobs table so
+          // active WIP has lens_type before ship.
+          persistInboundXmlToJobsTable(evt);
+        }
         catch (e) { console.error(`[DVI-Sync] loadDviJobIndex failed after file event: ${e.message}`); }
       }, 1000);
     }
@@ -3224,7 +3287,9 @@ Respond with a structured batching plan in this format:
     if (out.error) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: out.error })); }
     const scn = out.totals?.scenario || {};
     const safeName = (scn.name || 'scenario').replace(/[^A-Za-z0-9_-]/g, '_');
-    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="npi-sv-stocking-${safeName}-${new Date().toISOString().slice(0,10)}.csv"` });
+    const today = new Date().toISOString().slice(0, 10);
+    writeNpiExportWarnings(id, 'sv', today, out.warnings);
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="npi-order-sv-${safeName}-${today}.csv"` });
     return res.end(out.csv);
   }
   if (req.method === 'GET' && url.pathname.startsWith('/api/npi/scenarios/') && url.pathname.endsWith('/rx-stocking-semi.csv')) {
@@ -3233,7 +3298,9 @@ Respond with a structured batching plan in this format:
     if (out.error) { res.writeHead(400, { 'Content-Type': 'application/json' }); return res.end(JSON.stringify({ error: out.error })); }
     const scn = out.totals?.scenario || {};
     const safeName = (scn.name || 'scenario').replace(/[^A-Za-z0-9_-]/g, '_');
-    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="npi-semi-stocking-${safeName}-${new Date().toISOString().slice(0,10)}.csv"` });
+    const today = new Date().toISOString().slice(0, 10);
+    writeNpiExportWarnings(id, 'semi', today, out.warnings);
+    res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="npi-order-semi-${safeName}-${today}.csv"` });
     return res.end(out.csv);
   }
   // Projected vs actual cannibalization variance for a scenario. Computes
