@@ -79,7 +79,7 @@ function main() {
       UPDATE jobs
       SET status = 'SHIPPED',
           ship_date = COALESCE(ship_date,
-                               (SELECT shipped_at FROM dvi_shipped_jobs WHERE invoice = jobs.invoice)),
+                               (SELECT ship_date FROM dvi_shipped_jobs WHERE invoice = jobs.invoice)),
           shipped_no_xref = 0,
           updated_at = datetime('now')
       WHERE invoice IN (SELECT invoice FROM dvi_shipped_jobs)
