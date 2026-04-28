@@ -354,12 +354,17 @@ async function fetchCloud(endpoint) {
 async function pollCloudIrvine2() {
   if (!UNIFI_CLOUD_KEY) return null;
   try {
-    const resp = await fetchCloud('/hosts');
-    const hosts = resp?.data || resp || [];
-    // The host record we want has hostname matching UNIFI_CLOUD_IRVINE2_HOST.
-    // The reported state on each host record carries the UDM device data —
-    // hostname/mac/ip live on the top-level `reportedState` object, with WAN
-    // info under `reportedState.wans`.
+    // Two cloud calls: /hosts → find Irvine 2's hostId by hostname match,
+    // /sites → find the site managed by that host (carries real WAN
+    // telemetry, ISP info, device/client counts).
+    const [hostsResp, sitesResp] = await Promise.all([
+      fetchCloud('/hosts'),
+      fetchCloud('/sites'),
+    ]);
+    const hosts = hostsResp?.data || hostsResp || [];
+    const sites = sitesResp?.data || sitesResp || [];
+
+    // Find the Irvine 2 host by hostname.
     const host = hosts.find(h => {
       const hn = h?.reportedState?.hostname || h?.reportedState?.name || '';
       return hn === UNIFI_CLOUD_IRVINE2_HOST;
@@ -371,16 +376,24 @@ async function pollCloudIrvine2() {
     const rs = host.reportedState || {};
     const hw = rs.hardware || {};
 
+    // Find the matching site by hostId — that's the rich one with WAN +
+    // ISP + counts (statistics.wans, statistics.ispInfo, statistics.counts).
+    const site = sites.find(s => s.hostId === host.id);
+    const stats = site?.statistics || {};
+    const counts = stats.counts || {};
+    const wans = stats.wans || {};
+    const primaryIsp = stats.ispInfo || {};
+
     // Synthesize a UDM device entry — same shape as normalizeDevice() output
     // so the frontend renders it without special-casing.
     const udm = {
       id: host.id || rs.mac || 'cloud-udm-irvine2',
       name: rs.hostname || rs.name || 'Irvine2 UDM',
       type: 'udm',
-      model: hw.shortname || hw.name || 'UDM',
+      model: hw.shortname || hw.name || stats.gateway?.shortname || 'UDM',
       ip: rs.ip || (rs.ipAddrs || [])[0] || null,
-      mac: rs.mac || null,
-      uptime: null, // not exposed by /ea/hosts
+      mac: rs.mac || stats.gateway?.hardwareId || null,
+      uptime: null,
       status: rs.state === 'connected' ? 'online' : 'offline',
       cpu_pct: 0,
       mem_pct: 0,
@@ -392,27 +405,66 @@ async function pollCloudIrvine2() {
       _source: 'cloud',
     };
 
-    // Synthesize the WAN health entry — getStatus() looks for one
-    // health.subsystem === 'wan' per site. Pull primary WAN from rs.wans.
-    const primaryWan = (rs.wans || []).find(w => w.type === 'WAN' && w.enabled) || (rs.wans || [])[0] || {};
-    const wanHealth = {
-      subsystem: 'wan',
-      status: rs.state === 'connected' ? 'ok' : 'down',
-      wan_ip: primaryWan.ipv4 || host.ipAddress || null,
-      isp_name: null, // /ea/hosts doesn't carry ISP name; could be backfilled via WHOIS
-      latency: null,
-      tx_bytes_r: 0,
-      rx_bytes_r: 0,
-      uptime: null,
-      _source: 'cloud',
+    // WAN health entries — emit one per WAN interface so dual-WAN tiles
+    // can render. getStatus() picks the first 'wan' subsystem entry, so
+    // primary (WAN) goes first.
+    const wanEntries = [];
+    const wanOrder = ['WAN', 'WAN2'];
+    for (const wname of wanOrder) {
+      const w = wans[wname];
+      if (!w) continue;
+      const isp = w.ispInfo || primaryIsp;
+      wanEntries.push({
+        subsystem: 'wan',
+        wan_label: wname,
+        status: (w.wanIssues || []).length === 0 ? 'ok' : 'warn',
+        wan_ip: w.externalIp || null,
+        isp_name: isp.name || isp.organization || null,
+        isp_asn: isp.asn || null,
+        latency: w.wanIssues?.[0]?.latencyAvgMs || null,
+        uptime: w.wanUptime != null ? w.wanUptime : null,
+        tx_bytes_r: 0,
+        rx_bytes_r: 0,
+        _source: 'cloud',
+      });
+    }
+    // Fallback if no /sites WAN data — use the bare host info we have.
+    if (wanEntries.length === 0) {
+      const primaryWan = (rs.wans || []).find(w => w.type === 'WAN' && w.enabled) || (rs.wans || [])[0] || {};
+      wanEntries.push({
+        subsystem: 'wan',
+        status: rs.state === 'connected' ? 'ok' : 'down',
+        wan_ip: primaryWan.ipv4 || host.ipAddress || null,
+        isp_name: null,
+        latency: null,
+        tx_bytes_r: 0,
+        rx_bytes_r: 0,
+        uptime: null,
+        _source: 'cloud-host-fallback',
+      });
+    }
+
+    // Per-site counts that the dashboard can use to override locally-
+    // derived totals when cloud has authoritative numbers (it does — the
+    // Irvine 2 UDM is the source of truth for its own site).
+    const cloudCounts = {
+      totalDevice: counts.totalDevice ?? null,
+      offlineDevice: counts.offlineDevice ?? null,
+      wifiDevice: counts.wifiDevice ?? null,
+      wiredDevice: counts.wiredDevice ?? null,
+      gatewayDevice: counts.gatewayDevice ?? null,
+      wifiClient: counts.wifiClient ?? null,
+      wiredClient: counts.wiredClient ?? null,
+      guestClient: counts.guestClient ?? null,
     };
 
     return {
       devices: [udm],
       clients: [],
-      health: [wanHealth],
+      health: wanEntries,
       alarms: [],
       events: [],
+      cloudCounts, // consumed by getStatus() to surface accurate Irvine 2 totals
     };
   } catch (e) {
     console.warn('[NETWORK] Cloud Irvine 2 enrichment failed:', e.message);
@@ -554,6 +606,9 @@ async function poll() {
         // health.wan: only fill if we don't already have one (controller poll wins)
         const hasWan = (s2.health || []).some(h => h.subsystem === 'wan');
         if (!hasWan) s2.health = (s2.health || []).concat(cloudIrvine2.health);
+        // Stash cloud-authoritative counts so getStatus() can surface them
+        // even when Site Magic federation only gives us a subset of devices.
+        if (cloudIrvine2.cloudCounts) s2._cloudCounts = cloudIrvine2.cloudCounts;
       }
 
       siteData[SITE_KEY_1] = s1;
@@ -948,20 +1003,35 @@ module.exports = {
     const sites = {};
     for (const [siteId, data] of Object.entries(siteData)) {
       const wan = (data.health || []).find(h => h.subsystem === 'wan');
+      // Cloud-reported counts are authoritative when present (the remote
+      // UDM is the source of truth for its own site). Local count is a
+      // floor — never report less than what we actually see — but cloud
+      // can supply the upper bound for devices/clients we can't enumerate.
+      const cc = data._cloudCounts || {};
+      const localDevices = (data.devices || []).length;
+      const localOnline = (data.devices || []).filter(d => d.status === 'online').length;
+      const localOffline = (data.devices || []).filter(d => d.status === 'offline').length;
+      const localClients = (data.clients || []).length;
       sites[siteId] = {
         devices: {
-          total: data.devices?.length || 0,
-          online: (data.devices || []).filter(d => d.status === 'online').length,
-          offline: (data.devices || []).filter(d => d.status === 'offline').length,
+          total: cc.totalDevice != null ? Math.max(cc.totalDevice, localDevices) : localDevices,
+          online: cc.totalDevice != null && cc.offlineDevice != null
+            ? Math.max(cc.totalDevice - cc.offlineDevice, localOnline)
+            : localOnline,
+          offline: cc.offlineDevice != null ? Math.max(cc.offlineDevice, localOffline) : localOffline,
         },
-        clients: (data.clients || []).length,
+        clients: cc.wifiClient != null && cc.wiredClient != null
+          ? Math.max((cc.wifiClient || 0) + (cc.wiredClient || 0), localClients)
+          : localClients,
         wan: wan ? {
           status: wan.status,
           ip: wan.wan_ip,
           isp: wan.isp_name,
+          asn: wan.isp_asn,
           latency: wan.latency,
           tx_rate: wan.tx_bytes_r,
           rx_rate: wan.rx_bytes_r,
+          uptime: wan.uptime,
         } : null,
         alarms: (data.alarms || []).length,
       };
