@@ -458,6 +458,7 @@ class DviSyncService extends EventEmitter {
         syncState.lastSuccess = new Date().toISOString();
         syncState.lastError = null;
         syncState.status = 'idle';
+        saveState();
       } else {
         // For copy mode, skip files we already have locally
         let toProcess = files;
@@ -470,8 +471,12 @@ class DviSyncService extends EventEmitter {
         }
 
         if (toProcess.length === 0) {
+          // Files exist on remote but we already have them all locally —
+          // also a successful poll. Stamp lastSuccess, persist.
+          syncState.lastSuccess = new Date().toISOString();
           syncState.lastError = null;
           syncState.status = 'idle';
+          saveState();
         } else {
           // Limit batch size to avoid overwhelming SMB connection
           const batchSize = sync.batchSize || 50;
@@ -510,6 +515,7 @@ class DviSyncService extends EventEmitter {
       console.error(`[DVI-Sync] ${sync.name} error:`, err.message);
       try { require('./db').recordHeartbeatError('dvi_sync', err.message, 60 * 60 * 1000); } catch {}
       this.emit('error', { sync: sync.id, error: err });
+      saveState();
     }
   }
 
