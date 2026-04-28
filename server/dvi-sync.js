@@ -235,12 +235,30 @@ class LocalClient {
     // Use execFile('/bin/ls') instead of fs.promises.readdir — async fs operations
     // hang indefinitely on macOS SMB mounts (macOS SMB driver + libuv incompatibility).
     // Same pattern as dvi-trace.js. Filter '.' and '..' from output.
-    const fileNames = await new Promise((resolve) => {
-      execFile('/bin/ls', [fullPath], { timeout: 10000 }, (err, stdout) => {
+    //
+    // Timeout was 10s — too short for the SMB-backed jobs/ (61K files) and
+    // shipped/ (11K files) directories. SMB enumeration of those takes 30-60s
+    // on a healthy mount and longer when DVI is rotating files. A timeout
+    // returns an empty list, which the caller used to silently treat as a
+    // successful poll with no files — masking the failure for hours. Bumped
+    // to 90s and we now THROW on timeout (caller sets status='error') so the
+    // failure is visible in sync-state.json instead of pretending success.
+    // Also distinguish: empty result with NO error → real "no new files".
+    const result = await new Promise((resolve, reject) => {
+      // 90s should comfortably cover even a mid-rotation enumeration of the
+      // 60K-file inbound XML directory. maxBuffer bumped — `ls` of 60K files
+      // is ~1.5MB of stdout.
+      execFile('/bin/ls', [fullPath], { timeout: 90000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
         if (err) {
-          if (err.killed) console.warn(`[DVI-Sync] LocalClient: ls timed out on ${fullPath}`);
-          else if (err.code !== 0) console.warn(`[DVI-Sync] LocalClient: path not found: ${fullPath}`);
-          return resolve([]);
+          if (err.killed) {
+            // Real failure — surface it so the caller marks the sync as
+            // errored. Empty stdout pretending to be success was the original
+            // bug that hid this for 14h.
+            return reject(new Error(`ETIMEDOUT: ls ${fullPath} killed after 90s`));
+          }
+          // Non-timeout error (path missing, permission denied, etc.) — also
+          // surface, don't pretend success.
+          return reject(new Error(`ls failed on ${fullPath}: ${err.message}`));
         }
         const names = stdout.split('\n')
           .map(n => n.trim())
@@ -248,6 +266,7 @@ class LocalClient {
         resolve(names);
       });
     });
+    const fileNames = result;
 
     const regexes = patterns.map(p => new RegExp('^' + p.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i'));
 
@@ -430,6 +449,13 @@ class DviSyncService extends EventEmitter {
       );
 
       if (files.length === 0) {
+        // Successful poll that found nothing new — STILL counts as success.
+        // Pre-2026-04-28 this branch only cleared lastError, leaving
+        // lastSuccess null forever if the directory was always empty (or if
+        // the listing always timed out, since the timeout used to silently
+        // resolve to []). Now: lastSuccess gets stamped, dashboard goes
+        // green, heartbeat fires below.
+        syncState.lastSuccess = new Date().toISOString();
         syncState.lastError = null;
         syncState.status = 'idle';
       } else {
