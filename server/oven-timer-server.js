@@ -4839,6 +4839,51 @@ Respond with a structured batching plan in this format:
   }
 
   // ── System Health — unified status for all connections ──────
+  // ── /api/heartbeats — unified per-adapter staleness map ──────────
+  // Trust system part 2: every adapter (dvi_sync, dvi_trace, itempath,
+  // pickSync, netsuite, limble, looker, som, slack_ai_poll, etc.) calls
+  // recordHeartbeat() on every successful poll. This endpoint surfaces
+  // the whole sync_heartbeats table in one shot, computes staleness vs
+  // each source's own threshold, and tags each row green/yellow/red.
+  // Consumed by the Settings → Source Health panel and by the daily
+  // reconcile cron's heartbeat block.
+  if (req.method==='GET' && url.pathname==='/api/heartbeats') {
+    try {
+      const rows = labDb.db.prepare(`
+        SELECT source, last_success_at, last_row_count, last_error,
+               consecutive_errors, stale_threshold_ms, updated_at
+        FROM sync_heartbeats
+        ORDER BY source
+      `).all();
+      const now = Date.now();
+      const out = rows.map(r => {
+        const ageMs = r.last_success_at > 0 ? now - r.last_success_at : null;
+        const threshold = r.stale_threshold_ms;
+        let status = 'unknown';
+        if (r.consecutive_errors > 0 && r.last_success_at === 0) status = 'red';
+        else if (ageMs == null) status = 'unknown';
+        else if (threshold && ageMs > threshold) status = 'red';
+        else if (threshold && ageMs > threshold * 0.5) status = 'yellow';
+        else status = 'green';
+        return {
+          source: r.source,
+          last_success_at: r.last_success_at,
+          last_success_ago_ms: ageMs,
+          last_row_count: r.last_row_count,
+          last_error: r.last_error,
+          consecutive_errors: r.consecutive_errors,
+          stale_threshold_ms: threshold,
+          status,
+        };
+      });
+      const counts = { green: 0, yellow: 0, red: 0, unknown: 0 };
+      for (const r of out) counts[r.status]++;
+      return json(res, { sources: out, counts, asOf: new Date(now).toISOString() });
+    } catch (e) {
+      return json(res, { error: e.message, sources: [] }, 500);
+    }
+  }
+
   if (req.method==='GET' && url.pathname==='/api/health') {
     const trace = dviTrace.getStatus();
     const somStatus = som.getHealth ? som.getHealth() : null;

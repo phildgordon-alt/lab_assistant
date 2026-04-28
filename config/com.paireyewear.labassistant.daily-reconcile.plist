@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paireyewear.labassistant.daily-reconcile</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <!-- SLACK_WEBHOOK is sourced from /Users/Shared/lab_assistant/.env at
+             runtime by daily-reconcile.js — set it there once, plist stays
+             clean. The script falls back to logging if the env var is unset. -->
+    </dict>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <!-- Source .env so SLACK_WEBHOOK + any other env land in the
+             environment, then run the reconcile. This is the only way
+             launchd-managed agents pick up shell-style env files. -->
+        <string>set -a; [ -f /Users/Shared/lab_assistant/.env ] &amp;&amp; . /Users/Shared/lab_assistant/.env; set +a; exec /opt/homebrew/bin/node /Users/Shared/lab_assistant/scripts/daily-reconcile.js</string>
+    </array>
+    <!-- Run at 5:00 AM PT — lab open. Lab day window per memory. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>5</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+    <key>StandardOutPath</key>
+    <string>/Users/Shared/lab_assistant/data/daily-reconcile.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/Shared/lab_assistant/data/daily-reconcile.log</string>
+    <key>WorkingDirectory</key>
+    <string>/Users/Shared/lab_assistant</string>
+    <key>RunAtLoad</key>
+    <false/>
+</dict>
+</plist>

@@ -1911,8 +1911,17 @@ const PICKS_HISTORY_MAX_QTY = 10000; // sanity clamp: no legitimate pick is 10k+
 // distinguish real-time captures ('live'/'tx') from after-the-fact
 // recovery ('backfill'/'recovered'). Default null preserves callers
 // that haven't been migrated yet (none should remain in tree).
+// Schema invariant: refuse to write a GUID-shaped value into picks_history.order_id.
+// The column SHOULD always be the 6-char DVI invoice (= ItemPath orderName). The
+// historical bug — both in this writer's `line.orderName || line.orderId` fallback
+// and in the recovery script — wrote 35K+ GUIDs into this column, producing rows
+// that couldn't join to jobs.invoice. Now we trim+validate at write time.
+function isGuidShaped(s) {
+  return typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(s);
+}
+
 function upsertPicksHistory(lines, source) {
-  let inserted = 0, skipped = 0, rejected = 0;
+  let inserted = 0, skipped = 0, rejected = 0, badKey = 0;
   const src = source || null;
   // Allow callers to pass a custom pick_id prefix per line via line.pickId.
   // (Used by tx-writer to dedupe against live-writer rows on the same pick.)
@@ -1926,18 +1935,29 @@ function upsertPicksHistory(lines, source) {
         console.warn(`[DB] upsertPicksHistory: rejecting qty=${qty} sku=${sku} id=${line.id} (over ${PICKS_HISTORY_MAX_QTY} clamp — probable data error)`);
         continue;
       }
-      const orderName = line.orderName || line.orderId || '';
+      // The order_id column is the JOIN KEY to jobs.invoice — must be 6+ digit
+      // numeric. line.orderName carries the right value; line.orderId is the
+      // 36-char ItemPath GUID and is NEVER acceptable here. Refuse rather than
+      // pollute the table with unjoinable rows.
+      const candidate = (line.orderName || '').trim();
+      if (!candidate || isGuidShaped(candidate) || !/^\d{4,}$/.test(candidate)) {
+        badKey++;
+        if (badKey % 100 === 1) {
+          console.warn(`[DB] upsertPicksHistory: rejecting bad order_id "${candidate}" (sku=${sku} pick_id=${line.pickId || line.id}). ${badKey} so far this batch.`);
+        }
+        continue;
+      }
       const wh = normalizeWarehouse(line.warehouseName || line.costCenterName || '');
       const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
       // Caller may supply a fully-formed pickId (tx-writer / recovery script) — honor it.
       // Otherwise fall back to the legacy 'hist-<order_line.id>' shape.
       const pickId = line.pickId || `hist-${line.id || line.orderLineId || ''}`;
-      const result = upsertPicksHistoryStmt.run(pickId, orderName, sku, orderName, qty, qty, wh, completedAt, src);
+      const result = upsertPicksHistoryStmt.run(pickId, candidate, sku, candidate, qty, qty, wh, completedAt, src);
       if (result.changes > 0) inserted++;
     }
   });
   save();
-  return { inserted, skipped, rejected, total: lines.length };
+  return { inserted, skipped, rejected, badKey, total: lines.length };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -3392,6 +3412,13 @@ const upsertJobFromXMLStmt = db.prepare(`
 
 function upsertJobFromXML(p) {
   if (!p || !p.invoice) return;
+  // Schema invariant: invoice must be 6+ digit numeric (matches parseTraceLine
+  // guard). Refuse non-numeric here too so SHIPLOG XML can't smuggle in a
+  // malformed key the trace path already rejects.
+  if (!/^\d{4,}$/.test(String(p.invoice))) {
+    console.warn(`[DB] upsertJobFromXML: rejecting non-numeric invoice "${p.invoice}"`);
+    return;
+  }
   const rx = p.rx || {};
   const R = rx.R || {};
   const L = rx.L || {};
