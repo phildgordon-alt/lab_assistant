@@ -34,6 +34,15 @@ const UNIFI_URL = process.env.UNIFI_URL || '';
 const UNIFI_API_KEY = process.env.UNIFI_API_KEY || '';
 const UNIFI_SITE = process.env.UNIFI_SITE || 'default';
 const UNIFI_SITE_2 = process.env.UNIFI_SITE_2 || '';
+// Second physical UDM controller (Irvine 2). Site Magic does NOT federate
+// the remote UDM into the central controller's device list — UDMs are
+// their own controller. To populate Irvine 2's UDM/WAN/health/alarms,
+// set both UNIFI_URL_2 and UNIFI_API_KEY_2 (each site needs its own key).
+// Without these, the adapter falls back to single-controller mode and
+// Irvine 2 only shows whatever Site Magic federates into controller 1.
+const UNIFI_URL_2 = process.env.UNIFI_URL_2 || '';
+const UNIFI_API_KEY_2 = process.env.UNIFI_API_KEY_2 || '';
+const UNIFI_SITE_REMOTE = process.env.UNIFI_SITE_REMOTE || 'default';
 const NETWORK_POLL_MS = parseInt(process.env.NETWORK_POLL_MS || '30000');
 const MOCK_MODE = !UNIFI_URL;
 
@@ -280,33 +289,33 @@ function saveToDisk() {
 // ─────────────────────────────────────────────────────────────────────────────
 // API FETCHING
 // ─────────────────────────────────────────────────────────────────────────────
-async function fetchUnifi(endpoint) {
+async function fetchUnifi(endpoint, baseUrl = UNIFI_URL, apiKey = UNIFI_API_KEY) {
   const { fetch, agent } = await getFetch();
-  const url = `${UNIFI_URL}${endpoint}`;
+  const url = `${baseUrl}${endpoint}`;
   const res = await fetch(url, {
     headers: {
-      'X-API-KEY': UNIFI_API_KEY,
+      'X-API-KEY': apiKey,
       'Content-Type': 'application/json',
     },
     agent,
     timeout: 15000,
   });
   if (!res.ok) {
-    throw new Error(`UniFi API ${res.status} ${res.statusText} — ${endpoint}`);
+    throw new Error(`UniFi API ${res.status} ${res.statusText} — ${url}`);
   }
   const json = await res.json();
   return json.data || json;
 }
 
-async function pollSite(siteId) {
+async function pollSite(siteId, baseUrl = UNIFI_URL, apiKey = UNIFI_API_KEY) {
   const prefix = `/proxy/network/api/s/${siteId}`;
   const [devices, clients, health, alarms, events, vpnSessions] = await Promise.all([
-    fetchUnifi(`${prefix}/stat/device`),
-    fetchUnifi(`${prefix}/stat/sta`),
-    fetchUnifi(`${prefix}/stat/health`),
-    fetchUnifi(`${prefix}/list/alarm`),
-    fetchUnifi(`${prefix}/stat/event?_limit=50`).catch(() => null),
-    fetchUnifi(`${prefix}/stat/remoteuserstat`).catch(() => null),
+    fetchUnifi(`${prefix}/stat/device`, baseUrl, apiKey),
+    fetchUnifi(`${prefix}/stat/sta`, baseUrl, apiKey),
+    fetchUnifi(`${prefix}/stat/health`, baseUrl, apiKey),
+    fetchUnifi(`${prefix}/list/alarm`, baseUrl, apiKey),
+    fetchUnifi(`${prefix}/stat/event?_limit=50`, baseUrl, apiKey).catch(() => null),
+    fetchUnifi(`${prefix}/stat/remoteuserstat`, baseUrl, apiKey).catch(() => null),
   ]);
 
   // Update teleport data from VPN sessions
@@ -348,21 +357,37 @@ async function poll() {
   pollCount++;
 
   try {
-    // Poll site 1
+    // Poll site 1 (Irvine 1 controller)
     const site1Raw = await pollSite(UNIFI_SITE);
 
-    // Poll site 2 if configured as separate site
-    let site2Raw = null;
+    // Optional same-controller second site (legacy — kept for completeness)
+    let site2RawSameController = null;
     if (UNIFI_SITE_2 && UNIFI_SITE_2 !== UNIFI_SITE) {
-      site2Raw = await pollSite(UNIFI_SITE_2);
+      site2RawSameController = await pollSite(UNIFI_SITE_2);
     }
 
-    if (site2Raw) {
-      // Two separate UniFi sites — map directly
+    // Optional second physical controller (Irvine 2 UDM Pro). Polled
+    // independently — its own URL + own API key + its own site name.
+    // All devices/clients/health/alarms returned here belong to Irvine 2
+    // by construction (the controller IS at Irvine 2), so no IP-subnet
+    // classification needed for these.
+    let site2RawRemoteController = null;
+    if (UNIFI_URL_2 && UNIFI_API_KEY_2) {
+      try {
+        site2RawRemoteController = await pollSite(UNIFI_SITE_REMOTE, UNIFI_URL_2, UNIFI_API_KEY_2);
+      } catch (err) {
+        console.warn('[NETWORK] Irvine 2 controller poll failed:', err.message);
+        // Don't fail the whole poll — Irvine 1 data still usable.
+      }
+    }
+
+    if (site2RawSameController) {
+      // Two-sites-on-one-controller mode (rare — UNIFI_SITE_2 set)
       siteData[SITE_KEY_1] = site1Raw;
-      siteData[SITE_KEY_2] = site2Raw;
+      siteData[SITE_KEY_2] = site2RawSameController;
     } else {
-      // Single site (Site Magic) — split by IP subnet
+      // Single controller (Site Magic) — split site 1's devices/clients
+      // by IP subnet so anything Site Magic federates lands in irvine2.
       const s1 = { devices: [], clients: [], health: site1Raw.health, alarms: [], events: [] };
       const s2 = { devices: [], clients: [], health: [], alarms: [], events: [] };
 
@@ -378,6 +403,23 @@ async function poll() {
       }
       for (const e of site1Raw.events) {
         s1.events.push(e);
+      }
+
+      // If we ALSO polled the remote Irvine 2 controller, merge its data
+      // into s2. This is the path that finally surfaces the Irvine 2 UDM,
+      // its WAN, its health subsystem, and any clients the central
+      // controller doesn't see via Site Magic federation.
+      if (site2RawRemoteController) {
+        // Dedup devices/clients by MAC — Site Magic may federate some that
+        // also appear on the remote controller. Remote-controller record
+        // wins (it's authoritative for that physical site).
+        const remoteDeviceMacs = new Set((site2RawRemoteController.devices || []).map(d => d.mac).filter(Boolean));
+        const remoteClientMacs = new Set((site2RawRemoteController.clients || []).map(c => c.mac).filter(Boolean));
+        s2.devices = (s2.devices || []).filter(d => !remoteDeviceMacs.has(d.mac)).concat(site2RawRemoteController.devices || []);
+        s2.clients = (s2.clients || []).filter(c => !remoteClientMacs.has(c.mac)).concat(site2RawRemoteController.clients || []);
+        s2.health = site2RawRemoteController.health || [];
+        s2.alarms = (s2.alarms || []).concat(site2RawRemoteController.alarms || []);
+        s2.events = (s2.events || []).concat(site2RawRemoteController.events || []);
       }
 
       siteData[SITE_KEY_1] = s1;
