@@ -115,6 +115,15 @@ const AGENT_KEYWORDS: Record<string, string[]> = {
     'tracking', 'pack', 'packing', 'label', 'manifest', 'cutoff',
     'delivery', 'outbound',
   ],
+  NocAgent: [
+    'noc', 'network', 'vlan', 'wifi', 'wi-fi', 'wireless', 'switch', 'switching',
+    'unifi', 'udm', 'usw', 'uap', 'wan', 'lan', 'sd-wan', 'site magic',
+    'irvine 1', 'irvine 2', 'ap', 'access point', 'poe', 'stp',
+    'spanning tree', 'subnet', 'router', 'gateway', 'firewall', 'vpn',
+    'teleport', 'wireguard', 'isp', 'cox', 'verizon', 'rssi', 'channel',
+    'roaming', 'broadcast storm', 'topology', 'segment', 'segmentation',
+    'ot vlan', 'kardex segment', 'door access vlan',
+  ],
 };
 
 // Default agent when no match is found - LabAgent can answer ANY lab question
@@ -141,6 +150,7 @@ const AGENT_CONFIG_MAP: Record<string, string> = {
   DevOpsAgent: 'devops',
   MaintenanceAgent: 'maintenance',
   ShiftReportAgent: 'shiftreport',
+  NocAgent: 'noc',
 };
 
 /**

@@ -544,6 +544,26 @@ export const INVENTORY_AGENT: AgentConfig = {
   defaultFilters: {},
 };
 
+// NOC (Network Operations) — scoped to read-only diagnostic tools the
+// network agent actually needs. NocAgent.md (gateway/agents/prompts/)
+// supplies the persona; this config supplies the tool budget.
+export const NOC_AGENT: AgentConfig = {
+  name: 'NocAgent',
+  description: 'Network Operations: UniFi devices, VLANs, WAN/LAN, Site Magic SD-WAN, Wi-Fi, OT segment health',
+  department: undefined,
+  systemPrompt: '', // Loaded from NocAgent.md
+  tools: [
+    // Read-only context tools — NocAgent diagnoses, doesn't write
+    get_settings,
+    query_database,
+    search_knowledge,
+    get_knowledge_doc,
+    think_aloud,
+    call_api,
+  ],
+  defaultFilters: {},
+};
+
 export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   // Department agents (production flow order)
   surface: SURFACE_AGENT,
@@ -568,6 +588,8 @@ export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   maintenance: MAINTENANCE_AGENT,
   shiftreport: SHIFT_REPORT_AGENT,
   shift: SHIFT_REPORT_AGENT,
+  noc: NOC_AGENT,
+  network: NOC_AGENT,       // alias — frontend posts agent:'network' historically
   // Default fallback
   default: LAB_AGENT,
 };

@@ -6468,11 +6468,6 @@ function NetworkTab({ovenServerUrl,settings}){
   const [loading,setLoading]=useState(true);
   const [error,setError]=useState(null);
   const [agentOpen,setAgentOpen]=useState(true);
-  // Holds the live system prompt for the NOC agent. Loaded from the gateway
-  // (gateway/agents/prompts/NocAgent.md) at mount; falls back to the inline
-  // EXPERT_SYSTEM constant below if the fetch fails. Edit the prompt by
-  // changing the .md file — no code change required.
-  const [nocSystemPrompt,setNocSystemPrompt]=useState(null);
   const [messages,setMessages]=useState([{role:"assistant",content:"NOC Agent online. 30 years in the wire and I've seen it all.\n\nI'm watching **Irvine 1** and **Irvine 2** across 8 VLAN segments. I already see a few things that need your attention — run **Analyze Logs** or ask me directly.\n\nCurrent hot items:\n• UAP-AC-LR-CAM is **down** on VLAN 10 (Cameras)\n• US-24-OT port 14 had **two STP role changes** — that's not random noise\n• Port 22 on the Kardex segment had a 12-second link drop\n\nThat last one is the one that'd keep me up at night."}]);
   const [input,setInput]=useState("");
   const [thinking,setThinking]=useState(false);
@@ -6571,23 +6566,11 @@ function NetworkTab({ovenServerUrl,settings}){
   const timeSince=(iso)=>{if(!iso)return"—";const diff=Date.now()-new Date(iso).getTime();const m=Math.floor(diff/60000);if(m<60)return`${m}m ago`;const h=Math.floor(m/60);if(h<24)return`${h}h ago`;return`${Math.floor(h/24)}d ago`;};
   const devIcon=(t)=>t==="ugw"||t==="udm"?"⬡":t==="usw"?"⊞":t==="uap"?"◎":"◆";
 
-  // Expert system prompt — fallback if gateway/agents/prompts/NocAgent.md
-  // can't be loaded. The MD file in the repo is the source of truth; this
-  // string only runs if the gateway is unreachable at boot.
-  const EXPERT_SYSTEM=`You are a senior network engineer and IT infrastructure specialist with 30 years of hands-on experience in enterprise networking, switching, large-scale factory automation systems, and OT/IT convergence. You've designed and maintained networks for manufacturing facilities, lens labs, pharmaceutical clean rooms, and automated production lines globally.\n\nYour current assignment is the Pair Eyewear lens lab network across two Irvine, California sites (Irvine 1 and Irvine 2), connected via UniFi Site Magic SD-WAN. The network runs on Ubiquiti UniFi hardware with 8 VLAN segments:\n- VLAN 10: Security Cameras\n- VLAN 20: Door Access Control\n- VLAN 30: OT/Industrial (Kardex automated storage, Schneider KMS conveyor, ItemPath middleware, DVI VISION LMS on MSSQL, Phrozen 3D printer network)\n- VLAN 40: NAS storage\n- VLAN 50: Staff WiFi\n- VLAN 60: EV Charging\n- VLAN 1: Main LAN\n- VLAN 99: Management\n\nCritical systems on the OT/Industrial VLAN include:\n- DVI VISION (Lens Management System, MSSQL) - daily PAIRRX.XML job files\n- Kardex Power Pick automated storage retrieval\n- ItemPath middleware (MSSQL + REST)\n- Schneider KMS conveyor/material flow (MariaDB)\n- Phrozen 3D printer fleet (network gateway)\n\nWhen analyzing logs or device data, you:\n1. Identify root causes, not just symptoms\n2. Flag OT segment issues with HIGH PRIORITY since downtime = production loss\n3. Reference specific UniFi CLI commands or controller UI paths when relevant\n4. Distinguish between transient noise and systemic problems\n5. Quantify impact in manufacturing terms where possible (jobs delayed, throughput affected)\n6. Give concrete remediation steps with priority order\n\nTone: Direct, experienced, no-nonsense. You've seen every failure mode. You don't hedge unnecessarily. When you don't have enough data, you say exactly what additional data you need.`;
-
-  // Load NocAgent.md from gateway at mount. If it succeeds, the live
-  // system prompt is whatever the MD file says — edit the file, restart
-  // the gateway, refresh, agent picks it up. Falls back to EXPERT_SYSTEM
-  // (above) if the gateway is unreachable.
-  useEffect(()=>{
-    let cancelled=false;
-    fetch(`${gwBase}/gateway/agents/prompts/NocAgent`)
-      .then(r=>r.ok?r.json():null)
-      .then(j=>{if(!cancelled && j?.content) setNocSystemPrompt(j.content);})
-      .catch(()=>{/* fall back to EXPERT_SYSTEM silently */});
-    return ()=>{cancelled=true;};
-  },[gwBase]);
+  // System prompt for the NOC agent now lives gateway-side as
+  // gateway/agents/prompts/NocAgent.md, loaded by getAgentSystemPrompt
+  // when the gateway routes agent:'NocAgent' (registered in
+  // AGENT_REGISTRY + AGENT_KEYWORDS). To edit the persona, edit the MD
+  // file and restart the gateway — no JSX rebuild needed.
 
   // Fetch data
   const fetchData=useCallback(async()=>{
@@ -6738,7 +6721,12 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
     try{
       const res=await fetch(`${gwBase}/web/ask-sync`,{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({question:`${nocSystemPrompt||EXPERT_SYSTEM}\n\n${ctx}\n\n---\nUser query: ${userMsg}`,agent:"network"}),
+        // System prompt now lives gateway-side (NocAgent.md loaded by
+        // getAgentSystemPrompt) — we just send context + the user query
+        // and let the agent runtime supply the persona. Saves ~9KB per
+        // turn vs the old prepend-the-MD approach and keeps the prompt
+        // editable in one place (the .md file).
+        body:JSON.stringify({question:`${ctx}\n\n---\nUser query: ${userMsg}`,agent:"NocAgent"}),
       });
       if(res.ok){const d=await res.json();setMessages(p=>[...p,{role:"assistant",content:d.response||d.text||JSON.stringify(d)}]);}
       else setMessages(p=>[...p,{role:"assistant",content:`Gateway error: ${res.status}`}]);
