@@ -3244,12 +3244,34 @@ const upsertJobFromTraceStmt = db.prepare(`
           datetime('now'))
   ON CONFLICT(invoice) DO UPDATE SET
     tray = COALESCE(excluded.tray, jobs.tray),
-    current_stage = excluded.current_stage,
-    current_station = excluded.current_station,
-    current_station_num = excluded.current_station_num,
+    -- current_stage / status downgrade guards: once SHIPPED or CANCELED is set
+    -- (by SHIPLOG XML back-prop or stage transition), a late-arriving trace
+    -- event must NOT revert the row to ACTIVE/SURFACING/etc. Pre-2026-04-28
+    -- this caused every shipped job to revert as soon as a stale trace event
+    -- arrived, leaving 38+ rows in the §5 validity gate per shift.
+    current_stage = CASE
+      WHEN jobs.status = 'SHIPPED' OR jobs.current_stage = 'SHIPPED' THEN jobs.current_stage
+      WHEN jobs.status = 'CANCELED' OR jobs.current_stage = 'CANCELED' THEN jobs.current_stage
+      ELSE excluded.current_stage
+    END,
+    current_station = CASE
+      WHEN jobs.status = 'SHIPPED' OR jobs.current_stage = 'SHIPPED' THEN jobs.current_station
+      WHEN jobs.status = 'CANCELED' OR jobs.current_stage = 'CANCELED' THEN jobs.current_station
+      ELSE excluded.current_station
+    END,
+    current_station_num = CASE
+      WHEN jobs.status = 'SHIPPED' OR jobs.current_stage = 'SHIPPED' THEN jobs.current_station_num
+      WHEN jobs.status = 'CANCELED' OR jobs.current_stage = 'CANCELED' THEN jobs.current_station_num
+      ELSE excluded.current_station_num
+    END,
     operator = COALESCE(excluded.operator, jobs.operator),
     machine_id = COALESCE(excluded.machine_id, jobs.machine_id),
-    status = excluded.status,
+    -- Status downgrade guard — same rationale as current_stage above.
+    status = CASE
+      WHEN jobs.status = 'SHIPPED' THEN 'SHIPPED'
+      WHEN jobs.status = 'CANCELED' THEN 'CANCELED'
+      ELSE excluded.status
+    END,
     has_breakage = MAX(jobs.has_breakage, excluded.has_breakage),
     last_event_at = excluded.last_event_at,
     event_count = excluded.event_count,
