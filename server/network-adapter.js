@@ -43,6 +43,24 @@ const UNIFI_SITE_2 = process.env.UNIFI_SITE_2 || '';
 const UNIFI_URL_2 = process.env.UNIFI_URL_2 || '';
 const UNIFI_API_KEY_2 = process.env.UNIFI_API_KEY_2 || '';
 const UNIFI_SITE_REMOTE = process.env.UNIFI_SITE_REMOTE || 'default';
+
+// UniFi cloud Site Manager API (api.ui.com/ea/hosts). A "Site Manager API
+// key" generated at unifi.ui.com authorizes against this endpoint and
+// returns metadata for every UniFi console owned by the account — across
+// physical sites, regardless of whether the local controller has visibility.
+//
+// We use this purely for Irvine 2 UDM + WAN enrichment: the cloud response
+// carries enough about the remote UDM (model, MAC, name, public WAN IP,
+// internal IPs) to synthesize one device entry + one health.wan entry that
+// the dashboard can render. Devices/clients managed BY that UDM still
+// require either Site Magic federation (already handled) or a per-UDM
+// local API key (UNIFI_API_KEY_2) — out of scope for this enrichment.
+//
+// Set UNIFI_CLOUD_KEY to enable. UNIFI_CLOUD_IRVINE2_HOST = the hostname
+// reported by the Irvine 2 console in /ea/hosts (default 'Irvine2').
+const UNIFI_CLOUD_URL = process.env.UNIFI_CLOUD_URL || 'https://api.ui.com/ea';
+const UNIFI_CLOUD_KEY = process.env.UNIFI_CLOUD_KEY || '';
+const UNIFI_CLOUD_IRVINE2_HOST = process.env.UNIFI_CLOUD_IRVINE2_HOST || 'Irvine2';
 const NETWORK_POLL_MS = parseInt(process.env.NETWORK_POLL_MS || '30000');
 const MOCK_MODE = !UNIFI_URL;
 
@@ -307,6 +325,101 @@ async function fetchUnifi(endpoint, baseUrl = UNIFI_URL, apiKey = UNIFI_API_KEY)
   return json.data || json;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// CLOUD ENRICHMENT (UniFi Site Manager / api.ui.com)
+//
+// Talks to https://api.ui.com/ea/hosts using a Site Manager API key.
+// Returns either null (cloud disabled or call failed) or a partial
+// site-data shape for Irvine 2 with a synthesized UDM device + WAN health
+// entry. Caller merges this into siteData[irvine2] alongside any
+// IP-classified federated data and any local-controller poll data.
+// ─────────────────────────────────────────────────────────────────────────────
+async function fetchCloud(endpoint) {
+  const { fetch, agent } = await getFetch();
+  const url = `${UNIFI_CLOUD_URL}${endpoint}`;
+  const res = await fetch(url, {
+    headers: {
+      'X-API-KEY': UNIFI_CLOUD_KEY,
+      'Accept': 'application/json',
+    },
+    agent,
+    timeout: 15000,
+  });
+  if (!res.ok) {
+    throw new Error(`UniFi Cloud API ${res.status} ${res.statusText} — ${endpoint}`);
+  }
+  return res.json();
+}
+
+async function pollCloudIrvine2() {
+  if (!UNIFI_CLOUD_KEY) return null;
+  try {
+    const resp = await fetchCloud('/hosts');
+    const hosts = resp?.data || resp || [];
+    // The host record we want has hostname matching UNIFI_CLOUD_IRVINE2_HOST.
+    // The reported state on each host record carries the UDM device data —
+    // hostname/mac/ip live on the top-level `reportedState` object, with WAN
+    // info under `reportedState.wans`.
+    const host = hosts.find(h => {
+      const hn = h?.reportedState?.hostname || h?.reportedState?.name || '';
+      return hn === UNIFI_CLOUD_IRVINE2_HOST;
+    });
+    if (!host) {
+      console.warn(`[NETWORK] Cloud: no host with hostname='${UNIFI_CLOUD_IRVINE2_HOST}' in /ea/hosts (got: ${hosts.map(h => h?.reportedState?.hostname).filter(Boolean).join(',') || 'none'})`);
+      return null;
+    }
+    const rs = host.reportedState || {};
+    const hw = rs.hardware || {};
+
+    // Synthesize a UDM device entry — same shape as normalizeDevice() output
+    // so the frontend renders it without special-casing.
+    const udm = {
+      id: host.id || rs.mac || 'cloud-udm-irvine2',
+      name: rs.hostname || rs.name || 'Irvine2 UDM',
+      type: 'udm',
+      model: hw.shortname || hw.name || 'UDM',
+      ip: rs.ip || (rs.ipAddrs || [])[0] || null,
+      mac: rs.mac || null,
+      uptime: null, // not exposed by /ea/hosts
+      status: rs.state === 'connected' ? 'online' : 'offline',
+      cpu_pct: 0,
+      mem_pct: 0,
+      tx_bytes: 0,
+      rx_bytes: 0,
+      tx_rate: 0,
+      rx_rate: 0,
+      last_seen: host.lastConnectionStateChange ? new Date(host.lastConnectionStateChange).getTime() : null,
+      _source: 'cloud',
+    };
+
+    // Synthesize the WAN health entry — getStatus() looks for one
+    // health.subsystem === 'wan' per site. Pull primary WAN from rs.wans.
+    const primaryWan = (rs.wans || []).find(w => w.type === 'WAN' && w.enabled) || (rs.wans || [])[0] || {};
+    const wanHealth = {
+      subsystem: 'wan',
+      status: rs.state === 'connected' ? 'ok' : 'down',
+      wan_ip: primaryWan.ipv4 || host.ipAddress || null,
+      isp_name: null, // /ea/hosts doesn't carry ISP name; could be backfilled via WHOIS
+      latency: null,
+      tx_bytes_r: 0,
+      rx_bytes_r: 0,
+      uptime: null,
+      _source: 'cloud',
+    };
+
+    return {
+      devices: [udm],
+      clients: [],
+      health: [wanHealth],
+      alarms: [],
+      events: [],
+    };
+  } catch (e) {
+    console.warn('[NETWORK] Cloud Irvine 2 enrichment failed:', e.message);
+    return null;
+  }
+}
+
 async function pollSite(siteId, baseUrl = UNIFI_URL, apiKey = UNIFI_API_KEY) {
   const prefix = `/proxy/network/api/s/${siteId}`;
   const [devices, clients, health, alarms, events, vpnSessions] = await Promise.all([
@@ -381,6 +494,12 @@ async function poll() {
       }
     }
 
+    // Optional cloud enrichment for Irvine 2 — uses UniFi Site Manager
+    // API key (api.ui.com) to surface the remote UDM + WAN even when the
+    // local controller (UNIFI_URL_2) isn't configured. Returns null on any
+    // failure; never blocks the rest of the poll.
+    const cloudIrvine2 = await pollCloudIrvine2();
+
     if (site2RawSameController) {
       // Two-sites-on-one-controller mode (rare — UNIFI_SITE_2 set)
       siteData[SITE_KEY_1] = site1Raw;
@@ -420,6 +539,21 @@ async function poll() {
         s2.health = site2RawRemoteController.health || [];
         s2.alarms = (s2.alarms || []).concat(site2RawRemoteController.alarms || []);
         s2.events = (s2.events || []).concat(site2RawRemoteController.events || []);
+      }
+
+      // Cloud enrichment: even if no local Irvine 2 controller, we may
+      // still have the UDM device + WAN from the cloud. Merge LAST so it
+      // doesn't overwrite richer data from a real controller poll. Dedup
+      // by MAC again so we don't double-count if Site Magic also surfaced
+      // the UDM somehow.
+      if (cloudIrvine2) {
+        const existingDeviceMacs = new Set((s2.devices || []).map(d => d.mac).filter(Boolean));
+        for (const d of cloudIrvine2.devices) {
+          if (!existingDeviceMacs.has(d.mac)) s2.devices.push(d);
+        }
+        // health.wan: only fill if we don't already have one (controller poll wins)
+        const hasWan = (s2.health || []).some(h => h.subsystem === 'wan');
+        if (!hasWan) s2.health = (s2.health || []).concat(cloudIrvine2.health);
       }
 
       siteData[SITE_KEY_1] = s1;
