@@ -6081,6 +6081,9 @@ Type a question to get started!`;
 
       await callGateway(settings, userText, {
         context: buildContext(),
+        // Aging-report click routes directly to WipAgingAgent (strict-pivot
+        // format). Other queries fall through to the classifier.
+        ...(isAgingReport ? { agent: 'WipAgingAgent' } : {}),
         onChunk: (chunk) => {
           reply += chunk;
           setMessages(prev => prev.map((m, i) => i === msgIdx ? { ...m, content: reply } : m));

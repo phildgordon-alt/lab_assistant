@@ -115,6 +115,10 @@ const AGENT_KEYWORDS: Record<string, string[]> = {
     'tracking', 'pack', 'packing', 'label', 'manifest', 'cutoff',
     'delivery', 'outbound',
   ],
+  WipAgingAgent: [
+    'wip aging', 'aging report', 'aging pivot', 'pivot table', 'days in wip',
+    'station by age', 'aging by station', 'days in lab pivot',
+  ],
   NocAgent: [
     'noc', 'network', 'vlan', 'wifi', 'wi-fi', 'wireless', 'switch', 'switching',
     'unifi', 'udm', 'usw', 'uap', 'wan', 'lan', 'sd-wan', 'site magic',
@@ -151,6 +155,7 @@ const AGENT_CONFIG_MAP: Record<string, string> = {
   MaintenanceAgent: 'maintenance',
   ShiftReportAgent: 'shiftreport',
   NocAgent: 'noc',
+  WipAgingAgent: 'wipaging',
 };
 
 /**

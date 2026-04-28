@@ -564,6 +564,27 @@ export const NOC_AGENT: AgentConfig = {
   defaultFilters: {},
 };
 
+// WipAgingAgent — strict-pivot WIP aging report (Excel-paste format).
+// Split out from LabAgent.md 2026-04-28; the pivot column structure and
+// station ordering are too specific to share with general-purpose
+// queries.
+export const WIP_AGING_AGENT: AgentConfig = {
+  name: 'WipAgingAgent',
+  description: 'Strict-pivot WIP aging report by station × days-in-WIP, with active-only grand total',
+  department: undefined,
+  systemPrompt: '', // Loaded from WipAgingAgent.md
+  tools: [
+    get_wip_snapshot,
+    get_wip_jobs,
+    get_aging_report,
+    get_time_at_lab_summary,
+    get_time_at_lab_histogram,
+    query_database,
+    think_aloud,
+  ],
+  defaultFilters: {},
+};
+
 export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   // Department agents (production flow order)
   surface: SURFACE_AGENT,
@@ -590,6 +611,8 @@ export const AGENT_REGISTRY: Record<string, AgentConfig> = {
   shift: SHIFT_REPORT_AGENT,
   noc: NOC_AGENT,
   network: NOC_AGENT,       // alias — frontend posts agent:'network' historically
+  wipaging: WIP_AGING_AGENT,
+  'wip-aging': WIP_AGING_AGENT,  // alias for hyphenated form
   // Default fallback
   default: LAB_AGENT,
 };
