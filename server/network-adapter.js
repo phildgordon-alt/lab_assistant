@@ -42,9 +42,19 @@ const MOCK_MODE = !UNIFI_URL;
 const SITE_KEY_1 = 'irvine1';
 const SITE_KEY_2 = 'irvine2';
 
+// Irvine 2 IP ranges (Site Magic SD-WAN: physically separate site, one
+// UniFi controller). Subnets observed at Irvine 2:
+//   10.1.x       — original Irvine 2 LAN
+//   192.168.11.x — Site Magic gateway range (added 93ef258)
+//   192.168.1.x  — current Irvine 2 LAN (added 2026-04-28 — sites=1 in
+//                  controller, 3 UniFi devices on .1.x with Irvine 1 on .0.x;
+//                  classification was returning 0 devices/clients for irvine2
+//                  until this subnet was added).
+// Update this list when the network team renumbers — there is only one
+// classifier and one source of truth.
 function classifySite(ip) {
   if (!ip) return SITE_KEY_1;
-  if (ip.startsWith('10.1.') || ip.startsWith('192.168.11.')) return SITE_KEY_2;
+  if (ip.startsWith('10.1.') || ip.startsWith('192.168.11.') || ip.startsWith('192.168.1.')) return SITE_KEY_2;
   return SITE_KEY_1;
 }
 
