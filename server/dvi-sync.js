@@ -241,14 +241,28 @@ class LocalClient {
     // on a healthy mount and longer when DVI is rotating files. A timeout
     // returns an empty list, which the caller used to silently treat as a
     // successful poll with no files — masking the failure for hours. Bumped
-    // to 90s and we now THROW on timeout (caller sets status='error') so the
+    // to 300s and we now THROW on timeout (caller sets status='error') so the
     // failure is visible in sync-state.json instead of pretending success.
     // Also distinguish: empty result with NO error → real "no new files".
+    //
+    // ⚠️ TECH DEBT (2026-04-28): the 300s timeout is a band-aid — at 30s
+    // poll interval and a 60K-file SMB enumeration that takes 60-90s on a
+    // healthy mount and times out under load, we're spending most of the
+    // poll budget on a directory listing whose contents we already know
+    // 99.9% of. The right fix is incremental enumeration:
+    //   `find <dir> -newer <marker_file> -name '*.xml'`
+    // → O(new files since last successful poll) instead of O(60K).
+    // Marker file = touched after each successful poll. Fall back to full
+    // enumeration if marker is missing or older than N days.
+    // Tracked: replace this block with an incremental lister. Until then,
+    // the timeout has to scale with directory size, which scales with
+    // backlog, which is itself a separate accumulating-files problem (the
+    // sync uses action='copy', not 'move', because we don't have delete
+    // permission on the DVI share — see config/dvi-sync.json `note`).
     const result = await new Promise((resolve, reject) => {
-      // 90s should comfortably cover even a mid-rotation enumeration of the
-      // 60K-file inbound XML directory. maxBuffer bumped — `ls` of 60K files
-      // is ~1.5MB of stdout.
-      execFile('/bin/ls', [fullPath], { timeout: 90000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+      // 300s ceiling for enumerating the 60K-file inbound XML dir. maxBuffer
+      // bumped — `ls` of 60K files is ~1.5MB of stdout.
+      execFile('/bin/ls', [fullPath], { timeout: 300000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
         if (err) {
           if (err.killed) {
             // Real failure — surface it so the caller marks the sync as
