@@ -292,7 +292,11 @@ function mapToFlowStage(job, ovenState) {
 
   // Surfacing zone — try to narrow down
   if (stage === 'SURFACING') {
-    if (station.includes('BLOCK') || station.includes('CBB') || station.includes('TAPE')) return 'blocking';
+    // Blocking station match: DVI emits 'AUTO BLKER' and 'MANBLKER' at Pair's
+    // lab — the 'BLKER' substring is the actual signal. The 'BLOCK' / 'CBB' /
+    // 'TAPE' patterns came from a different lab's nomenclature and never fire
+    // on Pair's data, so the Blocking stage was always 0.
+    if (station.includes('BLKER') || station.includes('BLOCK') || station.includes('CBB') || station.includes('TAPE')) return 'blocking';
     if (station.includes('GENERATOR') || station.includes('GEN') || station.includes('HSC')) return 'surfacing';
     if (station.includes('DBA') || station.includes('DEBLOCK')) return 'detray';
     if (station.includes('POLISH') || station.includes('CCP') || station.includes('FIN')) return 'surfacing';
@@ -342,6 +346,53 @@ function countJobsByStage(dviTrace, dviJobIndex, ovenState) {
       daysInLab: job.daysInLab,
       firstSeen: job.firstSeen,
     });
+  }
+
+  // Oven overlay — DVI trace doesn't emit oven-station events (DVI's view
+  // ends at SENT TO COAT and resumes at RECEIVED COAT). The actual
+  // "currently in an oven" signal lives in the liveTimers map populated by
+  // OvenTimer.html standalone tablets — operators type job IDs in when they
+  // load a rack. Each liveTimers entry carries a jobs[] array for its rack.
+  //
+  // Sum unique invoices across all currently-running racks into the oven
+  // stage. Dedupe across racks AND against any DVI-trace COATING-stage row
+  // for the same invoice (so we don't double-count a job that's in liveTimers
+  // AND DVI shows at SENT TO COAT).
+  if (counts.oven && ovenState && typeof ovenState === 'object') {
+    const alreadyCounted = new Set();
+    for (const stageId of Object.keys(counts)) {
+      for (const j of counts[stageId].jobs) alreadyCounted.add(String(j.job_id));
+    }
+    const ovenInvoices = new Set();
+    for (const entry of Object.values(ovenState)) {
+      if (!entry || !Array.isArray(entry.jobs)) continue;
+      for (const inv of entry.jobs) {
+        const id = String(inv || '').trim();
+        if (!id) continue;
+        if (alreadyCounted.has(id)) continue;
+        ovenInvoices.add(id);
+      }
+    }
+    for (const id of ovenInvoices) {
+      // Classify via dviJobIndex when we can, fall back to 'surfacing' (only
+      // surfacing-line jobs hit the oven; SV bypasses).
+      let line = 'surfacing';
+      try {
+        const xml = dviJobIndex && dviJobIndex.get ? dviJobIndex.get(id) : null;
+        if (xml) line = classifyJob({ job_id: id }, dviJobIndex);
+      } catch {}
+      counts.oven[line] = (counts.oven[line] || 0) + 1;
+      counts.oven.total++;
+      counts.oven.jobs.push({
+        job_id: id,
+        line,
+        station: 'OVEN (live timer)',
+        rush: false,
+        daysInLab: null,
+        firstSeen: null,
+        _source: 'oven-live',
+      });
+    }
   }
 
   return counts;
