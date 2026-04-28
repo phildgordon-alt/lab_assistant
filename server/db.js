@@ -3373,12 +3373,19 @@ function upsertJobFromXML(p) {
   const rx = p.rx || {};
   const R = rx.R || {};
   const L = rx.L || {};
+  // parseDviXml() in oven-timer-server.js emits lensMat / lensOpc (not
+  // lensMaterial / lensOpcR). Pre-2026-04-28 this read-side called the wrong
+  // names and silently dropped material + OPC on every SHIPLOG XML write.
+  // Accept both shapes so callers with raw parser output OR enriched output
+  // both populate correctly.
+  const lensMaterial = p.lensMaterial != null ? p.lensMaterial : p.lensMat;
+  const lensOpcR     = p.lensOpcR     != null ? p.lensOpcR     : p.lensOpc;
   upsertJobFromXMLStmt.run(
     p.invoice, p.reference || null, p.rxNum || null, p.tray || null,
     p.entryDate || null, p.entryTime || null, p.shipDate || null, p.shipTime || null,
     p.daysInLab || null, p.department || null, p.jobType || null, p.operator || null,
     p.jobOrigin || null, p.machineId || null, p.isHko ? 1 : 0,
-    p.lensOpcR || null, p.lensOpcL || null, p.lensStyle || null, p.lensMaterial || null,
+    lensOpcR || null, p.lensOpcL || null, p.lensStyle || null, lensMaterial || null,
     p.lensType || null, p.lensPick || null, p.lensColor || null,
     p.coating || null, p.coatType || null,
     p.frameUpc || null, p.frameName || null, p.frameStyle || null, p.frameSku || null,

@@ -2875,7 +2875,9 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/aging/jobs') {
     // Compute zone/SLA from lens type + days (shared by both code paths)
     const _computeAging = (lensType, daysInLab) => {
-      const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing' : lensType === 'S' ? 'Single Vision' : 'Unknown';
+      // 'C' = custom/aspheric SV; classified as SV in NPI/coating-queue/db.js — keep parity here.
+      const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing'
+        : (lensType === 'S' || lensType === 'C') ? 'Single Vision' : 'Unknown';
       // Unknown lens type gets the longer surfacing SLA (3 days) to avoid
       // misclassifying surfacing jobs as over-SLA on the SV 2-day target
       const slaTarget = jobType === 'Single Vision' ? 2 : 3;
@@ -4653,7 +4655,7 @@ Respond with a structured batching plan in this format:
       if (j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED') {
         const xml = dviJobIndex.get(j.job_id);
         const lt = (xml?.lensType || '').toUpperCase();
-        if (lt === 'S') svWip++;
+        if (lt === 'S' || lt === 'C') svWip++;
         else if (lt === 'P' || lt === 'B') surfWip++;
         else unknownWip++;
       }
@@ -6958,7 +6960,7 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       if (!nel) { res.writeHead(503); res.end('Not ready'); return; }
       const headers = ['Job ID','OPC','Coating','Material','Style','Type','Rush','Days In Lab','Action','Alt SKU','Alt Qty','Alt Warehouse'];
       const rows = nel.jobs.map(j => [
-        j.jobId, j.opc || '', j.coating, j.material, j.style, j.isSurfacing ? 'SURF' : (j.lensType === 'S' ? 'SV' : 'UNKNOWN'),
+        j.jobId, j.opc || '', j.coating, j.material, j.style, j.isSurfacing ? 'SURF' : ((j.lensType === 'S' || j.lensType === 'C') ? 'SV' : 'UNKNOWN'),
         j.rush ? 'YES' : '', Math.round(j.daysInLab * 10) / 10, `"${j.action}"`,
         j.alternatives[0]?.sku || '', j.alternatives[0]?.qty || '', j.alternatives[0]?.warehouse || ''
       ].join(','));
@@ -7634,7 +7636,7 @@ function captureDailyShipTarget() {
       if (j.stage === 'SHIPPING' || j.stage === 'CANCELED' || j.status === 'SHIPPED') continue;
       const xml = dviJobIndex.get(j.job_id);
       const lt = (xml?.lensType || '').toUpperCase();
-      if (lt === 'S') svWip++;
+      if (lt === 'S' || lt === 'C') svWip++;
       else if (lt === 'P' || lt === 'B') surfWip++;
       else unknownWip++;
     }

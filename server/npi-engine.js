@@ -832,15 +832,19 @@ function formatSvStockingCsv(db, scenarioId) {
   const firstVariant = phCodes[0];
 
   // Empty-SV early-out: still emit dropped-selection warnings so the operator
-  // knows their material picks were ignored.
+  // knows their material picks were ignored. Warnings go to the sidecar log,
+  // not the CSV body — the supplier file stays clean.
   if (donors.length === 0) {
     const droppedSelections = selectedSvMaterials.slice();
+    const earlyWarnings = [];
     const headerLines = [`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`];
     for (const m of droppedSelections) {
-      headerLines.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
+      const w = `# WARNING: selected material ${m} had ZERO donor SKUs after expansion`;
+      earlyWarnings.push(w);
+      console.log(`[NPI-Export] ${w}`);
     }
     headerLines.push('# No SV donor SKUs found for selected materials.');
-    return { csv: headerLines.join('\n') + '\n' };
+    return { csv: headerLines.join('\n') + '\n', warnings: earlyWarnings, totals };
   }
 
   // Same Rx normalization as before: int×100 → decimal, snap to 0.25D.
@@ -983,32 +987,39 @@ function formatSvStockingCsv(db, scenarioId) {
     } catch { /* ignore */ }
   }
 
+  // All `# WARNING:` / `# NOTE:` lines are routed to the `warnings` array (and
+  // server log) rather than the CSV body. Phil ships these CSVs to suppliers;
+  // the body must contain only summary header + column header + data + grand
+  // total. Warnings still surface via the sidecar log file written by the
+  // export endpoint and via console.log here for live tailing.
+  const exportWarnings = warnings.slice(); // donor-loop warnings collected above
+  if (staleDays !== null && staleDays > 3) {
+    exportWarnings.push(`# WARNING: forecast last computed ${staleDays} days ago — consider running Lens Intelligence model first`);
+  }
+  if (multiVariant) {
+    exportWarnings.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
+    exportWarnings.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
+    exportWarnings.push(`# or prescriptions in the UI before splitting the order.`);
+  }
+  if (badDates && badDates.n > 0) {
+    exportWarnings.push(`# NOTE: ${badDates.n} jobs with non-DVI entry_date format were skipped from Rx histogram`);
+  }
+  for (const m of missingMats) {
+    exportWarnings.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
+  }
+  for (const w of exportWarnings) console.log(`[NPI-Export] ${w}`);
+
   const lines = [];
   lines.push(`# NPI SV Stocking — ${csvEsc(totals.scenario.name || '')}`);
   lines.push(`# Source: material_category | Per-donor-SKU × Rx | Window: last 12 months | R+L samples counted separately`);
   lines.push(`# Rx granularity: 0.25D (standard supplier stocking grid)`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
-  if (staleDays !== null && staleDays > 3) {
-    lines.push(`# WARNING: forecast last computed ${staleDays} days ago — consider running Lens Intelligence model first`);
-  }
-  if (multiVariant) {
-    lines.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
-    lines.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
-    lines.push(`# or prescriptions in the UI before splitting the order.`);
-  }
-  if (badDates && badDates.n > 0) {
-    lines.push(`# NOTE: ${badDates.n} jobs with non-DVI entry_date format were skipped from Rx histogram`);
-  }
   lines.push(`#`);
   lines.push(`# TOTAL SV INITIAL ORDER: ${grandSum} lenses`);
   lines.push(`# By material (order quantity):`);
   for (const [mat, q] of Object.entries(orderQtyByMat).sort((a, b) => b[1] - a[1])) {
     lines.push(`#   ${mat}: ${q} lenses   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
   }
-  for (const m of missingMats) {
-    lines.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
-  }
-  for (const w of warnings) lines.push(w);
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
   lines.push(['placeholder_sku','real_sku','donor_sku','material','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
@@ -1028,7 +1039,7 @@ function formatSvStockingCsv(db, scenarioId) {
   }
   lines.push('');
   lines.push(`# Grand total SV: ${grandSum} lenses`);
-  return { csv: lines.join('\n'), totals };
+  return { csv: lines.join('\n'), warnings: exportWarnings, totals };
 }
 
 // Semi stocking CSV — one row per donor SKU. base_curve comes from
@@ -1050,7 +1061,7 @@ function formatSemiStockingCsv(db, scenarioId) {
   const firstVariant = phCodes[0];
 
   if (donors.length === 0) {
-    return { csv: '# No semi-finished materials selected for cannibalization.\n' };
+    return { csv: '# No semi-finished materials selected for cannibalization.\n', warnings: [], totals };
   }
 
   const fallbackAvgStmt = db.prepare(`
@@ -1127,28 +1138,34 @@ function formatSemiStockingCsv(db, scenarioId) {
     } catch { /* ignore */ }
   }
 
+  // All `# WARNING:` / `# NOTE:` lines are routed to the `warnings` array (and
+  // server log) rather than the CSV body — supplier-facing file stays clean.
+  // The `# Note: base_curve=UNKNOWN ...` line below is a content explainer, not
+  // a `# NOTE:`-prefixed warning, so it stays in the body.
+  const exportWarnings = warnings.slice(); // donor-loop warnings collected above
+  if (staleDays !== null && staleDays > 3) {
+    exportWarnings.push(`# WARNING: forecast last computed ${staleDays} days ago — consider running Lens Intelligence model first`);
+  }
+  if (multiVariant) {
+    exportWarnings.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
+    exportWarnings.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
+    exportWarnings.push(`# or prescriptions in the UI before splitting the order.`);
+  }
+  for (const m of missingMats) {
+    exportWarnings.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
+  }
+  for (const w of exportWarnings) console.log(`[NPI-Export] ${w}`);
+
   const lines = [];
   lines.push(`# NPI Semi-Finished Stocking — ${csvEsc(totals.scenario.name || '')}`);
   lines.push(`# Source: material_category | Per-donor-SKU | Window: last 12 months`);
   lines.push(`# Lead time: ${totals.totalLeadTime}wk | Safety: ${totals.safetyWeeks}wk | ABC: ${totals.abcClass}`);
-  if (staleDays !== null && staleDays > 3) {
-    lines.push(`# WARNING: forecast last computed ${staleDays} days ago — consider running Lens Intelligence model first`);
-  }
-  if (multiVariant) {
-    lines.push(`# NOTE: scenario has ${phCodes.length} placeholder variants (${phCodes.join(', ')}). All rows stamped with ${phCodes[0]} only.`);
-    lines.push(`# Additional variants are NOT included in this CSV. Map each variant to specific materials`);
-    lines.push(`# or prescriptions in the UI before splitting the order.`);
-  }
   lines.push(`#`);
   lines.push(`# TOTAL SEMI INITIAL ORDER: ${grandSum} pucks`);
   lines.push(`# By material (order quantity):`);
   for (const [mat, q] of Object.entries(orderQtyByMat).sort((a, b) => b[1] - a[1])) {
     lines.push(`#   ${mat}: ${q} pucks   (${Math.round((q / (grandSum || 1)) * 100)}%)`);
   }
-  for (const m of missingMats) {
-    lines.push(`# WARNING: selected material ${m} had ZERO donor SKUs after expansion`);
-  }
-  for (const w of warnings) lines.push(w);
   lines.push(`#`);
   lines.push(`# Note: base_curve=UNKNOWN means the SKU has no known BC in lens_sku_properties.`);
   lines.push(`# Generated: ${new Date().toISOString()}`);
@@ -1168,7 +1185,7 @@ function formatSemiStockingCsv(db, scenarioId) {
   }
   lines.push('');
   lines.push(`# Grand total Semi: ${grandSum} pucks`);
-  return { csv: lines.join('\n'), totals };
+  return { csv: lines.join('\n'), warnings: exportWarnings, totals };
 }
 
 module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows, formatRxListCsv, getCannibalizationVariance, computeMaterialCategoryScenarioTotals, formatSvStockingCsv, formatSemiStockingCsv };

@@ -60,18 +60,28 @@ function main() {
   }
 
   // Candidate set: archived picks with a completed_at, last 30 days,
-  // with no picks_history row sharing the same (order_id, sku, completed_at)
+  // with no picks_history row sharing the same (invoice, sku, completed_at)
   // tuple. NOT IN ... is faster than NOT EXISTS for this size with the
   // existing idx_picks_hist_completed index.
+  //
+  // CRITICAL — column mapping (was wrong before 2026-04-28 repair):
+  //   picks.order_id   = 36-char ItemPath GUID (NOT joinable to jobs.invoice)
+  //   picks.reference  = 6-char DVI invoice    (THIS is what joins to jobs)
+  // picks_history.order_id is what jobs.invoice joins against, so we MUST
+  // populate it from picks.reference, not picks.order_id. The historical
+  // bug wrote 35,589 GUID-shaped rows; Phil ran the repair UPDATE on
+  // 2026-04-28. The script must never reintroduce them.
   const candidates = db.prepare(`
-    SELECT p.id, p.order_id, p.sku, p.name, p.qty, p.warehouse, p.completed_at
+    SELECT p.id, p.reference AS order_id, p.sku, p.name, p.qty, p.warehouse, p.completed_at
     FROM picks p
     WHERE p.archived = 1
       AND p.completed_at IS NOT NULL
       AND p.completed_at >= datetime('now', '-${DAYS} days')
+      AND p.reference IS NOT NULL
+      AND p.reference GLOB '[0-9][0-9][0-9][0-9]*'
       AND NOT EXISTS (
         SELECT 1 FROM picks_history h
-        WHERE h.order_id = p.order_id
+        WHERE h.order_id = p.reference
           AND h.sku      = p.sku
           AND substr(h.completed_at, 1, 10) = substr(p.completed_at, 1, 10)
       )
@@ -103,9 +113,17 @@ function main() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'recovered')
   `);
 
+  // Defense in depth — refuse to write a GUID-shaped order_id under any
+  // circumstance. If the SELECT ever drifts back to picks.order_id, this
+  // throws and aborts the transaction before a single bad row lands.
+  const isGuidShaped = (s) => typeof s === 'string' && /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(s);
+
   let totalInserted = 0;
   const tx = db.transaction(() => {
     for (const c of candidates) {
+      if (isGuidShaped(c.order_id)) {
+        throw new Error(`Refusing to write GUID-shaped order_id "${c.order_id}" — column mapping is wrong.`);
+      }
       const qty = c.qty || 0;
       const result = insertStmt.run(
         `rec-${c.id}`,
