@@ -2995,7 +2995,15 @@ Respond with a structured batching plan in this format:
     const over5 = jobs.filter(j => j.daysInLab >= 5).length;
     const over10 = jobs.filter(j => j.daysInLab >= 10).length;
     const over3 = jobs.filter(j => j.daysInLab >= 3).length;
-    const outlierPct = total > 0 ? Math.round((over3 / total) * 1000) / 10 : 0;
+    // Outlier % header: weighted average over CLASSIFIED jobs only (SV + Surfacing).
+    // Including 'Unknown' lens_type jobs in the denominator drags the rate down
+    // toward the Unknown bucket's age distribution (mostly fresh jobs <3d), so
+    // the header diverged from what the SV/Surfacing panels show. The two panels
+    // ARE the source of truth — header should be their weighted combined rate.
+    const ratedJobs = sv.length + surf.length;
+    const ratedOver3 = sv.filter(j => j.daysInLab >= 3).length + surf.filter(j => j.daysInLab >= 3).length;
+    const outlierPct = ratedJobs > 0 ? Math.round((ratedOver3 / ratedJobs) * 1000) / 10 : 0;
+    // avg days header still uses all jobs — that's a different question (lab-wide age).
     const avgDays = total > 0 ? Math.round(jobs.reduce((s, j) => s + j.daysInLab, 0) / total * 10) / 10 : 0;
 
     return json(res, {
