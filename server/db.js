@@ -3535,6 +3535,85 @@ const insertJobEventsBulk = db.transaction((events) => {
   for (const e of events) insertJobEvent(e);
 });
 
+// ── Breakage events (DVI VISION/LDS/breakage *.txt) ─────────────────────────
+// One row per (invoice, eye, occurred_at) — the LDS files are per-eye, written
+// one per breakage incident. Wired by oven-timer-server.js dviSync.on('file')
+// for evt.sync === 'breakage'. INSERT OR IGNORE on the natural-key index makes
+// re-processing the same file a no-op.
+//
+// File format (semicolon-delimited, trimmed):
+//   <invoice>; <padded_invoice>;<eye>;<reason>;<station_code>;<stage>;<ts>;<operator>;<flag>
+// Example:
+//   400208; 0400208;L;LOST            ;E 12;EDGING          ;2026-03-06 21:11:00;501;0
+db.exec(`
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_breakage_natural
+  ON breakage_events(invoice, occurred_at, reason);
+`);
+
+const insertBreakageEventStmt = db.prepare(`
+  INSERT OR IGNORE INTO breakage_events
+    (job_id, invoice, department, reason, stage, operator, occurred_at, notes)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+function parseBreakageFile(text, filename) {
+  // One file = one or more breakage rows. Eye comes from the row, not the
+  // filename, but the filename `<invoice>_<eye>.txt` gives us a fallback.
+  const fileEyeMatch = (filename || '').match(/_([RL])\.txt$/i);
+  const fileEye = fileEyeMatch ? fileEyeMatch[1].toUpperCase() : null;
+  const out = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const cols = line.split(';').map(c => c.trim());
+    if (cols.length < 7) continue;
+    const invoice = cols[0];
+    if (!/^\d{4,}$/.test(invoice)) continue; // defense vs garbage
+    const eye      = (cols[2] || fileEye || '').toUpperCase();
+    const reason   = cols[3] || null;
+    const station  = cols[4] || null;
+    const stage    = cols[5] || null;
+    const occurred = cols[6] || null;
+    const operator = cols[7] || null;
+    // Department = first non-space char of station code (E/S/C/A/Q) — best-effort
+    const department = station ? (station[0] || null) : null;
+    out.push({
+      invoice,
+      eye,
+      reason,
+      station,
+      stage,
+      occurred_at: occurred,
+      operator,
+      department,
+    });
+  }
+  return out;
+}
+
+function insertBreakageEvent(rec) {
+  if (!rec || !rec.invoice || !rec.occurred_at) return false;
+  const notes = `eye=${rec.eye || '?'};station=${rec.station || '?'}`;
+  const r = insertBreakageEventStmt.run(
+    rec.invoice,             // job_id (use invoice as the join key — same as our other job tables)
+    rec.invoice,
+    rec.department,
+    rec.reason,
+    rec.stage,
+    rec.operator,
+    rec.occurred_at,
+    notes
+  );
+  return r.changes > 0;
+}
+
+// Bulk wrapper for one file (multi-line breakage reports — rare but possible)
+const insertBreakageEventsBulk = db.transaction((records) => {
+  let inserted = 0;
+  for (const r of records) if (insertBreakageEvent(r)) inserted++;
+  return inserted;
+});
+
 // ── Query functions for unified jobs table ──────────────────────────────────
 
 function getJob(invoice) {
@@ -4046,6 +4125,10 @@ module.exports = {
   upsertJobFromLooker,
   insertJobEvent,
   insertJobEventsBulk,
+  // Breakage events (DVI VISION/LDS/breakage *.txt)
+  parseBreakageFile,
+  insertBreakageEvent,
+  insertBreakageEventsBulk,
   getJob,
   getJobByReference,
   queryJobsWip,

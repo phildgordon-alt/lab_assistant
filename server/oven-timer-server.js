@@ -692,6 +692,23 @@ function persistInboundXmlToJobsTable(evt) {
   }
 }
 
+// Process newly-synced breakage report (one per eye per breakage incident).
+// Idempotent — INSERT OR IGNORE on (invoice, occurred_at, reason).
+function persistBreakageFromFile(evt) {
+  try {
+    if (!evt || !evt.path) return;
+    const text = fs.readFileSync(evt.path, 'utf8');
+    const records = labDb.parseBreakageFile(text, evt.file);
+    if (!records.length) return;
+    const inserted = labDb.insertBreakageEventsBulk(records);
+    if (inserted > 0) {
+      console.log(`[DVI-Sync] breakage: persisted ${inserted}/${records.length} from ${evt.file}`);
+    }
+  } catch (e) {
+    console.error(`[DVI-Sync] persistBreakageFromFile failed for ${evt?.file}: ${e.message}`);
+  }
+}
+
 // Also reload when dvi-sync copies new files
 dviSync.on('file', (evt) => {
   try {
@@ -705,6 +722,12 @@ dviSync.on('file', (evt) => {
         }
         catch (e) { console.error(`[DVI-Sync] loadDviJobIndex failed after file event: ${e.message}`); }
       }, 1000);
+    }
+    if (evt && evt.sync === 'breakage') {
+      // Persist immediately — breakage_events writer was missing entirely
+      // pre-2026-04-28 (every per-event query returned 0 rows). The file
+      // is small and parsing is fast; no need for a setTimeout window.
+      persistBreakageFromFile(evt);
     }
   } catch (e) {
     console.error(`[DVI-Sync] 'file' event handler failed: ${e.message}`);
