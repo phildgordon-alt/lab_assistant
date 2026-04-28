@@ -10091,7 +10091,7 @@ function QCTab({trays,dviJobs=[],breakage,setBreakage,breakageMeta={}}){
   return(
     <div>
       <div style={{display:"flex",gap:4,marginBottom:16,flexWrap:"wrap"}}>
-        {[{id:"live",label:"Live QC Board",icon:"🔬"},{id:"breakage",label:"Breakage Log",icon:"💥"},{id:"analytics",label:"Analytics",icon:"📊"}].map(sv=>(
+        {[{id:"live",label:"Live QC Board",icon:"🔬"},{id:"breakage",label:"Breakage Log",icon:"💥"},{id:"analytics",label:"Analytics",icon:"📊"},{id:"yield",label:"Yield History",icon:"📈"}].map(sv=>(
           <button key={sv.id} onClick={()=>setSubView(sv.id)} style={{background:subView===sv.id?T.blueDark:"transparent",border:`1px solid ${subView===sv.id?T.blue:"transparent"}`,borderRadius:8,padding:"10px 20px",cursor:"pointer",color:subView===sv.id?T.blue:T.textMuted,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,fontFamily:sans}}><span>{sv.icon}</span>{sv.label}</button>
         ))}
       </div>
@@ -10223,7 +10223,7 @@ function QCTab({trays,dviJobs=[],breakage,setBreakage,breakageMeta={}}){
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
             <Card>
-              <SectionHeader>Break Type Distribution</SectionHeader>
+              <SectionHeader right={`${sortedTypes.length} reason${sortedTypes.length===1?'':'s'}`}>Breakage Reason Distribution</SectionHeader>
               {sortedTypes.map(([type,count])=>(
                 <div key={type} style={{marginBottom:8}}>
                   <div style={{display:"flex",justifyContent:"space-between",fontSize:11,marginBottom:3}}><span style={{color:T.textMuted}}>{type}</span><span style={{color:T.text,fontFamily:mono,fontWeight:700}}>{count}</span></div>
@@ -10244,6 +10244,86 @@ function QCTab({trays,dviJobs=[],breakage,setBreakage,breakageMeta={}}){
           <BreakageHistory breakage={breakage} serverHistory={breakageMeta.dailyHistory}/>
         </div>
       )}
+
+      {subView==="yield"&&(
+        <YieldHistoryView/>
+      )}
+    </div>
+  );
+}
+
+// ── Yield History Sub-Tab ────────────────────────────────────
+// Day-by-day yield chart, full retained range. Source:
+//   /api/breakage/yield-history — joins breakage_events.occurred_at with
+//   dvi_shipped_jobs.ship_date for every day either side has data.
+function YieldHistoryView(){
+  const [data,setData]=useState({days:[],totalDays:0,yield7d:null,yield30d:null,yield90d:null,oldest:null,newest:null});
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState(null);
+
+  useEffect(()=>{
+    let cancelled=false;
+    async function load(){
+      try{
+        const r=await fetch(`http://${window.location.hostname}:3002/api/breakage/yield-history`);
+        if(!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j=await r.json();
+        if(!cancelled) setData(j);
+      } catch(e){ if(!cancelled) setErr(e.message); }
+      finally{ if(!cancelled) setLoading(false); }
+    }
+    load();
+    const iv=setInterval(load,60000); // refresh every 60s
+    return ()=>{cancelled=true; clearInterval(iv);};
+  },[]);
+
+  if(loading) return <Card><div style={{padding:20,color:T.textDim,textAlign:"center"}}>Loading yield history…</div></Card>;
+  if(err) return <Card><div style={{padding:20,color:T.red}}>Failed to load: {err}</div></Card>;
+  if(!data.days?.length) return <Card><div style={{padding:20,color:T.textDim,textAlign:"center"}}>No yield data yet — needs at least one day with shipments + breakage.</div></Card>;
+
+  const yieldColor=(y)=>y==null?T.textDim:y>=95?T.green:y>=90?T.amber:T.red;
+  const days=data.days; // already DESC by date
+  // Find max shipped for relative bar widths
+  const maxShipped=Math.max(...days.map(d=>d.shipped||0), 1);
+
+  return(
+    <div style={{display:"flex",flexDirection:"column",gap:20}}>
+      <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+        <KPICard label="Yield (7-day)"  value={data.yield7d!=null?`${data.yield7d}%`:'—'}  sub="trailing 7 days" accent={yieldColor(data.yield7d)}/>
+        <KPICard label="Yield (30-day)" value={data.yield30d!=null?`${data.yield30d}%`:'—'} sub="trailing 30 days" accent={yieldColor(data.yield30d)}/>
+        <KPICard label="Yield (90-day)" value={data.yield90d!=null?`${data.yield90d}%`:'—'} sub="trailing 90 days" accent={yieldColor(data.yield90d)}/>
+        <KPICard label="Days Tracked" value={data.totalDays} sub={data.oldest?`since ${data.oldest}`:''} accent={T.blue}/>
+      </div>
+      <Card>
+        <SectionHeader right={`${days.length} days · ${data.oldest||'?'} → ${data.newest||'?'}`}>Daily Yield</SectionHeader>
+        <div style={{maxHeight:600,overflowY:"auto"}}>
+          {days.map(d=>{
+            const isToday=d.date===new Date().toISOString().slice(0,10);
+            const dayLabel=new Date(d.date+'T12:00:00').toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'});
+            const fillPct=maxShipped>0?(d.shipped/maxShipped)*100:0;
+            const yc=yieldColor(d.yieldPct);
+            return(
+              <div key={d.date} style={{display:"flex",alignItems:"center",gap:12,padding:"8px 12px",marginBottom:2,background:isToday?`${T.blue}10`:T.bg,borderRadius:8,border:`1px solid ${isToday?T.blue+'30':T.border}`}}>
+                <div style={{minWidth:110}}>
+                  <div style={{fontSize:12,color:isToday?T.blue:T.text,fontFamily:mono,fontWeight:700}}>{dayLabel}</div>
+                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{d.date}</div>
+                </div>
+                <div style={{flex:1,height:10,background:T.surface,borderRadius:5,overflow:"hidden"}}>
+                  <div style={{width:`${fillPct}%`,height:"100%",background:yc,opacity:0.85,borderRadius:5,transition:"width 0.3s"}}/>
+                </div>
+                <div style={{minWidth:80,textAlign:"right"}}>
+                  {d.yieldPct!=null
+                    ? <span style={{fontSize:14,fontWeight:800,color:yc,fontFamily:mono}}>{d.yieldPct}%</span>
+                    : <span style={{fontSize:11,color:T.textDim,fontFamily:mono}}>—</span>}
+                </div>
+                <div style={{minWidth:140,textAlign:"right",fontSize:10,color:T.textMuted,fontFamily:mono}}>
+                  {d.shipped} shipped · {d.broken} broke
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
     </div>
   );
 }

@@ -5091,6 +5091,29 @@ Respond with a structured batching plan in this format:
   // ── Breakage endpoint — real data from DVI Trace ─────────────
   if (req.method==='GET' && url.pathname==='/api/breakage') {
     const allJobs = dviTrace.getJobs();
+    // Pre-fetch reasons from breakage_events keyed by invoice. The DVI LDS
+    // breakage *.txt files (one per eye per breakage incident) are the
+    // authoritative source for the reason CODE — TC WRONG / CRAZE / LOST
+    // / PIT-SPECTS / BAD CUT / etc. The trace dviTrace.getJobs() only
+    // tells us THAT a break happened; the reason is in breakage_events.
+    let reasonByInvoice = new Map();
+    try {
+      const rows = labDb.db.prepare(`
+        SELECT invoice, reason, occurred_at
+        FROM breakage_events
+        ORDER BY occurred_at DESC
+      `).all();
+      for (const r of rows) {
+        // Most-recent reason wins (DESC ordering above), but keep prior
+        // reasons as alternates in case a job had multiple incidents.
+        if (!reasonByInvoice.has(r.invoice)) {
+          reasonByInvoice.set(r.invoice, { primary: r.reason, all: [r.reason] });
+        } else {
+          reasonByInvoice.get(r.invoice).all.push(r.reason);
+        }
+      }
+    } catch (e) { /* breakage_events may not be populated yet */ }
+
     const breakageJobs = [];
     for (const j of allJobs) {
       if (!j.hasBreakage) continue;
@@ -5102,13 +5125,19 @@ Respond with a structured batching plan in this format:
       // Find the station just before breakage for "dept" info
       const brkIdx = events.findIndex(e => e.stage === 'BREAKAGE');
       const prevEvent = brkIdx > 0 ? events[brkIdx - 1] : null;
+      const reasonInfo = reasonByInvoice.get(j.job_id);
       breakageJobs.push({
         id: `BRK-${j.job_id}`,
         job: j.job_id,
         dept: prevEvent?.stage || j.stage || 'UNKNOWN',
         station: j.station,
         currentStage: j.stage,
-        type: 'Breakage',
+        // 'type' is now the breakage REASON code (TC WRONG, CRAZE, LOST, etc.)
+        // pulled from breakage_events. Falls back to 'Breakage' when no
+        // reason exists yet (events for this job didn't land in the table).
+        type: reasonInfo?.primary || 'Breakage',
+        reason: reasonInfo?.primary || null,
+        reasonCount: reasonInfo?.all?.length || 0,
         lens: xml.lensType === 'P' ? 'Both' : xml.lensType === 'S' ? 'OD' : xml.lensType === 'B' ? 'Both' : 'Unknown',
         coating: xml.coating || 'Unknown',
         lensStyle: xml.lensStyle || null,
@@ -5208,6 +5237,69 @@ Respond with a structured batching plan in this format:
       shippedToday: todayShipped,
       dailyHistory,
     });
+  }
+
+  // Yield history — day-by-day for the full range we have data on.
+  // Joins breakage_events.occurred_at (count per day) with dvi_shipped_jobs.ship_date
+  // (shipped per day). Returns every day we have at least one of either, descending.
+  if (req.method==='GET' && url.pathname==='/api/breakage/yield-history') {
+    try {
+      // Pull both sides separately, merge in JS — SQLite's FULL OUTER JOIN is awkward.
+      const breaksByDay = {};
+      try {
+        const rows = labDb.db.prepare(`
+          SELECT substr(occurred_at, 1, 10) AS date, COUNT(*) AS broken
+          FROM breakage_events
+          WHERE occurred_at IS NOT NULL
+          GROUP BY substr(occurred_at, 1, 10)
+        `).all();
+        for (const r of rows) breaksByDay[r.date] = r.broken;
+      } catch {}
+      const shippedByDay = {};
+      try {
+        const rows = labDb.db.prepare(`
+          SELECT ship_date AS date, COUNT(*) AS shipped
+          FROM dvi_shipped_jobs
+          WHERE ship_date IS NOT NULL
+          GROUP BY ship_date
+        `).all();
+        for (const r of rows) shippedByDay[r.date] = r.shipped;
+      } catch {}
+
+      // Union of both date sets
+      const allDates = new Set([...Object.keys(breaksByDay), ...Object.keys(shippedByDay)]);
+      const rows = [];
+      for (const date of allDates) {
+        const broken = breaksByDay[date] || 0;
+        const shipped = shippedByDay[date] || 0;
+        const yieldPct = shipped > 0
+          ? Math.max(0, Math.round(((shipped - broken) / shipped) * 1000) / 10)
+          : null;
+        rows.push({ date, shipped, broken, yieldPct });
+      }
+      rows.sort((a, b) => b.date.localeCompare(a.date));
+
+      // Trailing aggregate yields
+      const sum = (arr, k) => arr.reduce((s, r) => s + (r[k] || 0), 0);
+      const recent = (n) => {
+        const slice = rows.slice(0, n);
+        const s = sum(slice, 'shipped');
+        const b = sum(slice, 'broken');
+        return s > 0 ? Math.max(0, Math.round(((s - b) / s) * 1000) / 10) : null;
+      };
+
+      return json(res, {
+        days: rows,
+        totalDays: rows.length,
+        yield7d: recent(7),
+        yield30d: recent(30),
+        yield90d: recent(90),
+        oldest: rows[rows.length - 1]?.date || null,
+        newest: rows[0]?.date || null,
+      });
+    } catch (e) {
+      return json(res, { error: e.message, days: [] }, 500);
+    }
   }
 
   // Breakage history — full persisted daily record
