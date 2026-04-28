@@ -43,11 +43,17 @@ const SITE_KEY_1 = 'irvine1';
 const SITE_KEY_2 = 'irvine2';
 
 // Irvine 2 IP ranges (Site Magic SD-WAN: physically separate site, one
-// UniFi controller). Per Phil 2026-04-28: 192.168.11.1 is the Irvine 2
-// gateway. 192.168.1.x is NOT Irvine 2 — it's a VLAN at Irvine 1.
+// UniFi controller). Empirically validated 2026-04-28 — when 192.168.1.x
+// is INCLUDED, the Irvine 2 dashboard populates with connected devices &
+// clients. When EXCLUDED it goes dark. Gateway IP (192.168.11.1) and the
+// client/device LAN subnet at Irvine 2 are not the same — SD-WAN puts the
+// gateway on its own /30-ish range and the LAN on 192.168.1.x.
+//
+// 10.1.x and 192.168.11.x retained from prior commits in case Site Magic
+// renumbers — extra subnets here are harmless if they don't appear.
 function classifySite(ip) {
   if (!ip) return SITE_KEY_1;
-  if (ip.startsWith('10.1.') || ip.startsWith('192.168.11.')) return SITE_KEY_2;
+  if (ip.startsWith('10.1.') || ip.startsWith('192.168.11.') || ip.startsWith('192.168.1.')) return SITE_KEY_2;
   return SITE_KEY_1;
 }
 
