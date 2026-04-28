@@ -55,9 +55,11 @@ function getToolLabel(toolName: string): string {
   return TOOL_LABELS[toolName] || `Using ${toolName.replace(/_/g, ' ')}`;
 }
 
-// Truncate large tool results to stay within token limits
-// ~4 chars per token, aim for max ~3000 tokens per tool result
-const MAX_TOOL_RESULT_CHARS = 12000;
+// Truncate large tool results to stay within token limits.
+// ~4 chars per token. Bumped 2026-04-28 from 12000 → 32000 (~8000 tokens)
+// after audit found WIP-snapshot tools were silently returning only the
+// first 20 of N rows on busy days, so agents reasoned about partial data.
+const MAX_TOOL_RESULT_CHARS = 32000;
 function truncateToolResult(result: unknown): string {
   const str = JSON.stringify(result);
   if (str.length <= MAX_TOOL_RESULT_CHARS) return str;
@@ -88,7 +90,11 @@ const anthropic = new Anthropic({
 // Haiku is 10x cheaper and faster — stays well within rate limits
 // Switch to claude-sonnet-4-20250514 after upgrading Anthropic tier ($5 deposit → 40K tokens/min)
 const MODEL = 'claude-haiku-4-5-20251001';
-const MAX_TOKENS = 2048;
+// Bumped 2026-04-28 from 2048 → 4096 after audit found agent responses
+// truncated mid-table on stocking plans, shift reports, cross-dept
+// summaries. 4096 fits a typical full report (~12 KB) without padding
+// our cost meaningfully on short answers (Haiku bills on actual usage).
+const MAX_TOKENS = 4096;
 
 // ── Demo Mode ────────────────────────────────────────────────────────────────
 // Set DEMO_MODE=true in gateway/.env to enable board-presentation mode.
