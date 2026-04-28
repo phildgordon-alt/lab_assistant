@@ -5139,13 +5139,60 @@ Respond with a structured batching plan in this format:
     }
     const dailyHistory = Object.values(byDay).sort((a, b) => b.date.localeCompare(a.date));
 
+    // Yield = jobs shipped that DIDN'T break / jobs shipped that day.
+    // Throughput source: dvi_shipped_jobs (SHIPLOG XML ground truth) by ship_date.
+    // Breakage count is the daily total above. Yield is (shipped - breakage) / shipped.
+    // Edge case: if breakage > shipped (jobs broken before they had a chance to ship
+    // that day), clamp yield at 0%.
+    const shippedByDay = {};
+    try {
+      const rows = labDb.db.prepare(`
+        SELECT ship_date AS date, COUNT(*) AS shipped
+        FROM dvi_shipped_jobs
+        WHERE ship_date >= date('now','-90 days')
+        GROUP BY ship_date
+      `).all();
+      for (const r of rows) shippedByDay[r.date] = r.shipped;
+    } catch (e) { /* non-critical — yield will just be null */ }
+
+    for (const day of dailyHistory) {
+      const shipped = shippedByDay[day.date] || 0;
+      day.shipped = shipped;
+      day.yieldPct = shipped > 0
+        ? Math.max(0, Math.round(((shipped - day.total) / shipped) * 1000) / 10)
+        : null;
+    }
+
+    // Today's yield (live snapshot)
+    const todayKey = new Date().toISOString().slice(0, 10);
+    const todayBreakages = byDay[todayKey]?.total || 0;
+    const todayShipped = shippedByDay[todayKey] || 0;
+    const yieldToday = todayShipped > 0
+      ? Math.max(0, Math.round(((todayShipped - todayBreakages) / todayShipped) * 1000) / 10)
+      : null;
+
+    // Trailing 7-day yield (smooths out single-day spikes)
+    let trailingShipped = 0, trailingBreaks = 0;
+    for (let i = 0; i < 7; i++) {
+      const k = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+      trailingShipped += shippedByDay[k] || 0;
+      trailingBreaks += byDay[k]?.total || 0;
+    }
+    const yield7d = trailingShipped > 0
+      ? Math.max(0, Math.round(((trailingShipped - trailingBreaks) / trailingShipped) * 1000) / 10)
+      : null;
+
     // Persist daily history to disk so it survives beyond trace file window
     const histPath = path.join(__dirname, 'data', 'breakage-history.json');
     try {
       let saved = {};
       if (fs.existsSync(histPath)) saved = JSON.parse(fs.readFileSync(histPath, 'utf8'));
       for (const day of dailyHistory) {
-        saved[day.date] = { total: day.total, active: day.active, resolved: day.resolved, byStage: day.byStage, byCoating: day.byCoating };
+        saved[day.date] = {
+          total: day.total, active: day.active, resolved: day.resolved,
+          byStage: day.byStage, byCoating: day.byCoating,
+          shipped: day.shipped, yieldPct: day.yieldPct,
+        };
       }
       fs.mkdirSync(path.dirname(histPath), { recursive: true });
       fs.writeFileSync(histPath, JSON.stringify(saved, null, 2));
@@ -5156,6 +5203,9 @@ Respond with a structured batching plan in this format:
       total: breakageJobs.length,
       active: breakageJobs.filter(b => !b.resolved).length,
       today: breakageJobs.filter(b => new Date(b.time).toDateString() === new Date().toDateString()).length,
+      yieldToday,
+      yield7d,
+      shippedToday: todayShipped,
       dailyHistory,
     });
   }

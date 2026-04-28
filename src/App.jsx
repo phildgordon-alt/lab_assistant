@@ -6345,24 +6345,32 @@ Type a question to get started!`;
 }
 
 // ── Breakage History Component ────────────────────────────────
-function BreakageHistory({breakage}){
+function BreakageHistory({breakage,serverHistory=[]}){
   const [expanded,setExpanded]=useState(null);
-  // Aggregate breakage by day
+  // Aggregate breakage by day. Merge server-provided history (which carries
+  // shipped count + yieldPct from /api/breakage) with the per-job stream so
+  // the bars can show yield alongside breakage count.
   const dailyData=useMemo(()=>{
     const byDay={};
     for(const b of breakage){
       const d=new Date(b.time);
       if(isNaN(d.getTime()))continue;
       const key=d.toISOString().slice(0,10);
-      if(!byDay[key])byDay[key]={date:key,total:0,active:0,resolved:0,byStage:{},byCoating:{},jobs:[]};
+      if(!byDay[key])byDay[key]={date:key,total:0,active:0,resolved:0,byStage:{},byCoating:{},jobs:[],shipped:0,yieldPct:null};
       byDay[key].total++;
       if(b.resolved)byDay[key].resolved++;else byDay[key].active++;
       const st=b.dept||'UNKNOWN';byDay[key].byStage[st]=(byDay[key].byStage[st]||0)+1;
       const ct=b.coating||'Unknown';byDay[key].byCoating[ct]=(byDay[key].byCoating[ct]||0)+1;
       byDay[key].jobs.push(b);
     }
+    // Overlay server-side shipped + yield
+    for(const day of (serverHistory||[])){
+      if(!byDay[day.date])continue;
+      byDay[day.date].shipped=day.shipped||0;
+      byDay[day.date].yieldPct=day.yieldPct;
+    }
     return Object.values(byDay).sort((a,b)=>b.date.localeCompare(a.date));
-  },[breakage]);
+  },[breakage,serverHistory]);
 
   const maxDay=dailyData.length?Math.max(...dailyData.map(d=>d.total)):1;
 
@@ -6402,6 +6410,17 @@ function BreakageHistory({breakage}){
                 <div style={{minWidth:80,textAlign:"right"}}>
                   {day.active>0&&<span style={{fontSize:10,color:T.red,fontFamily:mono,fontWeight:700,marginRight:6}}>{day.active} open</span>}
                   <span style={{fontSize:10,color:T.green,fontFamily:mono,opacity:0.7}}>{day.resolved} ok</span>
+                </div>
+                {/* Yield */}
+                <div style={{minWidth:90,textAlign:"right"}}>
+                  {day.yieldPct != null ? (
+                    <>
+                      <span style={{fontSize:11,fontWeight:700,fontFamily:mono,color:day.yieldPct>=95?T.green:day.yieldPct>=90?T.amber:T.red}}>{day.yieldPct}%</span>
+                      <span style={{fontSize:9,color:T.textDim,fontFamily:mono,marginLeft:4}}>of {day.shipped}</span>
+                    </>
+                  ) : (
+                    <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>—</span>
+                  )}
                 </div>
                 {/* Top stages */}
                 <div style={{minWidth:120,display:"flex",gap:4,flexWrap:"wrap"}}>
@@ -10046,7 +10065,7 @@ Be direct. No hedging. This is a live production environment.`;
 }
 
 // ── QC & Breakage Tab ────────────────────────────────────────
-function QCTab({trays,dviJobs=[],breakage,setBreakage}){
+function QCTab({trays,dviJobs=[],breakage,setBreakage,breakageMeta={}}){
   const [subView,setSubView]=useState("live");
   const [newBreak,setNewBreak]=useState({job:"",dept:"ASSEMBLY",type:BREAK_TYPES[0],lens:"OD",coating:COATING_TYPES[0],note:""});
   const [showForm,setShowForm]=useState(false);
@@ -10164,7 +10183,7 @@ function QCTab({trays,dviJobs=[],breakage,setBreakage}){
 
       {subView==="breakage"&&(
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
-          <BreakageHistory breakage={breakage}/>
+          <BreakageHistory breakage={breakage} serverHistory={breakageMeta.dailyHistory}/>
           <Card>
             <SectionHeader right={`${breakage.length} total breaks logged`}>All Breakage Events</SectionHeader>
             <div style={{maxHeight:500,overflowY:"auto"}}>
@@ -10188,6 +10207,18 @@ function QCTab({trays,dviJobs=[],breakage,setBreakage}){
           <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
             <KPICard label="Total Breaks" value={breakage.length} sub="all time" accent={T.red}/>
             <KPICard label="Today" value={todayBreaks.length} sub="breaks today" accent={T.orange}/>
+            <KPICard
+              label="Yield Today"
+              value={breakageMeta.yieldToday != null ? `${breakageMeta.yieldToday}%` : '—'}
+              sub={breakageMeta.shippedToday > 0 ? `${breakageMeta.shippedToday} shipped, ${todayBreaks.length} broke` : 'no shipments yet'}
+              accent={breakageMeta.yieldToday != null && breakageMeta.yieldToday >= 95 ? T.green : breakageMeta.yieldToday != null && breakageMeta.yieldToday >= 90 ? T.amber : T.red}
+            />
+            <KPICard
+              label="Yield (7-day)"
+              value={breakageMeta.yield7d != null ? `${breakageMeta.yield7d}%` : '—'}
+              sub="trailing 7 days"
+              accent={breakageMeta.yield7d != null && breakageMeta.yield7d >= 95 ? T.green : breakageMeta.yield7d != null && breakageMeta.yield7d >= 90 ? T.amber : T.red}
+            />
             <KPICard label="Top Type" value={sortedTypes.length>0?sortedTypes[0][0]:'—'} sub={sortedTypes.length>0?`${sortedTypes[0][1]} occurrences`:'none'} accent={T.amber}/>
           </div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
@@ -10210,7 +10241,7 @@ function QCTab({trays,dviJobs=[],breakage,setBreakage}){
                 );});})()}
             </Card>
           </div>
-          <BreakageHistory breakage={breakage}/>
+          <BreakageHistory breakage={breakage} serverHistory={breakageMeta.dailyHistory}/>
         </div>
       )}
     </div>
@@ -11401,6 +11432,7 @@ function LabAssistantV2(){
   const [messages,setMessages]=useState([]);
   const [inspections]=useState([]);
   const [breakage,setBreakage]=useState([]);
+  const [breakageMeta,setBreakageMeta]=useState({yieldToday:null,yield7d:null,shippedToday:0,dailyHistory:[]});
   const [connected]=useState(true);
   const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||`http://${window.location.hostname}:3002`;}catch{return `http://${window.location.hostname}:3002`;} });
   const [clock,setClock]=useState(new Date());
@@ -11473,6 +11505,12 @@ function LabAssistantV2(){
         if(res.ok){
           const data=await res.json();
           setBreakage(data.breakage||[]);
+          setBreakageMeta({
+            yieldToday: data.yieldToday,
+            yield7d: data.yield7d,
+            shippedToday: data.shippedToday,
+            dailyHistory: data.dailyHistory||[],
+          });
         }
       }catch(e){ console.warn("Breakage fetch:",e.message); }
     };
@@ -11728,7 +11766,7 @@ function LabAssistantV2(){
         {view==="maintenance"&&<MaintenanceTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="analytics"&&<AnalyticsTab batches={batches} trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="production-analysis"&&<ProductionAnalysisTab serverUrl={ovenServerUrl} settings={settings}/>}
-        {view==="qc"&&<QCTab trays={trays} dviJobs={mergedJobs} breakage={breakage} setBreakage={setBreakage}/>}
+        {view==="qc"&&<QCTab trays={trays} dviJobs={mergedJobs} breakage={breakage} setBreakage={setBreakage} breakageMeta={breakageMeta}/>}
         {view==="trays"&&<TrayFleetTab trays={trays} setTrays={setTrays}/>}
         {view==="ai"&&<AIAssistantTab trays={trays} batches={batches} dviJobs={dviJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="aging"&&<AgingJobsTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
