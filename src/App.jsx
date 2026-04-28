@@ -248,6 +248,25 @@ const mono = "'JetBrains Mono','Fira Code',monospace";
 const sans = "'Outfit','DM Sans',system-ui,sans-serif";
 
 
+// Format a duration given in minutes to a human-readable string.
+// 0   → "0m"
+// 47  → "47m"
+// 75  → "1h 15m"
+// 60  → "1h"
+// 1500→ "1d 1h"
+// 1440→ "1d"
+// Anything ≤0 or null returns "0m".
+function fmtMins(n) {
+  const m = Math.round(Number(n) || 0);
+  if (m <= 0) return "0m";
+  if (m < 60) return `${m}m`;
+  const days = Math.floor(m / 1440);
+  const hours = Math.floor((m % 1440) / 60);
+  const mins  = m % 60;
+  if (days > 0) return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
 function playBeep(freq=880, dur=0.4, type="sine") {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -7728,7 +7747,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
                       <td style={{padding:"4px 8px",color:stageColor(t.from_stage)}}>{t.from_stage||"—"}</td>
                       <td style={{padding:"4px 8px",color:stageColor(t.to_stage)}}>{t.to_stage}</td>
                       <td style={{padding:"4px 8px",color:"#7dd3fc"}}>{t.transition_at?new Date(t.transition_at).toLocaleString():""}</td>
-                      <td style={{padding:"4px 8px",color:T.text}}>{t.dwell_minutes?`${t.dwell_minutes}m`:"—"}</td>
+                      <td style={{padding:"4px 8px",color:T.text}}>{t.dwell_minutes?fmtMins(t.dwell_minutes):"—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -8384,11 +8403,11 @@ function FlowAgentTab({ovenServerUrl,settings}){
                     <div style={{fontFamily:mono,fontSize:11,color:"#9ca3af",marginBottom:4}}>{s.label}</div>
                     <div style={{fontFamily:mono,fontSize:22,fontWeight:700,color:statusColor(s.status)}}>{s.current_count}</div>
                     <div style={{fontFamily:mono,fontSize:10,color:"#6b7280",marginTop:2}}>
-                      {s.drain_time_minutes!=null?`drains ${s.drain_time_minutes}m`:"—"}
+                      {s.drain_time_minutes!=null?`drains ${fmtMins(s.drain_time_minutes)}`:"—"}
                     </div>
                     <div style={{fontFamily:mono,fontSize:10,color:"#6b7280"}}>{s.completion_rate}/hr</div>
                     {s.gap_minutes!=null&&s.gap_minutes>0&&(
-                      <div style={{position:"absolute",top:-8,right:-8,background:"#ef4444",borderRadius:10,padding:"1px 5px",fontSize:9,fontFamily:mono,color:"#fff"}}>gap {s.gap_minutes}m</div>
+                      <div style={{position:"absolute",top:-8,right:-8,background:"#ef4444",borderRadius:10,padding:"1px 5px",fontSize:9,fontFamily:mono,color:"#fff"}}>gap {fmtMins(s.gap_minutes)}</div>
                     )}
                     {s.stage_id==="oven"&&ovenETAs.length>0&&(
                       <div style={{fontSize:9,fontFamily:mono,color:"#a78bfa",marginTop:2}}>next batch {ovenETAs[0].etaTime}</div>
@@ -8420,10 +8439,10 @@ function FlowAgentTab({ovenServerUrl,settings}){
                       </div>
                     </div>
                     <div style={{fontFamily:mono,fontSize:10,color:"#6b7280",marginTop:4}}>
-                      {s.drain_time_minutes!=null?`drains ${s.drain_time_minutes}m`:"—"} · {s.completion_rate}/hr
+                      {s.drain_time_minutes!=null?`drains ${fmtMins(s.drain_time_minutes)}`:"—"} · {s.completion_rate}/hr
                     </div>
                     {s.gap_minutes!=null&&s.gap_minutes>0&&(
-                      <div style={{position:"absolute",top:-8,right:-8,background:"#ef4444",borderRadius:10,padding:"1px 5px",fontSize:9,fontFamily:mono,color:"#fff"}}>gap {s.gap_minutes}m</div>
+                      <div style={{position:"absolute",top:-8,right:-8,background:"#ef4444",borderRadius:10,padding:"1px 5px",fontSize:9,fontFamily:mono,color:"#fff"}}>gap {fmtMins(s.gap_minutes)}</div>
                     )}
                   </div>
                   {i<arr.length-1&&<div style={{width:24,height:2,background:"rgba(255,255,255,0.15)",flexShrink:0}}/>}
@@ -8500,9 +8519,9 @@ function FlowAgentTab({ovenServerUrl,settings}){
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12}}>
                   {[
                     {label:"Rate",value:`${s.completion_rate}/hr`,color:"#22c55e"},
-                    {label:"Drain",value:s.drain_time_minutes!=null?`${s.drain_time_minutes}m`:"—",color:statusColor(s.status)},
-                    {label:"Next Wave",value:s.next_wave_eta_minutes!=null?`${s.next_wave_eta_minutes}m`:"—",color:"#06b6d4"},
-                    {label:"Gap",value:s.gap_minutes!=null?`${s.gap_minutes}m`:"—",color:s.gap_minutes>0?"#ef4444":"#22c55e"},
+                    {label:"Drain",value:s.drain_time_minutes!=null?fmtMins(s.drain_time_minutes):"—",color:statusColor(s.status)},
+                    {label:"Next Wave",value:s.next_wave_eta_minutes!=null?fmtMins(s.next_wave_eta_minutes):"—",color:"#06b6d4"},
+                    {label:"Gap",value:s.gap_minutes!=null?fmtMins(s.gap_minutes):"—",color:s.gap_minutes>0?"#ef4444":"#22c55e"},
                     {label:"Machines Up",value:s.machines?.active||0,color:"#22c55e"},
                     {label:"Machines Down",value:s.machines?.down||0,color:s.machines?.down?"#ef4444":"#6b7280"},
                     {label:"No Demand",value:s.machines?.no_demand||0,color:s.machines?.no_demand?"#f59e0b":"#6b7280"},
