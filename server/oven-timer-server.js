@@ -4,18 +4,37 @@ const fs = require('fs');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-// Crash protection — log errors instead of dying
+// Crash protection — log errors instead of dying. Defensive against EPIPE
+// cascade (2026-04-30: handler's console.error threw EPIPE → fired
+// uncaughtException → recursed → 316 GB log file → disk full). Every write
+// is wrapped, file is size-capped at 10 MB with one rotation, identical
+// messages within 1s are dropped (kills tight error loops at the source).
 const logFile = path.join(__dirname, '..', 'data', 'server-errors.log');
+const LOG_MAX_BYTES = 10 * 1024 * 1024;
+let _lastErrMsg = '';
+let _lastErrAt = 0;
+
+function safeLogError(msg) {
+  const now = Date.now();
+  if (msg === _lastErrMsg && now - _lastErrAt < 1000) return;
+  _lastErrMsg = msg;
+  _lastErrAt = now;
+  try { process.stderr.write(msg); } catch {}
+  try {
+    let size = 0;
+    try { size = fs.statSync(logFile).size; } catch {}
+    if (size > LOG_MAX_BYTES) {
+      try { fs.renameSync(logFile, logFile + '.1'); } catch {}
+    }
+    fs.appendFileSync(logFile, msg);
+  } catch {}
+}
+
 process.on('uncaughtException', (err) => {
-  const msg = `[${new Date().toISOString()}] UNCAUGHT: ${err.message}\n${err.stack}\n\n`;
-  console.error(msg);
-  try { fs.appendFileSync(logFile, msg); } catch {}
-  // Don't exit — keep the server running
+  safeLogError(`[${new Date().toISOString()}] UNCAUGHT: ${err?.message || err}\n${err?.stack || ''}\n\n`);
 });
 process.on('unhandledRejection', (reason) => {
-  const msg = `[${new Date().toISOString()}] UNHANDLED REJECTION: ${reason?.message || reason}\n${reason?.stack || ''}\n\n`;
-  console.error(msg);
-  try { fs.appendFileSync(logFile, msg); } catch {}
+  safeLogError(`[${new Date().toISOString()}] UNHANDLED REJECTION: ${reason?.message || reason}\n${reason?.stack || ''}\n\n`);
 });
 
 // Sidecar warnings log for NPI export endpoints. The supplier-facing CSV
