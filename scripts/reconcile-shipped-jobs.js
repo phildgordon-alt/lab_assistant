@@ -2,16 +2,21 @@
 /**
  * reconcile-shipped-jobs.js — 2026-04-28 reconcile pass
  *
- * Two passes, both idempotent:
+ * Three passes, all idempotent:
  *
- * (1) Back-prop: for every row in dvi_shipped_jobs, ensure jobs.status='SHIPPED'.
- *     This was supposed to be wired by commit 1a48b31 but stale rows remain.
+ * (1) Back-prop: for every row in dvi_shipped_jobs, ensure jobs.status='SHIPPED'
+ *     AND jobs.current_stage='SHIPPED'.
  *
  * (2) No-xref flip: for jobs stuck in stage='SHIPPING' for >7 days that have
- *     NO matching dvi_shipped_jobs row, mark them status='SHIPPED' + set the
- *     new flag column shipped_no_xref=1 so dashboards can distinguish them
- *     from properly-xrefed shipped rows. This handles the manual-ship /
- *     SHIPLOG-never-landed edge cases without polluting active-WIP queries.
+ *     NO matching dvi_shipped_jobs row, mark them status='SHIPPED' +
+ *     current_stage='SHIPPED' + shipped_no_xref=1 so dashboards can distinguish
+ *     them from properly-xrefed shipped rows.
+ *
+ * (3) Stage sweep: catch the residue from earlier passes that updated `status`
+ *     but left `current_stage` stuck in WIP buckets (NEL/CUTTING/SURFACING/etc).
+ *     Every flow/WIP query joins on current_stage, so 8,683 dirty rows on the
+ *     2026-04-30 audit overcounted WIP. Forces current_stage='SHIPPED' wherever
+ *     status='SHIPPED'.
  *
  * Adds the flag column on first run if missing.
  *
@@ -67,6 +72,13 @@ function main() {
   `).get().n;
   console.log(`[reconcile] pass2 candidates (SHIPPING >${STALE_DAYS}d, no xref): ${pass2Pre}`);
 
+  // ── Pass 3: status=SHIPPED but current_stage drifted (stage sweep) ─────
+  const pass3Pre = db.prepare(`
+    SELECT COUNT(*) AS n FROM jobs
+    WHERE status = 'SHIPPED' AND current_stage != 'SHIPPED' AND current_stage IS NOT NULL
+  `).get().n;
+  console.log(`[reconcile] pass3 candidates (status=SHIPPED, current_stage drifted): ${pass3Pre}`);
+
   if (!APPLY) {
     console.log(`[reconcile] DRY RUN — no writes. Re-run with --apply.`);
     db.close();
@@ -78,6 +90,7 @@ function main() {
     const r1 = db.prepare(`
       UPDATE jobs
       SET status = 'SHIPPED',
+          current_stage = 'SHIPPED',
           ship_date = COALESCE(ship_date,
                                (SELECT ship_date FROM dvi_shipped_jobs WHERE invoice = jobs.invoice)),
           shipped_no_xref = 0,
@@ -91,6 +104,7 @@ function main() {
     const r2 = db.prepare(`
       UPDATE jobs
       SET status = 'SHIPPED',
+          current_stage = 'SHIPPED',
           shipped_no_xref = 1,
           updated_at = datetime('now')
       WHERE current_stage = 'SHIPPING'
@@ -99,6 +113,17 @@ function main() {
         AND NOT EXISTS (SELECT 1 FROM dvi_shipped_jobs dsj WHERE dsj.invoice = jobs.invoice)
     `).run();
     console.log(`[reconcile] pass2 rows updated: ${r2.changes}`);
+
+    // Pass 3 — stage sweep (catch residue where status was set without stage)
+    const r3 = db.prepare(`
+      UPDATE jobs
+      SET current_stage = 'SHIPPED',
+          updated_at = datetime('now')
+      WHERE status = 'SHIPPED'
+        AND current_stage != 'SHIPPED'
+        AND current_stage IS NOT NULL
+    `).run();
+    console.log(`[reconcile] pass3 rows updated: ${r3.changes}`);
   });
   tx();
 
@@ -115,10 +140,15 @@ function main() {
       AND (j.last_event_at IS NULL OR j.last_event_at < datetime('now', '-${STALE_DAYS} days'))
       AND NOT EXISTS (SELECT 1 FROM dvi_shipped_jobs dsj WHERE dsj.invoice = j.invoice)
   `).get().n;
+  const pass3Post = db.prepare(`
+    SELECT COUNT(*) AS n FROM jobs
+    WHERE status = 'SHIPPED' AND current_stage != 'SHIPPED' AND current_stage IS NOT NULL
+  `).get().n;
   const flaggedTotal = db.prepare(`SELECT COUNT(*) AS n FROM jobs WHERE shipped_no_xref = 1`).get().n;
 
   console.log(`[reconcile] post: pass1 residual = ${pass1Post} (expect 0)`);
   console.log(`[reconcile] post: pass2 residual = ${pass2Post} (expect 0)`);
+  console.log(`[reconcile] post: pass3 residual = ${pass3Post} (expect 0)`);
   console.log(`[reconcile] post: total shipped_no_xref=1 rows = ${flaggedTotal}`);
 
   db.close();
