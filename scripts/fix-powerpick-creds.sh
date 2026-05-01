@@ -18,12 +18,15 @@ fi
 
 NEW_USER="lab_assistant_ro"
 NEW_PASS='YourStrongPassword!'
+NEW_DB="PowerPick"
 
-# Swap POWERPICK_USER and POWERPICK_PASSWORD in place.
-# macOS sed needs -i '' (empty backup suffix) and a literal value safe for ! and /
-# (using | as the sed delimiter to avoid escaping ! / etc.)
+# Swap POWERPICK_USER, POWERPICK_PASSWORD, and POWERPICK_DATABASE in place.
+# The first setup-powerpick-env.sh seeded all three wrong. Verified working
+# combo from prior session transcript: lab_assistant_ro / YourStrongPassword! / PowerPick
+# macOS sed needs -i '' (empty backup suffix). | as delimiter to avoid escaping !
 sed -i '' "s|^POWERPICK_USER=.*|POWERPICK_USER=${NEW_USER}|" "$ENV_FILE"
 sed -i '' "s|^POWERPICK_PASSWORD=.*|POWERPICK_PASSWORD=${NEW_PASS}|" "$ENV_FILE"
+sed -i '' "s|^POWERPICK_DATABASE=.*|POWERPICK_DATABASE=${NEW_DB}|" "$ENV_FILE"
 
 echo "── .env now contains: ──"
 grep -E '^POWERPICK_(USER|PASSWORD)=' "$ENV_FILE"
