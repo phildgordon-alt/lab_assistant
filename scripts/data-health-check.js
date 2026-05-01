@@ -216,7 +216,15 @@ async function backfillPicks(gaps) {
 
             const completedAt = line.modifiedDate || line.creationDate || `${gap.day}T12:00:00`;
             const pickId = `ol-${line.id || line.orderLineId || ''}`;
-            const orderId = line.orderId || '';
+            // order_id joins to jobs.invoice — must be the DVI invoice (line.orderName),
+            // NOT the ItemPath GUID (line.orderId). Mirror of db.js:1943 validation in
+            // upsertPicksHistory: reject empty, GUID-shaped, or non-numeric. Without this,
+            // picks_history rows are unjoinable to jobs and pollute the table — the bug
+            // that produced the 9,125 GUID rows cleaned up on 2026-05-01.
+            const orderId = (line.orderName || '').trim();
+            if (!orderId || /^[0-9a-f]{8}-[0-9a-f-]{20,}$/i.test(orderId) || !/^\d{4,}$/.test(orderId)) {
+              continue;
+            }
 
             const result = insertStmt.run(pickId, orderId, sku, name, qty, qty, wh, completedAt);
             if (result.changes > 0) totalInserted++;
