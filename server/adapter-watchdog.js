@@ -38,7 +38,13 @@ function _evaluate(row) {
 }
 
 async function _slack(text) {
-  if (!SLACK_WEBHOOK_URL) return;
+  // No webhook configured? Skip the network call but still log so the alert
+  // is visible in stdout / lab-server.log. State tracking still runs and
+  // /api/watchdog/state still surfaces the per-source state map.
+  if (!SLACK_WEBHOOK_URL) {
+    console.log('[adapter-watchdog]', text.replace(/\n/g, ' '));
+    return;
+  }
   try {
     await fetch(SLACK_WEBHOOK_URL, {
       method: 'POST',
@@ -110,10 +116,13 @@ async function _check() {
 function start() {
   if (timer) return;
   if (!SLACK_WEBHOOK_URL) {
-    console.warn('[adapter-watchdog] SLACK_WEBHOOK_URL not set — watchdog disabled');
-    return;
+    // No Slack — watchdog still runs, populates /api/watchdog/state, and
+    // logs alerts to stdout. Add SLACK_WEBHOOK_URL or SLACK_WEBHOOK to .env
+    // when you want alerts pushed to a channel.
+    console.log('[adapter-watchdog] Starting — no Slack webhook configured, alerts logged to stdout only');
+  } else {
+    console.log(`[adapter-watchdog] Starting — checking sync_heartbeats every ${POLL_INTERVAL_MS / 60000} min, alerts to Slack`);
   }
-  console.log(`[adapter-watchdog] Starting — checking sync_heartbeats every ${POLL_INTERVAL_MS / 60000} min`);
   // First check after 60s (let adapters settle on boot), then every POLL_INTERVAL_MS
   setTimeout(() => {
     _check().catch(e => console.error('[adapter-watchdog] check error:', e.message));
