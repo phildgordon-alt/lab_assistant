@@ -19,7 +19,10 @@ const POLL_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 const ERROR_THRESHOLD  = 3;             // consecutive_errors that count as ERRORING
 const STALE_MULTIPLIER = 2;             // stale = no success in threshold * this
 
-const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || '';
+// Naming inconsistency across the codebase: data-health-check.js uses
+// SLACK_WEBHOOK_URL, daily-reconcile.js uses SLACK_WEBHOOK. Accept either —
+// whichever the prod .env has set will work.
+const SLACK_WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL || process.env.SLACK_WEBHOOK || '';
 
 // In-memory last-known-state per source. Map<source, 'healthy' | 'erroring' | 'stale'>
 const lastState = new Map();

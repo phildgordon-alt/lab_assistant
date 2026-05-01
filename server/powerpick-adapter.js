@@ -147,7 +147,10 @@ async function connect() {
         encrypt: POWERPICK_ENCRYPT,
         trustServerCertificate: true, // Power Pick is LAN-local; self-signed certs expected if any
         connectTimeout: 15000,
-        requestTimeout: 30000,
+        // 2026-05-01: bumped 30s → 120s. 50k-row backfill queries (days >= 20)
+        // can run 30-60s on the SQL side. Live polls (5k rows, default) finish
+        // in ~1s and never need the headroom, but they don't suffer from it.
+        requestTimeout: 120000,
       },
       pool: {
         max: 5,
