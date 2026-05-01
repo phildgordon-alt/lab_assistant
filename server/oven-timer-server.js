@@ -459,6 +459,26 @@ function labDateFromMs(ms) {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+// Lab-local PT date + hour (0-23) + day-of-week (0=Sun .. 6=Sat) for a Date.
+// Use this everywhere a "today / yesterday / weekday" check needs to be PT-correct.
+// Server clock can be UTC or any TZ; this guarantees the same answer either way.
+const _DOW = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+function labLocalParts(d) {
+  d = d || new Date();
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', hour12: false,
+    weekday: 'short',
+  }).formatToParts(d);
+  const get = (t) => parts.find(p => p.type === t)?.value;
+  return {
+    ymd: `${get('year')}-${get('month')}-${get('day')}`,
+    hour: parseInt(get('hour'), 10),
+    dow: _DOW[get('weekday')],
+  };
+}
+
 // Enrich a trace job with XML index data for SQLite sync and dashboard display
 function enrichJob(j, xmlIndex) {
   const xml = xmlIndex ? xmlIndex.get(j.job_id) : null;
@@ -7792,18 +7812,16 @@ async function sendStaleDataSlack(message) {
 function checkShippedStale() {
   try {
     const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
-    const hour = now.getHours();
-    const dow = now.getDay(); // 0 = Sun, 6 = Sat
+    // PT-local everywhere — server clock is UTC after 5 PM PT, which used to
+    // flip "today" to tomorrow's date and fire alerts under the wrong key.
+    const { ymd: todayStr, hour, dow } = labLocalParts(now);
 
     // Yesterday check: once it's past 10am local, flag if yesterday was a
     // weekday (Mon–Fri) but has zero shipped rows in our DB. This is the
     // exact "come in Monday and find no Friday data" scenario.
     if (hour >= 10) {
-      const y = new Date(now);
-      y.setDate(y.getDate() - 1);
-      const yStr = y.toISOString().slice(0, 10);
-      const yDow = y.getDay();
+      const y = new Date(now.getTime() - 86400000);
+      const { ymd: yStr, dow: yDow } = labLocalParts(y);
       const yIsWeekday = yDow >= 1 && yDow <= 5;
       const ykey = `yesterday:${yStr}`;
       if (yIsWeekday && staleAlertState[ykey] !== 'alerted') {
@@ -7840,8 +7858,8 @@ function checkShippedStale() {
     }
 
     // Garbage-collect state keys older than 14 days so it doesn't grow unbounded.
-    const cutoff = new Date(now); cutoff.setDate(cutoff.getDate() - 14);
-    const cutoffStr = cutoff.toISOString().slice(0, 10);
+    const cutoff = new Date(now.getTime() - 14 * 86400000);
+    const cutoffStr = labLocalParts(cutoff).ymd;
     for (const k of Object.keys(staleAlertState)) {
       const datePart = k.split(':')[1];
       if (datePart && datePart < cutoffStr) delete staleAlertState[k];
@@ -7863,8 +7881,9 @@ setInterval(checkShippedStale, 3600000);
 function captureDailyShipTarget() {
   try {
     const now = new Date();
-    const date = now.toISOString().slice(0, 10);
-    const dow = now.getDay();
+    // PT-local — UTC date flipped after 5 PM PT meant the snapshot was keyed
+    // under tomorrow's date for the last 7 hours of every workday.
+    const { ymd: date, hour: ptHour, dow } = labLocalParts(now);
     const isWorkday = dow >= 1 && dow <= 5 ? 1 : 0;
 
     const allJobs = dviTrace.getJobs();
@@ -7902,9 +7921,9 @@ function captureDailyShipTarget() {
       console.log(`[ShipTarget] Captured ${date}: target=${totalTarget} (SV ${svTarget} + Surf ${surfTarget}), shipped=${shipped}`);
     }
 
-    // At 11 PM or later, mark yesterday as finalized if not already
-    if (now.getHours() >= 23) {
-      const yesterday = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+    // At 11 PM or later (PT), mark yesterday as finalized if not already.
+    if (ptHour >= 23) {
+      const yesterday = labLocalParts(new Date(now.getTime() - 86400000)).ymd;
       labDb.db.prepare(`
         UPDATE daily_ship_targets
         SET finalized_at = datetime('now')

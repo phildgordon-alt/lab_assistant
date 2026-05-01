@@ -311,8 +311,12 @@ class DviTraceWatcher extends EventEmitter {
     if (!this.running) return;
 
     const now = Date.now();
-    const hour = new Date().getHours();
-    const isBusinessHours = hour >= 6 && hour <= 22;
+    // PT hour — server clock can be UTC; getHours() would shift the business-
+    // hours window 7-8 hrs and fail to self-heal during real lab hours.
+    const ptHour = parseInt(new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Los_Angeles', hour: '2-digit', hour12: false,
+    }).formatToParts(new Date()).find(p => p.type === 'hour').value, 10);
+    const isBusinessHours = ptHour >= 6 && ptHour <= 22;
     const lastEvt = this.todayStats.lastEvent;
     const eventAgeSec = lastEvt ? (now - lastEvt) / 1000 : null;
     const connected = this._consecutiveErrors < 3;
