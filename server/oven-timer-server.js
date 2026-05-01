@@ -2085,8 +2085,9 @@ Respond with a structured batching plan in this format:
     const totals = labDb.db.prepare(`SELECT MAX(completed_at) AS maxCompleted, COUNT(*) AS totalRows FROM picks_history`).get();
     // pickSync rebuild (2026-04-22): split per-day count by source so the
     // dashboard can show real-time captures vs after-the-fact recovery.
-    //   instant   = live + tx (caught at pick time)
-    //   recovered = backfill + recovered (filled in after the fact)
+    //   instant   = live + tx (caught at pick time, ItemPath REST)
+    //   recovered = backfill + recovered (ItemPath gap-fill, after the fact)
+    //   powerpick = direct Kardex SQL Server (added 2026-05-01)
     //   total     = all rows (incl. NULL legacy)
     //   missing   = max(0, expected - total)
     // substr(col,1,10) reads the PT-local date directly from the stored string
@@ -2096,6 +2097,7 @@ Respond with a structured batching plan in this format:
       SELECT substr(completed_at, 1, 10) AS date,
              SUM(CASE WHEN source IN ('live','tx') OR source IS NULL THEN 1 ELSE 0 END) AS instant,
              SUM(CASE WHEN source IN ('backfill','recovered') THEN 1 ELSE 0 END) AS recovered,
+             SUM(CASE WHEN source = 'powerpick' THEN 1 ELSE 0 END) AS powerpick,
              COUNT(*) AS count
       FROM picks_history
       WHERE completed_at >= datetime('now', '-30 days')
@@ -2111,6 +2113,7 @@ Respond with a structured batching plan in this format:
       const expected = expectedFor(r.date);
       const instant = r.instant || 0;
       const recovered = r.recovered || 0;
+      const powerpick = r.powerpick || 0;
       const count = r.count || 0;
       const missing = expected > 0 ? Math.max(0, expected - count) : 0;
       return {
@@ -2118,6 +2121,7 @@ Respond with a structured batching plan in this format:
         count,
         instant,
         recovered,
+        powerpick,
         missing,
         expected,
         pct: expected ? Math.min(100, Math.round((count / expected) * 100)) : null,
