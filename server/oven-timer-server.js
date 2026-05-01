@@ -177,6 +177,10 @@ som.start();
 const powerpick = require('./powerpick-adapter');
 powerpick.start();
 
+// ── Adapter watchdog — continuous Slack alerting for any adapter erroring/stale ─
+const adapterWatchdog = require('./adapter-watchdog');
+adapterWatchdog.start();
+
 // ── Network (UniFi) integration ─────────────────────────────────
 const network = require('./network-adapter');
 network.start();
@@ -4084,6 +4088,11 @@ Respond with a structured batching plan in this format:
       const days = Math.max(1, Math.min(30, parseInt(url.searchParams.get('days') || '7', 10)));
       return json(res, await powerpick.backfillRecentPicks(days));
     } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
+  }
+
+  // Watchdog state — what state the watchdog has each adapter pinned at
+  if (req.method==='GET' && url.pathname==='/api/watchdog/state') {
+    return json(res, adapterWatchdog.getState());
   }
   if (req.method==='GET' && url.pathname==='/api/som/orders') {
     return json(res, som.getOrders());
