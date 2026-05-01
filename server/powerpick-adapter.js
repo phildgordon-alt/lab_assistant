@@ -307,12 +307,240 @@ async function sampleRows(tableName, limit = 5) {
   }
 }
 
-// ── Phase 2 stub (NOT wired in startup yet) ─────────────────────────────────
-// Once the schema is known, replace this stub with the real polling query that
-// reads completed picks from Power Pick and writes them via db.upsertPicksHistory.
-// The live Trigger A in db.js then fires automatically and derives jobs.lens_type.
-async function pollPicks() {
-  return { ok: false, error: 'pollPicks not implemented — Phase 2. Run listTables() + getColumns() to map schema first.' };
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 2 — pick polling
+//
+// Query: History table, Type=4 = pick events (verified empirically 2026-05-01:
+// MasterorderName matches DVI invoice format, PickWarehouseName populated,
+// PutWarehouseName null). Type=1 is operator restocking puts ("ManualPut-LAPTOP-…")
+// — we ignore those.
+//
+// Mapping Power Pick `History` → our `picks_history` (via db.upsertPicksHistory):
+//   HistoryId            → pickId      (`pp-${HistoryId}`)
+//   MasterorderName      → orderName   (DVI invoice)
+//   Materialreference    → materialName (lens / frame SKU)
+//   QuantityConfirmed    → quantityConfirmed
+//   PickWarehouseName    → warehouseName
+//   Creationdate         → modifiedDate (ISO string)
+//
+// Cursor: lastSyncCreationdate persisted in powerpick-data.json. Initial run
+// without state pulls last 24h. Each poll uses `Creationdate > @lastSync`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let lastSyncCreationdate = null; // ISO string of the most-recent History row already ingested
+
+// Restore cursor from disk on boot (loadFromDisk does this generically; this is the picks-side init)
+function _initPickCursor() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      if (data.lastSyncCreationdate) lastSyncCreationdate = data.lastSyncCreationdate;
+    }
+  } catch { /* ignore — fresh start is fine */ }
+}
+_initPickCursor();
+
+function _savePickCursor() {
+  try {
+    let data = {};
+    try { if (fs.existsSync(DATA_FILE)) data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch {}
+    data.lastSyncCreationdate = lastSyncCreationdate;
+    data.savedAt = new Date().toISOString();
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+  } catch (e) {
+    console.warn('[PowerPick] Could not persist pick cursor:', e.message);
+  }
+}
+
+// Convert a Power Pick `History` row to the line object shape that
+// `db.upsertPicksHistory` expects. The function tolerates missing/null fields;
+// upsertPicksHistory does the final validation (rejects bad order_id shapes,
+// clamps qty, etc.).
+function _historyRowToPickLine(row) {
+  const orderName = (row.MasterorderName || '').trim();
+  return {
+    pickId: `pp-${row.HistoryId}`,
+    id: row.HistoryId,
+    orderName,
+    materialName: row.Materialreference || row.MaterialName || '',
+    quantityConfirmed: row.QuantityConfirmed,
+    warehouseName: row.PickWarehouseName || '',
+    costCenterName: row.CostcenterName || '',
+    modifiedDate: row.Creationdate ? new Date(row.Creationdate).toISOString() : new Date().toISOString(),
+    creationDate: row.Creationdate ? new Date(row.Creationdate).toISOString() : new Date().toISOString(),
+  };
+}
+
+/**
+ * Poll for new completed picks since lastSyncCreationdate. Writes via
+ * db.upsertPicksHistory (with source='powerpick'), which fires Trigger A and
+ * derives jobs.lens_type automatically. Idempotent — pick_id is the unique key
+ * on picks_history, so re-polling overlapping windows is harmless.
+ *
+ * @param {object} opts
+ * @param {Date|string} [opts.since] — explicit lower bound; defaults to lastSyncCreationdate
+ * @param {number} [opts.limit] — TOP N rows per poll (default 5000); guards against
+ *                                runaway result sets if cursor is way behind
+ */
+async function pollPicks(opts = {}) {
+  if (!sql) return { ok: false, error: 'mssql package not installed' };
+  if (!configReady()) return { ok: false, error: `missing env: ${configIssues().join(', ')}` };
+
+  // Default: pull last 24h on first ever run
+  const since = opts.since
+    ? new Date(opts.since).toISOString()
+    : (lastSyncCreationdate || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  const limit = Math.max(100, Math.min(50000, parseInt(opts.limit, 10) || 5000));
+
+  try {
+    if (!pool || !pool.connected) {
+      const ok = await connect();
+      if (!ok) return { ok: false, error: connectionError };
+    }
+
+    const result = await pool.request()
+      .input('since', sql.DateTime, new Date(since))
+      .query(`
+        SELECT TOP ${limit}
+          HistoryId,
+          MasterorderName,
+          Materialreference,
+          MaterialName,
+          QuantityConfirmed,
+          PickWarehouseName,
+          CostcenterName,
+          Creationdate
+        FROM History
+        WHERE Type = 4
+          AND Creationdate > @since
+          AND MasterorderName IS NOT NULL
+        ORDER BY Creationdate ASC
+      `);
+
+    const rows = result.recordset || [];
+    if (rows.length === 0) {
+      try { require('./db').recordHeartbeat('powerpick', 0, 60 * 60 * 1000); } catch {}
+      return { ok: true, fetched: 0, inserted: 0, since };
+    }
+
+    // Convert to upsertPicksHistory line shape and write. The Tier-3 Trigger A
+    // inside upsertPicksHistory (db.js commit 76a3564) will derive lens_type
+    // automatically for each invoice that just received a pick.
+    const lines = rows.map(_historyRowToPickLine);
+    let inserted = 0, rejected = 0, badKey = 0;
+    try {
+      const r = require('./db').upsertPicksHistory(lines, 'powerpick');
+      inserted = r.inserted;
+      rejected = r.rejected || 0;
+      badKey = r.badKey || 0;
+    } catch (e) {
+      try { require('./db').recordHeartbeatError('powerpick', e.message, 60 * 60 * 1000); } catch {}
+      return { ok: false, error: `upsertPicksHistory failed: ${e.message}`, fetched: rows.length };
+    }
+
+    // Advance the cursor to the newest row we just processed
+    const newestCreationdate = rows[rows.length - 1].Creationdate;
+    if (newestCreationdate) {
+      lastSyncCreationdate = new Date(newestCreationdate).toISOString();
+      _savePickCursor();
+    }
+
+    isLive = true;
+    failCount = 0;
+    lastSuccessfulPoll = new Date().toISOString();
+    try { require('./db').recordHeartbeat('powerpick', inserted, 60 * 60 * 1000); } catch {}
+
+    return {
+      ok: true,
+      fetched: rows.length,
+      inserted,
+      rejected,
+      badKey,
+      since,
+      newestCreationdate: lastSyncCreationdate,
+    };
+  } catch (err) {
+    isLive = false;
+    failCount++;
+    connectionError = err.message;
+    try { require('./db').recordHeartbeatError('powerpick', err.message, 60 * 60 * 1000); } catch {}
+    return { ok: false, error: err.message, since };
+  }
+}
+
+/**
+ * One-shot historical recovery — pulls Type=4 picks for the last N days and
+ * ingests them. Used to backfill the existing 141 NULL-lens_type active jobs
+ * from 2026-05-01 onward without waiting for ItemPath. Larger limit because
+ * a 7-day backfill on a busy lab can be 30K+ rows.
+ *
+ * NOTE: re-running is safe — INSERT OR IGNORE on pick_id dedupes against
+ * any rows already populated by ItemPath REST.
+ */
+async function backfillRecentPicks(days = 7) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  console.log(`[PowerPick] backfillRecentPicks: pulling Type=4 picks since ${since}`);
+  const result = await pollPicks({ since, limit: 50000 });
+  console.log(`[PowerPick] backfillRecentPicks: ${JSON.stringify(result)}`);
+  return result;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lifecycle — start / stop
+// Mirrors server/som-adapter.js pattern: schedule a self-rescheduling poll
+// timer; reconnect on failure with exponential-ish backoff via failCount.
+// ─────────────────────────────────────────────────────────────────────────────
+
+let pollTimer = null;
+let pollInFlight = false;
+
+async function _pollTick() {
+  if (pollInFlight) return; // skip if previous poll still running
+  pollInFlight = true;
+  try {
+    await pollPicks();
+  } catch (e) {
+    console.error('[PowerPick] poll tick error:', e.message);
+  } finally {
+    pollInFlight = false;
+  }
+}
+
+async function start() {
+  if (!sql) {
+    console.warn('[PowerPick] start() skipped — mssql package not installed (run: npm install mssql)');
+    return false;
+  }
+  if (!configReady()) {
+    console.warn(`[PowerPick] start() skipped — missing env: ${configIssues().join(', ')}`);
+    return false;
+  }
+  if (pollTimer) {
+    console.log('[PowerPick] start() called but already running — no-op');
+    return true;
+  }
+
+  console.log(`[PowerPick] Starting — ${POWERPICK_HOST}:${POWERPICK_PORT}/${POWERPICK_DATABASE}, poll every ${POWERPICK_POLL_INTERVAL / 1000}s`);
+  console.log(`[PowerPick] Pick cursor: ${lastSyncCreationdate || 'fresh (will pull last 24h on first poll)'}`);
+
+  // First poll on a 5s delay so the server boot finishes first; then self-reschedule
+  pollTimer = setTimeout(async function tick() {
+    await _pollTick();
+    if (pollTimer !== null) {
+      pollTimer = setTimeout(tick, POWERPICK_POLL_INTERVAL);
+    }
+  }, 5000);
+
+  return true;
+}
+
+async function stop() {
+  if (pollTimer) {
+    clearTimeout(pollTimer);
+    pollTimer = null;
+  }
+  await disconnect();
+  console.log('[PowerPick] Stopped.');
 }
 
 // ── Status (mirrors som-adapter.js getStatus pattern) ───────────────────────
@@ -345,7 +573,10 @@ module.exports = {
   // Lifecycle
   connect,
   disconnect,
+  start,
+  stop,
   getStatus,
-  // Phase 2 stub
+  // Phase 2 — picks
   pollPicks,
+  backfillRecentPicks,
 };

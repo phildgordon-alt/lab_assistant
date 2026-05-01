@@ -2083,31 +2083,39 @@ function start() {
     }, interval);
     if (hasHoles) console.log(`[pickSync] Backfill pending — next run in 5 min`);
   }
-  setTimeout(async () => {
-    try { await pickSync(); }
-    catch (e) { console.error('[pickSync] bootstrap pickSync error:', e.message); }
-    try { scheduleNextPickSync(); }
-    catch (e) {
-      console.error('[pickSync] bootstrap scheduleNext error, retrying in 30min:', e.message);
-      setTimeout(() => scheduleNextPickSync(), 30 * 60 * 1000);
-    }
-  }, 30000);
+  // Picks-side scheduling — disabled when Power Pick direct-DB adapter owns picks.
+  // Set ITEMPATH_PICKSYNC_DISABLED=true on prod once powerpick adapter is verified.
+  // ItemPath inventory/orders/put-wall/warehouse-stock continue regardless of this flag.
+  const PICKSYNC_DISABLED = String(process.env.ITEMPATH_PICKSYNC_DISABLED || '').toLowerCase() === 'true';
+  if (PICKSYNC_DISABLED) {
+    console.log('[ItemPath] Pick sync DISABLED via ITEMPATH_PICKSYNC_DISABLED — Power Pick adapter is the live picks source. Inventory/orders/put-wall remain active.');
+  } else {
+    setTimeout(async () => {
+      try { await pickSync(); }
+      catch (e) { console.error('[pickSync] bootstrap pickSync error:', e.message); }
+      try { scheduleNextPickSync(); }
+      catch (e) {
+        console.error('[pickSync] bootstrap scheduleNext error, retrying in 30min:', e.message);
+        setTimeout(() => scheduleNextPickSync(), 30 * 60 * 1000);
+      }
+    }, 30000);
 
-  // Count reconciliation: 2min delay then every 30 minutes
-  setTimeout(() => {
-    countReconciliation();
-    setInterval(countReconciliation, 30 * 60 * 1000);
-  }, 120000);
+    // Count reconciliation: 2min delay then every 30 minutes
+    setTimeout(() => {
+      countReconciliation();
+      setInterval(countReconciliation, 30 * 60 * 1000);
+    }, 120000);
 
-  // Freshness watchdog: every 5 min, check if lastSync is too old
-  // ItemPath polls every 60s, so 90 min stale = ~90 missed polls
-  setInterval(() => freshnessCheck(), 5 * 60 * 1000);
+    // Freshness watchdog: every 5 min, check if lastSync is too old
+    // ItemPath polls every 60s, so 90 min stale = ~90 missed polls
+    setInterval(() => freshnessCheck(), 5 * 60 * 1000);
 
-  // Delta poll (2026-04-23): 5s delay then self-rescheduling 30s loop with
-  // adaptive backoff. Replaces the heavy-poll tx→picks_history writer.
-  setTimeout(() => _scheduleDeltaPoll(), 5000);
+    // Delta poll (2026-04-23): 5s delay then self-rescheduling 30s loop with
+    // adaptive backoff. Replaces the heavy-poll tx→picks_history writer.
+    setTimeout(() => _scheduleDeltaPoll(), 5000);
 
-  console.log('[ItemPath] Pick sync: every 30 min (30s delay). Reconciliation: every 30 min (2min delay). Freshness watchdog: every 5 min. Delta poll: 30s adaptive (5s delay).');
+    console.log('[ItemPath] Pick sync: every 30 min (30s delay). Reconciliation: every 30 min (2min delay). Freshness watchdog: every 5 min. Delta poll: 30s adaptive (5s delay).');
+  }
 }
 
 // Freshness watchdog — alert if data is stale

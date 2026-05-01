@@ -170,6 +170,13 @@ limble.start();
 const som = require('./som-adapter');
 som.start();
 
+// ── Power Pick (Kardex SQL Server) direct adapter — picks bypass ─
+// Direct DB read of Kardex's underlying SQL Server. Replaces ItemPath REST
+// pickSync as the live source for picks_history. ItemPath remains active for
+// inventory, put-wall, warehouse stock, and order data.
+const powerpick = require('./powerpick-adapter');
+powerpick.start();
+
 // ── Network (UniFi) integration ─────────────────────────────────
 const network = require('./network-adapter');
 network.start();
@@ -4054,6 +4061,25 @@ Respond with a structured batching plan in this format:
     } catch (e) {
       return json(res, { ok: false, error: e.message }, 500);
     }
+  }
+
+  // Power Pick (Kardex direct SQL) — health + manual ops
+  if (req.method==='GET' && url.pathname==='/api/powerpick/status') {
+    return json(res, powerpick.getStatus());
+  }
+  if (req.method==='GET' && url.pathname==='/api/powerpick/test') {
+    try { return json(res, await powerpick.testConnection()); }
+    catch (e) { return json(res, { ok: false, error: e.message }, 500); }
+  }
+  if (req.method==='POST' && url.pathname==='/api/powerpick/poll') {
+    try { return json(res, await powerpick.pollPicks()); }
+    catch (e) { return json(res, { ok: false, error: e.message }, 500); }
+  }
+  if (req.method==='POST' && url.pathname==='/api/powerpick/backfill') {
+    try {
+      const days = Math.max(1, Math.min(30, parseInt(url.searchParams.get('days') || '7', 10)));
+      return json(res, await powerpick.backfillRecentPicks(days));
+    } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
   }
   if (req.method==='GET' && url.pathname==='/api/som/orders') {
     return json(res, som.getOrders());
