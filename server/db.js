@@ -1905,6 +1905,59 @@ const upsertPicksHistoryStmt = db.prepare(`
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LIVE LENS_TYPE DERIVATION (Tier 3) — picks_history → lens_sku_properties → jobs
+//
+// Mirrors scripts/backfill-active-wip-lens-type.js:183-205 but runs live so
+// jobs.lens_type is populated when the pick lands, not at the next manual
+// backfill. INNER JOIN ensures frame UPCs (196016*) silently filter out — only
+// lens-catalog SKUs match. UPDATE is COALESCE-guarded on every slot — never
+// overwrites an existing value, never touches status/current_stage. Safe to
+// call repeatedly and concurrently with upsertJobFromTrace / upsertJobFromXML.
+// Invoices unknown to jobs match 0 rows — harmless.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const tier3LookupStmt = db.prepare(`
+  SELECT ph.sku        AS sku,
+         lsp.material  AS material,
+         lsp.lens_type_modal AS lens_type_modal
+  FROM picks_history ph
+  JOIN lens_sku_properties lsp ON lsp.sku = ph.sku
+  WHERE ph.order_id = ?
+  ORDER BY ph.completed_at DESC
+  LIMIT 1
+`);
+
+const tier3UpdateStmt = db.prepare(`
+  UPDATE jobs SET
+    lens_type     = COALESCE(lens_type,     @lens_type),
+    lens_material = COALESCE(lens_material, @lens_material),
+    lens_opc_r    = COALESCE(lens_opc_r,    @lens_opc_r),
+    updated_at    = datetime('now')
+  WHERE invoice = @invoice
+`);
+
+const getLensTypeStmt = db.prepare(`SELECT lens_type FROM jobs WHERE invoice = ?`);
+
+// Post-Kardex stages — Phil's domain rule: a job in any of these MUST have had
+// a Kardex pick. Sourced from server/dvi-trace.js:122-139 stationToStage().
+// EXCLUDED: INCOMING, AT_KARDEX (pre-pick); NEL (pick failed); HOLD/OTHER
+// (indeterminate); CANCELED/SHIPPED (terminal); BREAKAGE (event marker).
+const POST_KARDEX_STAGES = new Set(['SURFACING', 'CUTTING', 'COATING', 'ASSEMBLY', 'SHIPPING']);
+
+function enrichLensTypeFromPicks(invoice) {
+  if (!invoice || !/^\d{4,}$/.test(String(invoice))) return false;
+  const row = tier3LookupStmt.get(invoice);
+  if (!row || (!row.lens_type_modal && !row.material)) return false;
+  const r = tier3UpdateStmt.run({
+    invoice,
+    lens_type:     row.lens_type_modal || null,
+    lens_material: row.material || null,
+    lens_opc_r:    row.sku || null,
+  });
+  return r.changes > 0;
+}
+
 const PICKS_HISTORY_MAX_QTY = 10000; // sanity clamp: no legitimate pick is 10k+ units
 
 // pickSync rebuild (2026-04-22): callers now pass `source` so we can
@@ -1957,6 +2010,23 @@ function upsertPicksHistory(lines, source) {
     }
   });
   save();
+
+  // Trigger A — Tier-3 lens_type derivation. After the batch lands, dedupe
+  // distinct invoices and run the lens-type lookup once per invoice. Guarded
+  // by `inserted > 0` so backfill batches that only hit INSERT OR IGNORE
+  // duplicates skip the trigger entirely (no new data to enrich).
+  if (inserted > 0) {
+    const seen = new Set();
+    for (const line of lines) {
+      const inv = (line.orderName || '').trim();
+      if (inv && /^\d{4,}$/.test(inv) && !seen.has(inv)) {
+        seen.add(inv);
+        try { enrichLensTypeFromPicks(inv); }
+        catch (e) { console.warn(`[DB] enrichLensTypeFromPicks(${inv}) failed: ${e.message}`); }
+      }
+    }
+  }
+
   return { inserted, skipped, rejected, badKey, total: lines.length };
 }
 
@@ -3343,6 +3413,18 @@ function upsertJobFromTrace(j) {
     j.coatType || null, j.lensOpcR || null, j.lensOpcL || null, j.frameUpc || null,
     j.frameName || null, j.frameStyle || null
   );
+
+  // Trigger B — race safety net for "every time a job advances past Kardex".
+  // If trace advanced this job past Kardex but lens_type is still NULL,
+  // attempt Tier-3 enrichment from picks_history. Covers the rare ordering
+  // where the DAT-line append precedes the picks_history INSERT in our pipeline.
+  if (POST_KARDEX_STAGES.has(stage)) {
+    const cur = getLensTypeStmt.get(j.invoice);
+    if (cur && cur.lens_type == null) {
+      try { enrichLensTypeFromPicks(j.invoice); }
+      catch (e) { console.warn(`[DB] trace enrichLensType(${j.invoice}) failed: ${e.message}`); }
+    }
+  }
 }
 
 const upsertJobFromXMLStmt = db.prepare(`
@@ -4101,6 +4183,7 @@ module.exports = {
   upsertAlerts,
   upsertPicks,
   upsertPicksHistory,
+  enrichLensTypeFromPicks,
   // Delta-poll cursor persistence (itempath-adapter)
   getDeltaCursor,
   setDeltaCursor,
