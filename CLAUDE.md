@@ -32,10 +32,13 @@ Standalone HTML                ├─ /api/itempath/*
 ─────────────────────          ├─ /api/som/*
 standalone/OvenTimer.html      └─ /api/report
 standalone/CoatingTimer.html
-standalone/AssemblyDashboard.html  server/dvi-adapter.js       → DVI API
+standalone/AssemblyDashboard.html  server/dvi-sync.js          → DVI SMB share (file mirror)
+                              server/dvi-trace.js         → DVI TRACE log tail (live job state)
                               server/itempath-adapter.js  → ItemPath API
                               server/som-adapter.js       → SOM MySQL (machines/conveyors)
-                              server/nightly-etl.js       → Looker + email IMAP
+                              server/looker-adapter.js    → Looker REST (historical reports)
+                              server/network-adapter.js   → UniFi cloud Site Manager
+                              server/limble-adapter.js    → Limble CMMS (maintenance)
                               server/slack-proxy.js       → Slack webhooks
 ```
 
@@ -52,7 +55,7 @@ The Lab_Assistant production Mac Studio (`labs-mac-studio`, `192.168.0.224`, use
 
 | LaunchAgent label | Plist | Binds | Purpose |
 |---|---|---|---|
-| `com.paireyewear.labassistant.server` | `.server.plist` | TCP **3002** | **Lab Server** — the whole Node app (`server/oven-timer-server.js`). Despite the filename, this process owns everything: `/api/*`, React SPA from `dist/`, `/standalone/*.html` static serving, `/status` landing tiles, WebSocket oven sync, `dvi-sync.js` (SMB), ItemPath adapter, SOM adapter, pickSync, dvi-trace, flow-agent, nightly-etl. |
+| `com.paireyewear.labassistant.server` | `.server.plist` | TCP **3002** | **Lab Server** — the whole Node app (`server/oven-timer-server.js`). Despite the filename, this process owns everything: `/api/*`, React SPA from `dist/`, `/standalone/*.html` static serving, `/status` landing tiles, WebSocket oven sync, `dvi-sync.js` (SMB), `dvi-trace.js` (TRACE tail), ItemPath adapter, SOM adapter, looker-adapter, network-adapter, limble-adapter, pickSync, flow-agent. |
 | `com.paireyewear.labassistant.gateway` | `.gateway.plist` | TCP **3001** | **Gateway** — `gateway/index.ts` via `npx tsx`. AI/Slack process. Proxies inventory/maintenance data to the Lab Server. |
 | `com.paireyewear.labassistant.healthcheck` | `.healthcheck.plist` | — | Idle / on-demand. |
 | `com.paireyewear.labassistant.backup` | `.backup.plist` | — | Nightly backup agent. |
@@ -145,45 +148,38 @@ The entire React frontend. Single file. Contains:
 - Model: `claude-sonnet-4-20250514`, max_tokens: 2000 for reports
 
 ### `server/oven-timer-server.js` (29KB)
-Main Node.js backend. Express + WebSocket.
-- REST endpoints for oven timers, tray state, QC events
+Main Node.js backend. Express + WebSocket. Runs on port 3002. Owns:
+- REST endpoints for oven timers, tray state, QC events, NPI scenarios, inventory, maintenance, flow planning
 - `/api/report` — accepts JSON, generates Word .docx via docx.js, returns binary
 - WebSocket for real-time timer sync across tablets
-- **Add 4 lines to integrate DVI adapter** (see dvi-adapter.js header comments)
-- **Add 4 lines to integrate ItemPath adapter** (see itempath-adapter.js header comments)
-- Runs on port 3002
+- All adapter polling: ItemPath, SOM, dvi-sync (SMB), dvi-trace (TRACE log tail), looker-adapter, network-adapter (UniFi), limble-adapter
 
-### `gateway/sources/dvi-soap.ts` — DVI SOAP Adapter (LIVE)
-Real-time connection to DVI RxLab via SOAP API.
-- **Endpoint:** `https://dvirx.com:443/DVIRx/services/DVIRxSOAP`
-- **Protocol:** SOAP 1.1 with XML payloads
-- **Auth:** Username/password + application GUID
+### DVI Integration (file-based, NOT SOAP)
 
-**Gateway endpoints:**
-- `GET /api/dvi/live/orders?max=100` — Download pending orders from DVI
-- `GET /api/dvi/live/statuses?hours=24` — Get status updates since N hours ago
-- `GET /api/dvi/live/health` — Check DVI connection
-- `GET /api/dvi/live/context` — Get AI-ready context summary
+DVI integration is **file-based**, not SOAP. There is no live SOAP adapter (an earlier
+plan referenced `gateway/sources/dvi-soap.ts` — that file does not exist and was never
+built; ignore any older docs that reference it). Two cooperating modules cover DVI:
 
-**Environment variables:**
-```
-DVI_SOAP_URL=https://dvirx.com:443/DVIRx/services/DVIRxSOAP
-DVI_USERNAME=pair
-DVI_PASSWORD=<password>
-DVI_APPLICATION=65613E2E-7C28-497C-961C-8F8415E5C216
-```
+**`server/dvi-sync.js`** — SMB watcher. Mirrors three DVI shared directories from the
+DVI Windows host to local `data/dvi/` via `/bin/ls` + `cp` over the SMB mount:
+- `data/dvi/jobs/` — inbound job XMLs (per-job, modern + legacy formats)
+- `data/dvi/shipped/` — outbound SHIPLOG XMLs (per-job, post-ship)
+- `data/dvi/breakage/` — daily breakage `.txt` files (semicolon-delimited)
+- `data/dvi/visdir/TRACE/` — per-day `LT*.DAT` TRACE event log (this is the live event firehose)
 
-**Available SOAP operations:**
-- `DownloadOrders` — Get pending orders (newest first)
-- `DownloadStatuses` — Get status updates since a date
-- `DownloadJobMessages` — Get job messages
-- `LookupByAccount` — Search by account/tray/Rx number
-- `GetOrderDetail` — Get full order details
+Polls every 60s. Heartbeats via `recordHeartbeat('dvi_sync')`. Fires per-file `'file'`
+events that downstream handlers in `oven-timer-server.js` consume (job XML → jobs table,
+SHIPLOG → dvi_shipped_jobs, breakage → breakage_events).
 
-### `server/dvi-adapter.js` (20KB) — Legacy REST Adapter
-Polls DVI REST API for assembly job data (not currently in use).
-- Auth: API key (`X-API-Key` header) or Basic Auth
-- Mock mode when `DVI_URL` not set
+**`server/dvi-trace.js`** — Tails the active `LT*.DAT` TRACE log line-by-line. Each
+trace event becomes a row in `dvi_trace_jobs` and an UPSERT into the unified `jobs`
+table via `upsertJobFromTrace()`. This is the real-time event source for current job
+location/stage/operator. Has self-heal logic: if no events arrive for too long during
+business hours, force-rotates the offset cursor.
+
+**Environment:** DVI requires no external API credentials in this codebase — auth is
+SMB-share-level. The Mac Studio has the DVI volume permanently mounted; `dvi-sync.js`
+detects unmount and triggers re-mount.
 
 ### `server/itempath-adapter.js` (21KB)
 Polls ItemPath/Kardex API every 60 seconds for live lens blank inventory.
@@ -225,15 +221,15 @@ SOM_POLL_INTERVAL=30000
 **Device categories:** blocking, surfacing, coating, edging, conveyor, control
 **Mock mode:** Falls back to mock data when MySQL connection unavailable
 
-### `server/nightly-etl.js` (19KB)
-Runs at 2:00 AM via cron. Pulls historical data from Looker and/or DVI.
-- Looker: OAuth2 client credentials → fetches 3 Looks (throughput, yield, cycle times)
-- DVI: API key → completed jobs endpoint
-- Email/IMAP: Parses CSV attachments from scheduled Looker/DVI email reports
-- Writes JSON files to `/data/historical/` (one per data type per day)
-- Logs to `sync-log.json` (last 90 days)
-- Sends Slack summary after each run
-- Exports: `readHistorical(type, days)` for server to answer AI queries
+### `server/looker-adapter.js` — Looker Historical Reports
+Polls Looker every 4 hours for historical job data (throughput, yield, breakage counts).
+- Auth: OAuth2 client credentials (LOOKER_URL, LOOKER_CLIENT_ID, LOOKER_CLIENT_SECRET)
+- Writes to `looker_jobs` table (PK: `(job_id, opc)`)
+- Cross-references with `jobs.reference` to enrich SHIPPED rows with Looker breakage counts
+- Silent-0-row guard: if Looker returns empty, keeps existing data (won't wipe on transient failure)
+
+(An earlier `server/nightly-etl.js` was a stub for this functionality and was deleted —
+`looker-adapter.js` is the live writer. Any docs referencing nightly-etl.js are stale.)
 
 ### `server/slack-proxy.js` (4KB)
 Simple Express proxy for Slack webhooks. Handles CORS for browser-side Slack calls.
@@ -290,12 +286,13 @@ Standalone tablet app for individual coaters. One tablet per coater.
 | Word report export | ✅ LIVE | `/api/report` endpoint in server |
 | AI Assistant | ✅ LIVE | Gateway AI agents + Anthropic API |
 | ItemPath adapter | ✅ LIVE | Lab server + gateway proxy. Credentials in `.env` |
-| DVI SOAP API | ✅ LIVE | `gateway/sources/dvi-soap.ts` — real-time orders/statuses |
+| DVI integration | ✅ LIVE | File-based: `dvi-sync.js` (SMB mirror) + `dvi-trace.js` (TRACE log tail). NO live SOAP — `gateway/sources/dvi-soap.ts` is fictional and was never built. |
 | DVI File Upload | ✅ LIVE | `/api/dvi/upload` — manual XML upload + archive |
-| Limble CMMS | ✅ LIVE | Maintenance data via gateway proxy |
+| Limble CMMS | ✅ LIVE | `server/limble-adapter.js` — assets, tasks, spare parts |
 | SOM Control Center | ✅ LIVE | `server/som-adapter.js` — machine status + conveyors |
+| UniFi network | ✅ LIVE | `server/network-adapter.js` — cloud Site Manager (no SQLite writes; JSON only) |
 | Assembly Dashboard | 🟡 MOCK | Standalone, works. Wire to DVI when ready. |
-| Nightly ETL | 🟡 STUB | Written, not scheduled. Needs Looker credentials. |
+| Looker historical | ✅ LIVE | `server/looker-adapter.js` — 4hr poll. (Old `nightly-etl.js` was a stub — deleted.) |
 | BLE zone readers | 📋 PLANNED | Hardware BOM done. Raspberry Pi Zero 2W + ASUS USB-BT500. |
 | Smart Tray BLE tags | 📋 PLANNED | Minew E7 beacons, retrofit BOM done. |
 | Slack alerts | ✅ LIVE | Socket Mode via gateway + bot token |
@@ -351,16 +348,13 @@ through the tray, and the lab owns that event stream.
    path is: server adapters poll APIs → expose via `/api/*` endpoints → App.jsx polls those
    instead of generating mock data. The adapter modules are written and ready.
 
-3. **DVI field mapping needs verification.** The dvi-adapter.js normalizes fields but DVI
-   installs vary. Get a sample API response from the DVI admin before going live.
+3. **DVI field-mapping bugs are the dominant failure mode.** Multiple writers touch the
+   `jobs` table (`upsertJobFromTrace`, `upsertJobFromXML`, `upsertJobClassificationFromXML`,
+   `upsertShippedJob`, `upsertJobFromSOM`, `upsertJobFromLooker`) — each with its own
+   field-name expectations. See the structural-fix workstream (Task #0 / #19 in active
+   task list) for the planned canonical-DTO layer that fixes this class of bug.
 
-4. **Nightly ETL cron not configured.** nightly-etl.js is written but not scheduled.
-   Add to crontab: `0 2 * * * node /path/to/server/nightly-etl.js`
-
-5. **oven-timer-server.js needs 4-line additions** to integrate DVI and ItemPath adapters.
-   See integration comments at top of each adapter file.
-
-6. **React #310 error was fixed** — there was an illegal `useState` inside an IIFE in JSX
+4. **React #310 error was fixed** — there was an illegal `useState` inside an IIFE in JSX
    in the Put Wall binding section. Removed. No functional impact.
 
 ---
@@ -410,18 +404,14 @@ npm run dev
 
 ## Immediate Next Work Items (in priority order)
 
-1. **Wire DVI adapter into server** — 4 lines in oven-timer-server.js. Get DVI URL + API key
-   from DVI admin. Verify field names against a sample response. Point AssemblyDashboard
-   Setup to server URL. Assembly floor goes live.
+1. **DVI integration is live** via `dvi-sync.js` (SMB mirror) + `dvi-trace.js` (TRACE log tail).
+   No remaining adapter wiring needed. AssemblyDashboard.html still in mock mode pending decision.
 
-2. **Wire ItemPath adapter into server** — 4 lines in oven-timer-server.js. Phil to generate
-   application token in ItemPath. Lens blank inventory becomes live in AI context and Overview.
+2. **ItemPath adapter is live** with non-expiring application token in `.env`. Lens blank
+   inventory drives Overview cards and AI context.
 
-3. **Replace mock tray data in App.jsx** — App.jsx currently generates trays in-memory.
-   Add polling to `/api/trays` and `/api/batches` once server exposes those from DVI/ItemPath.
-
-4. **Schedule nightly ETL** — Add crontab entry for nightly-etl.js. Get Looker client
-   credentials from BI team. Historical data enables AI to answer trend questions.
+3. **Looker historical data is live** via `server/looker-adapter.js` (4hr poll).
+   `looker_jobs` table populates and back-fills `jobs` enrichment columns.
 
 5. **BLE hardware purchase** — Order per BLE_ZoneReader_Hardware_BOM.docx (~$500).
    Set up 10 Raspberry Pi Zero 2W readers at zone entry points. Add `/api/ble/event`
@@ -593,7 +583,8 @@ without polling. `oven-timer-server.js` already has the WebSocket server — ext
 to support hundreds of arbitrary third-party devices from unknown vendors. Lab_Assistant
 is a closed environment — DVI, Kardex, three coating machines, BLE readers. Use a simple,
 strongly-typed integration layer instead. Each data source gets one adapter module
-(already done: `dvi-adapter.js`, `itempath-adapter.js`) with a clear interface contract.
+(already done: `dvi-sync.js`, `dvi-trace.js`, `itempath-adapter.js`, `som-adapter.js`,
+`looker-adapter.js`, `network-adapter.js`, `limble-adapter.js`) with a clear interface contract.
 
 ### The Target Server Architecture
 
@@ -608,10 +599,14 @@ server/
     recorder.js          ← SQLite append-only state history
     service-handler.js   ← routes service calls, validates, fires events
   integrations/
-    dvi-adapter.js       ← already written
+    dvi-sync.js          ← already written (SMB mirror)
+    dvi-trace.js         ← already written (TRACE log tail)
     itempath-adapter.js  ← already written
+    som-adapter.js       ← already written
+    looker-adapter.js    ← already written
+    network-adapter.js   ← already written
+    limble-adapter.js    ← already written
     ble-adapter.js       ← to build when hardware arrives
-    nightly-etl.js       ← already written
   api/
     rest.js              ← Express REST endpoints
     websocket.js         ← WebSocket server, pushes events to dashboard
@@ -634,10 +629,6 @@ See `.env.example` for full list. Key ones:
 | `SLACK_APP_TOKEN` | gateway | Slack app token for Socket Mode (xapp-...) |
 | `ITEMPATH_URL` | gateway, server | ItemPath base URL |
 | `ITEMPATH_TOKEN` | gateway, server | Non-expiring application token |
-| `DVI_SOAP_URL` | gateway | DVI SOAP endpoint |
-| `DVI_USERNAME` | gateway | DVI login username |
-| `DVI_PASSWORD` | gateway | DVI login password |
-| `DVI_APPLICATION` | gateway | DVI application GUID |
 | `LIMBLE_URL` | gateway, server | Limble CMMS base URL |
 | `LIMBLE_CLIENT_ID` | gateway, server | Limble OAuth2 client ID |
 | `LIMBLE_CLIENT_SECRET` | gateway, server | Limble OAuth2 client secret |
@@ -647,9 +638,9 @@ See `.env.example` for full list. Key ones:
 | `SOM_PASSWORD` | server | Schneider SOM MySQL password |
 | `SOM_DATABASE` | server | Schneider SOM database name (som_lms) |
 | `SOM_POLL_INTERVAL` | server | Polling interval in ms (default: 30000) |
-| `LOOKER_URL` | nightly-etl.js | Looker instance URL |
-| `LOOKER_CLIENT_ID` | nightly-etl.js | Looker OAuth2 client ID |
-| `LOOKER_CLIENT_SECRET` | nightly-etl.js | Looker OAuth2 client secret |
+| `LOOKER_URL` | looker-adapter.js | Looker instance URL |
+| `LOOKER_CLIENT_ID` | looker-adapter.js | Looker OAuth2 client ID |
+| `LOOKER_CLIENT_SECRET` | looker-adapter.js | Looker OAuth2 client secret |
 
 ---
 
