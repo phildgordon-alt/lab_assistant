@@ -4089,6 +4089,19 @@ Respond with a structured batching plan in this format:
       return json(res, await powerpick.backfillRecentPicks(days));
     } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
   }
+  // Date-windowed historical backfill — used by the picks_history canonicalization
+  // migration. Doesn't touch the live cursor. Long-running (30-60 min for full
+  // 17-month replay); poll the response — the request waits until done.
+  // Usage: POST /api/powerpick/backfill-history?start=2024-12-31&end=2026-05-01
+  if (req.method==='POST' && url.pathname==='/api/powerpick/backfill-history') {
+    try {
+      const start = url.searchParams.get('start');
+      const end   = url.searchParams.get('end') || new Date().toISOString();
+      if (!start) return json(res, { ok: false, error: 'start query param required (ISO date)' }, 400);
+      // No timeout on the response — backfillPicksHistory logs progress to stdout
+      return json(res, await powerpick.backfillPicksHistory(start, end));
+    } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
+  }
 
   // Watchdog state — what state the watchdog has each adapter pinned at
   if (req.method==='GET' && url.pathname==='/api/watchdog/state') {

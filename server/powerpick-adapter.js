@@ -484,6 +484,157 @@ async function pollPicks(opts = {}) {
 }
 
 /**
+ * Date-windowed pick poll. Like pollPicks but takes BOTH a since and until
+ * bound, and DOES NOT touch the live cursor (`lastSyncCreationdate`). Used by
+ * historical backfills so a 12-month replay doesn't reset the live poll cursor
+ * to 2024.
+ *
+ * Auto-paginates internally if the 50k SQL TOP cap would be hit — repeatedly
+ * runs `WHERE Creationdate > localCursor AND Creationdate <= until` until
+ * either no more rows OR localCursor reaches `until`.
+ *
+ * @param {object} opts
+ * @param {Date|string} opts.since — REQUIRED lower bound (exclusive)
+ * @param {Date|string} opts.until — REQUIRED upper bound (inclusive)
+ * @param {number} [opts.chunkLimit] — TOP N per inner query, default 25000
+ * @returns {{ ok: boolean, fetched: number, inserted: number, rejected: number,
+ *            badKey: number, since: string, until: string, chunks: number,
+ *            error?: string }}
+ */
+async function pollPicksWindow(opts = {}) {
+  if (!sql) return { ok: false, error: 'mssql package not installed' };
+  if (!configReady()) return { ok: false, error: `missing env: ${configIssues().join(', ')}` };
+  if (!opts.since || !opts.until) return { ok: false, error: 'pollPicksWindow requires both since and until' };
+
+  const sinceISO = new Date(opts.since).toISOString();
+  const untilISO = new Date(opts.until).toISOString();
+  const chunkLimit = Math.max(100, Math.min(50000, parseInt(opts.chunkLimit, 10) || 25000));
+
+  if (!pool || !pool.connected) {
+    const ok = await connect();
+    if (!ok) return { ok: false, error: connectionError, since: sinceISO, until: untilISO };
+  }
+
+  let localCursor = sinceISO;
+  let totalFetched = 0, totalInserted = 0, totalRejected = 0, totalBadKey = 0, chunks = 0;
+
+  while (true) {
+    let rows;
+    try {
+      const result = await pool.request()
+        .input('since', sql.DateTime, new Date(localCursor))
+        .input('until', sql.DateTime, new Date(untilISO))
+        .query(`
+          SELECT TOP ${chunkLimit}
+            HistoryId,
+            MasterorderName,
+            Materialreference,
+            MaterialName,
+            QuantityConfirmed,
+            PickWarehouseName,
+            CostcenterName,
+            Creationdate
+          FROM History
+          WHERE Type = 4
+            AND Creationdate > @since
+            AND Creationdate <= @until
+            AND MasterorderName IS NOT NULL
+            AND PickWarehouseName IS NOT NULL
+          ORDER BY Creationdate ASC
+        `);
+      rows = result.recordset || [];
+    } catch (err) {
+      return { ok: false, error: err.message, since: sinceISO, until: untilISO, chunks, fetched: totalFetched, inserted: totalInserted };
+    }
+
+    if (rows.length === 0) break;
+    chunks++;
+    totalFetched += rows.length;
+
+    const lines = rows.map(_historyRowToPickLine);
+    try {
+      const r = require('./db').upsertPicksHistory(lines, 'powerpick');
+      totalInserted += r.inserted || 0;
+      totalRejected += r.rejected || 0;
+      totalBadKey   += r.badKey   || 0;
+    } catch (e) {
+      return { ok: false, error: `upsertPicksHistory failed: ${e.message}`, since: sinceISO, until: untilISO, chunks, fetched: totalFetched, inserted: totalInserted };
+    }
+
+    // Advance LOCAL cursor only — does NOT touch lastSyncCreationdate, so live
+    // polling is undisturbed. If we got fewer rows than chunkLimit, we're done.
+    localCursor = new Date(rows[rows.length - 1].Creationdate).toISOString();
+    if (rows.length < chunkLimit) break;
+  }
+
+  return {
+    ok: true,
+    fetched: totalFetched,
+    inserted: totalInserted,
+    rejected: totalRejected,
+    badKey: totalBadKey,
+    since: sinceISO,
+    until: untilISO,
+    chunks,
+  };
+}
+
+/**
+ * Full historical backfill — pulls every Type=4 fulfilled pick from `startISO`
+ * to `endISO` (or "now") in week-sized chunks, never disturbing the live cursor.
+ * Built for the 2026-05-02 picks_history canonicalization migration: PowerPick
+ * supersedes ItemPath as the sole source, so we backfill PowerPick to its full
+ * depth (~2024-12-31) before deleting the ItemPath rows.
+ *
+ * Logs progress to stdout — typical 970K-row, 17-month backfill takes 30-60 min.
+ *
+ * Idempotent. Safe to interrupt and resume — INSERT OR IGNORE on pick_id dedupes,
+ * and you can pass a more recent startISO on resume.
+ *
+ * @param {string} startISO — e.g. '2024-12-31T00:00:00Z'
+ * @param {string} [endISO] — defaults to now
+ * @param {number} [weekChunkDays=7] — chunk size in days
+ */
+async function backfillPicksHistory(startISO, endISO, weekChunkDays = 7) {
+  const start = new Date(startISO);
+  const end   = endISO ? new Date(endISO) : new Date();
+  if (isNaN(start) || isNaN(end)) return { ok: false, error: 'invalid startISO/endISO' };
+  if (start >= end) return { ok: false, error: 'startISO must be before endISO' };
+
+  const chunkMs = weekChunkDays * 24 * 60 * 60 * 1000;
+  const totalChunks = Math.ceil((end - start) / chunkMs);
+  console.log(`[PowerPick] backfillPicksHistory: ${start.toISOString()} → ${end.toISOString()} in ${totalChunks} ${weekChunkDays}-day chunks`);
+
+  let chunkIdx = 0;
+  let grandFetched = 0, grandInserted = 0, grandRejected = 0, grandBadKey = 0;
+  let cursor = new Date(start);
+
+  while (cursor < end) {
+    chunkIdx++;
+    const chunkEnd = new Date(Math.min(cursor.getTime() + chunkMs, end.getTime()));
+    const t0 = Date.now();
+    const r = await pollPicksWindow({ since: cursor.toISOString(), until: chunkEnd.toISOString() });
+    const dtSec = ((Date.now() - t0) / 1000).toFixed(1);
+
+    if (!r.ok) {
+      console.error(`[PowerPick] chunk ${chunkIdx}/${totalChunks} FAILED: ${r.error}`);
+      return { ok: false, error: r.error, completedChunks: chunkIdx - 1, totalChunks, grandFetched, grandInserted };
+    }
+
+    grandFetched  += r.fetched;
+    grandInserted += r.inserted;
+    grandRejected += r.rejected;
+    grandBadKey   += r.badKey;
+    console.log(`[PowerPick] chunk ${chunkIdx}/${totalChunks} ${cursor.toISOString().slice(0,10)} → ${chunkEnd.toISOString().slice(0,10)}: fetched=${r.fetched} inserted=${r.inserted} (${dtSec}s)`);
+
+    cursor = chunkEnd;
+  }
+
+  console.log(`[PowerPick] backfillPicksHistory DONE: ${chunkIdx} chunks, fetched=${grandFetched}, inserted=${grandInserted}, rejected=${grandRejected}, badKey=${grandBadKey}`);
+  return { ok: true, completedChunks: chunkIdx, totalChunks, grandFetched, grandInserted, grandRejected, grandBadKey };
+}
+
+/**
  * One-shot historical recovery — pulls Type=4 picks for the last N days and
  * ingests them. Used to backfill the existing 141 NULL-lens_type active jobs
  * from 2026-05-01 onward without waiting for ItemPath. Larger limit because
@@ -594,4 +745,7 @@ module.exports = {
   // Phase 2 — picks
   pollPicks,
   backfillRecentPicks,
+  // Phase 3 — picks_history canonicalization (2026-05-02)
+  pollPicksWindow,
+  backfillPicksHistory,
 };

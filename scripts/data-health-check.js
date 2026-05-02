@@ -111,7 +111,7 @@ const checkAlreadyAttempted = db.prepare(`
 
 // ── Results Tracker ──────────────────────────────────────────────────────────
 const results = {
-  picks: { gaps: [], backfilled: [], failed: [] },
+  picks: { gaps: [], backfilled: [], failed: [], inflations: [] },
   shipped: { gaps: [], backfilled: [], failed: [] },
   daily: { gaps: [], backfilled: [], failed: [] },
 };
@@ -143,6 +143,54 @@ function detectPickGaps() {
 
   if (gaps.length === 0) log('  No pick gaps detected');
   return gaps;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inflation regression guard — added 2026-05-02 after picks_history was found
+// inflated 1.5-2x vs NetSuite due to ItemPath endpoint UUID-per-call dup pattern.
+// Catches that pattern returning, OR a new dup-write pattern via any other source.
+// Threshold: any weekday picks_history count > NetSuite same-day shipped × 1.20.
+// ─────────────────────────────────────────────────────────────────────────────
+function detectPickInflation() {
+  log('--- Picks Inflation Guard (vs NetSuite shipped) ---');
+
+  // Per-day picks_history count for last 14 weekdays
+  const picksByDay = {};
+  for (const r of db.prepare(`
+    SELECT substr(completed_at,1,10) AS day, COUNT(*) AS cnt
+    FROM picks_history
+    WHERE substr(completed_at,1,10) >= date('now','-21 days')
+    GROUP BY day
+  `).all()) picksByDay[r.day] = r.cnt;
+
+  // Per-day NetSuite shipped count (using dvi_shipped_jobs as proxy — same lab
+  // ground truth used by daily-reconcile.js). Multiply by 3 for lens+lens+frame
+  // expected pick count per shipped job.
+  const shippedByDay = {};
+  for (const r of db.prepare(`
+    SELECT substr(ship_date,1,10) AS day, COUNT(*) AS cnt
+    FROM dvi_shipped_jobs
+    WHERE substr(ship_date,1,10) >= date('now','-21 days')
+    GROUP BY day
+  `).all()) shippedByDay[r.day] = r.cnt;
+
+  const weekdays = getWeekdaysInRange(14);
+  const inflations = [];
+
+  for (const day of weekdays) {
+    const picks = picksByDay[day] || 0;
+    const shipped = shippedByDay[day] || 0;
+    if (shipped === 0) continue; // no comparison point — skip
+    const expected = shipped * 3;
+    const ratio = picks / expected;
+    if (ratio > 1.20) {
+      inflations.push({ day, picks, shipped, expected, ratio: ratio.toFixed(2) });
+      log(`  INFLATION: ${day} — picks=${picks}, shipped=${shipped}, expected≈${expected}, ratio=${ratio.toFixed(2)}× (>1.20)`);
+    }
+  }
+
+  if (inflations.length === 0) log('  No pick inflation detected (all weekdays within 1.20× of expected)');
+  return inflations;
 }
 
 async function backfillPicks(gaps) {
@@ -473,6 +521,13 @@ async function sendSlackSummary() {
     lines.push(msg);
   }
 
+  // Picks inflation summary (added 2026-05-02 — alerts on 1.20× or higher vs shipped)
+  const pi = (results.picks.inflations || []);
+  if (pi.length > 0) {
+    const worst = pi.slice().sort((a,b) => parseFloat(b.ratio) - parseFloat(a.ratio))[0];
+    lines.push(`:rotating_light: Picks INFLATION on ${pi.length} weekday(s) — worst: ${worst.day} ${worst.ratio}× (picks=${worst.picks}, shipped=${worst.shipped})`);
+  }
+
   // Shipped summary
   const sg = results.shipped.gaps.length;
   const sb = results.shipped.backfilled.length;
@@ -604,6 +659,10 @@ async function main() {
     // 1. Picks
     const pickGaps = detectPickGaps();
     await backfillPicks(pickGaps);
+    log('');
+
+    // 1b. Picks inflation guard (added 2026-05-02 after PowerPick canonical migration)
+    results.picks.inflations = detectPickInflation();
     log('');
 
     // 2. Shipped XMLs
