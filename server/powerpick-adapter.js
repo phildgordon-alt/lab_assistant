@@ -313,10 +313,21 @@ async function sampleRows(tableName, limit = 5) {
 // ─────────────────────────────────────────────────────────────────────────────
 // PHASE 2 — pick polling
 //
-// Query: History table, Type=4 = pick events (verified empirically 2026-05-01:
-// MasterorderName matches DVI invoice format, PickWarehouseName populated,
-// PutWarehouseName null). Type=1 is operator restocking puts ("ManualPut-LAPTOP-…")
-// — we ignore those.
+// Query: History table, Type=4 = pick events. Verified empirically 2026-05-01.
+//
+// CRITICAL — Type=4 is doubled in source. Power Pick writes each pick TWICE:
+//   - Pick REQUEST   (MotiveType=5, QuantityConfirmed=0, PickWarehouseName=NULL)
+//   - Pick FULFILLED (MotiveType=0, QuantityConfirmed>0, PickWarehouseName set)
+// We MUST filter to fulfilled rows only or pick counts inflate ~3.4x. The
+// PickWarehouseName IS NOT NULL predicate is the cheapest correct filter
+// (equivalent to MotiveType=0 but more semantically obvious).
+// Inflation incident: 2026-05-02 — pre-fix Mar15→May1 ingested 94,152 real
+// picks + 221,916 phantoms; YTD Consumption tab showed +183,213 unit variance
+// vs NetSuite. Filter shipped same day.
+//
+// Type=1 = operator restocking puts ("ManualPut-LAPTOP-…") — ignore.
+// Type=2 = manual handheld picks ("ManualPick-LAPTOP-…", no invoice) — ignore.
+// Type=9 = bulk replenishment / cycle count adjustments (no order linkage) — ignore.
 //
 // Mapping Power Pick `History` → our `picks_history` (via db.upsertPicksHistory):
 //   HistoryId            → pickId      (`pp-${HistoryId}`)
@@ -417,6 +428,7 @@ async function pollPicks(opts = {}) {
         WHERE Type = 4
           AND Creationdate > @since
           AND MasterorderName IS NOT NULL
+          AND PickWarehouseName IS NOT NULL  -- exclude unfulfilled pick requests (MotiveType=5, qty=0)
         ORDER BY Creationdate ASC
       `);
 
