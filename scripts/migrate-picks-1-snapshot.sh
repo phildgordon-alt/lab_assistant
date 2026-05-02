@@ -21,9 +21,15 @@ fi
 
 mkdir -p "$BACKUP_DIR"
 
-echo "── Snapshotting $DB → $DEST ──"
-# Use sqlite3 .backup so we get a consistent copy even with the server holding it open
-sqlite3 "$DB" ".backup '$DEST'"
+echo "── Checkpointing WAL → flushing pending writes into main DB file ──"
+# `.backup` can hang when the server holds a long-running write transaction.
+# Force a TRUNCATE checkpoint instead (flushes WAL into the main file and
+# resets the WAL to empty), then plain cp the file. WAL coordination via
+# SQLite means cp gets a consistent snapshot of the post-checkpoint state.
+sqlite3 "$DB" "PRAGMA wal_checkpoint(TRUNCATE);"
+
+echo "── Copying $DB → $DEST ──"
+cp "$DB" "$DEST"
 
 SRC_BYTES=$(stat -f%z "$DB")
 DST_BYTES=$(stat -f%z "$DEST")
