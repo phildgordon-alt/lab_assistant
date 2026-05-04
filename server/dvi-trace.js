@@ -122,6 +122,18 @@ function parseTimestamp(dateStr, timeStr) {
 function stationToStage(station) {
   const s = (station || '').toUpperCase();
   if (s === 'CANCELED') return 'CANCELED';
+  // CBOB - * stations are DVI's holding queues for incoming work, NOT lab
+  // stations. Pre-2026-05-04 we wrongly mapped CBOB suffixes (INHSE FIN, INHSE
+  // SF, DIG) to CUTTING/SURFACING per the lab-station-name pattern, which
+  // pushed ~982 queued-but-not-yet-picked jobs into the active WIP set with
+  // NULL lens_type. They're queued at DVI, not at the lab. This check
+  // supersedes the suffix-based matches further down.
+  if (s.startsWith('CBOB')) return 'INCOMING';
+  // Kickout/reject stations — must check BEFORE the SH CONVEY/EDGER lab
+  // patterns below, otherwise "SH CONVEY KCKOUT" gets stamped SHIPPING and
+  // "EDGERKCKOT2LINE2" gets stamped CUTTING. These are reject lanes that
+  // route the job to a manual review pile, not active lab progress.
+  if (s.includes('KCKOUT') || s.includes('KCKOT') || s.includes('KICKOUT')) return 'HOLD';
   if (s.includes('INITIATE') || s.includes('NEW WORK') || s.includes('FRAME LOGGED') || s.includes('LOG LENSES') || s.includes('SENT TO LAB') || s.includes('RX ENTRY') || s.includes('INTL ACCT')) return 'INCOMING';
   if (s.includes('NE LENS') || s.includes('NEL') || s.includes('NOT ENOUGH') || s.includes('NE FRMS') || s.includes('KRDX FAIL')) return 'NEL';
   if (s.includes('KARDEX') || s.includes('MAN2KARDX')) return 'AT_KARDEX';
@@ -137,6 +149,27 @@ function stationToStage(station) {
   if (s.includes('LASER REJECT') || s.includes('KICKOUT') || s.includes('SLOW MVRS') || s.includes('UNCATEGOR') || s.includes('INFLUENCE') || s.includes('PLANOSPLT')) return 'HOLD';
   if (s.includes('QC_HOLD') || s.includes('HOLD')) return 'HOLD';
   return 'OTHER';
+}
+
+// Derive lens_type from the station name when DVI assigns the job to a
+// type-specific holding queue. This populates lens_type for jobs that are
+// queued at DVI and waiting to be picked, BEFORE Power Pick or post-ship XML
+// would normally provide it. Added 2026-05-04 after the CBOB-misclassification
+// post-mortem found ~1,250 active WIP jobs sitting in DVI holding queues with
+// NULL lens_type, distorting the aging dashboard's outlier %.
+//
+// Mapping rationale (confirmed by Phil 2026-05-04):
+//   FIN  = in-house finished stock = single vision     → 'S'
+//   SF   = semi-finished surfacing = surfacing job     → 'P'
+//   DIG  = digital surfacing       = progressive       → 'P' (not in current data; future-proof)
+//   INTL ACCT = international accounts                  → null (lens type unknown from suffix)
+function lensTypeFromStation(station) {
+  const s = (station || '').toUpperCase();
+  if (!s.startsWith('CBOB')) return null;
+  if (s.includes('INHSE FIN')) return 'S';
+  if (s.includes('INHSE SF'))  return 'P';
+  if (s.includes('DIG'))       return 'P';
+  return null; // CBOB - INTL ACCT and any other CBOB suffix we don't know yet
 }
 
 function freshTodayStats() {
@@ -667,6 +700,11 @@ class DviTraceWatcher extends EventEmitter {
               eventCount: (job.events || []).length,
               eventsJson: JSON.stringify(recentEvents),
               rush: null,
+              // Derive lens_type from CBOB queue suffix when available (FIN→S, SF/DIG→P).
+              // upsertJobFromTrace COALESCEs (jobs.lens_type, excluded.lens_type), so this
+              // only fills the field when no other source has set it yet — won't overwrite
+              // XML/Looker/picks-derive values.
+              lensType: lensTypeFromStation(job.station),
             });
           } catch (e2) { /* ignore — unified table enrichment */ }
         }
@@ -1380,4 +1418,7 @@ module.exports = {
   purgeShippedJobs(shippedIndex) { return watcher.purgeShippedJobs(shippedIndex); },
   recover() { return watcher.recover(); },
   getIncomingByDate(days) { return watcher.getIncomingByDate(days); },
+  // Pure helpers exported for backfill scripts and tests
+  stationToStage,
+  lensTypeFromStation,
 };
