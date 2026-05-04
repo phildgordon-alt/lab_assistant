@@ -49,7 +49,14 @@ const APPLY  = process.argv.includes('--apply');
 const limitArg = process.argv.find(a => a.startsWith('--limit'));
 const LIMIT = limitArg ? parseInt(limitArg.split('=')[1] || process.argv[process.argv.indexOf('--limit') + 1], 10) || 0 : 0;
 
-const ACTIVE_STAGES = ['INCOMING','SURFACING','CUTTING','COATING','ASSEMBLY','SHIPPING'];
+const ALL_ACTIVE_STAGES = ['INCOMING','SURFACING','CUTTING','COATING','ASSEMBLY','SHIPPING'];
+// INCOMING jobs are pre-pick — they SHOULD have NULL lens_type until Kardex
+// is requested. Excluded from recovery attempts by default. Use
+// --include-incoming to override.
+const RECOVERY_STAGES = process.argv.includes('--include-incoming')
+  ? ALL_ACTIVE_STAGES
+  : ALL_ACTIVE_STAGES.filter(s => s !== 'INCOMING');
+const ACTIVE_STAGES = RECOVERY_STAGES; // backward-compat alias for the rest of the file
 
 // ── Setup ───────────────────────────────────────────────────────────────────
 if (!fs.existsSync(DB_PATH)) {
@@ -61,10 +68,28 @@ db.pragma('journal_mode = WAL');
 
 const log = (...a) => console.log('[recover]', ...a);
 
-// ── Find NULL active jobs ───────────────────────────────────────────────────
+// ── Stage breakdown of ALL NULL-lens_type active jobs (incl. INCOMING) ──────
+const allPlaceholders = ALL_ACTIVE_STAGES.map(() => '?').join(',');
+const stageRows = db.prepare(`
+  SELECT current_stage, COUNT(*) AS n
+  FROM jobs
+  WHERE current_stage IN (${allPlaceholders})
+    AND (lens_type IS NULL OR lens_type = '')
+  GROUP BY current_stage ORDER BY n DESC
+`).all(...ALL_ACTIVE_STAGES);
+
+const totalNull = stageRows.reduce((s, r) => s + r.n, 0);
+log(`NULL-lens_type active jobs by stage:`);
+for (const r of stageRows) {
+  const skipped = !ACTIVE_STAGES.includes(r.current_stage) ? '  [skipped — pre-pick]' : '';
+  log(`  ${r.current_stage.padEnd(10)} ${String(r.n).padStart(5)}${skipped}`);
+}
+log(`  TOTAL      ${String(totalNull).padStart(5)}`);
+
+// ── Find recovery candidates (excludes INCOMING by default) ─────────────────
 const placeholders = ACTIVE_STAGES.map(() => '?').join(',');
 const candidatesSql = `
-  SELECT invoice
+  SELECT invoice, current_stage
   FROM jobs
   WHERE current_stage IN (${placeholders})
     AND (lens_type IS NULL OR lens_type = '')
@@ -72,10 +97,11 @@ const candidatesSql = `
   ${LIMIT > 0 ? `LIMIT ${LIMIT}` : ''}
 `;
 const candidates = db.prepare(candidatesSql).all(...ACTIVE_STAGES);
-log(`Found ${candidates.length} active NULL-lens_type jobs to attempt recovery`);
+log('');
+log(`Recovery candidates (post-pick stages only): ${candidates.length}`);
 
 if (candidates.length === 0) {
-  log('Nothing to do.');
+  log('Nothing to recover. (All NULL jobs are in pre-pick stages — expected.)');
   db.close();
   process.exit(0);
 }
@@ -223,7 +249,8 @@ async function main() {
   }
 
   let recovered = 0, byPP = 0, byDVI = 0, byShipped = 0, unresolved = 0;
-  const csvLines = ['invoice,source,sku,lens_type,material'];
+  const unresolvedByStage = {};
+  const csvLines = ['invoice,stage,source,sku,lens_type,material'];
 
   for (const job of candidates) {
     let hit = await pp_lookupSku(job.invoice);
@@ -234,11 +261,12 @@ async function main() {
 
     if (!hit) {
       unresolved++;
-      csvLines.push(`${job.invoice},NONE,,,`);
+      unresolvedByStage[job.current_stage] = (unresolvedByStage[job.current_stage] || 0) + 1;
+      csvLines.push(`${job.invoice},${job.current_stage},NONE,,,`);
       continue;
     }
 
-    csvLines.push(`${job.invoice},${source},${hit.sku},${hit.lens_type},${hit.material || ''}`);
+    csvLines.push(`${job.invoice},${job.current_stage},${source},${hit.sku || ''},${hit.lens_type},${hit.material || ''}`);
 
     if (APPLY) {
       try {
@@ -269,6 +297,12 @@ async function main() {
   log(`Resolved by DVI XML:      ${byDVI}`);
   log(`Resolved by dvi_shipped:  ${byShipped}`);
   log(`Unresolved (no source):   ${unresolved}`);
+  if (unresolved > 0) {
+    log(`Unresolved by stage:`);
+    for (const [stage, n] of Object.entries(unresolvedByStage).sort((a,b) => b[1]-a[1])) {
+      log(`  ${stage.padEnd(10)} ${String(n).padStart(5)}`);
+    }
+  }
   log(`Total recoverable:        ${recovered}`);
   log(`CSV written to:           ${csvPath}`);
 
