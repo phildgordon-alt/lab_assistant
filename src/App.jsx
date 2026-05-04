@@ -7900,6 +7900,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
     {id:"recommendations",label:"Recommendations",icon:"📋"},
     {id:"catchup",label:"Catch-Up",icon:"📈"},
     {id:"trend",label:"8hr Trend",icon:"📊"},
+    {id:"pick-eff",label:"Pick Efficiency",icon:"🎯"},
     {id:"history-analysis",label:"Flow History",icon:"🔥"},
     {id:"history",label:"Push History",icon:"📜"},
   ];
@@ -7908,6 +7909,20 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [lphData, setLphData] = useState(null);
   const [lphDay, setLphDay] = useState(0); // 0=today, 1=yesterday, etc.
   const [lphHidden, setLphHidden] = useState(new Set());
+
+  // Pick efficiency (sends-per-job KPI). Hooks at top of component per React rules.
+  const [pe, setPe] = useState(null);
+  const [peDay, setPeDay] = useState(0); // 0 = yesterday, 1 = day before, ...
+  const [peLoading, setPeLoading] = useState(false);
+  useEffect(() => {
+    if (subTab !== 'pick-eff') return; // only fetch when this tab is active
+    const d = new Date(); d.setDate(d.getDate() - 1 - peDay);
+    const dateStr = d.toISOString().slice(0, 10);
+    setPeLoading(true);
+    fetch(`${base}/api/flow-agent/pick-efficiency?date=${dateStr}&worst=15`)
+      .then(r => r.json()).then(d => { setPe(d); setPeLoading(false); })
+      .catch(e => { setPe({ ok:false, error: String(e) }); setPeLoading(false); });
+  }, [subTab, peDay, base]);
   useEffect(() => {
     setLphData(null);
     const d = new Date(); d.setDate(d.getDate() - lphDay);
@@ -8924,6 +8939,125 @@ function FlowAgentTab({ovenServerUrl,settings}){
       )}
 
       {/* ═══════ PUSH HISTORY VIEW ═══════ */}
+      {/* ═══════ PICK EFFICIENCY ═══════
+          Sends-per-job metric. Each "send" = one DVI→Kardex request batch
+          (Power Pick History Type=4). 1 send = perfect, 2+ = re-issue.
+          Computed PER DAY for completed days only — today's data would be
+          partial (a job picked today may still re-issue tomorrow). The
+          backend defaults to yesterday in PT.  Task #33 / 2026-05-04. */}
+      {subTab==="pick-eff"&&(()=>{
+        // Hooks live at top of FlowAgentTab — see useState/useEffect above.
+        // This block is pure render based on { pe, peDay, peLoading }.
+        const fmtPct = (v) => `${(v * 100).toFixed(1)}%`;
+        const colorForRate = (r) => r >= 0.8 ? '#22c55e' : r >= 0.5 ? '#f59e0b' : '#ef4444';
+
+        return (
+          <div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",letterSpacing:1}}>PICK EFFICIENCY — SENDS PER JOB</div>
+              <div style={{display:"flex",gap:6}}>
+                {[0,1,2,3,4,5,6].map(off => {
+                  const d = new Date(); d.setDate(d.getDate() - 1 - off);
+                  const ds = d.toISOString().slice(5, 10);
+                  return (
+                    <button key={off} onClick={()=>setPeDay(off)} style={{background:peDay===off?"rgba(59,130,246,0.15)":"transparent",border:peDay===off?"1px solid rgba(59,130,246,0.3)":"1px solid rgba(255,255,255,0.06)",borderRadius:6,padding:"4px 10px",color:peDay===off?"#60a5fa":"#9ca3af",cursor:"pointer",fontFamily:mono,fontSize:11}}>{off===0?'Yesterday':ds}</button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{fontSize:11,color:"#6b7280",fontFamily:mono,marginBottom:16,fontStyle:"italic"}}>
+              Computed next day so all sends settle. A job picked today may still re-issue tomorrow — today's data would be partial.
+            </div>
+
+            {peLoading && <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>Loading…</div>}
+            {!peLoading && pe && !pe.ok && <div style={{textAlign:"center",padding:40,color:"#ef4444",fontFamily:mono}}>Error: {pe.error}</div>}
+            {!peLoading && pe && pe.ok && pe.totalJobs === 0 && <div style={{textAlign:"center",padding:40,color:"#6b7280",fontFamily:mono}}>No pick activity for {pe.date}</div>}
+
+            {!peLoading && pe && pe.ok && pe.totalJobs > 0 && (
+              <div>
+                {/* Headline */}
+                <div style={{display:"grid",gridTemplateColumns:"repeat(4, 1fr)",gap:12,marginBottom:16}}>
+                  <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16}}>
+                    <div style={{fontSize:10,color:"#6b7280",letterSpacing:1,fontFamily:mono,marginBottom:4}}>FIRST-TRY RATE</div>
+                    <div style={{fontSize:36,fontFamily:mono,fontWeight:700,color:colorForRate(pe.firstTryRate)}}>{fmtPct(pe.firstTryRate)}</div>
+                    <div style={{fontSize:11,color:"#6b7280",fontFamily:mono,marginTop:4}}>{pe.oneSend} of {pe.totalJobs} jobs</div>
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16}}>
+                    <div style={{fontSize:10,color:"#6b7280",letterSpacing:1,fontFamily:mono,marginBottom:4}}>AVG SENDS / JOB</div>
+                    <div style={{fontSize:36,fontFamily:mono,fontWeight:700,color:pe.avgSends<=1.2?"#22c55e":pe.avgSends<=2?"#f59e0b":"#ef4444"}}>{pe.avgSends.toFixed(2)}</div>
+                    <div style={{fontSize:11,color:"#6b7280",fontFamily:mono,marginTop:4}}>1.0 = perfect</div>
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16}}>
+                    <div style={{fontSize:10,color:"#6b7280",letterSpacing:1,fontFamily:mono,marginBottom:4}}>TOTAL JOBS</div>
+                    <div style={{fontSize:36,fontFamily:mono,fontWeight:700,color:"#e5e7eb"}}>{pe.totalJobs}</div>
+                    <div style={{fontSize:11,color:"#6b7280",fontFamily:mono,marginTop:4}}>that started {pe.date}</div>
+                  </div>
+                  <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16}}>
+                    <div style={{fontSize:10,color:"#6b7280",letterSpacing:1,fontFamily:mono,marginBottom:4}}>3+ SENDS</div>
+                    <div style={{fontSize:36,fontFamily:mono,fontWeight:700,color:"#ef4444"}}>{pe.threeSend + pe.fourPlus}</div>
+                    <div style={{fontSize:11,color:"#6b7280",fontFamily:mono,marginTop:4}}>terrible — investigate</div>
+                  </div>
+                </div>
+
+                {/* Breakdown bars */}
+                <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,padding:16,marginBottom:16}}>
+                  <div style={{fontSize:11,color:"#6b7280",letterSpacing:1,fontFamily:mono,marginBottom:10}}>DISTRIBUTION</div>
+                  {[
+                    {label:"1 send (perfect)", count:pe.oneSend,    color:"#22c55e"},
+                    {label:"2 sends (bad)",     count:pe.twoSend,    color:"#f59e0b"},
+                    {label:"3 sends (worse)",   count:pe.threeSend,  color:"#f97316"},
+                    {label:"4+ sends (terrible)", count:pe.fourPlus, color:"#ef4444"},
+                  ].map((b,i) => {
+                    const pct = pe.totalJobs ? (b.count / pe.totalJobs) * 100 : 0;
+                    return (
+                      <div key={i} style={{display:"grid",gridTemplateColumns:"170px 60px 1fr 60px",alignItems:"center",gap:10,marginBottom:6,fontFamily:mono,fontSize:12}}>
+                        <div style={{color:"#9ca3af"}}>{b.label}</div>
+                        <div style={{color:"#e5e7eb",textAlign:"right"}}>{b.count}</div>
+                        <div style={{height:10,background:"rgba(255,255,255,0.04)",borderRadius:5,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${pct}%`,background:b.color,transition:"width 0.3s"}}></div>
+                        </div>
+                        <div style={{color:b.color,textAlign:"right"}}>{pct.toFixed(1)}%</div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Worst offenders */}
+                {pe.worstOffenders && pe.worstOffenders.length > 0 && (
+                  <div style={{background:"rgba(255,255,255,0.02)",border:"1px solid rgba(255,255,255,0.06)",borderRadius:10,overflow:"hidden"}}>
+                    <div style={{fontSize:11,color:"#6b7280",letterSpacing:1,fontFamily:mono,padding:"12px 16px",borderBottom:"1px solid rgba(255,255,255,0.06)"}}>WORST OFFENDERS</div>
+                    <table style={{width:"100%",borderCollapse:"collapse",fontFamily:mono,fontSize:12}}>
+                      <thead>
+                        <tr style={{borderBottom:"1px solid rgba(255,255,255,0.06)"}}>
+                          {["Invoice","Sends","First Send","Last Send","Span"].map(h=>(
+                            <th key={h} style={{padding:"8px 12px",textAlign:"left",color:"#6b7280",fontSize:10,fontWeight:600}}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pe.worstOffenders.map((w,i) => {
+                          const span = w.lastSend && w.firstSend ? Math.round((new Date(w.lastSend) - new Date(w.firstSend)) / 3600000 * 10) / 10 : null;
+                          return (
+                            <tr key={i} style={{borderBottom:"1px solid rgba(255,255,255,0.03)"}}>
+                              <td style={{padding:"6px 12px",color:"#60a5fa",fontWeight:700}}>{w.invoice}</td>
+                              <td style={{padding:"6px 12px",color:w.sends>=4?"#ef4444":w.sends>=3?"#f97316":"#f59e0b",fontWeight:700}}>{w.sends}</td>
+                              <td style={{padding:"6px 12px",color:"#9ca3af"}}>{w.firstSend?new Date(w.firstSend).toLocaleString():"—"}</td>
+                              <td style={{padding:"6px 12px",color:"#9ca3af"}}>{w.lastSend?new Date(w.lastSend).toLocaleString():"—"}</td>
+                              <td style={{padding:"6px 12px",color:"#6b7280"}}>{span!==null?`${span}h`:"—"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {subTab==="history"&&(
         <div>
           <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:14,color:"#6b7280",letterSpacing:1,marginBottom:8}}>PUSH HISTORY (24H)</div>

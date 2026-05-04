@@ -4107,6 +4107,18 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/watchdog/state') {
     return json(res, adapterWatchdog.getState());
   }
+
+  // Pick efficiency KPI — sends-per-job for ONE day (default: yesterday in PT).
+  // Task #33: surface DVI→Kardex re-issue pattern. 1 send = perfect, 2+ = inefficient.
+  // Computed next day so all sends settle (a job can be re-issued days later).
+  // For trend charts, the UI calls this once per day for each completed day.
+  if (req.method==='GET' && url.pathname==='/api/flow-agent/pick-efficiency') {
+    try {
+      const date   = url.searchParams.get('date'); // optional 'YYYY-MM-DD'
+      const worstN = parseInt(url.searchParams.get('worst') || '10', 10);
+      return json(res, await powerpick.getPickEfficiency({ date, worstN }));
+    } catch (e) { return json(res, { ok: false, error: e.message }, 500); }
+  }
   if (req.method==='GET' && url.pathname==='/api/som/orders') {
     return json(res, som.getOrders());
   }

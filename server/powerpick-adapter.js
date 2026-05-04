@@ -651,6 +651,197 @@ async function backfillRecentPicks(days = 7) {
   return result;
 }
 
+/**
+ * Pick efficiency KPI — sends per job for a specific day. (Task #33, 2026-05-04.)
+ *
+ * Each "send" = one DVI→Kardex request batch. DVI sends a request, Kardex
+ * either auto-confirms (stock available) or leaves the request unfulfilled.
+ * If unfulfilled, DVI re-issues — that's a second send. Per Phil:
+ *   1 send  = perfect (job picked first try)
+ *   2 sends = inefficient
+ *   3+      = chronic re-issue (out of stock or operator pattern)
+ *
+ * SCOPE — single day, computed AFTER that day is over.
+ *
+ * Per Phil 2026-05-04: "calculate next day so we capture all jobs the day
+ * before". The metric is "yesterday's first-try rate" — calculated today
+ * after yesterday is complete. NO sliding window: each call returns one
+ * day's number. The UI calls this for a few recent completed days to build
+ * a trend; it does NOT call for "today" (today's data is partial — a job
+ * picked today may still re-issue tomorrow).
+ *
+ * "Belongs to a day" = the job's FIRST send was on that day. All subsequent
+ * sends for that job are counted in that day's bucket regardless of when
+ * they happen. So a job that first sends on Monday and re-sends Tuesday
+ * counts Tuesday's re-send in Monday's metric.
+ *
+ * Implementation: Power Pick `History` Type=4 records arrive in batches —
+ * lens_R + lens_L + frame all share the same Creationdate (within ms). We
+ * collapse a batch by truncating Creationdate to the minute. Distinct
+ * (MasterorderName, minute) tuples = sends. A job's "first send" is the
+ * earliest minute_bucket; only jobs whose first send is on the requested
+ * date are counted.
+ *
+ * Returns:
+ *   {
+ *     ok, date, dayStart, dayEnd,
+ *     totalJobs, oneSend, twoSend, threeSend, fourPlus,
+ *     firstTryRate (0..1), avgSends,
+ *     worstOffenders: [{invoice, sends, firstSend, lastSend}, ...]
+ *   }
+ *
+ * Read-only against Power Pick. Safe to call repeatedly; the result is stable
+ * once the day is past + a couple days for late re-sends to settle.
+ *
+ * @param {object} opts
+ * @param {string} [opts.date] — 'YYYY-MM-DD' PT-local. Default: yesterday in PT.
+ * @param {number} [opts.worstN=10]
+ */
+async function getPickEfficiency(opts = {}) {
+  if (!sql) return { ok: false, error: 'mssql package not installed' };
+  if (!configReady()) return { ok: false, error: `missing env: ${configIssues().join(', ')}` };
+
+  const worstN = Math.max(1, Math.min(100, parseInt(opts.worstN, 10) || 10));
+
+  // Default = yesterday in PT-local. PT is UTC-7 (PDT) or UTC-8 (PST).
+  // We use UTC-7 here — close enough for day-bucketing; lab is mostly
+  // active 6am-6pm PT so DST drift doesn't matter for grouping.
+  const PT_OFFSET_MS = 7 * 60 * 60 * 1000;
+  let date = opts.date;
+  if (!date) {
+    const ptNow = new Date(Date.now() - PT_OFFSET_MS);
+    const yesterday = new Date(ptNow.getTime() - 24 * 60 * 60 * 1000);
+    date = yesterday.toISOString().slice(0, 10);
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return { ok: false, error: 'date must be YYYY-MM-DD' };
+
+  // Day boundaries in UTC for the SQL query. Day starts at PT 00:00 (= UTC 07:00)
+  // and ends 24h later.
+  const ptMidnightUtc = new Date(`${date}T00:00:00.000Z`).getTime() + PT_OFFSET_MS;
+  const dayStart = new Date(ptMidnightUtc);
+  const dayEnd   = new Date(ptMidnightUtc + 24 * 60 * 60 * 1000);
+
+  if (!pool || !pool.connected) {
+    const ok = await connect();
+    if (!ok) return { ok: false, error: connectionError, date };
+  }
+
+  try {
+    // Strategy: identify all jobs whose FIRST send occurred during this PT-day
+    // (between dayStart and dayEnd UTC). Then count ALL sends for those jobs
+    // including any re-issues that happened on later days.
+    //
+    // CONVERT(VARCHAR(16), …, 120) yields 'YYYY-MM-DD HH:MM' (minute precision).
+    // Sends are deduplicated by (MasterorderName, minute) tuples.
+    const aggResult = await pool.request()
+      .input('dayStart', sql.DateTime, dayStart)
+      .input('dayEnd',   sql.DateTime, dayEnd)
+      .query(`
+        -- Step 1: every minute-bucket batch for ANY job (we need full history
+        -- because re-sends can happen days after the first send).
+        WITH all_batches AS (
+          SELECT MasterorderName,
+                 CONVERT(VARCHAR(16), Creationdate, 120) AS minute_bucket,
+                 MIN(Creationdate) AS first_in_minute
+          FROM History
+          WHERE Type = 4
+            AND MasterorderName IS NOT NULL
+            AND MasterorderName LIKE '[0-9]%'
+          GROUP BY MasterorderName, CONVERT(VARCHAR(16), Creationdate, 120)
+        ),
+        -- Step 2: per-job overall first-send timestamp
+        first_send_per_job AS (
+          SELECT MasterorderName, MIN(first_in_minute) AS first_send
+          FROM all_batches
+          GROUP BY MasterorderName
+        ),
+        -- Step 3: jobs whose first send was on the requested PT-day
+        jobs_for_day AS (
+          SELECT MasterorderName
+          FROM first_send_per_job
+          WHERE first_send >= @dayStart AND first_send < @dayEnd
+        ),
+        -- Step 4: count ALL minute-bucket sends for those jobs (any date)
+        sends AS (
+          SELECT b.MasterorderName, COUNT(*) AS send_count
+          FROM all_batches b
+          INNER JOIN jobs_for_day j ON j.MasterorderName = b.MasterorderName
+          GROUP BY b.MasterorderName
+        )
+        SELECT
+          COUNT(*)                                           AS total_jobs,
+          SUM(CASE WHEN send_count = 1  THEN 1 ELSE 0 END)   AS one_send,
+          SUM(CASE WHEN send_count = 2  THEN 1 ELSE 0 END)   AS two_send,
+          SUM(CASE WHEN send_count = 3  THEN 1 ELSE 0 END)   AS three_send,
+          SUM(CASE WHEN send_count >= 4 THEN 1 ELSE 0 END)   AS four_plus,
+          AVG(CAST(send_count AS FLOAT))                     AS avg_sends
+        FROM sends
+      `);
+
+    const r = aggResult.recordset[0] || {};
+    const totalJobs = r.total_jobs || 0;
+    const oneSend   = r.one_send   || 0;
+
+    // Worst offenders — top N by send count for this day
+    const worstResult = await pool.request()
+      .input('dayStart', sql.DateTime, dayStart)
+      .input('dayEnd',   sql.DateTime, dayEnd)
+      .query(`
+        WITH all_batches AS (
+          SELECT MasterorderName,
+                 CONVERT(VARCHAR(16), Creationdate, 120) AS minute_bucket,
+                 MIN(Creationdate) AS first_in_minute,
+                 MAX(Creationdate) AS last_in_minute
+          FROM History
+          WHERE Type = 4
+            AND MasterorderName IS NOT NULL
+            AND MasterorderName LIKE '[0-9]%'
+          GROUP BY MasterorderName, CONVERT(VARCHAR(16), Creationdate, 120)
+        ),
+        first_send_per_job AS (
+          SELECT MasterorderName, MIN(first_in_minute) AS first_send
+          FROM all_batches
+          GROUP BY MasterorderName
+        ),
+        jobs_for_day AS (
+          SELECT MasterorderName, first_send
+          FROM first_send_per_job
+          WHERE first_send >= @dayStart AND first_send < @dayEnd
+        )
+        SELECT TOP ${worstN}
+          j.MasterorderName AS invoice,
+          (SELECT COUNT(*) FROM all_batches b WHERE b.MasterorderName = j.MasterorderName) AS sends,
+          j.first_send,
+          (SELECT MAX(last_in_minute) FROM all_batches b WHERE b.MasterorderName = j.MasterorderName) AS last_send
+        FROM jobs_for_day j
+        ORDER BY sends DESC, j.MasterorderName ASC
+      `);
+
+    return {
+      ok: true,
+      date,
+      dayStart: dayStart.toISOString(),
+      dayEnd:   dayEnd.toISOString(),
+      totalJobs,
+      oneSend,
+      twoSend:    r.two_send   || 0,
+      threeSend:  r.three_send || 0,
+      fourPlus:   r.four_plus  || 0,
+      firstTryRate: totalJobs ? oneSend / totalJobs : 0,
+      avgSends:     r.avg_sends || 0,
+      worstOffenders: (worstResult.recordset || []).map(w => ({
+        invoice:    w.invoice,
+        sends:      w.sends,
+        firstSend:  w.first_send instanceof Date ? w.first_send.toISOString() : w.first_send,
+        lastSend:   w.last_send  instanceof Date ? w.last_send.toISOString()  : w.last_send,
+      })),
+      asOf: new Date().toISOString(),
+    };
+  } catch (err) {
+    return { ok: false, error: err.message, date };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Lifecycle — start / stop
 // Mirrors server/som-adapter.js pattern: schedule a self-rescheduling poll
@@ -748,4 +939,6 @@ module.exports = {
   // Phase 3 — picks_history canonicalization (2026-05-02)
   pollPicksWindow,
   backfillPicksHistory,
+  // KPI — pick efficiency / sends-per-job (2026-05-04, task #33)
+  getPickEfficiency,
 };
