@@ -8053,31 +8053,101 @@ function FlowAgentTab({ovenServerUrl,settings}){
         </div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
           {(()=>{
-            // Always render — show state visibly so we can see when data isn't loading.
-            let labelText, color, isClickable = true, hoverTitle = '';
+            // ── Pick efficiency header pill — designer spec 2026-05-04 ──
+            // 320×44 composite: headline | delta chip | distribution bar with goal tick | volume + drill affordance
+            const TARGET_RATE = 0.80;
+
+            // Fallback states (loading / error / no data) — minimal pill, drop the rich layout.
             if (!peHeader) {
-              labelText = 'loading…'; color = '#6b7280'; isClickable = false;
-            } else if (peHeader.ok === false) {
-              labelText = 'error'; color = '#ef4444';
-              hoverTitle = peHeader.error || 'Pick efficiency endpoint failed';
-            } else if (!peHeader.totalJobs) {
-              labelText = 'no data'; color = '#6b7280';
-              hoverTitle = `No pick activity on ${peHeader.date || 'yesterday'}`;
-            } else {
-              const rate = peHeader.firstTryRate;
-              color = rate >= 0.8 ? '#22c55e' : rate >= 0.5 ? '#f59e0b' : '#ef4444';
-              const dt = peHeader.date ? peHeader.date.slice(5) : '—';
-              labelText = `${dt}: ${(rate*100).toFixed(1)}% first-try`;
-              hoverTitle = `${peHeader.totalJobs} jobs on ${peHeader.date}, ${peHeader.oneSend} picked first try. Click for full breakdown.`;
+              return (
+                <button disabled style={{background:"rgba(107,114,128,0.08)",border:"1px solid #21262D",borderRadius:6,padding:"6px 12px",color:"#6b7280",fontFamily:mono,fontSize:11,display:"flex",alignItems:"center",gap:6,cursor:"default"}}>
+                  <span>🎯</span><span>loading…</span>
+                </button>
+              );
             }
-            const rgb = color === '#22c55e' ? '34,197,94' : color === '#f59e0b' ? '245,158,11' : color === '#ef4444' ? '239,68,68' : '107,114,128';
+            if (peHeader.ok === false) {
+              return (
+                <button title={peHeader.error||'Pick efficiency endpoint failed'} style={{background:"rgba(239,68,68,0.12)",border:"1px solid #ef444440",borderRadius:6,padding:"6px 12px",color:"#ef4444",fontFamily:mono,fontSize:11,display:"flex",alignItems:"center",gap:6,cursor:"default"}}>
+                  <span>🎯</span><span>error</span>
+                </button>
+              );
+            }
+            if (!peHeader.totalJobs) {
+              return (
+                <button title={`No pick activity on ${peHeader.date||'yesterday'}`} style={{background:"rgba(107,114,128,0.08)",border:"1px solid #21262D",borderRadius:6,padding:"6px 12px",color:"#6b7280",fontFamily:mono,fontSize:11,display:"flex",alignItems:"center",gap:6,cursor:"default"}}>
+                  <span>🎯</span><span>{peHeader.date?.slice(5)||'—'}: no data</span>
+                </button>
+              );
+            }
+
+            // ── Data state — full composite pill ──
+            const rate    = peHeader.firstTryRate;
+            const ratePct = rate * 100;
+            const deltaPp = ratePct - TARGET_RATE * 100;
+            const headColor = rate >= TARGET_RATE ? '#22c55e' : rate >= 0.5 ? '#f59e0b' : '#ef4444';
+            const headRgb  = headColor === '#22c55e' ? '34,197,94' : headColor === '#f59e0b' ? '245,158,11' : '239,68,68';
+            const dt      = peHeader.date ? peHeader.date.slice(5) : '—';
+
+            // Distribution segments — stacked left-to-right best→worst
+            const total = peHeader.totalJobs;
+            const segs = [
+              { label: '1×', count: peHeader.oneSend,   color: '#22c55e' },
+              { label: '2×', count: peHeader.twoSend,   color: '#f59e0b' },
+              { label: '3×', count: peHeader.threeSend, color: '#f97316' },
+              { label: '4+', count: peHeader.fourPlus,  color: '#ef4444' },
+            ];
+
+            const tooltipLines = [
+              `Pick Efficiency · ${peHeader.date}`,
+              `First-try rate: ${ratePct.toFixed(1)}% (target ≥${(TARGET_RATE*100).toFixed(0)}%)`,
+              ``,
+              ...segs.map(s => `  ${s.label.padEnd(3)}  ${String(s.count).padStart(4)}  ${total ? ((s.count/total)*100).toFixed(1).padStart(5) : '—'}%`),
+              ``,
+              `Avg sends/job: ${peHeader.avgSends.toFixed(2)}`,
+              `Click to investigate →`,
+            ];
+            const tooltip = tooltipLines.join('\n');
+
             return (
               <button
-                onClick={isClickable ? ()=>setSubTab('pick-eff') : undefined}
-                title={hoverTitle}
-                style={{background:`rgba(${rgb},0.12)`,border:`1px solid ${color}40`,borderRadius:6,padding:"4px 10px",color,cursor:isClickable?"pointer":"default",fontFamily:mono,fontSize:11,display:"flex",alignItems:"center",gap:6}}>
-                <span style={{fontSize:11}}>🎯</span>
-                <span style={{fontWeight:700}}>{labelText}</span>
+                onClick={()=>setSubTab('pick-eff')}
+                title={tooltip}
+                style={{background:"#0D1117",border:"1px solid #21262D",borderRadius:6,padding:"4px 8px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontFamily:mono,height:44,minWidth:280,transition:"border-color 0.2s"}}
+                onMouseEnter={e=>e.currentTarget.style.borderColor='#58A6FF'}
+                onMouseLeave={e=>e.currentTarget.style.borderColor='#21262D'}>
+
+                {/* Zone A — Headline (date stamp + rate + target context) */}
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-start",lineHeight:1,minWidth:78}}>
+                  <span style={{fontSize:9,color:"#8B949E",letterSpacing:0.5,marginBottom:2}}>🎯 {dt}</span>
+                  <span style={{fontSize:18,fontWeight:600,color:headColor,fontFamily:mono,letterSpacing:-0.3}}>{ratePct.toFixed(1)}%</span>
+                  <span style={{fontSize:10,color:"#8B949E",marginTop:1}}>vs {(TARGET_RATE*100).toFixed(0)}%</span>
+                </div>
+
+                {/* Zone B — Delta chip */}
+                <div style={{background:`rgba(${headRgb},0.12)`,color:headColor,padding:"3px 6px",borderRadius:4,fontSize:11,fontWeight:600,fontFamily:mono,whiteSpace:"nowrap"}}>
+                  {deltaPp >= 0 ? '▲' : '▼'} {deltaPp >= 0 ? '+' : ''}{deltaPp.toFixed(0)}pp
+                </div>
+
+                {/* Zone C — Distribution bar with goal tick at 80% */}
+                <div style={{position:"relative",width:140,display:"flex",flexDirection:"column",gap:2}}>
+                  <div style={{position:"relative",height:8,borderRadius:2,overflow:"hidden",background:"rgba(255,255,255,0.04)",display:"flex"}}>
+                    {segs.map((s,i)=>{
+                      const w = total ? (s.count/total)*100 : 0;
+                      return <div key={i} style={{width:`${w}%`,height:"100%",background:s.color,transition:"width 0.6s cubic-bezier(0.4,0,0.2,1)"}}/>;
+                    })}
+                    {/* Goal tick at 80% */}
+                    <div style={{position:"absolute",left:`${TARGET_RATE*100}%`,top:-1,bottom:-1,width:1,background:"rgba(230,237,243,0.6)",pointerEvents:"none"}}/>
+                  </div>
+                  <div style={{display:"flex",justifyContent:"space-between",fontSize:9,color:"#8B949E",letterSpacing:0.3,padding:"0 1px"}}>
+                    <span>1×</span><span>2×</span><span>3×</span><span>4+</span>
+                  </div>
+                </div>
+
+                {/* Zone D — Volume + drill chevron */}
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",lineHeight:1.1,minWidth:36}}>
+                  <span style={{fontSize:11,color:"#8B949E"}}>{total} jobs</span>
+                  <span style={{fontSize:12,color:"#8B949E",marginTop:6}}>↗</span>
+                </div>
               </button>
             );
           })()}
