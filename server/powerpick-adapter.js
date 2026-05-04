@@ -818,7 +818,7 @@ async function getPickEfficiency(opts = {}) {
           j.MasterorderName AS invoice,
           (SELECT COUNT(*) FROM all_batches b WHERE b.MasterorderName = j.MasterorderName) AS sends,
           j.first_send,
-          (SELECT MAX(last_in_minute) FROM all_batches b WHERE b.MasterorderName = j.MasterorderName) AS last_send
+          (SELECT MAX(last_in_hour) FROM all_batches b WHERE b.MasterorderName = j.MasterorderName) AS last_send
         FROM jobs_for_day j
         ORDER BY sends DESC, j.MasterorderName ASC
       `);
