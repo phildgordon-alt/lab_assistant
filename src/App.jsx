@@ -8052,16 +8052,32 @@ function FlowAgentTab({ovenServerUrl,settings}){
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
-          {peHeader&&peHeader.ok&&peHeader.totalJobs>0&&(()=>{
-            const rate = peHeader.firstTryRate;
-            const c = rate >= 0.8 ? "#22c55e" : rate >= 0.5 ? "#f59e0b" : "#ef4444";
-            const dt = peHeader.date ? peHeader.date.slice(5) : "—";
+          {(()=>{
+            // Always render — show state visibly so we can see when data isn't loading.
+            let labelText, color, isClickable = true, hoverTitle = '';
+            if (!peHeader) {
+              labelText = 'loading…'; color = '#6b7280'; isClickable = false;
+            } else if (peHeader.ok === false) {
+              labelText = 'error'; color = '#ef4444';
+              hoverTitle = peHeader.error || 'Pick efficiency endpoint failed';
+            } else if (!peHeader.totalJobs) {
+              labelText = 'no data'; color = '#6b7280';
+              hoverTitle = `No pick activity on ${peHeader.date || 'yesterday'}`;
+            } else {
+              const rate = peHeader.firstTryRate;
+              color = rate >= 0.8 ? '#22c55e' : rate >= 0.5 ? '#f59e0b' : '#ef4444';
+              const dt = peHeader.date ? peHeader.date.slice(5) : '—';
+              labelText = `${dt}: ${(rate*100).toFixed(1)}% first-try`;
+              hoverTitle = `${peHeader.totalJobs} jobs on ${peHeader.date}, ${peHeader.oneSend} picked first try. Click for full breakdown.`;
+            }
+            const rgb = color === '#22c55e' ? '34,197,94' : color === '#f59e0b' ? '245,158,11' : color === '#ef4444' ? '239,68,68' : '107,114,128';
             return (
-              <button onClick={()=>setSubTab('pick-eff')} title={`Click for full breakdown — ${peHeader.totalJobs} jobs on ${peHeader.date}, ${peHeader.oneSend} picked first try`} style={{background:`rgba(${c==="#22c55e"?"34,197,94":c==="#f59e0b"?"245,158,11":"239,68,68"},0.12)`,border:`1px solid ${c}40`,borderRadius:6,padding:"4px 10px",color:c,cursor:"pointer",fontFamily:mono,fontSize:11,display:"flex",alignItems:"center",gap:6}}>
+              <button
+                onClick={isClickable ? ()=>setSubTab('pick-eff') : undefined}
+                title={hoverTitle}
+                style={{background:`rgba(${rgb},0.12)`,border:`1px solid ${color}40`,borderRadius:6,padding:"4px 10px",color,cursor:isClickable?"pointer":"default",fontFamily:mono,fontSize:11,display:"flex",alignItems:"center",gap:6}}>
                 <span style={{fontSize:11}}>🎯</span>
-                <span style={{color:"#9ca3af",fontSize:10}}>{dt}:</span>
-                <span style={{fontWeight:700}}>{(rate*100).toFixed(1)}%</span>
-                <span style={{color:"#6b7280",fontSize:10}}>first-try</span>
+                <span style={{fontWeight:700}}>{labelText}</span>
               </button>
             );
           })()}
