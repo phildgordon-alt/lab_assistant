@@ -7915,7 +7915,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [peDay, setPeDay] = useState(0); // 0 = yesterday, 1 = day before, ...
   const [peLoading, setPeLoading] = useState(false);
   useEffect(() => {
-    if (subTab !== 'pick-eff') return; // only fetch when this tab is active
+    if (subTab !== 'pick-eff') return; // only fetch full detail when this tab is active
     const d = new Date(); d.setDate(d.getDate() - 1 - peDay);
     const dateStr = d.toISOString().slice(0, 10);
     setPeLoading(true);
@@ -7923,6 +7923,21 @@ function FlowAgentTab({ovenServerUrl,settings}){
       .then(r => r.json()).then(d => { setPe(d); setPeLoading(false); })
       .catch(e => { setPe({ ok:false, error: String(e) }); setPeLoading(false); });
   }, [subTab, peDay, base]);
+
+  // Header badge — always yesterday's number, visible from every sub-tab so
+  // operators see current state at a glance. Refreshes every 5 min.
+  const [peHeader, setPeHeader] = useState(null);
+  useEffect(() => {
+    const load = () => {
+      const d = new Date(); d.setDate(d.getDate() - 1);
+      const dateStr = d.toISOString().slice(0, 10);
+      fetch(`${base}/api/flow-agent/pick-efficiency?date=${dateStr}&worst=1`)
+        .then(r => r.json()).then(setPeHeader).catch(() => setPeHeader({ ok: false }));
+    };
+    load();
+    const t = setInterval(load, 5 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [base]);
   useEffect(() => {
     setLphData(null);
     const d = new Date(); d.setDate(d.getDate() - lphDay);
@@ -8037,6 +8052,19 @@ function FlowAgentTab({ovenServerUrl,settings}){
           </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
+          {peHeader&&peHeader.ok&&peHeader.totalJobs>0&&(()=>{
+            const rate = peHeader.firstTryRate;
+            const c = rate >= 0.8 ? "#22c55e" : rate >= 0.5 ? "#f59e0b" : "#ef4444";
+            const dt = peHeader.date ? peHeader.date.slice(5) : "—";
+            return (
+              <button onClick={()=>setSubTab('pick-eff')} title={`Click for full breakdown — ${peHeader.totalJobs} jobs on ${peHeader.date}, ${peHeader.oneSend} picked first try`} style={{background:`rgba(${c==="#22c55e"?"34,197,94":c==="#f59e0b"?"245,158,11":"239,68,68"},0.12)`,border:`1px solid ${c}40`,borderRadius:6,padding:"4px 10px",color:c,cursor:"pointer",fontFamily:mono,fontSize:11,display:"flex",alignItems:"center",gap:6}}>
+                <span style={{fontSize:11}}>🎯</span>
+                <span style={{color:"#9ca3af",fontSize:10}}>{dt}:</span>
+                <span style={{fontWeight:700}}>{(rate*100).toFixed(1)}%</span>
+                <span style={{color:"#6b7280",fontSize:10}}>first-try</span>
+              </button>
+            );
+          })()}
           {health&&<span style={{fontSize:11,fontFamily:mono,color:health.running?"#22c55e":"#ef4444"}}>{health.running?"RUNNING":"STOPPED"} · Poll #{health.pollCount} · {health.lastPollMs}ms</span>}
           <button onClick={()=>setShowConfig(!showConfig)} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:6,padding:"6px 12px",color:"#9ca3af",cursor:"pointer",fontSize:12}}>⚙ Config</button>
         </div>
