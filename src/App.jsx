@@ -8112,15 +8112,15 @@ function FlowAgentTab({ovenServerUrl,settings}){
               <button
                 onClick={()=>setSubTab('pick-eff')}
                 title={tooltip}
-                style={{background:"#0D1117",border:"1px solid #21262D",borderRadius:6,padding:"4px 8px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontFamily:mono,height:44,minWidth:280,transition:"border-color 0.2s"}}
+                style={{background:"#0D1117",border:"1px solid #21262D",borderRadius:6,padding:"4px 8px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontFamily:mono,height:44,width:320,transition:"border-color 0.2s"}}
                 onMouseEnter={e=>e.currentTarget.style.borderColor='#58A6FF'}
                 onMouseLeave={e=>e.currentTarget.style.borderColor='#21262D'}>
 
                 {/* Zone A — Headline (date stamp + rate + target context) */}
-                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-start",lineHeight:1,minWidth:78}}>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-start",lineHeight:1,minWidth:88}}>
                   <span style={{fontSize:9,color:"#8B949E",letterSpacing:0.5,marginBottom:2}}>🎯 {dt}</span>
-                  <span style={{fontSize:18,fontWeight:600,color:headColor,fontFamily:mono,letterSpacing:-0.3}}>{ratePct.toFixed(1)}%</span>
-                  <span style={{fontSize:10,color:"#8B949E",marginTop:1}}>vs {(TARGET_RATE*100).toFixed(0)}%</span>
+                  <span style={{fontSize:20,fontWeight:600,color:headColor,fontFamily:mono,letterSpacing:-0.3}}>{ratePct.toFixed(1)}%</span>
+                  <span style={{fontSize:11,color:"#8B949E",marginTop:1}}>vs {(TARGET_RATE*100).toFixed(0)}%</span>
                 </div>
 
                 {/* Zone B — Delta chip */}
