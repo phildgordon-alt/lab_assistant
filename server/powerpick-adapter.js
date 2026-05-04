@@ -675,11 +675,17 @@ async function backfillRecentPicks(days = 7) {
  * they happen. So a job that first sends on Monday and re-sends Tuesday
  * counts Tuesday's re-send in Monday's metric.
  *
- * Implementation: Power Pick `History` Type=4 records arrive in batches —
- * lens_R + lens_L + frame all share the same Creationdate (within ms). We
- * collapse a batch by truncating Creationdate to the minute. Distinct
- * (MasterorderName, minute) tuples = sends. A job's "first send" is the
- * earliest minute_bucket; only jobs whose first send is on the requested
+ * Implementation: Power Pick `History` Type=4 records arrive in batches.
+ * A single physical pick session for one job often spans 5-30 minutes
+ * (frame dispatched first, lenses fulfilled minutes later by the operator).
+ * Originally bucketed by minute, but that mis-counted within-session
+ * activity as separate sends. Switched to HOUR-BUCKET 2026-05-04 after
+ * sanity-check showed minute-bucket gave 0.8% first-try rate vs hour-bucket
+ * 90.8% — the lab was correctly handling most picks first try, the metric
+ * was just splitting them. Re-issues happen hours-to-days apart so hour
+ * granularity correctly distinguishes sessions from re-issues. Distinct
+ * (MasterorderName, hour) tuples = sends. A job's "first send" is the
+ * earliest hour_bucket; only jobs whose first send is on the requested
  * date are counted.
  *
  * Returns:
@@ -741,17 +747,17 @@ async function getPickEfficiency(opts = {}) {
         -- because re-sends can happen days after the first send).
         WITH all_batches AS (
           SELECT MasterorderName,
-                 CONVERT(VARCHAR(16), Creationdate, 120) AS minute_bucket,
-                 MIN(Creationdate) AS first_in_minute
+                 CONVERT(VARCHAR(13), Creationdate, 120) AS hour_bucket,
+                 MIN(Creationdate) AS first_in_hour
           FROM History
           WHERE Type = 4
             AND MasterorderName IS NOT NULL
             AND MasterorderName LIKE '[0-9]%'
-          GROUP BY MasterorderName, CONVERT(VARCHAR(16), Creationdate, 120)
+          GROUP BY MasterorderName, CONVERT(VARCHAR(13), Creationdate, 120)
         ),
         -- Step 2: per-job overall first-send timestamp
         first_send_per_job AS (
-          SELECT MasterorderName, MIN(first_in_minute) AS first_send
+          SELECT MasterorderName, MIN(first_in_hour) AS first_send
           FROM all_batches
           GROUP BY MasterorderName
         ),
@@ -789,17 +795,17 @@ async function getPickEfficiency(opts = {}) {
       .query(`
         WITH all_batches AS (
           SELECT MasterorderName,
-                 CONVERT(VARCHAR(16), Creationdate, 120) AS minute_bucket,
-                 MIN(Creationdate) AS first_in_minute,
-                 MAX(Creationdate) AS last_in_minute
+                 CONVERT(VARCHAR(13), Creationdate, 120) AS hour_bucket,
+                 MIN(Creationdate) AS first_in_hour,
+                 MAX(Creationdate) AS last_in_hour
           FROM History
           WHERE Type = 4
             AND MasterorderName IS NOT NULL
             AND MasterorderName LIKE '[0-9]%'
-          GROUP BY MasterorderName, CONVERT(VARCHAR(16), Creationdate, 120)
+          GROUP BY MasterorderName, CONVERT(VARCHAR(13), Creationdate, 120)
         ),
         first_send_per_job AS (
-          SELECT MasterorderName, MIN(first_in_minute) AS first_send
+          SELECT MasterorderName, MIN(first_in_hour) AS first_send
           FROM all_batches
           GROUP BY MasterorderName
         ),
