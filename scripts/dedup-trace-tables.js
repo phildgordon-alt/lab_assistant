@@ -103,25 +103,30 @@ function rebuildTable(table, key) {
   `).run(snap.max_rowid);
   log(`[${table}]   caught ${r2.changes} live writes (these are not deduped — fresh data)`);
 
-  // Phase 3: atomic swap + recreate indexes
-  log(`[${table}] Phase 3: atomic swap + index rebuild...`);
+  // Phase 3: atomic swap + drop old + recreate indexes — all in one txn.
+  //
+  // SQLite quirk: indexes follow their table on RENAME. After
+  //   RENAME job_events → job_events_old
+  // the index names (idx_je_invoice, ...) are still in use, attached to
+  // job_events_old. Recreating them on the new job_events would collide.
+  // So we MUST drop the old table (which drops its indexes) BEFORE
+  // recreating indexes on the new table.
+  log(`[${table}] Phase 3: atomic swap + drop old + index rebuild...`);
   const t3 = Date.now();
   db.exec('BEGIN IMMEDIATE');
   try {
     db.exec(`ALTER TABLE ${table} RENAME TO ${table}_old`);
     db.exec(`ALTER TABLE ${table}_new RENAME TO ${table}`);
-    for (const ix of indexes) db.exec(ix.sql);
+    db.exec(`DROP TABLE ${table}_old`); // releases indexes' names
+    for (const ix of indexes) db.exec(ix.sql); // create on the new table
     db.exec('COMMIT');
   } catch (e) {
     db.exec('ROLLBACK');
     log(`[${table}] SWAP FAILED: ${e.message}`);
     throw e;
   }
-  log(`[${table}]   swapped in ${((Date.now() - t3) / 1000).toFixed(1)}s`);
+  log(`[${table}]   swap+drop+reindex in ${((Date.now() - t3) / 1000).toFixed(1)}s`);
 
-  // Phase 4: drop old table (releases pages to freelist; doesn't shrink file)
-  log(`[${table}] Phase 4: dropping old table...`);
-  db.exec(`DROP TABLE ${table}_old`);
   db.prepare('PRAGMA wal_checkpoint(TRUNCATE)').run();
 
   const finalCount = db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get().c;
