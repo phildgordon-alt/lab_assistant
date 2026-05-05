@@ -398,10 +398,14 @@ function parseDviXml(xml) {
   }
 
   // Extract OrderData attributes (ship date, entry date, etc.)
+  // SHIPLOG XMLs use <OrderData Invoice="..." ...> attributes. Inbound per-job
+  // XMLs (data/dvi/jobs/) use a different envelope rooted at <Job> with the
+  // invoice in a <RmtInv> child element. Fall back to RmtInv so classification
+  // enrichment works for both formats.
   const shipDate = getAttr('OrderData', 'ShipDate');
   const shipTime = getAttr('OrderData', 'ShipTime');
   const entryDate = getAttr('OrderData', 'EntryDate');
-  const invoice = getAttr('OrderData', 'Invoice');
+  const invoice = getAttr('OrderData', 'Invoice') || get('RmtInv');
   const reference = getAttr('OrderData', 'Reference');
   const daysInLab = getAttr('RxOrder', 'DaysInLab');
 

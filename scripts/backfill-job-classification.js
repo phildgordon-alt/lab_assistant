@@ -90,7 +90,9 @@ function parseDviXml(xml) {
   const shipDate  = getAttr('OrderData', 'ShipDate');
   const shipTime  = getAttr('OrderData', 'ShipTime');
   const entryDate = getAttr('OrderData', 'EntryDate');
-  const invoice   = getAttr('OrderData', 'Invoice');
+  // Fall back to <RmtInv> for inbound <Job>-rooted XMLs (data/dvi/jobs/) which
+  // don't have an <OrderData Invoice="..."> attribute.
+  const invoice   = getAttr('OrderData', 'Invoice') || get('RmtInv');
   const reference = getAttr('OrderData', 'Reference');
   const machineId = getAttr('MegaTransfer', 'MachineID');
   const isHko = machineId === '000';
