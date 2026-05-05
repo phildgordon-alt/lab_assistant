@@ -3540,7 +3540,7 @@ function upsertJobFromXML(p) {
   const lensOpcR     = p.lensOpcR     != null ? p.lensOpcR     : p.lensOpc;
   upsertJobFromXMLStmt.run(
     p.invoice, p.reference || null, p.rxNum || null, p.tray || null,
-    p.entryDate || null, p.entryTime || null, p.shipDate || null, p.shipTime || null,
+    convertDate(p.entryDate), p.entryTime || null, convertDate(p.shipDate), p.shipTime || null,
     p.daysInLab || null, p.department || null, p.jobType || null, p.operator || null,
     p.jobOrigin || null, p.machineId || null, p.isHko ? 1 : 0,
     lensOpcR || null, p.lensOpcL || null, p.lensStyle || null, lensMaterial || null,
