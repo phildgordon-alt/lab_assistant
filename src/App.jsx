@@ -5813,15 +5813,20 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
           { zone: 'OVER10', label: '10+ days', color: '#7c2d12', action: 'Lost or abandoned. Investigate if these jobs are still valid or should be canceled.' },
         ].map(z => {
           const count = z.zone === 'OVER5' ? (sm.over5 || 0) : z.zone === 'OVER10' ? (sm.over10 || 0) : (sm[z.zone.toLowerCase()] || 0);
-          const total = sm.total || 0;
-          const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+          // Percentage of outliers (jobs 3+ days). In-SLA buckets (<3 days)
+          // are not part of the outlier population — they show 0%.
+          const outlierTotal = sm.critical || 0;
+          const isOutlierBucket = z.zone === 'CRITICAL' || z.zone === 'OVER5' || z.zone === 'OVER10';
+          const pct = (isOutlierBucket && outlierTotal > 0) ? ((count / outlierTotal) * 100).toFixed(1) : '0.0';
           return (
           <Card key={z.zone} onClick={() => setFilter(filter === z.zone ? 'all' : z.zone)}
             style={{ padding: 14, borderLeft: `4px solid ${z.color}`, cursor: 'pointer', background: filter === z.zone ? `${z.color}10` : T.card }}>
             <div style={{ textAlign: 'center', marginBottom: 6 }}>
               <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>{count}</div>
               <div style={{ fontSize: 10, fontWeight: 700, color: z.color, fontFamily: mono }}>{z.label}</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, fontFamily: mono, marginTop: 2 }}>{pct}%</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, fontFamily: mono, marginTop: 2 }}>
+                {pct}% of outliers
+              </div>
             </div>
             <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>{z.action}</div>
           </Card>
