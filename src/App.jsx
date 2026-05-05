@@ -5805,17 +5805,26 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
       {/* Zone cards with action descriptions */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 16 }}>
         {[
-          { zone: 'GREEN', label: '0-1 days', color: T.green, action: 'On track. No action needed.' },
-          { zone: 'YELLOW', label: '1-2 days', color: T.amber, action: 'Watch list. Check if these jobs are stuck at a station.' },
-          { zone: 'RED', label: '2-3 days', color: T.red, action: 'Supervisor review. Find out why these jobs haven\'t moved. Check for holds, breakage, or missing materials.' },
-          { zone: 'CRITICAL', label: '3+ days', color: '#cc0000', action: 'Immediate escalation. These jobs are past SLA. Identify the blocker and resolve today.' },
-          { zone: 'OVER5', label: '5+ days', color: '#9333ea', action: 'Severely stuck. These jobs need direct intervention — contact DVI or vendor if subcontracted.' },
-          { zone: 'OVER10', label: '10+ days', color: '#7c2d12', action: 'Lost or abandoned. Investigate if these jobs are still valid or should be canceled.' },
+          { zone: 'GREEN',    label: '0-1 days',  color: T.green,    action: 'On track. No action needed.' },
+          { zone: 'YELLOW',   label: '1-2 days',  color: T.amber,    action: 'Watch list. Check if these jobs are stuck at a station.' },
+          { zone: 'RED',      label: '2-3 days',  color: T.red,      action: 'Supervisor review. Find out why these jobs haven\'t moved. Check for holds, breakage, or missing materials.' },
+          { zone: 'CRITICAL', label: '3-5 days',  color: '#cc0000',  action: 'Immediate escalation. These jobs are past SLA. Identify the blocker and resolve today.' },
+          { zone: 'OVER5',    label: '5-10 days', color: '#9333ea',  action: 'Severely stuck. These jobs need direct intervention — contact DVI or vendor if subcontracted.' },
+          { zone: 'OVER10',   label: '10+ days',  color: '#7c2d12',  action: 'Lost or abandoned. Investigate if these jobs are still valid or should be canceled.' },
         ].map(z => {
-          const count = z.zone === 'OVER5' ? (sm.over5 || 0) : z.zone === 'OVER10' ? (sm.over10 || 0) : (sm[z.zone.toLowerCase()] || 0);
-          // Percentage of outliers (jobs 3+ days). In-SLA buckets (<3 days)
-          // are not part of the outlier population — they show 0%.
-          const outlierTotal = sm.critical || 0;
+          // Buckets are now non-overlapping ranges. Backend still returns
+          // sm.critical/over5/over10 as cumulative (3+, 5+, 10+), so compute
+          // exclusive counts here so percentages divide cleanly and sum to
+          // 100% of outliers.
+          const cumCritical = sm.critical || 0;  // 3+ days (cumulative)
+          const cumOver5    = sm.over5    || 0;  // 5+ days (cumulative)
+          const cumOver10   = sm.over10   || 0;  // 10+ days (cumulative)
+          let count;
+          if      (z.zone === 'CRITICAL') count = Math.max(0, cumCritical - cumOver5);   // 3 to <5 days
+          else if (z.zone === 'OVER5')    count = Math.max(0, cumOver5 - cumOver10);     // 5 to <10 days
+          else if (z.zone === 'OVER10')   count = cumOver10;                              // 10+ days
+          else                            count = sm[z.zone.toLowerCase()] || 0;          // in-SLA: GREEN/YELLOW/RED
+          const outlierTotal = cumCritical;  // total outliers = jobs ≥3 days
           const isOutlierBucket = z.zone === 'CRITICAL' || z.zone === 'OVER5' || z.zone === 'OVER10';
           const pct = (isOutlierBucket && outlierTotal > 0) ? ((count / outlierTotal) * 100).toFixed(1) : '0.0';
           return (
