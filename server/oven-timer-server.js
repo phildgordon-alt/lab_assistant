@@ -790,6 +790,21 @@ dviSync.on('file', (evt) => {
       // is small and parsing is fast; no need for a setTimeout window.
       persistBreakageFromFile(evt);
     }
+    if (evt && evt.sync === 'shipped') {
+      // 2026-05-05 — handler added to close the silent-skip gap that left
+      // SHIPLOG XMLs sitting on disk without a dvi_shipped_jobs row. Pre-fix,
+      // the only path was loadShippedIndex() running every 60s, which uses an
+      // in-memory index (line 582) — once a file failed once, it was never
+      // retried. Now: re-load on every new file event, and any errors land
+      // loudly in the log (no silent /* skip bad files */).
+      setTimeout(() => {
+        try {
+          loadShippedIndex();
+        } catch (e) {
+          console.error(`[DVI-Sync] loadShippedIndex failed after shipped file event: ${e.message}`);
+        }
+      }, 1000);
+    }
   } catch (e) {
     console.error(`[DVI-Sync] 'file' event handler failed: ${e.message}`);
   }
