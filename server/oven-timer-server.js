@@ -2976,9 +2976,9 @@ Respond with a structured batching plan in this format:
 
   // ── Aging Jobs ─────────────────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/aging/jobs') {
-    // Map DVI lens_type/lens_style → Looker-style human category.
-    // Phil's mapping (verified 2026-05-05 against real active-jobs distribution):
-    //   PLANO style                              → Non-RX
+    // Map DVI lens_type/lens_style → human-readable lab category. Phil's
+    // naming (verified 2026-05-05 against real active-jobs distribution):
+    //   PLANO style                              → Plano  (lab term — no prescription)
     //   lens_type=P AND style starts with ENDLESS → Progressives  (the standard Progressive product)
     //   lens_type=P (no ENDLESS marker)          → Premium Progressive
     //   lens_type IN (S, C)                      → Single Vision
@@ -2987,7 +2987,7 @@ Respond with a structured batching plan in this format:
     const _mapLookerCategory = (lensType, lensStyle) => {
       const code = (lensType || '').toUpperCase();
       const style = (lensStyle || '').toUpperCase();
-      if (style === 'PLANO') return 'Non-RX';
+      if (style === 'PLANO') return 'Plano';
       if (code === 'P') return style.startsWith('ENDLESS') ? 'Progressives' : 'Premium Progressive';
       if (code === 'S' || code === 'C') return 'Single Vision';
       if (code === 'B') return 'Bifocal';
