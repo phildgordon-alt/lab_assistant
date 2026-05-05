@@ -5876,7 +5876,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                   <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>% OF WIP</th>
                   <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>AVG DAYS</th>
                   <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>OUTLIER %</th>
-                  <th style={{ padding: '10px 12px', textAlign: 'center', color: T.textDim, fontWeight: 700 }}>ZONE DISTRIBUTION (G / Y / R / C / 5+ / 10+)</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: T.textDim, fontWeight: 700 }}>ZONE DISTRIBUTION (0-1d / 1-2d / 2-3d / 3-5d / 5-10d / 10+d)</th>
                 </tr>
               </thead>
               <tbody>
@@ -5891,15 +5891,18 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: r.avgDays >= 3 ? T.red : T.text }}>{r.avgDays}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: r.outlierPct > 5 ? T.red : T.green, fontWeight: 700 }}>{r.outlierPct}%</td>
                     <td style={{ padding: '10px 12px', textAlign: 'center', fontFamily: mono, fontSize: 11 }}>
+                      {/* Non-overlapping ranges (matches the bucket cards above):
+                          3-5d = critical - over5, 5-10d = over5 - over10, 10+d = over10.
+                          Sums to row count. */}
                       <span style={{ color: T.green }}>{r.green}</span>
                       <span style={{ color: T.textDim }}> / </span>
                       <span style={{ color: T.amber }}>{r.yellow}</span>
                       <span style={{ color: T.textDim }}> / </span>
                       <span style={{ color: T.red }}>{r.red}</span>
                       <span style={{ color: T.textDim }}> / </span>
-                      <span style={{ color: '#cc0000', fontWeight: 700 }}>{r.critical}</span>
+                      <span style={{ color: '#cc0000', fontWeight: 700 }}>{Math.max(0, r.critical - r.over5)}</span>
                       <span style={{ color: T.textDim }}> / </span>
-                      <span style={{ color: '#9333ea' }}>{r.over5}</span>
+                      <span style={{ color: '#9333ea' }}>{Math.max(0, r.over5 - r.over10)}</span>
                       <span style={{ color: T.textDim }}> / </span>
                       <span style={{ color: '#7c2d12' }}>{r.over10}</span>
                     </td>
