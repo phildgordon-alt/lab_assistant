@@ -124,13 +124,15 @@ if (!fs.existsSync(JOBS_XML_DIR)) {
 
 const labDb = require(path.resolve(__dirname, '..', 'server', 'db.js'));
 
-// Find invoices that need enrichment.
+// Find invoices that need enrichment. Includes SHIPPED rows because the
+// 6-day upsertJobFromXML silent failure (Apr 30 - May 5) left jobs.lens_type
+// NULL on every SHIPLOG-processed row in that window. dvi_shipped_jobs got
+// the data; jobs did not.
 console.log('[backfill-classification] querying invoices missing lens_type...');
 const targets = labDb.db.prepare(`
   SELECT invoice
   FROM jobs
   WHERE (lens_type IS NULL OR lens_type = '')
-    AND status NOT IN ('SHIPPED', 'CANCELED')
   ORDER BY invoice
 `).all().map((r) => r.invoice);
 console.log(`[backfill-classification]   ${targets.length} invoices need enrichment`);
