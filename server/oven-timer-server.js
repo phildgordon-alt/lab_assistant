@@ -459,6 +459,31 @@ function parseDviXml(xml) {
   };
 }
 
+// Map DVI lens_type/lens_style to a human category. Used by both the
+// active-aging endpoint and the shipped-history endpoint so they label
+// categories the same way.
+//   PLANO style                              → Plano
+//   lens_type=P (any style, incl. ENDLESS)   → Progressive
+//   lens_type IN (S, C)                      → Single Vision
+//   lens_type=B                              → Bifocal
+//   else                                     → Unknown
+function mapLookerCategory(lensType, lensStyle) {
+  const code = (lensType || '').toUpperCase();
+  const style = (lensStyle || '').toUpperCase();
+  if (style === 'PLANO') return 'Plano';
+  if (code === 'P') return 'Progressive';
+  if (code === 'S' || code === 'C') return 'Single Vision';
+  if (code === 'B') return 'Bifocal';
+  return 'Unknown';
+}
+
+// SLA target in days for a given DVI lens_type. Mirrors the existing
+// _computeAging convention: SV/Custom = 2 days, Progressive/Bifocal/Unknown = 3.
+function slaTargetForLensType(lensType) {
+  const code = (lensType || '').toUpperCase();
+  return (code === 'S' || code === 'C') ? 2 : 3;
+}
+
 // Convert DVI EntryDate (MM/DD/YY) to ISO date (YYYY-MM-DD)
 function dviEntryDateToIso(entryDate) {
   if (!entryDate) return null;
@@ -2976,23 +3001,9 @@ Respond with a structured batching plan in this format:
 
   // ── Aging Jobs ─────────────────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/aging/jobs') {
-    // Map DVI lens_type/lens_style → human-readable lab category. Phil's
-    // naming (verified 2026-05-05 against real active-jobs distribution):
-    //   PLANO style                              → Plano  (lab term — no prescription)
-    //   lens_type=P AND style starts with ENDLESS → Progressives  (the standard Progressive product)
-    //   lens_type=P (no ENDLESS marker)          → Premium Progressive
-    //   lens_type IN (S, C)                      → Single Vision
-    //   lens_type=B                              → Bifocal
-    //   else                                     → Unknown
-    const _mapLookerCategory = (lensType, lensStyle) => {
-      const code = (lensType || '').toUpperCase();
-      const style = (lensStyle || '').toUpperCase();
-      if (style === 'PLANO') return 'Plano';
-      if (code === 'P') return style.startsWith('ENDLESS') ? 'Progressives' : 'Premium Progressive';
-      if (code === 'S' || code === 'C') return 'Single Vision';
-      if (code === 'B') return 'Bifocal';
-      return 'Unknown';
-    };
+    // mapLookerCategory is module-level (see top of file); shared with the
+    // shipped-history endpoint below so categories label the same way.
+    const _mapLookerCategory = mapLookerCategory;
 
     // Compute zone/SLA from lens type + days (shared by both code paths)
     const _computeAging = (lensType, daysInLab) => {
@@ -3147,6 +3158,50 @@ Respond with a structured batching plan in this format:
       byLensType,
       source: _agingSource,
     });
+  }
+
+  // ── Shipped history by lens category ──────────────────────
+  // Same lens-category breakdown as /api/aging/jobs but for SHIPPED jobs in
+  // a configurable trailing window (default 30 days, max 365). Used by the
+  // "By Lens Type" sub-tab's history view.
+  if (req.method==='GET' && url.pathname==='/api/aging/shipped-by-lens-type') {
+    const days = parseInt(url.searchParams.get('days') || '30', 10);
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      return json(res, { error: 'days must be an integer in [1, 365]' }, 400);
+    }
+    const rows = labDb.db.prepare(`
+      SELECT lens_type, lens_style, days_in_lab, ship_date
+      FROM jobs
+      WHERE status = 'SHIPPED'
+        AND ship_date IS NOT NULL
+        AND DATE(ship_date) >= DATE('now', '-' || ? || ' days')
+        AND days_in_lab IS NOT NULL
+    `).all(days);
+    const total = rows.length;
+    const ltMap = new Map();
+    for (const r of rows) {
+      const cat = mapLookerCategory(r.lens_type, r.lens_style);
+      const sla = slaTargetForLensType(r.lens_type);
+      let g = ltMap.get(cat);
+      if (!g) {
+        g = { label: cat, count: 0, totalDays: 0, overSLA: 0, maxDays: 0 };
+        ltMap.set(cat, g);
+      }
+      g.count++;
+      g.totalDays += r.days_in_lab;
+      if (r.days_in_lab > g.maxDays) g.maxDays = r.days_in_lab;
+      if (r.days_in_lab > sla) g.overSLA++;
+    }
+    const byLensTypeShipped = Array.from(ltMap.values()).map(g => ({
+      label: g.label,
+      count: g.count,
+      pct: total > 0 ? Math.round((g.count / total) * 1000) / 10 : 0,
+      avgDays: g.count > 0 ? Math.round((g.totalDays / g.count) * 10) / 10 : 0,
+      maxDays: Math.round(g.maxDays * 10) / 10,
+      overSLA: g.overSLA,
+      overSLAPct: g.count > 0 ? Math.round((g.overSLA / g.count) * 1000) / 10 : 0,
+    })).sort((a, b) => b.count - a.count);
+    return json(res, { days, total, byLensTypeShipped });
   }
 
   // ── Lens Intelligence ──────────────────────────────────────

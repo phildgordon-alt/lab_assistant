@@ -5757,6 +5757,25 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [subView, setSubView] = useState('buckets'); // 'buckets' | 'lensType'
+  const [lensTypeView, setLensTypeView] = useState('active'); // 'active' | 'shipped7' | 'shipped30' | 'shipped90'
+  const [shippedData, setShippedData] = useState(null);
+  const [shippedLoading, setShippedLoading] = useState(false);
+
+  // Lazy-fetch shipped history when user opens the lens-type sub-tab and picks
+  // a non-active view. Keyed on (subView, lensTypeView) so we re-fetch when the
+  // window changes. /api/aging/shipped-by-lens-type returns aggregates only,
+  // so it's small and we don't need to poll it on a timer.
+  useEffect(() => {
+    if (subView !== 'lensType') return;
+    if (lensTypeView === 'active') return;
+    if (!ovenServerUrl) return;
+    const days = lensTypeView === 'shipped7' ? 7 : lensTypeView === 'shipped30' ? 30 : 90;
+    setShippedLoading(true);
+    fetch(`${ovenServerUrl}/api/aging/shipped-by-lens-type?days=${days}`)
+      .then(r => r.json())
+      .then(d => { setShippedData(d); setShippedLoading(false); })
+      .catch(() => setShippedLoading(false));
+  }, [subView, lensTypeView, ovenServerUrl]);
 
   useEffect(() => {
     if (!ovenServerUrl) return;
@@ -5822,7 +5841,29 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
         ))}
       </div>
 
-      {subView === 'lensType' && (() => {
+      {subView === 'lensType' && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          {[
+            { key: 'active',    label: 'Active WIP' },
+            { key: 'shipped7',  label: 'Shipped — last 7 days' },
+            { key: 'shipped30', label: 'Shipped — last 30 days' },
+            { key: 'shipped90', label: 'Shipped — last 90 days' },
+          ].map(v => (
+            <button key={v.key} onClick={() => setLensTypeView(v.key)}
+              style={{
+                padding: '6px 12px', fontSize: 11, fontFamily: mono, fontWeight: 700,
+                borderRadius: 4, cursor: 'pointer',
+                background: lensTypeView === v.key ? T.blue + '20' : 'transparent',
+                color: lensTypeView === v.key ? T.blue : T.textMuted,
+                border: `1px solid ${lensTypeView === v.key ? T.blue : T.border}`,
+              }}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {subView === 'lensType' && lensTypeView === 'active' && (() => {
         const rows = data?.byLensType || [];
         const total = sm.total || 0;
         return (
@@ -5872,6 +5913,59 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{sm.avgDays || 0}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{sm.outlierPct || 0}%</td>
                     <td style={{ padding: '10px 12px', textAlign: 'center', color: T.textDim }}>—</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </Card>
+        );
+      })()}
+
+      {subView === 'lensType' && lensTypeView !== 'active' && (() => {
+        const rows = shippedData?.byLensTypeShipped || [];
+        const total = shippedData?.total || 0;
+        const days = shippedData?.days || 0;
+        return (
+          <Card style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ padding: '10px 14px', background: T.bg, borderBottom: `1px solid ${T.border}`, fontSize: 11, color: T.textMuted, fontFamily: mono }}>
+              {shippedLoading ? 'Loading…' : `${total.toLocaleString()} jobs shipped in the last ${days} days`}
+            </div>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
+              <thead>
+                <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                  <th style={{ padding: '10px 12px', textAlign: 'left',  color: T.textDim, fontWeight: 700 }}>LENS TYPE</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>SHIPPED</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>% OF SHIPPED</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>AVG DAYS</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>MAX DAYS</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>OVER SLA</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>OVER-SLA %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {!shippedLoading && rows.length === 0 && (
+                  <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: T.textDim }}>No shipped jobs in window</td></tr>
+                )}
+                {rows.map(r => (
+                  <tr key={r.label} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    <td style={{ padding: '10px 12px', color: T.text, fontWeight: 600 }}>{r.label}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.text, fontWeight: 700 }}>{r.count.toLocaleString()}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textMuted }}>{r.pct}%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: r.avgDays >= 3 ? T.red : T.text }}>{r.avgDays}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textMuted }}>{r.maxDays}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: r.overSLA > 0 ? T.amber : T.textDim }}>{r.overSLA.toLocaleString()}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: r.overSLAPct > 5 ? T.red : T.green, fontWeight: 700 }}>{r.overSLAPct}%</td>
+                  </tr>
+                ))}
+                {rows.length > 0 && (
+                  <tr style={{ background: T.bg, borderTop: `2px solid ${T.border}` }}>
+                    <td style={{ padding: '10px 12px', color: T.textDim, fontWeight: 700 }}>TOTAL</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.text, fontWeight: 700 }}>{total.toLocaleString()}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>100.0%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>—</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>—</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{rows.reduce((s, r) => s + r.overSLA, 0).toLocaleString()}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{total > 0 ? Math.round((rows.reduce((s, r) => s + r.overSLA, 0) / total) * 1000) / 10 : 0}%</td>
                   </tr>
                 )}
               </tbody>
