@@ -29,8 +29,23 @@
 const fs = require('fs');
 const path = require('path');
 
-const JOBS_XML_DIR = process.argv[2] || '/Users/Shared/lab_assistant/data/dvi/visdir/VISION/Q';
+// XML candidates are checked in order. The local mirror at data/dvi/jobs/ is
+// the long-term store (~63K XMLs going back months) and almost always has
+// the file. The SMB VISION/Q dir is the live working dir; DVI cycles files
+// out of it after they're processed, so old invoices don't exist there.
+// SHIPLOG is the post-ship XML — used as a final fallback for SHIPPED rows
+// whose original Q-side XML has been archived.
+const XML_CANDIDATE_DIRS = [
+  '/Users/Shared/lab_assistant/data/dvi/jobs',                    // local mirror, primary
+  '/Users/Shared/lab_assistant/data/dvi/visdir/VISION/Q',         // SMB live, fallback
+  '/Users/Shared/lab_assistant/data/dvi/shipped',                 // local SHIPLOG mirror
+  '/Users/Shared/lab_assistant/data/dvi/visdir/VISION/SHIPLOG',   // SMB SHIPLOG, last resort
+];
+
+// Optional CLI arg overrides the candidate list with a single path.
+const OVERRIDE_DIR = process.argv[2];
 const DB_PATH      = process.argv[3] || '/Users/Shared/lab_assistant/data/lab_assistant.db';
+const dirsToTry = OVERRIDE_DIR ? [OVERRIDE_DIR] : XML_CANDIDATE_DIRS;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // XML parser — copied from server/oven-timer-server.js parseDviXml. Same code
@@ -114,11 +129,14 @@ function parseDviXml(xml) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-console.log(`[backfill-classification] jobs XML dir: ${JOBS_XML_DIR}`);
-console.log(`[backfill-classification] DB:           ${DB_PATH}`);
-
-if (!fs.existsSync(JOBS_XML_DIR)) {
-  console.error(`[backfill-classification] FATAL: ${JOBS_XML_DIR} not found (SMB mount issue?)`);
+console.log(`[backfill-classification] DB: ${DB_PATH}`);
+console.log(`[backfill-classification] XML candidates (checked in order):`);
+for (const d of dirsToTry) {
+  console.log(`[backfill-classification]   ${fs.existsSync(d) ? '✓' : '✗'} ${d}`);
+}
+const anyExists = dirsToTry.some((d) => fs.existsSync(d));
+if (!anyExists) {
+  console.error(`[backfill-classification] FATAL: none of the candidate dirs exist`);
   process.exit(1);
 }
 
@@ -147,15 +165,20 @@ let xmlMissing = 0;
 let parseFails = 0;
 let upsertFails = 0;
 let imported = 0;
+const sourceCounts = new Map(); // dir -> hits, for diagnostics
 
 const t0 = Date.now();
 for (const invoice of targets) {
   scanned++;
-  const filePath = path.join(JOBS_XML_DIR, `${invoice}.xml`);
-  if (!fs.existsSync(filePath)) {
+  let filePath = null;
+  for (const d of dirsToTry) {
+    const p = path.join(d, `${invoice}.xml`);
+    if (fs.existsSync(p)) { filePath = p; sourceCounts.set(d, (sourceCounts.get(d) || 0) + 1); break; }
+  }
+  if (!filePath) {
     xmlMissing++;
     if (xmlMissing <= 5 || xmlMissing % 50 === 0) {
-      console.warn(`[backfill-classification] XML not found for ${invoice} at ${filePath}`);
+      console.warn(`[backfill-classification] XML not found for ${invoice} in any candidate dir`);
     }
     continue;
   }
@@ -201,6 +224,10 @@ console.log(`[backfill-classification]   enriched:        ${imported}`);
 console.log(`[backfill-classification]   XML not found:   ${xmlMissing}`);
 console.log(`[backfill-classification]   parse failures:  ${parseFails}`);
 console.log(`[backfill-classification]   upsert failures: ${upsertFails}`);
+if (sourceCounts.size > 0) {
+  console.log(`[backfill-classification]   sources used:`);
+  for (const [d, n] of sourceCounts) console.log(`[backfill-classification]     ${n.toString().padStart(6)}  ${d}`);
+}
 
 if (imported > 0) {
   console.log('');
