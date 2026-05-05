@@ -533,6 +533,13 @@ try {
   db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_picks_hist_pick_id ON picks_history(pick_id)`);
 } catch (e) { /* index may already exist */ }
 
+// inventory_alerts dedup + UNIQUE(sku). Was DELETE+INSERT every 60s leaking
+// ~825K dead rowids/day; UPSERT keyed on sku stops the freelist growth.
+try {
+  db.exec(`DELETE FROM inventory_alerts WHERE id NOT IN (SELECT MIN(id) FROM inventory_alerts GROUP BY sku)`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_alerts_sku_unique ON inventory_alerts(sku)`);
+} catch (e) { /* index may already exist */ }
+
 // pickSync rebuild (2026-04-22): tag every row with the writer that produced it.
 // Values: 'live' (dual-writer), 'tx' (transaction-writer, gap closer),
 // 'backfill' (pickSync historical), 'recovered' (one-shot picks→picks_history).
@@ -1045,6 +1052,14 @@ db.exec(`
     uploaded_at TEXT DEFAULT (datetime('now'))
   );
 `);
+
+// bin_contents dedup + UNIQUE(location_name). Was DELETE+INSERT every 5min
+// leaking ~555K dead rowids/day; UPSERT keyed on location_name stops the
+// freelist growth (was at 200M+ over 12 months, ~30 GB recoverable by VACUUM).
+try {
+  db.exec(`DELETE FROM bin_contents WHERE id NOT IN (SELECT MIN(id) FROM bin_contents GROUP BY location_name)`);
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_bin_loc_unique ON bin_contents(location_name)`);
+} catch (e) { /* index may already exist */ }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIERED DATA ARCHITECTURE
@@ -1795,21 +1810,32 @@ function upsertInventory(materials) {
 }
 
 function upsertAlerts(alerts) {
-  // Clear old alerts and insert new ones
-  db.prepare('DELETE FROM inventory_alerts').run();
+  // UPSERT keyed on sku + sweep stale. Pre-2026-05-05 this did DELETE+INSERT
+  // every 60s, leaking ~825K dead rowids/day into the freelist (300M+ over a
+  // year). Now: keep stable rowids, only write on change, drop SKUs no longer
+  // alerting.
+  const now = new Date().toISOString();
 
-  const stmt = db.prepare(`
+  const upsert = db.prepare(`
     INSERT INTO inventory_alerts (sku, name, qty, threshold, severity, created_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(sku) DO UPDATE SET
+      name = excluded.name,
+      qty = excluded.qty,
+      threshold = excluded.threshold,
+      severity = excluded.severity,
+      created_at = excluded.created_at
   `);
+  const sweepStale = db.prepare('DELETE FROM inventory_alerts WHERE created_at < ?');
 
-  const insertMany = db.transaction((items) => {
+  const apply = db.transaction((items) => {
     for (const a of items) {
-      stmt.run(a.sku, a.name, a.qty, a.threshold, a.severity);
+      upsert.run(a.sku, a.name, a.qty, a.threshold, a.severity, now);
     }
+    sweepStale.run(now);
   });
 
-  insertMany(alerts);
+  apply(alerts);
   logSync('alerts', alerts.length);
 }
 
@@ -3675,16 +3701,29 @@ function upsertJobFromLooker(j) {
   );
 }
 
+// Skip duplicates: SMB tail re-reads of the same TRACE line had been creating
+// hundreds of millions of duplicate rows (~1.5M/day vs ~700/day actual events).
+// We dedupe on (invoice, station, event_ts) — same job at same station at the
+// same instant is the same event. Rows with NULL event_ts are not deduped
+// (legitimately distinct events from the rare malformed-trace path).
+// Separate dedup script handles historical: scripts/dedup-trace-tables.js.
 const insertJobEventStmt = db.prepare(`
   INSERT INTO job_events (invoice, station, station_num, stage, operator, machine_id, event_time, event_ts)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  SELECT ?, ?, ?, ?, ?, ?, ?, ?
+  WHERE ? IS NULL OR NOT EXISTS (
+    SELECT 1 FROM job_events
+    WHERE invoice = ? AND station IS ? AND event_ts = ?
+  )
 `);
 
 function insertJobEvent(e) {
   if (!e || !e.invoice) return;
+  const ts = e.eventTs || null;
+  const station = e.station || null;
   insertJobEventStmt.run(
-    e.invoice, e.station || null, e.stationNum || null, e.stage || null,
-    e.operator || null, e.machineId || null, e.eventTime || null, e.eventTs || null
+    e.invoice, station, e.stationNum || null, e.stage || null,
+    e.operator || null, e.machineId || null, e.eventTime || null, ts,
+    ts, e.invoice, station, ts
   );
 }
 

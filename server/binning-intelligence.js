@@ -52,12 +52,24 @@ function rebuildBinContents(locationContents, matIdToSku) {
 
   const now = new Date().toISOString();
 
-  db.prepare('DELETE FROM bin_contents').run();
-
-  const insert = db.prepare(`
+  // UPSERT keyed on location_name + sweep stale. Pre-2026-05-05 this did
+  // DELETE+INSERT every 5min, leaking ~555K dead rowids/day (200M+ over a year,
+  // ~30 GB freelist). Now stable rowids; sweep removes locations no longer
+  // returned by ItemPath.
+  const upsert = db.prepare(`
     INSERT INTO bin_contents (location_name, carousel, shelf, position, warehouse, material_id, sku, qty, last_sync)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(location_name) DO UPDATE SET
+      carousel = excluded.carousel,
+      shelf = excluded.shelf,
+      position = excluded.position,
+      warehouse = excluded.warehouse,
+      material_id = excluded.material_id,
+      sku = excluded.sku,
+      qty = excluded.qty,
+      last_sync = excluded.last_sync
   `);
+  const sweepStale = db.prepare('DELETE FROM bin_contents WHERE last_sync < ?');
 
   const insertMany = db.transaction((items) => {
     for (const lc of items) {
@@ -67,7 +79,7 @@ function rebuildBinContents(locationContents, matIdToSku) {
       const parsed = parseLocation(lc.locationName);
       const sku = matIdToSku[lc.materialId] || lc.materialId;
 
-      insert.run(
+      upsert.run(
         lc.locationName,
         parsed.carousel,
         parsed.shelf,
@@ -79,6 +91,7 @@ function rebuildBinContents(locationContents, matIdToSku) {
         now
       );
     }
+    sweepStale.run(now);
   });
 
   // Also build bin_key → sku_count mapping for bin type classification

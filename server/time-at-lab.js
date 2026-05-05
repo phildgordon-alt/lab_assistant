@@ -106,9 +106,18 @@ const stmts = {
     WHERE job_id = ?
   `),
 
+  // Skip duplicate transitions: TRACE tail re-reads were creating ~1.5M rows/day
+  // versus ~700/day actual transitions (2000x amplification). Dedup on
+  // (job_id, transition_at, from_stage, to_stage) — same job moving the same
+  // way at the same instant is the same transition. Historical dedup handled
+  // by scripts/dedup-trace-tables.js.
   insertTransition: db.prepare(`
     INSERT INTO stage_transitions (job_id, from_stage, to_stage, from_station, to_station, operator_id, transition_at, dwell_minutes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?
+    WHERE NOT EXISTS (
+      SELECT 1 FROM stage_transitions
+      WHERE job_id = ? AND transition_at = ? AND from_stage IS ? AND to_stage IS ?
+    )
   `),
 
   getJob: db.prepare('SELECT * FROM job_lifecycle WHERE job_id = ?'),
@@ -285,7 +294,8 @@ function processEvent(evt) {
 
     stmts.insertTransition.run(
       jobId, prevStage.stage, stage, prevStage.station, station, operator, timestamp,
-      dwellMin > 0 && dwellMin < 1440 ? dwellMin : null
+      dwellMin > 0 && dwellMin < 1440 ? dwellMin : null,
+      jobId, timestamp, prevStage.stage, stage
     );
 
     // Update enter/exit timestamps on job_lifecycle
