@@ -3086,11 +3086,51 @@ Respond with a structured batching plan in this format:
     // avg days header still uses all jobs — that's a different question (lab-wide age).
     const avgDays = total > 0 ? Math.round(jobs.reduce((s, j) => s + j.daysInLab, 0) / total * 10) / 10 : 0;
 
+    // ── Breakdown by lens type ──
+    // Aggregates the already-computed jobs array — no extra DB hit.
+    // Codes per CLAUDE.md: P=Progressive, B=Bifocal, S=Single Vision,
+    // C=Custom/Aspheric SV. Empty / null surfaces as 'Unknown'.
+    const lensLabel = (code) => (
+      code === 'P' ? 'Progressive' :
+      code === 'B' ? 'Bifocal' :
+      code === 'S' ? 'Single Vision' :
+      code === 'C' ? 'Custom/Aspheric SV' :
+      'Unknown'
+    );
+    const ltMap = new Map();
+    for (const j of jobs) {
+      const code = j.lensType || '';
+      let g = ltMap.get(code);
+      if (!g) {
+        g = { lensType: code, label: lensLabel(code), count: 0, totalDays: 0,
+              green: 0, yellow: 0, red: 0, critical: 0, over5: 0, over10: 0, overSLA: 0 };
+        ltMap.set(code, g);
+      }
+      g.count++;
+      g.totalDays += j.daysInLab;
+      const z = (j.zone || '').toLowerCase();
+      if (z === 'green' || z === 'yellow' || z === 'red' || z === 'critical') g[z]++;
+      if (j.daysInLab >= 5) g.over5++;
+      if (j.daysInLab >= 10) g.over10++;
+      if (j.overSLA) g.overSLA++;
+    }
+    const byLensType = Array.from(ltMap.values()).map(g => ({
+      lensType: g.lensType,
+      label: g.label,
+      count: g.count,
+      pct: total > 0 ? Math.round((g.count / total) * 1000) / 10 : 0,
+      avgDays: g.count > 0 ? Math.round((g.totalDays / g.count) * 10) / 10 : 0,
+      green: g.green, yellow: g.yellow, red: g.red, critical: g.critical,
+      over5: g.over5, over10: g.over10, overSLA: g.overSLA,
+      outlierPct: g.count > 0 ? Math.round((g.critical / g.count) * 1000) / 10 : 0,
+    })).sort((a, b) => b.count - a.count);
+
     return json(res, {
       jobs,
       summary: { total, green, yellow, red, critical, over5, over10, outlierPct, avgDays, outlierThreshold: 5 },
       singleVision: { ...zoneCounts(sv), slaTarget: 2 },
       surfacing: { ...zoneCounts(surf), slaTarget: 3 },
+      byLensType,
       source: _agingSource,
     });
   }

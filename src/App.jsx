@@ -5756,6 +5756,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   const [data, setData] = useState(null);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
+  const [subView, setSubView] = useState('buckets'); // 'buckets' | 'lensType'
 
   useEffect(() => {
     if (!ovenServerUrl) return;
@@ -5802,6 +5803,86 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
         </div>
       </div>
 
+      {/* Sub-tab toggle: buckets vs by-lens-type */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: `1px solid ${T.border}` }}>
+        {[
+          { key: 'buckets',  label: 'Aging Buckets' },
+          { key: 'lensType', label: 'By Lens Type' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setSubView(t.key)}
+            style={{
+              padding: '8px 16px', background: 'transparent', border: 'none',
+              borderBottom: `2px solid ${subView === t.key ? T.blue : 'transparent'}`,
+              color: subView === t.key ? T.text : T.textMuted,
+              fontWeight: subView === t.key ? 700 : 500,
+              fontSize: 13, cursor: 'pointer', fontFamily: mono,
+            }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {subView === 'lensType' && (() => {
+        const rows = data?.byLensType || [];
+        const total = sm.total || 0;
+        return (
+          <Card style={{ padding: 0, overflow: 'hidden' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
+              <thead>
+                <tr style={{ background: T.bg, borderBottom: `1px solid ${T.border}` }}>
+                  <th style={{ padding: '10px 12px', textAlign: 'left', color: T.textDim, fontWeight: 700 }}>LENS TYPE</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>COUNT</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>% OF WIP</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>AVG DAYS</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>OUTLIER %</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: T.textDim, fontWeight: 700 }}>ZONE DISTRIBUTION (G / Y / R / C / 5+ / 10+)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.length === 0 && (
+                  <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: T.textDim }}>No data</td></tr>
+                )}
+                {rows.map(r => (
+                  <tr key={r.lensType || 'unk'} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    <td style={{ padding: '10px 12px', color: T.text, fontWeight: 600 }}>
+                      {r.label} {r.lensType && <span style={{ color: T.textDim, fontWeight: 400 }}>({r.lensType})</span>}
+                    </td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.text, fontWeight: 700 }}>{r.count}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textMuted }}>{r.pct}%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: r.avgDays >= 3 ? T.red : T.text }}>{r.avgDays}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: r.outlierPct > 5 ? T.red : T.green, fontWeight: 700 }}>{r.outlierPct}%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'center', fontFamily: mono, fontSize: 11 }}>
+                      <span style={{ color: T.green }}>{r.green}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: T.amber }}>{r.yellow}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: T.red }}>{r.red}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: '#cc0000', fontWeight: 700 }}>{r.critical}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: '#9333ea' }}>{r.over5}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: '#7c2d12' }}>{r.over10}</span>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length > 0 && (
+                  <tr style={{ background: T.bg, borderTop: `2px solid ${T.border}` }}>
+                    <td style={{ padding: '10px 12px', color: T.textDim, fontWeight: 700 }}>TOTAL</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.text, fontWeight: 700 }}>{total}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>100.0%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{sm.avgDays || 0}</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{sm.outlierPct || 0}%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'center', color: T.textDim }}>—</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </Card>
+        );
+      })()}
+
+      {subView === 'buckets' && (<>
       {/* Zone cards with action descriptions */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, marginBottom: 16 }}>
         {[
@@ -5966,6 +6047,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
           {filtered.length === 0 && <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>No aging jobs</div>}
         </div>
       </Card>
+      </>)}
     </ProductionStageTab>
   );
 }
