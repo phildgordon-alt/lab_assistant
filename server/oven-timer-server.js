@@ -129,10 +129,21 @@ const labDb = require('./db');
 // cleaned up on prod before this fix shipped). Idempotent — safe on every boot,
 // safe to run alongside the in-line back-prop in upsertShippedJob.
 try {
+  // 2026-05-05 — Hardened: only flip to SHIPPED when dvi_shipped_jobs has a
+  // non-null ship_date, AND copy ship_date into jobs atomically. Without these
+  // guards a SHIPLOG XML lacking ShipDate would create a new zombie row
+  // (status='SHIPPED' + ship_date=NULL), defeating the purpose of self-heal.
   const result = labDb.db.prepare(`
-    UPDATE jobs SET status='SHIPPED', current_stage='SHIPPED', updated_at = datetime('now')
-    WHERE invoice IN (SELECT invoice FROM dvi_shipped_jobs)
-      AND (status != 'SHIPPED' OR current_stage IS NULL OR current_stage != 'SHIPPED')
+    UPDATE jobs SET
+      status='SHIPPED',
+      current_stage='SHIPPED',
+      ship_date = (SELECT ship_date FROM dvi_shipped_jobs WHERE invoice = jobs.invoice),
+      ship_time = COALESCE(jobs.ship_time, (SELECT ship_time FROM dvi_shipped_jobs WHERE invoice = jobs.invoice)),
+      updated_at = datetime('now')
+    WHERE invoice IN (SELECT invoice FROM dvi_shipped_jobs WHERE ship_date IS NOT NULL)
+      AND (status != 'SHIPPED'
+        OR current_stage IS NULL OR current_stage != 'SHIPPED'
+        OR ship_date IS NULL)
   `).run();
   if (result.changes > 0) {
     console.log(`[startup] self-heal: flipped ${result.changes} jobs to SHIPPED based on dvi_shipped_jobs XML truth`);

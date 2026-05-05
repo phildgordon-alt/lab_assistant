@@ -3428,6 +3428,14 @@ function upsertJobFromTrace(j) {
 }
 
 const upsertJobFromXMLStmt = db.prepare(`
+  -- 2026-05-05 — INSERT-side status was hardcoded 'SHIPPED' regardless of
+  -- whether the SHIPLOG XML actually had a ShipDate attribute. A malformed
+  -- or partial XML lacking ShipDate would create status='SHIPPED' + ship_date=NULL
+  -- — a zombie row that downstream filters treat as inactive (excluded from
+  -- WIP) but that has no proof of physical ship. Fixed: status now derived
+  -- from ?7 (ship_date parameter); 'SHIPPED' only when ship_date is present.
+  -- The ON CONFLICT path already handled this correctly via excluded.ship_date
+  -- check; this brings INSERT in line with that semantics.
   INSERT INTO jobs (invoice, reference, rx_number, tray, entry_date, entry_time,
                     ship_date, ship_time, days_in_lab, department, job_type, operator,
                     job_origin, machine_id, is_hko, status,
@@ -3438,12 +3446,13 @@ const upsertJobFromXMLStmt = db.prepare(`
                     rx_r_sphere, rx_r_cylinder, rx_r_axis, rx_r_pd, rx_r_add,
                     rx_l_sphere, rx_l_cylinder, rx_l_axis, rx_l_pd, rx_l_add,
                     updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SHIPPED',
-          ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?,
-          ?, ?, ?,
-          ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?,
+  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+          CASE WHEN ?7 IS NOT NULL AND ?7 != '' THEN 'SHIPPED' ELSE 'ACTIVE' END,
+          ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
+          ?25, ?26, ?27, ?28, ?29, ?30,
+          ?31, ?32, ?33,
+          ?34, ?35, ?36, ?37, ?38,
+          ?39, ?40, ?41, ?42, ?43,
           datetime('now'))
   ON CONFLICT(invoice) DO UPDATE SET
     reference = COALESCE(excluded.reference, jobs.reference),

@@ -1001,13 +1001,16 @@ class DviTraceWatcher extends EventEmitter {
       } catch (e) { /* job_events write — non-critical */ }
     }
 
-    // Only mark SHIPPED when job hits actual shipping scan (SH CONVEY), not ASSEMBLY PASS
-    if (stage === 'SHIPPING' && /SH CONVEY|SHIP/i.test(evt.station) && evt.station !== 'ASSEMBLY PASS') {
-      job.status = 'SHIPPED';
-    } else if (job.status === 'SHIPPED') {
-      // Job moved back into production after shipping station
-      job.status = 'Active';
-    }
+    // 2026-05-05 — REMOVED trace-driven status='SHIPPED' setter.
+    // Trace must NEVER set status='SHIPPED' because ship_date can only be set
+    // by SHIPLOG XML processing (upsertJobFromXML / upsertShippedJob). When
+    // trace flipped status here, the row got status='SHIPPED' permanently
+    // (downgrade guard at db.js:3361) but ship_date stayed NULL — creating
+    // zombie-shipped jobs that masked WIP. The historical artifact: a single
+    // bad event on 2026-04-16 created 8,683 such zombies, hiding ~1,500 jobs
+    // from the active WIP count vs DVI's 3,240. Status='SHIPPED' is now the
+    // exclusive responsibility of SHIPLOG XML, which sets status, current_stage,
+    // and ship_date atomically.
 
     // Track breakage
     if (stage === 'BREAKAGE') {
