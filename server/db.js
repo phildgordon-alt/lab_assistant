@@ -25,14 +25,7 @@ const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VERSIONED MIGRATIONS — server/migrations/NNN_*.sql
-// New schema changes go here. Existing inline DDL below stays as-is.
-// ─────────────────────────────────────────────────────────────────────────────
-const { runMigrations } = require('./migration-runner');
-runMigrations(db);
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SCHEMA MIGRATIONS (legacy inline) — safe ALTER TABLE for existing databases
+// SCHEMA MIGRATIONS — safe ALTER TABLE for existing databases
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
 try { db.exec("ALTER TABLE looker_jobs ADD COLUMN dvi_destination TEXT DEFAULT 'PAIR'"); } catch {}
