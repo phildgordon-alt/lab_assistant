@@ -3041,12 +3041,30 @@ function convertDate(raw) {
 // If the trace ever misses a SHIP event (e.g. partial-replay-overwrite bug pre
 // commit 6126095), the unified jobs row can be left at SHIPPING forever. Flip
 // it here in the same transaction as the XML upsert so the two tables can't drift.
-// Idempotent — WHERE clause skips already-SHIPPED rows.
+// Idempotent — WHERE clause skips already-SHIPPED rows with ship_date populated.
+//
+// 2026-05-05 — Now also writes ship_date + ship_time. Pre-fix this statement
+// flipped status/current_stage but silently dropped ship_date, leaving every
+// SHIPLOG-processed job with status='SHIPPED' AND ship_date=NULL in `jobs`
+// (while dvi_shipped_jobs had the correct ship_date). Symptom: the prod query
+//   SELECT COUNT(*) FROM jobs WHERE status='SHIPPED' AND ship_date IS NULL
+// returned 1,210 on 2026-05-05, all from the last 7+ days of normal shipping.
+// Fixed via subselect from dvi_shipped_jobs — safe because upsertShippedJobTxn
+// runs upsertShippedJobStmt FIRST in the same transaction, so the row is
+// guaranteed to be there when this UPDATE fires. The startup self-heal at
+// oven-timer-server.js:131 (also patched 2026-05-05) catches anything that
+// drifted before this fix landed.
 const backPropShippedToJobsStmt = db.prepare(`
   UPDATE jobs
-  SET status = 'SHIPPED', current_stage = 'SHIPPED', updated_at = datetime('now')
+  SET status = 'SHIPPED',
+      current_stage = 'SHIPPED',
+      ship_date = (SELECT ship_date FROM dvi_shipped_jobs WHERE invoice = jobs.invoice),
+      ship_time = COALESCE(jobs.ship_time, (SELECT ship_time FROM dvi_shipped_jobs WHERE invoice = jobs.invoice)),
+      updated_at = datetime('now')
   WHERE invoice = ?
-    AND (status != 'SHIPPED' OR current_stage IS NULL OR current_stage != 'SHIPPED')
+    AND (status != 'SHIPPED'
+      OR current_stage IS NULL OR current_stage != 'SHIPPED'
+      OR ship_date IS NULL)
 `);
 
 const upsertShippedJobTxn = db.transaction((args, invoice) => {
