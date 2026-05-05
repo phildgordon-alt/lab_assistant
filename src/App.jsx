@@ -5811,18 +5811,22 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
           { zone: 'CRITICAL', label: '3+ days', color: '#cc0000', action: 'Immediate escalation. These jobs are past SLA. Identify the blocker and resolve today.' },
           { zone: 'OVER5', label: '5+ days', color: '#9333ea', action: 'Severely stuck. These jobs need direct intervention — contact DVI or vendor if subcontracted.' },
           { zone: 'OVER10', label: '10+ days', color: '#7c2d12', action: 'Lost or abandoned. Investigate if these jobs are still valid or should be canceled.' },
-        ].map(z => (
+        ].map(z => {
+          const count = z.zone === 'OVER5' ? (sm.over5 || 0) : z.zone === 'OVER10' ? (sm.over10 || 0) : (sm[z.zone.toLowerCase()] || 0);
+          const total = sm.total || 0;
+          const pct = total > 0 ? ((count / total) * 100).toFixed(1) : '0.0';
+          return (
           <Card key={z.zone} onClick={() => setFilter(filter === z.zone ? 'all' : z.zone)}
             style={{ padding: 14, borderLeft: `4px solid ${z.color}`, cursor: 'pointer', background: filter === z.zone ? `${z.color}10` : T.card }}>
             <div style={{ textAlign: 'center', marginBottom: 6 }}>
-              <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>
-                {z.zone === 'OVER5' ? (sm.over5 || 0) : z.zone === 'OVER10' ? (sm.over10 || 0) : (sm[z.zone.toLowerCase()] || 0)}
-              </div>
+              <div style={{ fontSize: 28, fontWeight: 800, color: z.color, fontFamily: mono }}>{count}</div>
               <div style={{ fontSize: 10, fontWeight: 700, color: z.color, fontFamily: mono }}>{z.label}</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: T.textMuted, fontFamily: mono, marginTop: 2 }}>{pct}%</div>
             </div>
             <div style={{ fontSize: 10, color: T.textMuted, lineHeight: 1.4 }}>{z.action}</div>
           </Card>
-        ))}
+          );
+        })}
       </div>
 
       {/* Outlier explainer */}
