@@ -2976,6 +2976,24 @@ Respond with a structured batching plan in this format:
 
   // ── Aging Jobs ─────────────────────────────────────────────
   if (req.method==='GET' && url.pathname==='/api/aging/jobs') {
+    // Map DVI lens_type/lens_style → Looker-style human category.
+    // Phil's mapping (verified 2026-05-05 against real active-jobs distribution):
+    //   PLANO style                              → Non-RX
+    //   lens_type=P AND style starts with ENDLESS → Progressives  (the standard Progressive product)
+    //   lens_type=P (no ENDLESS marker)          → Premium Progressive
+    //   lens_type IN (S, C)                      → Single Vision
+    //   lens_type=B                              → Bifocal
+    //   else                                     → Unknown
+    const _mapLookerCategory = (lensType, lensStyle) => {
+      const code = (lensType || '').toUpperCase();
+      const style = (lensStyle || '').toUpperCase();
+      if (style === 'PLANO') return 'Non-RX';
+      if (code === 'P') return style.startsWith('ENDLESS') ? 'Progressives' : 'Premium Progressive';
+      if (code === 'S' || code === 'C') return 'Single Vision';
+      if (code === 'B') return 'Bifocal';
+      return 'Unknown';
+    };
+
     // Compute zone/SLA from lens type + days (shared by both code paths)
     const _computeAging = (lensType, daysInLab) => {
       // 'C' = custom/aspheric SV; classified as SV in NPI/coating-queue/db.js — keep parity here.
@@ -3020,6 +3038,8 @@ Respond with a structured batching plan in this format:
           station: r.current_station,
           coating: r.coating || '',
           rush: r.rush || 'N',
+          lensStyle: r.lens_style || '',
+          lensCategory: _mapLookerCategory(r.lens_type, r.lens_style),
           ...aging,
           enteredAt: r.entry_date || (r.first_seen_at ? r.first_seen_at.slice(0, 10) : ''),
         };
@@ -3037,6 +3057,7 @@ Respond with a structured batching plan in this format:
           const daysInLab = Math.round((_now - enteredMs) / 86400000 * 10) / 10;
           const xml = dviJobIndex.get(j.job_id);
           const aging = _computeAging(j.lensType || xml?.lensType || '', daysInLab);
+          const styleVal = j.lensStyle || xml?.lensStyle || '';
           return {
             job_id: j.job_id,
             invoice: j.invoice || j.job_id,
@@ -3044,6 +3065,8 @@ Respond with a structured batching plan in this format:
             station: j.station,
             coating: j.coating || xml?.coating || '',
             rush: j.rush || 'N',
+            lensStyle: styleVal,
+            lensCategory: _mapLookerCategory(aging.lensType, styleVal),
             ...aging,
             enteredAt: enteredMs ? new Date(enteredMs).toISOString().slice(0, 10) : '',
           };
@@ -3086,25 +3109,17 @@ Respond with a structured batching plan in this format:
     // avg days header still uses all jobs — that's a different question (lab-wide age).
     const avgDays = total > 0 ? Math.round(jobs.reduce((s, j) => s + j.daysInLab, 0) / total * 10) / 10 : 0;
 
-    // ── Breakdown by lens type ──
+    // ── Breakdown by lens category ──
     // Aggregates the already-computed jobs array — no extra DB hit.
-    // Codes per CLAUDE.md: P=Progressive, B=Bifocal, S=Single Vision,
-    // C=Custom/Aspheric SV. Empty / null surfaces as 'Unknown'.
-    const lensLabel = (code) => (
-      code === 'P' ? 'Progressive' :
-      code === 'B' ? 'Bifocal' :
-      code === 'S' ? 'Single Vision' :
-      code === 'C' ? 'Custom/Aspheric SV' :
-      'Unknown'
-    );
+    // Categories come from _mapLookerCategory above (Phil's Looker-style names).
     const ltMap = new Map();
     for (const j of jobs) {
-      const code = j.lensType || '';
-      let g = ltMap.get(code);
+      const cat = j.lensCategory || 'Unknown';
+      let g = ltMap.get(cat);
       if (!g) {
-        g = { lensType: code, label: lensLabel(code), count: 0, totalDays: 0,
+        g = { label: cat, count: 0, totalDays: 0,
               green: 0, yellow: 0, red: 0, critical: 0, over5: 0, over10: 0, overSLA: 0 };
-        ltMap.set(code, g);
+        ltMap.set(cat, g);
       }
       g.count++;
       g.totalDays += j.daysInLab;
@@ -3115,7 +3130,6 @@ Respond with a structured batching plan in this format:
       if (j.overSLA) g.overSLA++;
     }
     const byLensType = Array.from(ltMap.values()).map(g => ({
-      lensType: g.lensType,
       label: g.label,
       count: g.count,
       pct: total > 0 ? Math.round((g.count / total) * 1000) / 10 : 0,

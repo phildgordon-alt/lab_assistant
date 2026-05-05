@@ -5843,10 +5843,8 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                   <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: T.textDim }}>No data</td></tr>
                 )}
                 {rows.map(r => (
-                  <tr key={r.lensType || 'unk'} style={{ borderBottom: `1px solid ${T.border}` }}>
-                    <td style={{ padding: '10px 12px', color: T.text, fontWeight: 600 }}>
-                      {r.label} {r.lensType && <span style={{ color: T.textDim, fontWeight: 400 }}>({r.lensType})</span>}
-                    </td>
+                  <tr key={r.label} style={{ borderBottom: `1px solid ${T.border}` }}>
+                    <td style={{ padding: '10px 12px', color: T.text, fontWeight: 600 }}>{r.label}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.text, fontWeight: 700 }}>{r.count}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textMuted }}>{r.pct}%</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: r.avgDays >= 3 ? T.red : T.text }}>{r.avgDays}</td>
