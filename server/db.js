@@ -25,7 +25,14 @@ const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCHEMA MIGRATIONS — safe ALTER TABLE for existing databases
+// VERSIONED MIGRATIONS — server/migrations/NNN_*.sql
+// New schema changes go here. Existing inline DDL below stays as-is.
+// ─────────────────────────────────────────────────────────────────────────────
+const { runMigrations } = require('./migration-runner');
+runMigrations(db);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SCHEMA MIGRATIONS (legacy inline) — safe ALTER TABLE for existing databases
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
 try { db.exec("ALTER TABLE looker_jobs ADD COLUMN dvi_destination TEXT DEFAULT 'PAIR'"); } catch {}
@@ -3477,9 +3484,12 @@ const upsertJobFromXMLStmt = db.prepare(`
   -- or partial XML lacking ShipDate would create status='SHIPPED' + ship_date=NULL
   -- — a zombie row that downstream filters treat as inactive (excluded from
   -- WIP) but that has no proof of physical ship. Fixed: status now derived
-  -- from ?7 (ship_date parameter); 'SHIPPED' only when ship_date is present.
-  -- The ON CONFLICT path already handled this correctly via excluded.ship_date
-  -- check; this brings INSERT in line with that semantics.
+  -- in JS from ship_date and passed as a bind parameter ('SHIPPED' only when
+  -- ship_date is present). Earlier attempt used ?N numbered binding with ?7
+  -- reused inside a CASE expression — that approach silently failed under
+  -- better-sqlite3 positional .run() (param-count mismatch with reused ?N),
+  -- so every SHIPLOG XML dual-write threw "Too many parameter values" and
+  -- was swallowed by the outer try/catch in oven-timer-server.js:604.
   INSERT INTO jobs (invoice, reference, rx_number, tray, entry_date, entry_time,
                     ship_date, ship_time, days_in_lab, department, job_type, operator,
                     job_origin, machine_id, is_hko, status,
@@ -3490,13 +3500,13 @@ const upsertJobFromXMLStmt = db.prepare(`
                     rx_r_sphere, rx_r_cylinder, rx_r_axis, rx_r_pd, rx_r_add,
                     rx_l_sphere, rx_l_cylinder, rx_l_axis, rx_l_pd, rx_l_add,
                     updated_at)
-  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-          CASE WHEN ?7 IS NOT NULL AND ?7 != '' THEN 'SHIPPED' ELSE 'ACTIVE' END,
-          ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24,
-          ?25, ?26, ?27, ?28, ?29, ?30,
-          ?31, ?32, ?33,
-          ?34, ?35, ?36, ?37, ?38,
-          ?39, ?40, ?41, ?42, ?43,
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?,
+          ?, ?, ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?,
           datetime('now'))
   ON CONFLICT(invoice) DO UPDATE SET
     reference = COALESCE(excluded.reference, jobs.reference),
@@ -3564,11 +3574,14 @@ function upsertJobFromXML(p) {
   // both populate correctly.
   const lensMaterial = p.lensMaterial != null ? p.lensMaterial : p.lensMat;
   const lensOpcR     = p.lensOpcR     != null ? p.lensOpcR     : p.lensOpc;
+  // Status derived from ship_date — same rule the SQL CASE used to apply.
+  const shipDateIso = convertDate(p.shipDate);
+  const status = (shipDateIso && shipDateIso !== '') ? 'SHIPPED' : 'ACTIVE';
   upsertJobFromXMLStmt.run(
     p.invoice, p.reference || null, p.rxNum || null, p.tray || null,
-    convertDate(p.entryDate), p.entryTime || null, convertDate(p.shipDate), p.shipTime || null,
+    convertDate(p.entryDate), p.entryTime || null, shipDateIso, p.shipTime || null,
     p.daysInLab || null, p.department || null, p.jobType || null, p.operator || null,
-    p.jobOrigin || null, p.machineId || null, p.isHko ? 1 : 0,
+    p.jobOrigin || null, p.machineId || null, p.isHko ? 1 : 0, status,
     lensOpcR || null, p.lensOpcL || null, p.lensStyle || null, lensMaterial || null,
     p.lensType || null, p.lensPick || null, p.lensColor || null,
     p.coating || null, p.coatType || null,
