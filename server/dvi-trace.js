@@ -62,21 +62,42 @@ function getTodayFilename() {
 // doesn't spam the log on cold-start replay of a corrupted historical file.
 let _corruptLineCount = 0;
 
+// Strip embedded NUL bytes (DVI TRACE pads short fields with \u0000) before
+// trimming whitespace. Plain .trim() does not match \u0000 — without this,
+// every short field downstream carries NUL padding into the jobs/job_events
+// rows and ultimately into the dashboard JSON ("tray":"\u0000\u0000...").
+function cleanField(s) {
+  if (s == null) return '';
+  return String(s).replace(/\u0000/g, "").trim();
+}
+
+// Reject 8-digit values that parse as a recent YYYYMMDD date. Real lab
+// invoices live in the mid-6-digit range; an 8-digit "invoice" of 20260429
+// is a date that leaked into the invoice column. The default regex
+// /^\d{4,}$/ accepts these, so we add a separate date-shape filter.
+function looksLikeYyyymmdd(s) {
+  if (!/^\d{8}$/.test(s)) return false;
+  const y = parseInt(s.slice(0, 4), 10);
+  const m = parseInt(s.slice(4, 6), 10);
+  const d = parseInt(s.slice(6, 8), 10);
+  return y >= 2020 && y <= 2099 && m >= 1 && m <= 12 && d >= 1 && d <= 31;
+}
+
 function parseTraceLine(line) {
   const parts = line.split('\t');
   if (parts.length < 6) return null;
 
-  const tray = (parts[0] || '').trim();
-  const invNum = (parts[1] || '').trim();
-  const logDate = (parts[2] || '').trim();
-  const logTime = (parts[3] || '').trim();
+  const tray       = cleanField(parts[0]);
+  const invNum     = cleanField(parts[1]);
+  const logDate    = cleanField(parts[2]);
+  const logTime    = cleanField(parts[3]);
   const stationNum = parseInt(parts[4]) || 0;
-  const station = (parts[5] || '').trim();
+  const station    = cleanField(parts[5]);
   const categoryNum = parseInt(parts[6]) || 0;
-  const category = (parts[7] || '').trim();
-  const logOp = (parts[8] || '').trim();
-  const logMid = (parts[9] || '').trim();
-  const logPort = (parts[10] || '').trim();
+  const category   = cleanField(parts[7]);
+  const logOp      = cleanField(parts[8]);
+  const logMid     = cleanField(parts[9]);
+  const logPort    = cleanField(parts[10]);
 
   if (!invNum || !station) return null;
   // Invoice numbers are always all-digit, ≥4 chars. Anything else is a
@@ -84,7 +105,7 @@ function parseTraceLine(line) {
   // tiny tray-only row ('11', '1'), or alphabetic garbage. Drop it so the
   // jobs table never gets seeded with a non-numeric primary key (the
   // 19-row corruption we are cleaning up downstream came in this way).
-  if (!/^\d{4,}$/.test(invNum)) {
+  if (!/^\d{4,}$/.test(invNum) || looksLikeYyyymmdd(invNum)) {
     if (++_corruptLineCount % 100 === 0) {
       console.warn(`[DVI-Trace] dropped ${_corruptLineCount} malformed lines (sample invoice='${invNum}')`);
     }
