@@ -3691,6 +3691,76 @@ function upsertJobFromXML(p) {
   // Status derived from ship_date — same rule the SQL CASE used to apply.
   const shipDateIso = convertDate(p.shipDate);
   const status = (shipDateIso && shipDateIso !== '') ? 'SHIPPED' : 'ACTIVE';
+
+  // Step 3d of Task #19 — parallel audit through jobs-repo. Run BEFORE the
+  // legacy stmt so the repo sees pre-update state and produces a real audit
+  // row (per the ordering fix in Step 3c). Source 'xml-shiplog' has top
+  // priority on most fields per jobs-contract.js, so changes mostly go
+  // through unblocked. Errors caught + logged, never block the legacy write.
+  const _xmlObservedMs = (() => {
+    if (typeof p.shippedAt === 'number' && Number.isFinite(p.shippedAt)) return p.shippedAt;
+    if (shipDateIso) { const ms = Date.parse(`${shipDateIso}T${p.shipTime || '12:00'}:00`);
+      if (Number.isFinite(ms)) return ms; }
+    return Date.now();
+  })();
+  try {
+    jobsRepo.upsert({
+      invoice: String(p.invoice),
+      patch: {
+        reference: p.reference || null,
+        rx_number: p.rxNum || null,
+        tray: p.tray || null,
+        entry_date: convertDate(p.entryDate),
+        entry_time: p.entryTime || null,
+        ship_date: shipDateIso,
+        ship_time: p.shipTime || null,
+        days_in_lab: p.daysInLab || null,
+        department: p.department || null,
+        job_type: p.jobType || null,
+        operator: p.operator || null,
+        job_origin: p.jobOrigin || null,
+        machine_id: p.machineId || null,
+        is_hko: p.isHko ? 1 : 0,
+        // status derived from current_stage — set stage and let contract derive
+        current_stage: status === 'SHIPPED' ? 'SHIPPED' : null,
+        lens_opc_r: lensOpcR || null,
+        lens_opc_l: p.lensOpcL || null,
+        lens_style: p.lensStyle || null,
+        lens_material: lensMaterial || null,
+        lens_type: p.lensType || null,
+        lens_pick_r: p.lensPick || null,
+        lens_color: p.lensColor || null,
+        coating: p.coating || null,
+        coat_type: p.coatType || null,
+        frame_upc: p.frameUpc || null,
+        frame_name: p.frameName || null,
+        frame_style: p.frameStyle || null,
+        frame_sku: p.frameSku || null,
+        frame_mfr: p.frameMfr || null,
+        frame_color: p.frameColor || null,
+        eye_size: p.eyeSize || null,
+        bridge: p.bridge || null,
+        edge_type: p.edgeType || null,
+        rx_r_sphere: R.sphere || null,
+        rx_r_cylinder: R.cylinder || null,
+        rx_r_axis: R.axis || null,
+        rx_r_pd: R.pd || null,
+        rx_r_add: R.add || null,
+        rx_l_sphere: L.sphere || null,
+        rx_l_cylinder: L.cylinder || null,
+        rx_l_axis: L.axis || null,
+        rx_l_pd: L.pd || null,
+        rx_l_add: L.add || null,
+      },
+      source: 'xml-shiplog',
+      observedAt: _xmlObservedMs,
+      actor: 'db.js:upsertJobFromXML',
+      metadata: { shipDate: shipDateIso, shipTime: p.shipTime || null },
+    });
+  } catch (e) {
+    console.warn(`[xml-shiplog-repo-audit] invoice ${p.invoice}: ${e.message}`);
+  }
+
   upsertJobFromXMLStmt.run(
     p.invoice, p.reference || null, p.rxNum || null, p.tray || null,
     convertDate(p.entryDate), p.entryTime || null, shipDateIso, p.shipTime || null,
@@ -3761,6 +3831,44 @@ function upsertJobClassificationFromXML(p) {
   // raw parser output don't silently drop these fields.
   const lensMaterial = p.lensMaterial != null ? p.lensMaterial : p.lensMat;
   const lensOpcR     = p.lensOpcR     != null ? p.lensOpcR     : p.lensOpc;
+
+  // Step 3e of Task #19 — parallel audit through jobs-repo. Skip non-numeric
+  // invoices to avoid noisy contract-error logs (the legacy stmt tolerates
+  // them via ON CONFLICT semantics; the contract throws InvalidKeyError).
+  if (/^\d{4,}$/.test(String(p.invoice))) {
+    try {
+      jobsRepo.upsert({
+        invoice: String(p.invoice),
+        patch: {
+          reference: p.reference || null,
+          rx_number: p.rxNum || p.rxNumber || null,
+          entry_date: p.entryDate || null,
+          entry_time: p.entryTime || null,
+          department: p.department || null,
+          job_type: p.jobType || null,
+          is_hko: p.isHko ? 1 : 0,
+          lens_type: p.lensType || null,
+          lens_material: lensMaterial || null,
+          lens_style: p.lensStyle || null,
+          lens_color: p.lensColor || null,
+          coating: p.coating || null,
+          coat_type: p.coatType || null,
+          lens_opc_r: lensOpcR || null,
+          lens_opc_l: p.lensOpcL || null,
+          frame_upc: p.frameUpc || null,
+          frame_name: p.frameName || null,
+          frame_style: p.frameStyle || null,
+        },
+        source: 'xml-classification',
+        observedAt: Date.now(),
+        actor: 'db.js:upsertJobClassificationFromXML',
+        metadata: null,
+      });
+    } catch (e) {
+      console.warn(`[xml-classification-repo-audit] invoice ${p.invoice}: ${e.message}`);
+    }
+  }
+
   upsertJobClassificationFromXMLStmt.run(
     p.invoice,
     p.reference || null,
