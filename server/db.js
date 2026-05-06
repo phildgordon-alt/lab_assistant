@@ -3112,12 +3112,19 @@ const backPropShippedToJobsStmt = db.prepare(`
 // AND back-props status/stage/ship_date into the unified jobs row. As of
 // Step 3 of Task #19 (2026-05-05) it ALSO calls jobsRepo.upsert() for the
 // same back-prop, so every SHIPLOG-driven write to jobs gets a state_history
-// audit row. Repo errors are caught — they log but don't roll back the main
-// SHIPLOG writes. Once we trust the repo audit (a day or two), the direct
-// backPropShippedToJobsStmt becomes redundant and gets removed.
+// audit row.
+//
+// Order matters: repo MUST run before backPropShippedToJobsStmt; otherwise
+// the back-prop has already updated the jobs row and the repo sees a
+// post-write state, treating the patch as an identity write (no audit).
+// Sequence: dvi_shipped_jobs INSERT → repo.upsert (writes jobs + audit) →
+// direct back-prop (legacy override; safety net if contract drifts).
+//
+// Repo errors are caught — they log but don't roll back the main SHIPLOG
+// writes. Once we trust the repo audit (a day or two of clean data), the
+// direct backPropShippedToJobsStmt becomes redundant and gets removed.
 const upsertShippedJobTxn = db.transaction((args, invoice, repoArgs) => {
   upsertShippedJobStmt.run(...args);
-  backPropShippedToJobsStmt.run(invoice);
   if (repoArgs) {
     try {
       jobsRepo.upsert(repoArgs);
@@ -3125,6 +3132,7 @@ const upsertShippedJobTxn = db.transaction((args, invoice, repoArgs) => {
       console.warn(`[shiplog-backprop] repo audit failed for invoice ${invoice}: ${e.message}`);
     }
   }
+  backPropShippedToJobsStmt.run(invoice);
 });
 
 function upsertShippedJob(p) {
@@ -3502,6 +3510,62 @@ function upsertJobFromTrace(j) {
   let status = (j.status || 'ACTIVE').toUpperCase();
   if (stage === 'CANCELED') status = 'CANCELED';
   else if (stage === 'SHIPPED' || stage === 'COMPLETE') status = 'SHIPPED';
+
+  // Step 3c of Task #19 — parallel audit through jobs-repo. MUST run BEFORE
+  // the direct upsertJobFromTraceStmt below; otherwise the repo would see a
+  // post-write row, treat the patch as an identity write, and produce no
+  // audit. Run order: repo first (writes jobs to its contract + state_history
+  // audit) → direct stmt second (overrides with the legacy SQL behavior, so
+  // existing terminal-stage guards still win in case of contract drift).
+  // Repo errors are caught + logged; they do NOT block the direct write.
+  // observedAt: trace events carry timestamp as a ms number when called from
+  // dvi-trace.js, but legacy callers / replays may pass an ISO string. Coerce.
+  const _observedMs = (() => {
+    const t = j.lastEventAt != null ? j.lastEventAt : j.firstSeenAt;
+    if (typeof t === 'number' && Number.isFinite(t)) return t;
+    if (typeof t === 'string') { const ms = Date.parse(t); if (Number.isFinite(ms)) return ms; }
+    return Date.now();
+  })();
+  try {
+    jobsRepo.upsert({
+      invoice: String(j.invoice),
+      patch: {
+        tray: j.tray || null,
+        current_stage: j.stage || null,
+        current_station: j.station || null,
+        current_station_num: j.stationNum || null,
+        operator: j.operator || null,
+        machine_id: j.machineId || null,
+        has_breakage: j.hasBreakage ? 1 : 0,
+        rush: j.rush || null,
+        reference: j.reference || null,
+        rx_number: j.rxNumber || null,
+        entry_date: j.entryDate || null,
+        entry_time: j.entryTime || null,
+        department: j.department || null,
+        job_type: j.jobType || null,
+        is_hko: j.isHko ? 1 : 0,
+        lens_type: j.lensType || null,
+        lens_material: j.lensMaterial || null,
+        lens_style: j.lensStyle || null,
+        lens_color: j.lensColor || null,
+        coating: j.coating || null,
+        coat_type: j.coatType || null,
+        lens_opc_r: j.lensOpcR || null,
+        lens_opc_l: j.lensOpcL || null,
+        frame_upc: j.frameUpc || null,
+        frame_name: j.frameName || null,
+        frame_style: j.frameStyle || null,
+      },
+      source: 'trace',
+      observedAt: _observedMs,
+      actor: 'db.js:upsertJobFromTrace',
+      metadata: { station: j.station || null, stationNum: j.stationNum || null },
+    });
+  } catch (e) {
+    console.warn(`[trace-repo-audit] invoice ${j.invoice}: ${e.message}`);
+  }
+
   upsertJobFromTraceStmt.run(
     j.invoice, j.tray || null, j.stage || null, j.station || null, j.stationNum || null,
     j.operator || null, j.machineId || null, status,
