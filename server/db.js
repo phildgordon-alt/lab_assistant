@@ -3101,40 +3101,9 @@ function convertDate(raw) {
   return raw; // already ISO or unknown format
 }
 
-// Back-prop: dvi_shipped_jobs is the authoritative XML ground truth for SHIP.
-// If the trace ever misses a SHIP event (e.g. partial-replay-overwrite bug pre
-// commit 6126095), the unified jobs row can be left at SHIPPING forever. Flip
-// it here in the same transaction as the XML upsert so the two tables can't drift.
-// Idempotent — WHERE clause skips already-SHIPPED rows with ship_date populated.
-//
-// 2026-05-05 — Now also writes ship_date + ship_time. Pre-fix this statement
-// flipped status/current_stage but silently dropped ship_date, leaving every
-// SHIPLOG-processed job with status='SHIPPED' AND ship_date=NULL in `jobs`
-// (while dvi_shipped_jobs had the correct ship_date). Symptom: the prod query
-//   SELECT COUNT(*) FROM jobs WHERE status='SHIPPED' AND ship_date IS NULL
-// returned 1,210 on 2026-05-05, all from the last 7+ days of normal shipping.
-// Fixed via subselect from dvi_shipped_jobs — safe because upsertShippedJobTxn
-// runs upsertShippedJobStmt FIRST in the same transaction, so the row is
-// guaranteed to be there when this UPDATE fires. The startup self-heal at
-// oven-timer-server.js:131 (also patched 2026-05-05) catches anything that
-// drifted before this fix landed.
-const backPropShippedToJobsStmt = db.prepare(`
-  UPDATE jobs
-  SET status = 'SHIPPED',
-      current_stage = 'SHIPPED',
-      ship_date = (SELECT ship_date FROM dvi_shipped_jobs WHERE invoice = jobs.invoice),
-      ship_time = COALESCE(jobs.ship_time, (SELECT ship_time FROM dvi_shipped_jobs WHERE invoice = jobs.invoice)),
-      updated_at = datetime('now')
-  WHERE invoice = ?
-    AND (status != 'SHIPPED'
-      OR current_stage IS NULL OR current_stage != 'SHIPPED'
-      OR ship_date IS NULL)
-`);
-
 // upsertShippedJobTxn writes to dvi_shipped_jobs (authoritative SHIPLOG mirror)
 // AND back-props status/stage/ship_date into the unified jobs row via
-// jobs-repo.js (Step 3b cutover, 2026-05-06: removed the redundant
-// backPropShippedToJobsStmt direct UPDATE — repo is now sole writer).
+// jobs-repo.js (sole writer for the jobs table).
 //
 // Repo errors are caught + logged so a contract bug can't break SHIPLOG
 // ingestion entirely (dvi_shipped_jobs still gets the row even if jobs
@@ -3443,75 +3412,6 @@ db.exec(`
 
 // ── Prepared statements for jobs table ──────────────────────────────────────
 
-const upsertJobFromTraceStmt = db.prepare(`
-  INSERT INTO jobs (invoice, tray, current_stage, current_station, current_station_num,
-                    operator, machine_id, status, has_breakage, first_seen_at, last_event_at,
-                    event_count, events_json, rush,
-                    reference, rx_number, entry_date, entry_time, department, job_type,
-                    is_hko, lens_type, lens_material, lens_style, lens_color, coating,
-                    coat_type, lens_opc_r, lens_opc_l, frame_upc, frame_name, frame_style,
-                    updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?,
-          datetime('now'))
-  ON CONFLICT(invoice) DO UPDATE SET
-    tray = COALESCE(excluded.tray, jobs.tray),
-    -- current_stage / status downgrade guards: once SHIPPED or CANCELED is set
-    -- (by SHIPLOG XML back-prop or stage transition), a late-arriving trace
-    -- event must NOT revert the row to ACTIVE/SURFACING/etc. Pre-2026-04-28
-    -- this caused every shipped job to revert as soon as a stale trace event
-    -- arrived, leaving 38+ rows in the §5 validity gate per shift.
-    current_stage = CASE
-      WHEN jobs.status = 'SHIPPED' OR jobs.current_stage = 'SHIPPED' THEN jobs.current_stage
-      WHEN jobs.status = 'CANCELED' OR jobs.current_stage = 'CANCELED' THEN jobs.current_stage
-      ELSE excluded.current_stage
-    END,
-    current_station = CASE
-      WHEN jobs.status = 'SHIPPED' OR jobs.current_stage = 'SHIPPED' THEN jobs.current_station
-      WHEN jobs.status = 'CANCELED' OR jobs.current_stage = 'CANCELED' THEN jobs.current_station
-      ELSE excluded.current_station
-    END,
-    current_station_num = CASE
-      WHEN jobs.status = 'SHIPPED' OR jobs.current_stage = 'SHIPPED' THEN jobs.current_station_num
-      WHEN jobs.status = 'CANCELED' OR jobs.current_stage = 'CANCELED' THEN jobs.current_station_num
-      ELSE excluded.current_station_num
-    END,
-    operator = COALESCE(excluded.operator, jobs.operator),
-    machine_id = COALESCE(excluded.machine_id, jobs.machine_id),
-    -- Status downgrade guard — same rationale as current_stage above.
-    status = CASE
-      WHEN jobs.status = 'SHIPPED' THEN 'SHIPPED'
-      WHEN jobs.status = 'CANCELED' THEN 'CANCELED'
-      ELSE excluded.status
-    END,
-    has_breakage = MAX(jobs.has_breakage, excluded.has_breakage),
-    last_event_at = excluded.last_event_at,
-    event_count = excluded.event_count,
-    events_json = excluded.events_json,
-    rush = CASE WHEN jobs.rush IS NULL OR jobs.rush = 'N' THEN COALESCE(excluded.rush, jobs.rush) ELSE jobs.rush END,
-    reference = COALESCE(jobs.reference, excluded.reference),
-    rx_number = COALESCE(jobs.rx_number, excluded.rx_number),
-    entry_date = COALESCE(jobs.entry_date, excluded.entry_date),
-    entry_time = COALESCE(jobs.entry_time, excluded.entry_time),
-    department = COALESCE(jobs.department, excluded.department),
-    job_type = COALESCE(jobs.job_type, excluded.job_type),
-    is_hko = MAX(jobs.is_hko, excluded.is_hko),
-    lens_type = COALESCE(jobs.lens_type, excluded.lens_type),
-    lens_material = COALESCE(jobs.lens_material, excluded.lens_material),
-    lens_style = COALESCE(jobs.lens_style, excluded.lens_style),
-    lens_color = COALESCE(jobs.lens_color, excluded.lens_color),
-    coating = COALESCE(jobs.coating, excluded.coating),
-    coat_type = COALESCE(jobs.coat_type, excluded.coat_type),
-    lens_opc_r = COALESCE(jobs.lens_opc_r, excluded.lens_opc_r),
-    lens_opc_l = COALESCE(jobs.lens_opc_l, excluded.lens_opc_l),
-    frame_upc = COALESCE(jobs.frame_upc, excluded.frame_upc),
-    frame_name = COALESCE(jobs.frame_name, excluded.frame_name),
-    frame_style = COALESCE(jobs.frame_style, excluded.frame_style),
-    updated_at = datetime('now')
-`);
-
 function upsertJobFromTrace(j) {
   if (!j || !j.invoice) return;
   // Defense-in-depth: parseTraceLine() now drops non-numeric invoices, but a
@@ -3534,13 +3434,6 @@ function upsertJobFromTrace(j) {
   if (stage === 'CANCELED') status = 'CANCELED';
   // (Removed: SHIPPED-from-trace branch — never set from trace path.)
 
-  // Step 3c of Task #19 — parallel audit through jobs-repo. MUST run BEFORE
-  // the direct upsertJobFromTraceStmt below; otherwise the repo would see a
-  // post-write row, treat the patch as an identity write, and produce no
-  // audit. Run order: repo first (writes jobs to its contract + state_history
-  // audit) → direct stmt second (overrides with the legacy SQL behavior, so
-  // existing terminal-stage guards still win in case of contract drift).
-  // Repo errors are caught + logged; they do NOT block the direct write.
   // observedAt: trace events carry timestamp as a ms number when called from
   // dvi-trace.js, but legacy callers / replays may pass an ISO string. Coerce.
   const _observedMs = (() => {
@@ -3588,9 +3481,6 @@ function upsertJobFromTrace(j) {
   } catch (e) {
     console.warn(`[trace-repo-audit] invoice ${j.invoice}: ${e.message}`);
   }
-  // Step 3b cutover (2026-05-06): removed legacy upsertJobFromTraceStmt.run().
-  // jobs-repo is sole writer; the repo's contract handles terminal-stage
-  // guards, status derivation, COALESCE-style enrichment, etc.
 
   // Trigger B — race safety net for "every time a job advances past Kardex".
   // If trace advanced this job past Kardex but lens_type is still NULL,
@@ -3604,83 +3494,6 @@ function upsertJobFromTrace(j) {
     }
   }
 }
-
-const upsertJobFromXMLStmt = db.prepare(`
-  -- 2026-05-05 — INSERT-side status was hardcoded 'SHIPPED' regardless of
-  -- whether the SHIPLOG XML actually had a ShipDate attribute. A malformed
-  -- or partial XML lacking ShipDate would create status='SHIPPED' + ship_date=NULL
-  -- — a zombie row that downstream filters treat as inactive (excluded from
-  -- WIP) but that has no proof of physical ship. Fixed: status now derived
-  -- in JS from ship_date and passed as a bind parameter ('SHIPPED' only when
-  -- ship_date is present). Earlier attempt used ?N numbered binding with ?7
-  -- reused inside a CASE expression — that approach silently failed under
-  -- better-sqlite3 positional .run() (param-count mismatch with reused ?N),
-  -- so every SHIPLOG XML dual-write threw "Too many parameter values" and
-  -- was swallowed by the outer try/catch in oven-timer-server.js:604.
-  INSERT INTO jobs (invoice, reference, rx_number, tray, entry_date, entry_time,
-                    ship_date, ship_time, days_in_lab, department, job_type, operator,
-                    job_origin, machine_id, is_hko, status,
-                    lens_opc_r, lens_opc_l, lens_style, lens_material, lens_type,
-                    lens_pick_r, lens_color, coating, coat_type,
-                    frame_upc, frame_name, frame_style, frame_sku, frame_mfr, frame_color,
-                    eye_size, bridge, edge_type,
-                    rx_r_sphere, rx_r_cylinder, rx_r_axis, rx_r_pd, rx_r_add,
-                    rx_l_sphere, rx_l_cylinder, rx_l_axis, rx_l_pd, rx_l_add,
-                    updated_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?,
-          ?, ?, ?, ?, ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?, ?,
-          ?, ?, ?,
-          ?, ?, ?, ?, ?,
-          ?, ?, ?, ?, ?,
-          datetime('now'))
-  ON CONFLICT(invoice) DO UPDATE SET
-    reference = COALESCE(excluded.reference, jobs.reference),
-    rx_number = COALESCE(excluded.rx_number, jobs.rx_number),
-    tray = COALESCE(excluded.tray, jobs.tray),
-    entry_date = COALESCE(excluded.entry_date, jobs.entry_date),
-    entry_time = COALESCE(excluded.entry_time, jobs.entry_time),
-    ship_date = excluded.ship_date,
-    ship_time = excluded.ship_time,
-    days_in_lab = COALESCE(excluded.days_in_lab, jobs.days_in_lab),
-    department = COALESCE(excluded.department, jobs.department),
-    job_type = COALESCE(excluded.job_type, jobs.job_type),
-    operator = COALESCE(excluded.operator, jobs.operator),
-    job_origin = COALESCE(excluded.job_origin, jobs.job_origin),
-    machine_id = COALESCE(excluded.machine_id, jobs.machine_id),
-    is_hko = excluded.is_hko,
-    status = CASE WHEN excluded.ship_date IS NOT NULL THEN 'SHIPPED' ELSE jobs.status END,
-    lens_opc_r = COALESCE(excluded.lens_opc_r, jobs.lens_opc_r),
-    lens_opc_l = COALESCE(excluded.lens_opc_l, jobs.lens_opc_l),
-    lens_style = COALESCE(excluded.lens_style, jobs.lens_style),
-    lens_material = COALESCE(excluded.lens_material, jobs.lens_material),
-    lens_type = COALESCE(excluded.lens_type, jobs.lens_type),
-    lens_pick_r = COALESCE(excluded.lens_pick_r, jobs.lens_pick_r),
-    lens_color = COALESCE(excluded.lens_color, jobs.lens_color),
-    coating = COALESCE(excluded.coating, jobs.coating),
-    coat_type = COALESCE(excluded.coat_type, jobs.coat_type),
-    frame_upc = COALESCE(excluded.frame_upc, jobs.frame_upc),
-    frame_name = COALESCE(excluded.frame_name, jobs.frame_name),
-    frame_style = COALESCE(excluded.frame_style, jobs.frame_style),
-    frame_sku = COALESCE(excluded.frame_sku, jobs.frame_sku),
-    frame_mfr = COALESCE(excluded.frame_mfr, jobs.frame_mfr),
-    frame_color = COALESCE(excluded.frame_color, jobs.frame_color),
-    eye_size = COALESCE(excluded.eye_size, jobs.eye_size),
-    bridge = COALESCE(excluded.bridge, jobs.bridge),
-    edge_type = COALESCE(excluded.edge_type, jobs.edge_type),
-    rx_r_sphere = COALESCE(excluded.rx_r_sphere, jobs.rx_r_sphere),
-    rx_r_cylinder = COALESCE(excluded.rx_r_cylinder, jobs.rx_r_cylinder),
-    rx_r_axis = COALESCE(excluded.rx_r_axis, jobs.rx_r_axis),
-    rx_r_pd = COALESCE(excluded.rx_r_pd, jobs.rx_r_pd),
-    rx_r_add = COALESCE(excluded.rx_r_add, jobs.rx_r_add),
-    rx_l_sphere = COALESCE(excluded.rx_l_sphere, jobs.rx_l_sphere),
-    rx_l_cylinder = COALESCE(excluded.rx_l_cylinder, jobs.rx_l_cylinder),
-    rx_l_axis = COALESCE(excluded.rx_l_axis, jobs.rx_l_axis),
-    rx_l_pd = COALESCE(excluded.rx_l_pd, jobs.rx_l_pd),
-    rx_l_add = COALESCE(excluded.rx_l_add, jobs.rx_l_add),
-    updated_at = datetime('now')
-`);
 
 function upsertJobFromXML(p) {
   if (!p || !p.invoice) return;
@@ -3773,7 +3586,6 @@ function upsertJobFromXML(p) {
   } catch (e) {
     console.warn(`[xml-shiplog-repo-audit] invoice ${p.invoice}: ${e.message}`);
   }
-  // Step 3b cutover (2026-05-06): removed legacy upsertJobFromXMLStmt.run().
 }
 
 // ── Classification-only enrichment from inbound XML ─────────────────────────
@@ -3784,44 +3596,6 @@ function upsertJobFromXML(p) {
 // first_seen_at, last_event_at, or any trace-derived fields. If the row
 // doesn't yet exist (XML landed before first trace event), seed with
 // status='ACTIVE' and current_stage='INCOMING'.
-const upsertJobClassificationFromXMLStmt = db.prepare(`
-  INSERT INTO jobs (invoice, reference, rx_number, entry_date, entry_time,
-                    department, job_type, is_hko,
-                    lens_type, lens_material, lens_style, lens_color,
-                    coating, coat_type, lens_opc_r, lens_opc_l,
-                    frame_upc, frame_name, frame_style,
-                    status, current_stage, updated_at)
-  VALUES (?, ?, ?, ?, ?,
-          ?, ?, ?,
-          ?, ?, ?, ?,
-          ?, ?, ?, ?,
-          ?, ?, ?,
-          'ACTIVE', 'INCOMING', datetime('now'))
-  ON CONFLICT(invoice) DO UPDATE SET
-    reference     = COALESCE(jobs.reference,     excluded.reference),
-    rx_number     = COALESCE(jobs.rx_number,     excluded.rx_number),
-    entry_date    = COALESCE(jobs.entry_date,    excluded.entry_date),
-    entry_time    = COALESCE(jobs.entry_time,    excluded.entry_time),
-    department    = COALESCE(jobs.department,    excluded.department),
-    job_type      = COALESCE(jobs.job_type,      excluded.job_type),
-    is_hko        = MAX(jobs.is_hko, excluded.is_hko),
-    lens_type     = COALESCE(jobs.lens_type,     excluded.lens_type),
-    lens_material = COALESCE(jobs.lens_material, excluded.lens_material),
-    lens_style    = COALESCE(jobs.lens_style,    excluded.lens_style),
-    lens_color    = COALESCE(jobs.lens_color,    excluded.lens_color),
-    coating       = COALESCE(jobs.coating,       excluded.coating),
-    coat_type     = COALESCE(jobs.coat_type,     excluded.coat_type),
-    lens_opc_r    = COALESCE(jobs.lens_opc_r,    excluded.lens_opc_r),
-    lens_opc_l    = COALESCE(jobs.lens_opc_l,    excluded.lens_opc_l),
-    frame_upc     = COALESCE(jobs.frame_upc,     excluded.frame_upc),
-    frame_name    = COALESCE(jobs.frame_name,    excluded.frame_name),
-    frame_style   = COALESCE(jobs.frame_style,   excluded.frame_style),
-    -- Do NOT change status / current_stage on an existing row — those are
-    -- owned by upsertJobFromTrace (active WIP) and upsertJobFromXML (SHIPPED).
-    -- This UPSERT must never transition SHIPPED → ACTIVE or COATING → INCOMING.
-    updated_at    = datetime('now')
-`);
-
 function upsertJobClassificationFromXML(p) {
   if (!p || !p.invoice) return;
   // parseDviXml() emits lensMat/lensOpc; upsertJobFromXML reads
@@ -3870,21 +3644,6 @@ function upsertJobClassificationFromXML(p) {
 
 }
 
-const upsertJobFromSOMStmt = db.prepare(`
-  UPDATE jobs SET
-    som_order = ?,
-    current_dept = ?,
-    previous_dept = ?,
-    som_side = ?,
-    som_entry_date = ?,
-    som_frame_no = ?,
-    som_frame_ref = ?,
-    som_lds = ?,
-    reference = COALESCE(?, jobs.reference),
-    updated_at = datetime('now')
-  WHERE invoice = ?
-`);
-
 function upsertJobFromSOM(j) {
   if (!j || !j.dviJob) return;
 
@@ -3919,19 +3678,7 @@ function upsertJobFromSOM(j) {
       }
     }
   }
-  // Step 3b cutover (2026-05-06): jobs-repo is sole writer; legacy
-  // upsertJobFromSOMStmt.run() removed.
 }
-
-const upsertJobFromLookerStmt = db.prepare(`
-  UPDATE jobs SET
-    looker_job_id = ?,
-    dvi_destination = ?,
-    count_lenses = ?,
-    count_breakages = ?,
-    updated_at = datetime('now')
-  WHERE reference = ?
-`);
 
 function upsertJobFromLooker(j) {
   if (!j || !j.order_number) return;
@@ -3962,8 +3709,6 @@ function upsertJobFromLooker(j) {
       console.warn(`[looker-repo-audit] invoice ${m.invoice} ref ${j.order_number}: ${e.message}`);
     }
   }
-  // Step 3b cutover (2026-05-06): jobs-repo is sole writer; legacy
-  // upsertJobFromLookerStmt.run() removed.
 }
 
 // Skip duplicates: SMB tail re-reads of the same TRACE line had been creating
