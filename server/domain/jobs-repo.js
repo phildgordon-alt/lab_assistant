@@ -110,6 +110,21 @@ function createRepo(db) {
       throw new ContractError('observedAt must be a finite number (ms since epoch)');
     }
 
+    // Strip null / undefined / empty-string from patch before contract evaluation.
+    // Writers conventionally pass `field || null` for unknown values; treating
+    // those as "no opinion on this field" (rather than "explicitly clear it")
+    // prevents the contract from logging dozens of source-not-permitted skips
+    // per call. Without this, a single trace event with ~25 mostly-null fields
+    // produces 1 audit row per call with 20+ skipped fields - millions of rows
+    // per day of pure noise. Writers that genuinely need to clear a field can
+    // pass a sentinel; today none do.
+    const cleanPatch = {};
+    for (const k of Object.keys(patch)) {
+      const v = patch[k];
+      if (v !== null && v !== undefined && v !== '') cleanPatch[k] = v;
+    }
+    patch = cleanPatch;
+
     const _actor = actor || source;
     const _metadataJson = metadata ? JSON.stringify(metadata) : null;
     const invoiceStr = String(invoice);

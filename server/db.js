@@ -3531,10 +3531,18 @@ function upsertJobFromTrace(j) {
   if (!/^\d{4,}$/.test(String(j.invoice))) return;
   // Derive status from stage — stage is source of truth. Don't let stale 'ACTIVE'
   // from the caller outlive a CANCELED/SHIPPED stage transition.
-  const stage = (j.stage || '').toUpperCase();
+  const rawStage = (j.stage || '').toUpperCase();
+  // 2026-05-06 — Per dvi-trace.js:1004 hardening: trace MUST NOT set
+  // status='SHIPPED' because ship_date can only come from SHIPLOG XML.
+  // Translate trace-observed SHIPPED/COMPLETE stages to SHIPPING so the row
+  // reflects "physically at the ship station" without claiming the ship
+  // event itself. Without this, every TRACE event for an at-ship-station job
+  // throws ZombieRowError in the repo (rightly) and floods the log with
+  // [trace-repo-audit] warnings 15K times/day.
+  const stage = (rawStage === 'SHIPPED' || rawStage === 'COMPLETE') ? 'SHIPPING' : rawStage;
   let status = (j.status || 'ACTIVE').toUpperCase();
   if (stage === 'CANCELED') status = 'CANCELED';
-  else if (stage === 'SHIPPED' || stage === 'COMPLETE') status = 'SHIPPED';
+  // (Removed: SHIPPED-from-trace branch — never set from trace path.)
 
   // Step 3c of Task #19 — parallel audit through jobs-repo. MUST run BEFORE
   // the direct upsertJobFromTraceStmt below; otherwise the repo would see a
@@ -3556,7 +3564,7 @@ function upsertJobFromTrace(j) {
       invoice: String(j.invoice),
       patch: {
         tray: j.tray || null,
-        current_stage: j.stage || null,
+        current_stage: stage || null,
         current_station: j.station || null,
         current_station_num: j.stationNum || null,
         operator: j.operator || null,
@@ -3592,7 +3600,7 @@ function upsertJobFromTrace(j) {
   }
 
   upsertJobFromTraceStmt.run(
-    j.invoice, j.tray || null, j.stage || null, j.station || null, j.stationNum || null,
+    j.invoice, j.tray || null, stage || null, j.station || null, j.stationNum || null,
     j.operator || null, j.machineId || null, status,
     j.hasBreakage ? 1 : 0, j.firstSeenAt || null, j.lastEventAt || null,
     j.eventCount || 0, j.eventsJson || null, j.rush || null,
