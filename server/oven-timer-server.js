@@ -8304,6 +8304,55 @@ setTimeout(prunePeriodicAudit, 5 * 60 * 1000);
 setInterval(prunePeriodicAudit, STATE_HISTORY_PRUNE_INTERVAL_MS);
 
 // ──────────────────────────────────────────────────────────
+// Task #19 Definition of Done — track 7 consecutive days with zero
+// zombie rows (jobs.current_stage='SHIPPED' AND ship_date IS NULL).
+// Engine triggers from migration 002 prevent any new zombies from
+// landing; this just confirms it stays that way for a week before
+// we declare Task #19 verified.
+function runDailyDodCheck() {
+  try {
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const zombieCount = labDb.db.prepare(
+      `SELECT COUNT(*) AS n FROM jobs WHERE current_stage='SHIPPED' AND (ship_date IS NULL OR ship_date='')`
+    ).get().n;
+    labDb.db.prepare(
+      `INSERT INTO dod_zombie_log (check_date, zombie_count, recorded_at) VALUES (?, ?, datetime('now'))
+       ON CONFLICT(check_date) DO UPDATE SET zombie_count = excluded.zombie_count, recorded_at = excluded.recorded_at`
+    ).run(today, zombieCount);
+
+    // Streak = count of trailing days where zombie_count=0, walking back
+    // from today. SQL CTE does it in one query.
+    const streakRow = labDb.db.prepare(`
+      WITH RECURSIVE walk AS (
+        SELECT check_date, zombie_count, 0 AS step FROM dod_zombie_log
+          WHERE check_date = (SELECT MAX(check_date) FROM dod_zombie_log)
+        UNION ALL
+        SELECT d.check_date, d.zombie_count, walk.step + 1
+          FROM dod_zombie_log d JOIN walk
+            ON d.check_date = date(walk.check_date, '-1 day')
+          WHERE d.zombie_count = 0 AND walk.zombie_count = 0
+      )
+      SELECT COUNT(*) AS streak FROM walk WHERE zombie_count = 0
+    `).get();
+    const streak = streakRow ? streakRow.streak : 0;
+
+    if (zombieCount > 0) {
+      console.log(`[dod] ❌ ${today} zombies=${zombieCount} streak reset (Task #19 verification regressed)`);
+    } else if (streak >= 7) {
+      console.log(`[dod] ✅ ${today} zombies=0 streak=${streak} — Task #19 7-day clean window VERIFIED`);
+    } else {
+      console.log(`[dod] ${today} zombies=0 streak=${streak}/7 — ${7 - streak} more clean days for Task #19 DoD`);
+    }
+  } catch (e) {
+    console.error('[dod] daily check failed:', e.message);
+  }
+}
+// First run 6 min after boot (just after the prune timer fires) so the
+// two log lines land together in the morning. Then once every 24 hours.
+setTimeout(runDailyDodCheck, 6 * 60 * 1000);
+setInterval(runDailyDodCheck, 24 * 60 * 60 * 1000);
+
+// ──────────────────────────────────────────────────────────
 // Daily Ship Target snapshot — runs once per hour. On the first run of each
 // workday, captures the SLA target from current WIP. On every run, updates
 // shipped_actual + variance so the history reflects in-progress days.
