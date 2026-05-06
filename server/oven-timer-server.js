@@ -448,11 +448,21 @@ function parseDviXml(xml) {
   const entryTime = getAttr('OrderData', 'EntryTime');
   const jobOrigin = getAttr('OrderData', 'JobOrigin');
   const lensOpcL = leftEyeBlock ? ((leftEyeBlock[0] || '').match(/\sOPC="([^"]*)"/) || [])[1] || null : null;
-  const frameUpc = ((frameXml || '').match(/\sUPC="([^"]*)"/) || [])[1] || null;
-  const frameName = ((frameXml || '').match(/\sName="([^"]*)"/) || [])[1] || null;
-  const frameMat = ((frameXml || '').match(/\sMaterial="([^"]*)"/) || [])[1] || null;
-  const frameColor = ((frameXml || '').match(/\sColor="([^"]*)"/) || [])[1] || null;
-  const edgeType = ((frameXml || '').match(/\sEdgeType="([^"]*)"/) || [])[1] || null;
+  // DVI emits frame metadata in TWO different shapes:
+  //   - SHIPLOG XML (data/dvi/shipped/) — attributes on <Frame>:
+  //       <Frame UPC="..." Name="..." Material="..." Color="..." EdgeType="..."/>
+  //   - Inbound per-job XML (data/dvi/jobs/) — child elements:
+  //       <Frame Status="S"><Style>HARPER_A</Style><SKU>196016455467</SKU>...</Frame>
+  // Pre-fix, only the attribute form was extracted, so active jobs (which
+  // come from inbound XML) had frame_upc=NULL on every row. Now: try the
+  // attribute form first (SHIPLOG), fall back to the child-element form
+  // (inbound). Trim trailing whitespace because DVI pads with `&#x20;`.
+  const _trim = v => (typeof v === 'string' ? v.trim() : v) || null;
+  const frameUpc   = _trim(((frameXml || '').match(/\sUPC="([^"]*)"/) || [])[1])  || _trim(getFrame('SKU'))      || _trim(getFrame('UPC'))      || null;
+  const frameName  = _trim(((frameXml || '').match(/\sName="([^"]*)"/) || [])[1]) || _trim(getFrame('Name'))     || null;
+  const frameMat   = _trim(((frameXml || '').match(/\sMaterial="([^"]*)"/) || [])[1]) || _trim(getFrame('Material')) || null;
+  const frameColor = _trim(((frameXml || '').match(/\sColor="([^"]*)"/) || [])[1]) || _trim(getFrame('Color'))    || null;
+  const edgeType   = _trim(((frameXml || '').match(/\sEdgeType="([^"]*)"/) || [])[1]) || _trim(getFrame('EdgeType')) || null;
 
   return {
     status: getAttr('Job', 'Status'),
