@@ -8115,6 +8115,24 @@ setTimeout(checkShippedStale, 30000);
 setInterval(checkShippedStale, 3600000);
 
 // ──────────────────────────────────────────────────────────
+// state_history retention. The repo writes one audit row per non-identity
+// jobs upsert. ~25K rows/day at steady state, so 90 days ≈ 2.25M rows. Prune
+// once daily to keep the table bounded. First run is 5 minutes after boot so
+// the DB is fully warm and we don't compete with startup self-heal.
+const STATE_HISTORY_KEEP_DAYS = 90;
+const STATE_HISTORY_PRUNE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+function prunePeriodicAudit() {
+  try {
+    const r = labDb.jobsRepo.pruneOldAudit(STATE_HISTORY_KEEP_DAYS);
+    console.log(`[state-history-prune] deleted=${r.deleted} daysToKeep=${r.daysToKeep} elapsed=${r.elapsed_ms}ms`);
+  } catch (e) {
+    console.error('[state-history-prune] failed:', e.message);
+  }
+}
+setTimeout(prunePeriodicAudit, 5 * 60 * 1000);
+setInterval(prunePeriodicAudit, STATE_HISTORY_PRUNE_INTERVAL_MS);
+
+// ──────────────────────────────────────────────────────────
 // Daily Ship Target snapshot — runs once per hour. On the first run of each
 // workday, captures the SLA target from current WIP. On every run, updates
 // shipped_actual + variance so the history reflects in-progress days.
