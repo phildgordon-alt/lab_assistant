@@ -164,12 +164,28 @@ function createRepo(db) {
         }
       }
 
-      // Audit row. Always written when there is something to log — applied
-      // changes OR rejected fields. Pure identity writes skip the audit row.
+      // Audit row. Written when there is meaningful state change OR a real
+      // contract violation. "Routine" skips (COALESCE-style first-non-null
+      // and rush-latch — the contract working as intended) do NOT generate
+      // audit rows; otherwise every trace event would log a noop because
+      // operator/lens_type/etc. are already set on the row. (Empirical: at
+      // ~30K trace events/day across ~3000 active jobs, this would write
+      // ~1M+ audit rows/day, which would re-create the DB bloat we cleaned
+      // up on 2026-05-05.)
+      //
+      // VIOLATION reasons that DO get audited even when changes is empty:
+      //   - source-not-permitted:* (writer trying to touch a field it shouldn't)
+      //   - guarded / guarded:TERMINAL (terminal-stage downgrade attempt)
+      //   - derived-field (writer set status directly — caller bug)
+      //   - pk-immutable (writer included invoice in patch — caller bug)
+      const NOISY_REASONS = new Set(['first-non-null-already-set', 'rush-latched']);
       const hasChanges = changedFields.length > 0;
-      const hasSkipped = result.skipped && result.skipped.length > 0;
+      const hasViolationSkip = result.skipped && result.skipped.some(
+        (f) => !NOISY_REASONS.has(result.reason && result.reason[f])
+      );
       let audit_id = null;
-      if (hasChanges || hasSkipped) {
+      if (hasChanges || hasViolationSkip) {
+        const hasSkipped = result.skipped && result.skipped.length > 0;
         const prevStatus = currentRow ? currentRow.status : null;
         const prevStage = currentRow ? currentRow.current_stage : null;
         const nextStage = merged.current_stage != null ? merged.current_stage : null;

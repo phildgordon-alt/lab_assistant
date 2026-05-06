@@ -144,6 +144,40 @@ test('A3: identity write — no changes, no audit row, no jobs UPDATE', () => {
   assert.equal(auditCount, 1, 'only the first write should have audited');
 });
 
+test('A4: COALESCE-skip — repeat trace upsert with already-set fields produces NO audit', () => {
+  // Regression for the 33x trace audit amplification (2026-05-06): every trace
+  // event was producing skipped=["operator"] with reason="first-non-null-
+  // already-set", and the repo audited every one — generating 1M+ audit rows
+  // per day. Rule: "first-non-null-already-set" / "rush-latched" are routine
+  // contract behavior, not violations, and must NOT generate audit rows.
+  const db = freshDb();
+  const repo = createRepo(db);
+
+  // First trace event sets operator (creates the row).
+  repo.upsert({
+    invoice: '450123',
+    patch: { current_stage: 'COATING', operator: 'SMITH' },
+    source: 'trace',
+    observedAt: T0,
+  });
+
+  // Second trace event with same operator — first-non-null-wins skips operator
+  // because it's already set, and current_stage is unchanged. Both fields skip
+  // for routine reasons. NO audit row should be written.
+  const r = repo.upsert({
+    invoice: '450123',
+    patch: { current_stage: 'COATING', operator: 'SMITH' },
+    source: 'trace',
+    observedAt: T0 + 5000,
+  });
+
+  assert.deepEqual(r.applied, {});
+  assert.equal(r.audit_id, null, 'COALESCE-skip should not generate audit');
+
+  const auditCount = db.prepare('SELECT COUNT(*) AS c FROM state_history').get().c;
+  assert.equal(auditCount, 1, 'only the first write should have audited');
+});
+
 // ═════════════════════════════════════════════════════════════════════════════
 // SECTION B — rejection paths and zombie prevention
 // ═════════════════════════════════════════════════════════════════════════════
