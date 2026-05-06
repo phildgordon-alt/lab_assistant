@@ -597,6 +597,7 @@ class DviTraceWatcher extends EventEmitter {
           machineId: row.machine_id,
           hasBreakage: !!row.has_breakage,
           events,
+          dirty: false, // freshly loaded from DB — no need to save it back
         });
       }
       if (skippedCorrupt > 0) {
@@ -691,8 +692,16 @@ class DviTraceWatcher extends EventEmitter {
          event_count, events_json, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `);
+      let savedCount = 0, skippedClean = 0;
       const save = db.db.transaction(() => {
         for (const [jobId, job] of this.jobs) {
+          // 2026-05-06 — only save jobs whose state actually changed since
+          // last save. processEvent sets job.dirty when any field moved.
+          // Without this guard, every 5-min checkpoint re-upserted ~3000
+          // unchanged jobs to dvi_trace_jobs AND jobs (~864K wasted
+          // writes/day) and re-fired the repo zombie warnings for the
+          // 3 stuck-at-SHIPPED-station rows on every cycle.
+          if (!job.dirty) { skippedClean++; continue; }
           // Only store last 10 events per job to keep DB size reasonable
           const recentEvents = (job.events || []).slice(-10);
           upsert.run(
@@ -728,10 +737,12 @@ class DviTraceWatcher extends EventEmitter {
               lensType: lensTypeFromStation(job.station),
             });
           } catch (e2) { /* ignore — unified table enrichment */ }
+          job.dirty = false; // mark clean after successful save
+          savedCount++;
         }
       });
       save();
-      console.log(`[DVI-Trace] Saved ${this.jobs.size} jobs to SQLite + unified jobs`);
+      console.log(`[DVI-Trace] Saved ${savedCount} dirty / ${skippedClean} clean / ${this.jobs.size} total jobs to SQLite + unified jobs`);
       // Heartbeat: 2h stale threshold during business hours. Trace files grow
       // continuously while lab is running, so no-write for 2h = real problem.
       try { db.recordHeartbeat('dvi_trace', this.jobs.size, 2 * 60 * 60 * 1000); } catch {}
@@ -981,13 +992,28 @@ class DviTraceWatcher extends EventEmitter {
         status: 'Active',
         firstSeen: evt.timestamp,
         lastSeen: evt.timestamp,
-        events: []
+        events: [],
+        dirty: true, // 2026-05-06 — new job needs a save
       };
       this.jobs.set(evt.jobId, job);
     }
 
     // Track station change for job_events logging
     const stationChanged = job.station !== evt.station;
+
+    // Mark job dirty if any field actually changed. Without this, saveToDb's
+    // 5-min loop re-upserts every job in memory (~3000 of them) regardless of
+    // whether anything moved — ~864K wasted writes/day, plus repeated repo
+    // zombie-warnings for jobs stuck at the SHIPPED conveyor with no SHIPLOG.
+    if (stationChanged
+        || job.stationNum !== evt.stationNum
+        || job.stage !== stage
+        || job.category !== evt.category
+        || job.lastSeen !== evt.timestamp
+        || job.operator !== evt.operator
+        || job.machineId !== evt.machineId) {
+      job.dirty = true;
+    }
 
     // Update last known position
     job.station = evt.station;
