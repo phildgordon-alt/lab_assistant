@@ -432,7 +432,7 @@ function BinningDetailView({ view, serverUrl }) {
   const [sortAsc, setSortAsc] = useState(true);
 
   useEffect(() => {
-    if (!serverUrl) return;
+    if (serverUrl == null) return;
     setLoading(true);
     const ep = view === 'swap' ? '/api/inventory/binning/swap'
              : view === 'consolidate' ? '/api/inventory/binning/consolidate'
@@ -1040,7 +1040,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
   // Lazy-load: only fetch data needed for the active sub-tab
   const fetchedRef = useRef({});
   useEffect(() => {
-    if (!ovenServerUrl) return;
+    if (ovenServerUrl == null) return;
     const fetchFor = async (tab) => {
       try {
         if (tab === 'warehouses' || tab === 'picks') {

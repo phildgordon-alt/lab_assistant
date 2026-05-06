@@ -2729,7 +2729,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
 
   // Poll active coating runs
   useEffect(()=>{
-    if(!serverUrl) return;
+    if (serverUrl == null) return;
     const poll=()=>fetch(`${serverUrl}/api/coating/runs`).then(r=>r.json()).then(d=>{if(d.ok) setActiveRuns(d.active||{});}).catch(()=>{});
     poll();
     const iv=setInterval(poll,5000);
@@ -5442,7 +5442,7 @@ function IncomingTab({ ovenServerUrl, settings }) {
   const [days, setDays] = useState(30);
 
   useEffect(() => {
-    if (!ovenServerUrl) return;
+    if (ovenServerUrl == null) return;
     const go = async () => {
       try {
         const resp = await fetch(`${ovenServerUrl}/api/dvi/incoming?days=${days}`);
@@ -5768,7 +5768,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   useEffect(() => {
     if (subView !== 'lensType') return;
     if (lensTypeView === 'active') return;
-    if (!ovenServerUrl) return;
+    if (ovenServerUrl == null) return;
     const days = lensTypeView === 'shipped7' ? 7 : lensTypeView === 'shipped30' ? 30 : 90;
     setShippedLoading(true);
     fetch(`${ovenServerUrl}/api/aging/shipped-by-lens-type?days=${days}`)
@@ -5778,7 +5778,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   }, [subView, lensTypeView, ovenServerUrl]);
 
   useEffect(() => {
-    if (!ovenServerUrl) return;
+    if (ovenServerUrl == null) return;
     const go = () => fetch(`${ovenServerUrl}/api/aging/jobs`).then(r => r.json()).then(setData).catch(() => {});
     go();
     const iv = setInterval(go, 60000);

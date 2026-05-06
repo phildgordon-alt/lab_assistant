@@ -358,7 +358,7 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
   const [machines,setMachines]=useState({machines:[],isLive:false,updatedAt:null});
   const [selectedMachineId,setSelectedMachineId]=useState(null);
   useEffect(()=>{
-    if(!ovenServerUrl)return;
+    if (ovenServerUrl == null) return;
     const go=async()=>{
       try{
         const r=await fetch(`${ovenServerUrl}/api/som/machines/summary`,{signal:AbortSignal.timeout(5000)});
@@ -374,7 +374,7 @@ export default function MaintenanceTab({ovenServerUrl,settings}){
 
   // Fetch maintenance data from server
   useEffect(()=>{
-    if(!ovenServerUrl)return;
+    if (ovenServerUrl == null) return;
     const go=async()=>{
       try{
         const [aR,tR,dR,pR,sR]=await Promise.all([

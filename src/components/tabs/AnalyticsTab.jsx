@@ -102,7 +102,7 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
   // Fetch real analytics from DVI trace
   const daysMap={"7d":7,"30d":30,"90d":90,"all":365};
   useEffect(()=>{
-    if(!ovenServerUrl)return;
+    if (ovenServerUrl == null) return;
     setAnalyticsLoading(true);
     const go=async()=>{
       try{
@@ -116,7 +116,7 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
 
   // Fetch oven data
   useEffect(()=>{
-    if(!ovenServerUrl)return;
+    if (ovenServerUrl == null) return;
     const go=async()=>{
       try{
         const [rR,sR]=await Promise.all([
@@ -133,7 +133,7 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
   // Fetch shipping performance (target vs actual history)
   const [shipPerf,setShipPerf]=useState(null);
   useEffect(()=>{
-    if(!ovenServerUrl)return;
+    if (ovenServerUrl == null) return;
     const go=async()=>{
       try{
         const r=await fetch(`${ovenServerUrl}/api/shipping/performance?days=${daysMap[range]}`,{signal:AbortSignal.timeout(5000)});

@@ -53,7 +53,7 @@ const MACHINE_COLORS = {
 function MachineChart({ serverUrl, date }) {
   const [somData, setSomData] = useState(null);
   useEffect(() => {
-    if (!serverUrl) return;
+    if (serverUrl == null) return;
     fetch(`${serverUrl}/api/som/lens-per-hour?date=${date}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => setSomData(d))
