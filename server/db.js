@@ -2014,14 +2014,12 @@ function enrichLensTypeFromPicks(invoice) {
       console.warn(`[picks-derive-repo-audit] invoice ${invoice}: ${e.message}`);
     }
   }
-
-  const r = tier3UpdateStmt.run({
-    invoice,
-    lens_type:     row.lens_type_modal || null,
-    lens_material: row.material || null,
-    lens_opc_r:    row.sku || null,
-  });
-  return r.changes > 0;
+  // Step 3b cutover (2026-05-06): jobs-repo is sole writer; legacy
+  // tier3UpdateStmt.run() removed. Caller checks return value of this
+  // function — without a write to compare against, we return true if the
+  // picks lookup found a row to enrich (the contract may COALESCE-skip
+  // some fields, but the call did real work).
+  return !!(row.lens_type_modal || row.material || row.sku);
 }
 
 const PICKS_HISTORY_MAX_QTY = 10000; // sanity clamp: no legitimate pick is 10k+ units
@@ -3134,20 +3132,13 @@ const backPropShippedToJobsStmt = db.prepare(`
 `);
 
 // upsertShippedJobTxn writes to dvi_shipped_jobs (authoritative SHIPLOG mirror)
-// AND back-props status/stage/ship_date into the unified jobs row. As of
-// Step 3 of Task #19 (2026-05-05) it ALSO calls jobsRepo.upsert() for the
-// same back-prop, so every SHIPLOG-driven write to jobs gets a state_history
-// audit row.
+// AND back-props status/stage/ship_date into the unified jobs row via
+// jobs-repo.js (Step 3b cutover, 2026-05-06: removed the redundant
+// backPropShippedToJobsStmt direct UPDATE — repo is now sole writer).
 //
-// Order matters: repo MUST run before backPropShippedToJobsStmt; otherwise
-// the back-prop has already updated the jobs row and the repo sees a
-// post-write state, treating the patch as an identity write (no audit).
-// Sequence: dvi_shipped_jobs INSERT → repo.upsert (writes jobs + audit) →
-// direct back-prop (legacy override; safety net if contract drifts).
-//
-// Repo errors are caught — they log but don't roll back the main SHIPLOG
-// writes. Once we trust the repo audit (a day or two of clean data), the
-// direct backPropShippedToJobsStmt becomes redundant and gets removed.
+// Repo errors are caught + logged so a contract bug can't break SHIPLOG
+// ingestion entirely (dvi_shipped_jobs still gets the row even if jobs
+// doesn't). Self-heal at server boot covers any drift.
 const upsertShippedJobTxn = db.transaction((args, invoice, repoArgs) => {
   upsertShippedJobStmt.run(...args);
   if (repoArgs) {
@@ -3157,7 +3148,6 @@ const upsertShippedJobTxn = db.transaction((args, invoice, repoArgs) => {
       console.warn(`[shiplog-backprop] repo audit failed for invoice ${invoice}: ${e.message}`);
     }
   }
-  backPropShippedToJobsStmt.run(invoice);
 });
 
 function upsertShippedJob(p) {
@@ -3598,19 +3588,9 @@ function upsertJobFromTrace(j) {
   } catch (e) {
     console.warn(`[trace-repo-audit] invoice ${j.invoice}: ${e.message}`);
   }
-
-  upsertJobFromTraceStmt.run(
-    j.invoice, j.tray || null, stage || null, j.station || null, j.stationNum || null,
-    j.operator || null, j.machineId || null, status,
-    j.hasBreakage ? 1 : 0, j.firstSeenAt || null, j.lastEventAt || null,
-    j.eventCount || 0, j.eventsJson || null, j.rush || null,
-    j.reference || null, j.rxNumber || null, j.entryDate || null, j.entryTime || null,
-    j.department || null, j.jobType || null,
-    j.isHko ? 1 : 0, j.lensType || null, j.lensMaterial || null, j.lensStyle || null,
-    j.lensColor || null, j.coating || null,
-    j.coatType || null, j.lensOpcR || null, j.lensOpcL || null, j.frameUpc || null,
-    j.frameName || null, j.frameStyle || null
-  );
+  // Step 3b cutover (2026-05-06): removed legacy upsertJobFromTraceStmt.run().
+  // jobs-repo is sole writer; the repo's contract handles terminal-stage
+  // guards, status derivation, COALESCE-style enrichment, etc.
 
   // Trigger B — race safety net for "every time a job advances past Kardex".
   // If trace advanced this job past Kardex but lens_type is still NULL,
@@ -3793,21 +3773,7 @@ function upsertJobFromXML(p) {
   } catch (e) {
     console.warn(`[xml-shiplog-repo-audit] invoice ${p.invoice}: ${e.message}`);
   }
-
-  upsertJobFromXMLStmt.run(
-    p.invoice, p.reference || null, p.rxNum || null, p.tray || null,
-    convertDate(p.entryDate), p.entryTime || null, shipDateIso, p.shipTime || null,
-    p.daysInLab || null, p.department || null, p.jobType || null, p.operator || null,
-    p.jobOrigin || null, p.machineId || null, p.isHko ? 1 : 0, status,
-    lensOpcR || null, p.lensOpcL || null, p.lensStyle || null, lensMaterial || null,
-    p.lensType || null, p.lensPick || null, p.lensColor || null,
-    p.coating || null, p.coatType || null,
-    p.frameUpc || null, p.frameName || null, p.frameStyle || null, p.frameSku || null,
-    p.frameMfr || null, p.frameColor || null,
-    p.eyeSize || null, p.bridge || null, p.edgeType || null,
-    R.sphere || null, R.cylinder || null, R.axis || null, R.pd || null, R.add || null,
-    L.sphere || null, L.cylinder || null, L.axis || null, L.pd || null, L.add || null
-  );
+  // Step 3b cutover (2026-05-06): removed legacy upsertJobFromXMLStmt.run().
 }
 
 // ── Classification-only enrichment from inbound XML ─────────────────────────
@@ -3902,27 +3868,6 @@ function upsertJobClassificationFromXML(p) {
     }
   }
 
-  upsertJobClassificationFromXMLStmt.run(
-    p.invoice,
-    p.reference || null,
-    p.rxNum || p.rxNumber || null,
-    p.entryDate || null,
-    p.entryTime || null,
-    p.department || null,
-    p.jobType || null,
-    p.isHko ? 1 : 0,
-    p.lensType || null,
-    lensMaterial || null,
-    p.lensStyle || null,
-    p.lensColor || null,
-    p.coating || null,
-    p.coatType || null,
-    lensOpcR || null,
-    p.lensOpcL || null,
-    p.frameUpc || null,
-    p.frameName || null,
-    p.frameStyle || null
-  );
 }
 
 const upsertJobFromSOMStmt = db.prepare(`
@@ -3974,13 +3919,8 @@ function upsertJobFromSOM(j) {
       }
     }
   }
-
-  upsertJobFromSOMStmt.run(
-    j.somOrder || null, j.dept || null, j.prevDept || null,
-    j.side || null, j.entryDate || null, j.frameNo || null,
-    j.frameRef || null, j.lds || null, j.reference || null,
-    j.dviJob
-  );
+  // Step 3b cutover (2026-05-06): jobs-repo is sole writer; legacy
+  // upsertJobFromSOMStmt.run() removed.
 }
 
 const upsertJobFromLookerStmt = db.prepare(`
@@ -4022,12 +3962,8 @@ function upsertJobFromLooker(j) {
       console.warn(`[looker-repo-audit] invoice ${m.invoice} ref ${j.order_number}: ${e.message}`);
     }
   }
-
-  upsertJobFromLookerStmt.run(
-    j.job_id || null, j.dvi_destination || null,
-    j.count_lenses || 0, j.count_breakages || 0,
-    j.order_number
-  );
+  // Step 3b cutover (2026-05-06): jobs-repo is sole writer; legacy
+  // upsertJobFromLookerStmt.run() removed.
 }
 
 // Skip duplicates: SMB tail re-reads of the same TRACE line had been creating

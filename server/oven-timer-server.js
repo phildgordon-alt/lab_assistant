@@ -171,25 +171,11 @@ try {
         }
       }
     }
-    console.log(`[startup] self-heal: ${needsFlip.length} candidate(s); ${audited} audited via repo, ${auditFailed} repo failures (bulk UPDATE will catch remaining)`);
+    console.log(`[startup] self-heal: flipped ${audited}/${needsFlip.length} via repo, ${auditFailed} repo failures`);
   }
-  // Bulk UPDATE — handles anything the per-row repo loop didn't (SQL injection
-  // safety net + recovery if repo throws across the board).
-  const result = labDb.db.prepare(`
-    UPDATE jobs SET
-      status='SHIPPED',
-      current_stage='SHIPPED',
-      ship_date = (SELECT ship_date FROM dvi_shipped_jobs WHERE invoice = jobs.invoice),
-      ship_time = COALESCE(jobs.ship_time, (SELECT ship_time FROM dvi_shipped_jobs WHERE invoice = jobs.invoice)),
-      updated_at = datetime('now')
-    WHERE invoice IN (SELECT invoice FROM dvi_shipped_jobs WHERE ship_date IS NOT NULL)
-      AND (status != 'SHIPPED'
-        OR current_stage IS NULL OR current_stage != 'SHIPPED'
-        OR ship_date IS NULL)
-  `).run();
-  if (result.changes > 0) {
-    console.log(`[startup] self-heal: bulk UPDATE flipped ${result.changes} jobs (post-repo safety net)`);
-  }
+  // Step 3b cutover (2026-05-06): jobs-repo is sole writer; legacy bulk
+  // UPDATE removed. If repo errors prevent some flips, the warnings above
+  // tell us exactly which invoices need attention.
 } catch (e) {
   console.warn(`[startup] self-heal failed: ${e.message}`);
 }
