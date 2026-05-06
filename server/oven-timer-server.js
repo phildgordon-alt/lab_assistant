@@ -456,8 +456,16 @@ function parseDviXml(xml) {
   // Pre-fix, only the attribute form was extracted, so active jobs (which
   // come from inbound XML) had frame_upc=NULL on every row. Now: try the
   // attribute form first (SHIPLOG), fall back to the child-element form
-  // (inbound). Trim trailing whitespace because DVI pads with `&#x20;`.
-  const _trim = v => (typeof v === 'string' ? v.trim() : v) || null;
+  // (inbound). DVI pads SKUs with the literal text `&#x20;&#x20;` — that's
+  // not whitespace until decoded, so a plain .trim() leaves the entities
+  // baked in (which broke equality matching in the holds feature). Decode
+  // the common HTML entities before trimming.
+  const _decodeEntities = s => String(s)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g,            (_, d) => String.fromCharCode(parseInt(d, 10)))
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  const _trim = v => (typeof v === 'string' ? _decodeEntities(v).trim() : v) || null;
   const frameUpc   = _trim(((frameXml || '').match(/\sUPC="([^"]*)"/) || [])[1])  || _trim(getFrame('SKU'))      || _trim(getFrame('UPC'))      || null;
   const frameName  = _trim(((frameXml || '').match(/\sName="([^"]*)"/) || [])[1]) || _trim(getFrame('Name'))     || null;
   const frameMat   = _trim(((frameXml || '').match(/\sMaterial="([^"]*)"/) || [])[1]) || _trim(getFrame('Material')) || null;

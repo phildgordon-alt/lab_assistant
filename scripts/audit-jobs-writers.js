@@ -51,7 +51,11 @@ const PATTERNS = [
 ];
 
 // Skip these directories entirely.
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.claude']);
+// `server/migrations` is skipped because migrations are explicitly versioned,
+// run-once schema / data fixes applied through the migration runner. Anything
+// in there is reviewed at the migration-authoring step, not at the canonical-
+// write-path-audit step.
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.claude', 'migrations']);
 
 const findings = [];
 

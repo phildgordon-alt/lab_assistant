@@ -58,7 +58,12 @@ function parseFrameFromXml(xml) {
     const m = frameXml.match(new RegExp(`<${tag}[^>]*>([^<]*)</${tag}>`));
     return m ? m[1].trim() : null;
   };
-  const _trim = v => (typeof v === 'string' ? v.trim() : v) || null;
+  const _decodeEntities = s => String(s)
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .replace(/&#(\d+);/g,            (_, d) => String.fromCharCode(parseInt(d, 10)))
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+  const _trim = v => (typeof v === 'string' ? _decodeEntities(v).trim() : v) || null;
   return {
     frame_upc:   _trim(((frameXml || '').match(/\sUPC="([^"]*)"/) || [])[1])   || _trim(getFrame('SKU'))      || _trim(getFrame('UPC'))      || null,
     frame_name:  _trim(((frameXml || '').match(/\sName="([^"]*)"/) || [])[1])  || _trim(getFrame('Name'))     || null,
