@@ -32,6 +32,14 @@ const { runMigrations } = require('./migration-runner');
 runMigrations(db);
 
 // ─────────────────────────────────────────────────────────────────────────────
+// JOBS REPO (Step 3 of Task #19) — singleton, used by writers as we migrate
+// them one at a time. Created HERE because it depends on state_history
+// existing (set up by the migration runner above).
+// ─────────────────────────────────────────────────────────────────────────────
+const { createRepo: createJobsRepo } = require('./domain/jobs-repo');
+const jobsRepo = createJobsRepo(db);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SCHEMA MIGRATIONS (legacy inline) — safe ALTER TABLE for existing databases
 // ─────────────────────────────────────────────────────────────────────────────
 try { db.exec('ALTER TABLE netsuite_consumption_daily ADD COLUMN category TEXT'); } catch {}
@@ -3100,9 +3108,23 @@ const backPropShippedToJobsStmt = db.prepare(`
       OR ship_date IS NULL)
 `);
 
-const upsertShippedJobTxn = db.transaction((args, invoice) => {
+// upsertShippedJobTxn writes to dvi_shipped_jobs (authoritative SHIPLOG mirror)
+// AND back-props status/stage/ship_date into the unified jobs row. As of
+// Step 3 of Task #19 (2026-05-05) it ALSO calls jobsRepo.upsert() for the
+// same back-prop, so every SHIPLOG-driven write to jobs gets a state_history
+// audit row. Repo errors are caught — they log but don't roll back the main
+// SHIPLOG writes. Once we trust the repo audit (a day or two), the direct
+// backPropShippedToJobsStmt becomes redundant and gets removed.
+const upsertShippedJobTxn = db.transaction((args, invoice, repoArgs) => {
   upsertShippedJobStmt.run(...args);
   backPropShippedToJobsStmt.run(invoice);
+  if (repoArgs) {
+    try {
+      jobsRepo.upsert(repoArgs);
+    } catch (e) {
+      console.warn(`[shiplog-backprop] repo audit failed for invoice ${invoice}: ${e.message}`);
+    }
+  }
 });
 
 function upsertShippedJob(p) {
@@ -3125,7 +3147,35 @@ function upsertShippedJob(p) {
     R.sphere || null, R.cylinder || null, R.axis || null, R.pd || null, R.add || null,
     L.sphere || null, L.cylinder || null, L.axis || null, L.pd || null, L.add || null,
   ];
-  upsertShippedJobTxn(args, p.invoice);
+
+  // Step 3 of Task #19 — parallel audit through jobs-repo. Patch matches
+  // what the existing back-prop SQL writes (status is derived from
+  // current_stage by the contract). observedAt is ship event time when we
+  // can build it from the XML, otherwise wall-clock now.
+  const shipDateIso = convertDate(p.shipDate);
+  const repoArgs = contract_isValidInvoice(p.invoice) ? {
+    invoice: String(p.invoice),
+    patch: {
+      current_stage: 'SHIPPED',
+      ship_date: shipDateIso,
+      ship_time: p.shipTime || null,
+    },
+    source: 'shiplog-backprop',
+    observedAt: p.shippedAt || Date.now(),
+    actor: 'db.js:upsertShippedJob',
+    metadata: { shipDate: shipDateIso, file: p.fileName || undefined },
+  } : null;
+
+  upsertShippedJobTxn(args, p.invoice, repoArgs);
+}
+
+// Cheap invoice-shape check matching the contract's numericInvoiceGuard.
+// We do this in upsertShippedJob so we can SKIP the repo call (vs letting
+// the repo throw InvalidKeyError into our catch and log noise on every
+// SHIPLOG XML with a non-numeric invoice).
+function contract_isValidInvoice(inv) {
+  if (inv == null) return false;
+  return /^\d{4,}$/.test(String(inv));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

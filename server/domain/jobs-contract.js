@@ -234,13 +234,18 @@ const FIELD_RULES = Object.freeze({
 
   // db.js:3454 — xml OVERWRITES ship_date (no COALESCE). Only xml-shiplog
   // ever sets these.
+  // ship_date / ship_time: xml-shiplog is primary (parses the SHIPLOG XML
+  // directly). shiplog-backprop is added because that's literally the
+  // role of the back-prop step — copying ship_date/ship_time from the
+  // authoritative dvi_shipped_jobs row into the unified jobs row. self-heal
+  // does the same recovery work at server boot for any rows that drifted.
   ship_date: {
-    priority: ['xml-shiplog'],
+    priority: ['xml-shiplog', 'shiplog-backprop', 'self-heal'],
     onConflict: 'priority-wins',
     guards: [],
   },
   ship_time: {
-    priority: ['xml-shiplog'],
+    priority: ['xml-shiplog', 'shiplog-backprop', 'self-heal'],
     onConflict: 'priority-wins',
     guards: [],
   },
