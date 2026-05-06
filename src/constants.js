@@ -67,7 +67,7 @@ export const DEFAULT_SETTINGS = {
   pin: null,
   pinEnabled: false,
   anthropicApiKey: '',
-  gatewayUrl: 'http://localhost:3001',
+  gatewayUrl: '',
   itempathUrl: '',
   itempathToken: '',
   dviUrl: '',

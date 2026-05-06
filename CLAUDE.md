@@ -1,6 +1,6 @@
 # CLAUDE.md — Lab_Assistant Project Context
 # Pair Eyewear · Irvine, CA · VP R&D: Phil
-# Last updated: March 2026 · Handed off from claude.ai chat sessions
+# Last updated: 2026-05-06 · Handed off from claude.ai chat sessions
 
 ---
 
@@ -21,26 +21,42 @@ He is the primary stakeholder and daily user. Do not over-explain. Be specific a
 ## Architecture Overview
 
 ```
-Browser (React SPA)          Server (Node.js)            External APIs
-─────────────────────        ────────────────────        ──────────────
-src/App.jsx                  server/oven-timer-server.js  ItemPath/Kardex (live, 60s poll)
-  ├─ Main app + all tabs       ├─ REST API (:3002)         DVI (jobs, 90s poll)
-  ├─ ?mode=tablet              ├─ WebSocket (timers)       SOM/Schneider (live, 30s poll)
-  └─ ?mode=corporate           ├─ /api/report (Word gen)   Looker (nightly ETL 2AM)
-                               ├─ /api/dvi/*               Slack (webhooks)
-Standalone HTML                ├─ /api/itempath/*
-─────────────────────          ├─ /api/som/*
-standalone/OvenTimer.html      └─ /api/report
-standalone/CoatingTimer.html
-standalone/AssemblyDashboard.html  server/dvi-sync.js          → DVI SMB share (file mirror)
-                              server/dvi-trace.js         → DVI TRACE log tail (live job state)
-                              server/itempath-adapter.js  → ItemPath API
-                              server/som-adapter.js       → SOM MySQL (machines/conveyors)
-                              server/looker-adapter.js    → Looker REST (historical reports)
-                              server/network-adapter.js   → UniFi cloud Site Manager
-                              server/limble-adapter.js    → Limble CMMS (maintenance)
-                              server/slack-proxy.js       → Slack webhooks
+Browser (React SPA)               Server (Node.js)              External APIs
+────────────────────────          ─────────────────────         ──────────────
+src/App.jsx (shell + some tabs)   server/oven-timer-server.js   ItemPath/Kardex (60s)
+src/components/tabs/                ├─ Lab API (:3002)          DVI (file-based)
+  ├─ OverviewTab.jsx                ├─ WebSocket (timers)       SOM/Schneider (30s)
+  ├─ InventoryTab.jsx               ├─ /api/report (Word)       Looker (4hr poll)
+  ├─ MaintenanceTab.jsx             ├─ /api/dvi/*               Slack (webhooks)
+  ├─ AnalyticsTab.jsx               ├─ /api/itempath/*
+  ├─ ProductionAnalysisTab.jsx      ├─ /api/som/*
+  └─ SettingsTab.jsx                ├─ Reverse-proxy →:3001     gateway/index.ts (:3001)
+src/constants.js (DEFAULT_SETTINGS) │   /web/* /gateway/* /api/slack/*
+                                  server/dvi-sync.js          → DVI SMB share
+                                  server/dvi-trace.js         → DVI TRACE log tail
+Standalone HTML                   server/itempath-adapter.js  → ItemPath REST
+────────────────────────          server/som-adapter.js       → SOM MySQL
+standalone/OvenTimer.html         server/looker-adapter.js    → Looker REST
+standalone/CoatingTimer.html      server/network-adapter.js   → UniFi cloud
+standalone/AssemblyDashboard.html server/limble-adapter.js    → Limble CMMS
+                                  server/slack-proxy.js       → Slack
+                                  server/domain/jobs-repo.js  → canonical writer
+                                                              for jobs table
 ```
+
+**Single canonical write path for `jobs`:** Every INSERT/UPDATE on the `jobs`
+table routes through `server/domain/jobs-repo.js`. The repo enforces a
+contract (priority lists, COALESCE-style merges, terminal-stage guards) and
+writes a `state_history` audit row in the same transaction. Direct writes
+are blocked by SQLite triggers and a CI script (`scripts/audit-jobs-writers.js`).
+See "Task #19 / domain layer" notes for context.
+
+**Frontend uses same-origin URLs for all backend calls.** `/api/*` routes go
+to the Lab Server (3002); `/web/*`, `/gateway/*`, and `/api/slack/*` are
+forwarded by the Lab Server to the Gateway (3001) via an internal reverse
+proxy (`proxyToGateway` in `oven-timer-server.js`). This means a single
+Cloudflare tunnel hostname (e.g. `lab.paireyewear.tools` → `localhost:3002`)
+covers both servers — port 3001 stays local-only.
 
 **URL modes (App.jsx):**
 - `/` — Full desktop app, all features, all controls
@@ -119,8 +135,12 @@ Both need: `ITEMPATH_URL`, `ITEMPATH_TOKEN`, `LIMBLE_URL`, `LIMBLE_CLIENT_ID`, `
 
 ## File Map — Every File and What It Does
 
-### `src/App.jsx` (229KB — the main app)
-The entire React frontend. Single file. Contains:
+### `src/App.jsx` (~12,400 lines, partial split)
+The React frontend shell. Tabs are progressively being extracted to
+`src/components/tabs/*.jsx` (Overview, Inventory, Maintenance, Analytics,
+ProductionAnalysis, Settings already extracted; ~13K lines moved out as of
+2026-05-06). Default settings (including `gatewayUrl: ''` for same-origin)
+live in `src/constants.js`. App.jsx still contains:
 
 **Tabs:**
 1. **Overview** — KPI cards, live activity feed, zone map
@@ -341,8 +361,11 @@ through the tray, and the lab owns that event stream.
 
 ## Known Issues / Technical Debt
 
-1. **App.jsx is a single massive file (229KB, ~3,800 lines).** Works fine but should be
-   split into components when doing significant future work. Split by tab.
+1. **App.jsx split is partially complete.** ~13K lines extracted to
+   `src/components/tabs/*.jsx` (2026-05-06). App.jsx is still ~12,400 lines —
+   continued tab extraction remains useful for any new significant work.
+   When grepping for frontend behavior, always include `src/components/tabs/`
+   AND `src/constants.js` — looking only at `src/App.jsx` will miss things.
 
 2. **All tray/batch data is mock.** The app generates data in-memory on load. The integration
    path is: server adapters poll APIs → expose via `/api/*` endpoints → App.jsx polls those
@@ -420,9 +443,9 @@ npm run dev
 6. **Smart Tray retrofit** — Order per SmartTray_Retrofit_BOM.docx (~$1,880 for 140 trays).
    Minew E7 beacons, 3M VHB tape, Brother QL-820NWB labels. 4-hour retrofit session.
 
-7. **Split App.jsx into components** — When doing significant work on any tab, extract it
-   to `src/components/[TabName]Tab.jsx`. Reduces file size and makes Claude Code sessions
-   more manageable.
+7. **Continue App.jsx split.** Six tabs are already extracted to
+   `src/components/tabs/`. Remaining tabs and large helpers in App.jsx
+   should follow the same pattern when worked on.
 
 ---
 

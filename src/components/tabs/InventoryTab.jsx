@@ -322,7 +322,7 @@ function EmbeddedAIPanel({ domain, contextData, serverUrl, onClose, settings }) 
     setResponse('');
 
     try {
-      const gatewayUrl = settings?.gatewayUrl || 'http://localhost:3001';
+      const gatewayUrl = settings?.gatewayUrl || '';
       const res = await fetch(`${gatewayUrl}/web/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

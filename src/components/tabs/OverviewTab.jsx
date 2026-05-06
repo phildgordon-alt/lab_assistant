@@ -68,7 +68,7 @@ const Card = ({children,style,onClick})=>(
 
 // ── Gateway helper ─────────────────────────────────────────────
 const callGateway = async (settings, question, { onChunk, agent, userId = 'web-user', context } = {}) => {
-  const gatewayUrl = settings?.gatewayUrl || `http://${window.location.hostname}:3001`;
+  const gatewayUrl = settings?.gatewayUrl || ``;
   const res = await fetch(`${gatewayUrl}/web/ask-sync`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -179,7 +179,7 @@ function useElapsed(startedAt, running) {
 function useSlackConfig(onIncoming, setMessages){
   const KEY="la_slack_v2";
   const DEFAULTS={
-    proxyUrl:`http://${window.location.hostname}:3001/api/slack/messages?channel=C0AJH9LG96D`,
+    proxyUrl:`/api/slack/messages?channel=C0AJH9LG96D`,
     channel:"lab-assistant",
     channelId:"C0AJH9LG96D"
   };
@@ -193,7 +193,7 @@ function useSlackConfig(onIncoming, setMessages){
   const post=useCallback(async(text)=>{
     setStatus("sending");
     try{
-      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || `http://${window.location.hostname}:3001/api/slack/send`;
+      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || `/api/slack/send`;
       const r=await fetch(sendUrl,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -377,7 +377,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     try{
       const agent=KPI_AGENTS[modalKpi]||'ShiftReportAgent';
       const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nUse your MCP tools to get real data. Do not invent data.`;
-      const res=await fetch(`http://${window.location.hostname}:3001/web/ask-sync`,{
+      const res=await fetch(`/web/ask-sync`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({question:aiQuery,agent,userId:'kpi-modal',context})
@@ -1154,7 +1154,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
             <div style={{display:"flex",gap:6}}>
               <button onClick={async()=>{
                 const mode=confirm("Clear ALL messages from Slack channel?\n\nOK = Delete all messages\nCancel = Delete bot messages only");
-                const gw=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+                const gw=settings?.gatewayUrl||``;
                 try{
                   const r=await fetch(`${gw}/api/slack/messages${mode?"?all=true":""}`,{method:"DELETE"});
                   const d=await r.json();
@@ -1180,7 +1180,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                 {key:"channel",label:"Channel name (no #)",ph:"lab-assistant",type:"text"},
                 {key:"channelUrl",label:"Channel URL (for QR code)",ph:"https://yourco.slack.com/archives/C...",type:"url"},
                 {key:"channelId",label:"Channel ID (incoming)",ph:"C05AB12XYZ",type:"text"},
-                {key:"proxyUrl",label:"Local proxy URL (incoming)",ph:"http://${window.location.hostname}:3001/slack/messages",type:"url"},
+                {key:"proxyUrl",label:"Local proxy URL (incoming)",ph:"/slack/messages",type:"url"},
               ].map(f=>(
                 <div key={f.key} style={{marginBottom:10}}>
                   <label style={{fontSize:9,color:"#E8A9F4",fontFamily:mono,display:"block",marginBottom:3,letterSpacing:1}}>{f.label.toUpperCase()}</label>

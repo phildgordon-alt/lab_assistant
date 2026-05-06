@@ -14,7 +14,7 @@ function DevOpsAICard({settings,connections}){
     if(!question.trim()) return;
     setLoading(true);
     setResponse('');
-    const gwUrl = settings?.gatewayUrl || `http://${window.location.hostname}:3001`;
+    const gwUrl = settings?.gatewayUrl || ``;
     try {
       // Build context from connections
       const ctx = connections ? `Current connection status:\n${JSON.stringify(connections.connections,null,2)}` : '';
@@ -292,7 +292,7 @@ function AgentsPanel({settings}){
   const [showCreate,setShowCreate]=useState(false);
   const [newAgentName,setNewAgentName]=useState('');
   const [newAgentContent,setNewAgentContent]=useState('');
-  const gwUrl=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+  const gwUrl=settings?.gatewayUrl||``;
 
   // Load agents on mount
   useEffect(()=>{
@@ -697,7 +697,7 @@ function DataImportPanel({settings}){
   const [dviData,setDviData]=useState(null);
   const [uploads,setUploads]=useState({uploads:[],missingDates:[],missingCount:0});
   const [error,setError]=useState(null);
-  const gwUrl=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+  const gwUrl=settings?.gatewayUrl||``;
   const fileInputRef=useRef(null);
 
   // Load existing DVI data and upload history on mount
@@ -1570,7 +1570,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   const testGatewayConnection = async () => {
     setTestingGateway(true);
     try {
-      const resp = await fetch(`${settings.gatewayUrl || `http://${window.location.hostname}:3001`}/health`, {
+      const resp = await fetch(`${settings.gatewayUrl || ``}/health`, {
         signal: AbortSignal.timeout(5000)
       });
       if (resp.ok) {
@@ -1594,7 +1594,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
     setCleaningSlack(true);
     setSlackCleanResult(null);
     try {
-      const gwUrl = settings.gatewayUrl || `http://${window.location.hostname}:3001`;
+      const gwUrl = settings.gatewayUrl || ``;
       const url = deleteAllSlackMsgs ? `${gwUrl}/api/slack/messages?all=true` : `${gwUrl}/api/slack/messages`;
       const resp = await fetch(url, {
         method: 'DELETE',
@@ -1616,7 +1616,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   // Load gateway dashboard data
   const loadGatewayData = async () => {
     setLoadingGateway(true);
-    const gwUrl = settings.gatewayUrl || `http://${window.location.hostname}:3001`;
+    const gwUrl = settings.gatewayUrl || ``;
     try {
       const [statsRes, reqsRes] = await Promise.all([
         fetch(`${gwUrl}/gateway/stats/detailed?since=${statsPeriod}`, { signal: AbortSignal.timeout(5000) }),
@@ -1640,7 +1640,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   // Load connections status
   const loadConnections = async () => {
     setLoadingConnections(true);
-    const gwUrl = settings.gatewayUrl || `http://${window.location.hostname}:3001`;
+    const gwUrl = settings.gatewayUrl || ``;
     try {
       const resp = await fetch(`${gwUrl}/gateway/connections`, { signal: AbortSignal.timeout(15000) });
       if (resp.ok) {
@@ -1665,7 +1665,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
   // Load MCP tools and agents
   const loadMcpData = async () => {
     setLoadingMcp(true);
-    const gwUrl = settings.gatewayUrl || `http://${window.location.hostname}:3001`;
+    const gwUrl = settings.gatewayUrl || ``;
     try {
       const [toolsRes, agentsRes] = await Promise.all([
         fetch(`${gwUrl}/gateway/tools`, { signal: AbortSignal.timeout(5000) }),
@@ -1697,7 +1697,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
     if (!selectedTool) return;
     setTestingTool(true);
     setToolTestResult(null);
-    const gwUrl = settings.gatewayUrl || `http://${window.location.hostname}:3001`;
+    const gwUrl = settings.gatewayUrl || ``;
     try {
       let input = {};
       try { input = JSON.parse(toolTestInput); } catch { input = {}; }
@@ -1716,7 +1716,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
 
   // Save updated rate limits
   const saveLimits = async () => {
-    const gwUrl = settings.gatewayUrl || `http://${window.location.hostname}:3001`;
+    const gwUrl = settings.gatewayUrl || ``;
     try {
       const resp = await fetch(`${gwUrl}/gateway/config/limits`, {
         method: 'POST',
@@ -2224,7 +2224,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                           <button onClick={async(e)=>{
                             e.stopPropagation();
                             if(!confirm(`Delete custom tool "${tool.name}"?`))return;
-                            const gwUrl=settings.gatewayUrl||`http://${window.location.hostname}:3001`;
+                            const gwUrl=settings.gatewayUrl||``;
                             await fetch(`${gwUrl}/gateway/tools/custom/${tool.name}`,{method:'DELETE'});
                             const resp=await fetch(`${gwUrl}/gateway/tools`,{signal:AbortSignal.timeout(5000)});
                             if(resp.ok){const data=await resp.json();setMcpTools(data.tools||[]);}
@@ -2352,7 +2352,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                     onClick={async()=>{
                       setSavingTool(true);
                       try{
-                        const gwUrl=settings.gatewayUrl||`http://${window.location.hostname}:3001`;
+                        const gwUrl=settings.gatewayUrl||``;
                         let schema={type:"object",properties:{}};
                         try{schema=JSON.parse(newTool.input_schema);}catch{}
                         const resp=await fetch(`${gwUrl}/gateway/tools/custom`,{
@@ -2597,7 +2597,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                 <label style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:6}}>MCP GATEWAY URL</label>
                 <div style={{display:"flex",gap:8}}>
                   <input value={settings.gatewayUrl||''} onChange={e=>setSettings(prev=>({...prev,gatewayUrl:e.target.value}))}
-                    placeholder="http://localhost:3001"
+                    placeholder="(blank = same-origin via Lab Server proxy)"
                     style={{flex:1,background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 12px",color:T.text,fontSize:13,fontFamily:mono}}/>
                   <button onClick={testGatewayConnection} disabled={testingGateway}
                     style={{background:T.purple,border:"none",borderRadius:8,padding:"10px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:testingGateway?0.7:1}}>
@@ -2638,7 +2638,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                   <div style={{width:10,height:10,borderRadius:"50%",background:gatewayStatus?.ok?T.green:T.textDim}}/>
                   <span style={{fontSize:12,fontWeight:700,color:T.text}}>MCP Gateway</span>
                 </div>
-                <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{settings.gatewayUrl || `http://${window.location.hostname}:3001`}</div>
+                <div style={{fontSize:10,color:T.textMuted,fontFamily:mono}}>{settings.gatewayUrl || ``}</div>
                 {gatewayStatus?.uptime && <div style={{fontSize:9,color:T.textDim,marginTop:4}}>Uptime: {Math.round(gatewayStatus.uptime/60)}m</div>}
               </div>
               <div style={{background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,padding:"14px 16px"}}>
@@ -3005,7 +3005,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
 
       {/* ══ API SPEND ══ */}
       {sub==="spend"&&(
-        <SpendTracker gatewayUrl={settings?.gatewayUrl||`http://${window.location.hostname}:3001`}/>
+        <SpendTracker gatewayUrl={settings?.gatewayUrl||``}/>
       )}
     </div>
   );
