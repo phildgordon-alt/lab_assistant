@@ -5943,11 +5943,12 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                   <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>MAX DAYS</th>
                   <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>OVER SLA</th>
                   <th style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim, fontWeight: 700 }}>OVER-SLA %</th>
+                  <th style={{ padding: '10px 12px', textAlign: 'center', color: T.textDim, fontWeight: 700 }}>ZONE DISTRIBUTION (0-1d / 1-2d / 2-3d / 3-5d / 5-10d / 10+d)</th>
                 </tr>
               </thead>
               <tbody>
                 {!shippedLoading && rows.length === 0 && (
-                  <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: T.textDim }}>No shipped jobs in window</td></tr>
+                  <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: T.textDim }}>No shipped jobs in window</td></tr>
                 )}
                 {rows.map(r => (
                   <tr key={r.label} style={{ borderBottom: `1px solid ${T.border}` }}>
@@ -5958,6 +5959,19 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textMuted }}>{r.maxDays}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: r.overSLA > 0 ? T.amber : T.textDim }}>{r.overSLA.toLocaleString()}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: r.overSLAPct > 5 ? T.red : T.green, fontWeight: 700 }}>{r.overSLAPct}%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'center', fontFamily: mono, fontSize: 11 }}>
+                      <span style={{ color: T.green }}>{r.d01}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: T.amber }}>{r.d12}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: T.red }}>{r.d23}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: '#cc0000', fontWeight: 700 }}>{r.d35}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: '#9333ea' }}>{r.d510}</span>
+                      <span style={{ color: T.textDim }}> / </span>
+                      <span style={{ color: '#7c2d12' }}>{r.d10p}</span>
+                    </td>
                   </tr>
                 ))}
                 {rows.length > 0 && (
@@ -5969,6 +5983,12 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>—</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{rows.reduce((s, r) => s + r.overSLA, 0).toLocaleString()}</td>
                     <td style={{ padding: '10px 12px', textAlign: 'right', color: T.textDim }}>{total > 0 ? Math.round((rows.reduce((s, r) => s + r.overSLA, 0) / total) * 1000) / 10 : 0}%</td>
+                    <td style={{ padding: '10px 12px', textAlign: 'center', fontFamily: mono, fontSize: 11, color: T.textDim }}>
+                      {(() => {
+                        const sum = (k) => rows.reduce((s, r) => s + (r[k] || 0), 0);
+                        return `${sum('d01')} / ${sum('d12')} / ${sum('d23')} / ${sum('d35')} / ${sum('d510')} / ${sum('d10p')}`;
+                      })()}
+                    </td>
                   </tr>
                 )}
               </tbody>

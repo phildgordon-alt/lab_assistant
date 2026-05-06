@@ -3188,13 +3188,22 @@ Respond with a structured batching plan in this format:
       const sla = slaTargetForLensType(r.lens_type);
       let g = ltMap.get(cat);
       if (!g) {
-        g = { label: cat, count: 0, totalDays: 0, overSLA: 0, maxDays: 0 };
+        g = { label: cat, count: 0, totalDays: 0, overSLA: 0, maxDays: 0,
+              d01: 0, d12: 0, d23: 0, d35: 0, d510: 0, d10p: 0 };
         ltMap.set(cat, g);
       }
       g.count++;
       g.totalDays += r.days_in_lab;
       if (r.days_in_lab > g.maxDays) g.maxDays = r.days_in_lab;
       if (r.days_in_lab > sla) g.overSLA++;
+      // Same non-overlapping buckets as the bucket cards / active lens-type table
+      const d = r.days_in_lab;
+      if      (d < 1)  g.d01++;
+      else if (d < 2)  g.d12++;
+      else if (d < 3)  g.d23++;
+      else if (d < 5)  g.d35++;
+      else if (d < 10) g.d510++;
+      else             g.d10p++;
     }
     const byLensTypeShipped = Array.from(ltMap.values()).map(g => ({
       label: g.label,
@@ -3204,6 +3213,7 @@ Respond with a structured batching plan in this format:
       maxDays: Math.round(g.maxDays * 10) / 10,
       overSLA: g.overSLA,
       overSLAPct: g.count > 0 ? Math.round((g.overSLA / g.count) * 1000) / 10 : 0,
+      d01: g.d01, d12: g.d12, d23: g.d23, d35: g.d35, d510: g.d510, d10p: g.d10p,
     })).sort((a, b) => b.count - a.count);
     return json(res, { days, total, byLensTypeShipped });
   }
