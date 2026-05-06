@@ -94,7 +94,7 @@ export const DEFAULT_SETTINGS = {
     { id: 'eq2', categoryId: 'coaters', name: 'Satis 1200-B', serialNumber: '', location: 'Lab Floor 1' },
     { id: 'eq3', categoryId: 'coaters', name: 'Opticoat S', serialNumber: '', location: 'Lab Floor 2' },
   ],
-  serverUrl: 'http://localhost:3002',
+  serverUrl: '',
   slackWebhook: '',
 };
 

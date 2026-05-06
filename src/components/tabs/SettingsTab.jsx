@@ -119,7 +119,7 @@ const SOM_CATEGORIES = [
 ];
 
 function SOMEquipmentSection({somDevices,setSomDevices,somDeviceOverrides,setSomDeviceOverrides,loadingSomDevices,setLoadingSomDevices,somEquipSearch,setSomEquipSearch,somEquipCategory,setSomEquipCategory,settings}){
-  const serverUrl = settings?.serverUrl || `http://${window.location.hostname}:3002`;
+  const serverUrl = settings?.serverUrl || ``;
 
   // Load SOM devices on mount
   useEffect(()=>{
@@ -538,7 +538,7 @@ You are a specialist agent for Pair Eyewear's lens lab operations. You help with
 function DVIFilesPanel({settings}){
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(false);
-  const serverUrl=settings?.serverUrl||`http://${window.location.hostname}:3002`;
+  const serverUrl=settings?.serverUrl||``;
 
   const refresh=async()=>{
     setLoading(true);
@@ -1005,7 +1005,7 @@ const VALID_AGENTS = [
 ];
 
 function KnowledgeBasePanel({ovenServerUrl}){
-  const serverUrl = ovenServerUrl || `http://${window.location.hostname}:3002`;
+  const serverUrl = ovenServerUrl || ``;
   const [docs,setDocs]=useState([]);
   const [loading,setLoading]=useState(true);
   const [filter,setFilter]=useState({category:null,agent:null});
@@ -1492,7 +1492,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
     setSavingEnv(serviceKey);
     setEnvSaveResult(prev=>({...prev,[serviceKey]:null}));
     try {
-      const serverUrl = settings.serverUrl || `http://${window.location.hostname}:3002`;
+      const serverUrl = settings.serverUrl || ``;
       // Map settings keys to env var names using the label field
       const envVars = {};
       for (const cfg of configs) {
@@ -2578,7 +2578,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                 <label style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1,display:"block",marginBottom:6}}>OVEN/MAINTENANCE SERVER URL</label>
                 <div style={{display:"flex",gap:8}}>
                   <input value={settings.serverUrl||''} onChange={e=>setSettings(prev=>({...prev,serverUrl:e.target.value}))}
-                    placeholder="http://localhost:3002"
+                    placeholder=""
                     style={{flex:1,background:T.surface,border:`1px solid ${T.border}`,borderRadius:8,padding:"10px 12px",color:T.text,fontSize:13,fontFamily:mono}}/>
                   <button onClick={testServerConnection} disabled={testingServer}
                     style={{background:T.blue,border:"none",borderRadius:8,padding:"10px 16px",color:"#fff",fontSize:12,fontWeight:700,cursor:"pointer",opacity:testingServer?0.7:1}}>
@@ -2888,7 +2888,7 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
           </Card>
         </div>
       )}
-      {sub==="database"&&(<DatabaseSection serverUrl={settings?.ovenServerUrl||`http://${window.location.hostname}:3002`}/>)}
+      {sub==="database"&&(<DatabaseSection serverUrl={settings?.ovenServerUrl||``}/>)}
       {sub==="security"&&(
         <div style={{display:"flex",flexDirection:"column",gap:16}}>
           <Card>

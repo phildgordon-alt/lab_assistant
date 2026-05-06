@@ -223,7 +223,7 @@ function LensIntelSection({ sku }) {
   const [data, setData] = useState(null);
   useEffect(() => {
     if (!sku) return;
-    fetch(`http://${window.location.hostname}:3002/api/lens-intel/sku/${encodeURIComponent(sku)}`)
+    fetch(`/api/lens-intel/sku/${encodeURIComponent(sku)}`)
       .then(r => r.json()).then(setData).catch(() => {});
   }, [sku]);
   if (!data?.status) return null;

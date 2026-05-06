@@ -853,8 +853,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchInventory=async()=>{
       try{
         const [invRes,alertRes]=await Promise.all([
-          fetch(`http://${window.location.hostname}:3002/api/inventory`),
-          fetch(`http://${window.location.hostname}:3002/api/inventory/alerts`)
+          fetch(`/api/inventory`),
+          fetch(`/api/inventory/alerts`)
         ]);
         const inv=await invRes.json();
         const alerts=await alertRes.json();
@@ -879,8 +879,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchMaintenance=async()=>{
       try{
         const [statsRes,tasksRes]=await Promise.all([
-          fetch(`http://${window.location.hostname}:3002/api/maintenance/stats`),
-          fetch(`http://${window.location.hostname}:3002/api/maintenance/tasks`)
+          fetch(`/api/maintenance/stats`),
+          fetch(`/api/maintenance/tasks`)
         ]);
         const stats=await statsRes.json();
         const tasks=await tasksRes.json();
@@ -909,9 +909,9 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchPutWall=async()=>{
       try{
         const [pwRes,invRes,dailyRes]=await Promise.all([
-          fetch(`http://${window.location.hostname}:3002/api/inventory/putwall`),
-          fetch(`http://${window.location.hostname}:3002/api/inventory`),
-          fetch(`http://${window.location.hostname}:3002/api/inventory/picks/daily`)
+          fetch(`/api/inventory/putwall`),
+          fetch(`/api/inventory`),
+          fetch(`/api/inventory/picks/daily`)
         ]);
         const data=await pwRes.json();
         setPutWallData({
@@ -951,9 +951,9 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     const fetchCoating=async()=>{
       try{
         const [intelRes,ovenRes,coaterRes]=await Promise.all([
-          fetch(`http://${window.location.hostname}:3002/api/coating/intelligence`),
-          fetch(`http://${window.location.hostname}:3002/api/oven-runs?limit=10`),
-          fetch(`http://${window.location.hostname}:3002/api/coating/runs?limit=10`)
+          fetch(`/api/coating/intelligence`),
+          fetch(`/api/oven-runs?limit=10`),
+          fetch(`/api/coating/runs?limit=10`)
         ]);
         const intel=intelRes.ok?await intelRes.json():null;
         const ovenRuns=ovenRes.ok?await ovenRes.json():null;
@@ -987,9 +987,9 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
       try{
         // Fetch orders, devices, and active jobs in parallel
         const [ordersRes, devicesRes, activeJobsRes]=await Promise.all([
-          fetch(`http://${window.location.hostname}:3002/api/som/orders`),
-          fetch(`http://${window.location.hostname}:3002/api/som/devices`),
-          fetch(`http://${window.location.hostname}:3002/api/jobs/active`)
+          fetch(`/api/som/orders`),
+          fetch(`/api/som/devices`),
+          fetch(`/api/jobs/active`)
         ]);
         const ordersData=await ordersRes.json();
         const devicesData=await devicesRes.json();

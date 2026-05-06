@@ -122,7 +122,7 @@ function MachineChart({ serverUrl, date }) {
 }
 
 export default function ProductionAnalysisTab({ serverUrl, settings }) {
-  const base = serverUrl || `http://${window.location.hostname}:3002`;
+  const base = serverUrl || ``;
 
   const [date, setDate] = useState(todayStr());
   const [compareOn, setCompareOn] = useState(false);

@@ -239,7 +239,7 @@ const DEFAULT_SETTINGS = {
     { id: 'eq2', categoryId: 'coaters', name: 'Satis 1200-B', serialNumber: '', location: 'Lab Floor 1' },
     { id: 'eq3', categoryId: 'coaters', name: 'Opticoat S', serialNumber: '', location: 'Lab Floor 2' },
   ],
-  serverUrl: `http://${window.location.hostname}:3002`,
+  serverUrl: ``,
   slackWebhook: '',
   demoMode: false,
 };
@@ -1999,7 +1999,7 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
   useEffect(()=>{
     const fetchPutWall=async()=>{
       try{
-        const res=await fetch(`http://${window.location.hostname}:3002/api/inventory/putwall`);
+        const res=await fetch(`/api/inventory/putwall`);
         const data=await res.json();
         setPutWallData({
           WH1:data.WH1||{putWallCount:0,laptopCount:0,manualCount:0,totalOrders:0,putWallOrders:[]},
@@ -2209,7 +2209,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
 
   // Poll coating intelligence endpoint with config as query params
   useEffect(()=>{
-    const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+    const base=ovenServerUrl||``;
     let active=true;
     const poll=async()=>{
       try{
@@ -2266,7 +2266,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
 
 // ── Coating Pipeline (Container Inheritance) ─────────────────
 function CoatingPipelineView({serverUrl,settings}){
-  const base=serverUrl||`http://${window.location.hostname}:3002`;
+  const base=serverUrl||``;
   const mono="'JetBrains Mono',monospace";
   const isDemo=settings?.demoMode||false;
 
@@ -3537,7 +3537,7 @@ function BatchBuilderView({intel,batchEdits,setBatchEdits,serverUrl}){
 function OvenStatusView({intel,serverUrl}){
   const [ovenHistory,setOvenHistory]=useState([]);
   useEffect(()=>{
-    const base=serverUrl||`http://${window.location.hostname}:3002`;
+    const base=serverUrl||``;
     fetch(`${base}/api/oven-runs?limit=50`).then(r=>r.json()).then(d=>setOvenHistory(d.runs||[])).catch(()=>{});
   },[serverUrl]);
 
@@ -6167,7 +6167,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   );
 }
 
-function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl=`http://${window.location.hostname}:3002`,settings}){
+function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl=``,settings}){
   // Get coater machines from settings (fallback to MACHINES constant)
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
@@ -6195,7 +6195,7 @@ function AIAssistantTab({trays,batches,dviJobs=[],breakage=[],ovenServerUrl=`htt
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const [reportDownloading,setReportDownloading]=useState(null); // messageIdx
-  const [serverUrl,setServerUrl]=useState(`http://${window.location.hostname}:3002`);
+  const [serverUrl,setServerUrl]=useState(``);
   const chatRef=useRef(null);
 
   const REPORT_KEYWORDS=["report","summary","analysis","generate","write up","breakdown","overview"];
@@ -6701,7 +6701,7 @@ function BreakageHistory({breakage,serverHistory=[]}){
 
 // ── Network Operations Tab ───────────────────────────────────
 function NetworkTab({ovenServerUrl,settings}){
-  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const base=ovenServerUrl||``;
   const mono="'JetBrains Mono',monospace";
   const gwBase=settings?.gatewayUrl||``;
 
@@ -7458,7 +7458,7 @@ VLANs: ${(vlans||DEMO_VLANS).map(v=>`${v.name}: ${v.clients} clients, ${v.pct}%`
 // ── Early Warning System Tab ─────────────────────────────────
 // ── Vision Dashboard ─────────────────────────────────────────
 function VisionDashboard({ovenServerUrl,settings,isTablet}){
-  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const base=ovenServerUrl||``;
   const mono="'JetBrains Mono',monospace";
   const isDemo=settings?.demoMode||false;
 
@@ -7680,7 +7680,7 @@ function VisionDashboard({ovenServerUrl,settings,isTablet}){
 
 // ── Time at Lab Tab ──────────────────────────────────────────
 function TimeAtLabTab({ovenServerUrl,settings}){
-  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const base=ovenServerUrl||``;
   const mono="'JetBrains Mono',monospace";
   const isDemo=settings?.demoMode||false;
 
@@ -7980,7 +7980,7 @@ function TimeAtLabTab({ovenServerUrl,settings}){
 // ═══════════════════════════════════════════════════════════════════
 
 function FlowAgentTab({ovenServerUrl,settings}){
-  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const base=ovenServerUrl||``;
   const mono="'JetBrains Mono',monospace";
 
   const [snapshot,setSnapshot]=useState(null);
@@ -9461,7 +9461,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
 }
 
 function EarlyWarningTab({ovenServerUrl,settings}){
-  const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
+  const base=ovenServerUrl||``;
   const mono="'JetBrains Mono',monospace";
 
   const [alerts,setAlerts]=useState([]);
@@ -10747,7 +10747,7 @@ function YieldHistoryView(){
     let cancelled=false;
     async function load(){
       try{
-        const r=await fetch(`http://${window.location.hostname}:3002/api/breakage/yield-history`);
+        const r=await fetch(`/api/breakage/yield-history`);
         if(!r.ok) throw new Error(`HTTP ${r.status}`);
         const j=await r.json();
         if(!cancelled) setData(j);
@@ -11996,7 +11996,7 @@ function LabAssistantV2(){
   const [breakage,setBreakage]=useState([]);
   const [breakageMeta,setBreakageMeta]=useState({yieldToday:null,yield7d:null,shippedToday:0,dailyHistory:[]});
   const [connected]=useState(true);
-  const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||`http://${window.location.hostname}:3002`;}catch{return `http://${window.location.hostname}:3002`;} });
+  const [ovenServerUrl,setOvenServerUrl]=useState(()=>{ try{return JSON.parse(localStorage.getItem("la_slack_v2")||"{}").ovenServer||``;}catch{return ``;} });
   const [clock,setClock]=useState(new Date());
 
   // DVI jobs from gateway + shipped stats
@@ -12034,7 +12034,7 @@ function LabAssistantV2(){
   useEffect(()=>{
     const fetchDvi=async()=>{
       try{
-        const res=await fetch(`http://${window.location.hostname}:3002/api/dvi/jobs`);
+        const res=await fetch(`/api/dvi/jobs`);
         if(res.ok){
           const data=await res.json();
           // Filter out CANCELED and SHIPPED jobs — only active WIP
@@ -12050,7 +12050,7 @@ function LabAssistantV2(){
         }
       }catch(e){ console.warn("DVI fetch:",e.message); }
       try{
-        const incRes=await fetch(`http://${window.location.hostname}:3002/api/dvi/incoming?days=2`);
+        const incRes=await fetch(`/api/dvi/incoming?days=2`);
         if(incRes.ok){const incData=await incRes.json();setIncomingToday(incData.todayCount||0);}
       }catch{}
     };
@@ -12063,7 +12063,7 @@ function LabAssistantV2(){
   useEffect(()=>{
     const fetchBreakage=async()=>{
       try{
-        const res=await fetch(`http://${window.location.hostname}:3002/api/breakage`);
+        const res=await fetch(`/api/breakage`);
         if(res.ok){
           const data=await res.json();
           setBreakage(data.breakage||[]);
@@ -12086,7 +12086,7 @@ function LabAssistantV2(){
   useEffect(()=>{
     const fetchHealth=async()=>{
       try{
-        const res=await fetch(`http://${window.location.hostname}:3002/api/health`);
+        const res=await fetch(`/api/health`);
         if(res.ok) setSystemHealth(await res.json());
       }catch(e){ setSystemHealth({status:'down',systems:{server:{status:'down',message:e.message}}}); }
     };
@@ -12101,7 +12101,7 @@ function LabAssistantV2(){
     const stageIcon=(s)=>({INCOMING:"📥",NEL:"🔍",AT_KARDEX:"📦",SURFACING:"⚙",COATING:"🌡",CUTTING:"✂",ASSEMBLY:"🔧",QC:"🔬",SHIPPING:"📤",BREAKAGE:"💥",HOLD:"⏸"}[s]||"📡");
     const fetchEvents=async()=>{
       try{
-        const res=await fetch(`http://${window.location.hostname}:3002/api/dvi/trace/events?limit=20`);
+        const res=await fetch(`/api/dvi/trace/events?limit=20`);
         if(!res.ok)return;
         const data=await res.json();
         const evts=(data.events||data||[]);
