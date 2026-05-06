@@ -3975,22 +3975,31 @@ function queryJobsAgingFull() {
   // any stale row has status='ACTIVE' with current_stage='CANCELED' it still
   // gets filtered out of the aging dashboard.
   //
-  // Manual SKU holds (migration 004): jobs whose lens_opc_r OR lens_opc_l
-  // matches an active hold are excluded so SLA / outlier metrics aren't
-  // polluted by intentionally paused work. Released holds don't filter.
-  // The HOLD stage (set automatically by dvi-trace.js station mapping) is
-  // also excluded — kickout / laser-reject / QC-hold jobs aren't aging
-  // candidates either.
+  // Manual holds (migration 004): jobs picking a held SKU are excluded
+  // so SLA / outlier metrics aren't polluted by intentionally paused
+  // work. The SKU the user enters is matched against every plausible
+  // SKU-shaped column on the job row PLUS the picks_history fallback —
+  // works for frame UPCs (jobs.frame_upc / frame_sku), lens codes
+  // (jobs.lens_opc_r / lens_opc_l), and Kardex pick codes
+  // (picks_history.sku linked by order_id). Released holds don't filter.
+  // The trace-derived HOLD stage is also excluded.
   return db.prepare(`
     SELECT invoice, tray, current_stage, current_station, days_in_lab, entry_date,
            coating, rush, operator, lens_style, lens_type, frame_name, first_seen_at,
            status
-    FROM jobs
-    WHERE status IN ('ACTIVE','Active')
-      AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
-      AND lens_opc_r NOT IN (SELECT sku FROM holds WHERE status = 'active')
-      AND (lens_opc_l IS NULL OR lens_opc_l NOT IN (SELECT sku FROM holds WHERE status = 'active'))
-    ORDER BY days_in_lab DESC
+    FROM jobs j
+    WHERE j.status IN ('ACTIVE','Active')
+      AND (j.current_stage IS NULL OR j.current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
+      AND j.invoice NOT IN (
+        SELECT ph.order_id FROM picks_history ph
+        JOIN holds h ON h.sku = ph.sku
+        WHERE h.status = 'active' AND ph.order_id IS NOT NULL
+      )
+      AND (j.lens_opc_r IS NULL OR j.lens_opc_r NOT IN (SELECT sku FROM holds WHERE status = 'active'))
+      AND (j.lens_opc_l IS NULL OR j.lens_opc_l NOT IN (SELECT sku FROM holds WHERE status = 'active'))
+      AND (j.frame_upc  IS NULL OR j.frame_upc  NOT IN (SELECT sku FROM holds WHERE status = 'active'))
+      AND (j.frame_sku  IS NULL OR j.frame_sku  NOT IN (SELECT sku FROM holds WHERE status = 'active'))
+    ORDER BY j.days_in_lab DESC
   `).all();
 }
 

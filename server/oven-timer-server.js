@@ -3302,13 +3302,23 @@ Respond with a structured batching plan in this format:
       const rows = labDb.db.prepare(q).all(...params);
       // Enrich each hold with affected_count: jobs currently picking this SKU
       // and not in a terminal stage. Cheap query — runs once per hold.
+      // A SKU on a hold is matched against every column where a SKU-shaped
+      // value lives on the job row, plus the picks_history fallback. Phil
+      // enters whatever SKU is on the box / barcode — frame UPC, lens OPC,
+      // Kardex pick code — and we cast a wide net so the right jobs match.
       const enriched = rows.map(h => {
         const cnt = labDb.db.prepare(`
-          SELECT COUNT(*) AS n FROM jobs
-          WHERE status IN ('ACTIVE','Active')
-            AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
-            AND (lens_opc_r = ? OR lens_opc_l = ?)
-        `).get(h.sku, h.sku).n;
+          SELECT COUNT(*) AS n FROM jobs j
+          WHERE j.status IN ('ACTIVE','Active')
+            AND (j.current_stage IS NULL OR j.current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
+            AND (
+              j.lens_opc_r = ?
+              OR j.lens_opc_l = ?
+              OR j.frame_upc = ?
+              OR j.frame_sku = ?
+              OR j.invoice IN (SELECT order_id FROM picks_history WHERE sku = ?)
+            )
+        `).get(h.sku, h.sku, h.sku, h.sku, h.sku).n;
         return { ...h, affected_count: cnt };
       });
       return json(res, { holds: enriched });
@@ -3324,13 +3334,20 @@ Respond with a structured batching plan in this format:
       const hold = labDb.db.prepare('SELECT sku, status FROM holds WHERE id = ?').get(id);
       if (!hold) return json(res, { error: 'Hold not found' }, 404);
       const rows = labDb.db.prepare(`
-        SELECT invoice, current_stage, current_station, days_in_lab, lens_type, lens_opc_r, lens_opc_l, rush
-        FROM jobs
-        WHERE status IN ('ACTIVE','Active')
-          AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
-          AND (lens_opc_r = ? OR lens_opc_l = ?)
+        SELECT invoice, current_stage, current_station, days_in_lab, lens_type,
+               lens_opc_r, lens_opc_l, frame_upc, frame_sku, frame_name, rush
+        FROM jobs j
+        WHERE j.status IN ('ACTIVE','Active')
+          AND (j.current_stage IS NULL OR j.current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
+          AND (
+            j.lens_opc_r = ?
+            OR j.lens_opc_l = ?
+            OR j.frame_upc = ?
+            OR j.frame_sku = ?
+            OR j.invoice IN (SELECT order_id FROM picks_history WHERE sku = ?)
+          )
         ORDER BY days_in_lab DESC
-      `).all(hold.sku, hold.sku);
+      `).all(hold.sku, hold.sku, hold.sku, hold.sku, hold.sku);
       return json(res, { hold, jobs: rows });
     } catch (e) {
       return json(res, { error: e.message }, 500);
