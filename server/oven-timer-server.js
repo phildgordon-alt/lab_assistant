@@ -133,6 +133,48 @@ try {
   // non-null ship_date, AND copy ship_date into jobs atomically. Without these
   // guards a SHIPLOG XML lacking ShipDate would create a new zombie row
   // (status='SHIPPED' + ship_date=NULL), defeating the purpose of self-heal.
+  //
+  // Step 3i of Task #19 — pre-select the rows that need flipping and audit
+  // each through jobs-repo (source='self-heal'), then run the bulk UPDATE
+  // as a redundant safety net. In a healthy system the SELECT returns 0
+  // rows; only zombies hit the loop.
+  const needsFlip = labDb.db.prepare(`
+    SELECT j.invoice, d.ship_date AS shiplog_ship_date, d.ship_time AS shiplog_ship_time
+    FROM jobs j
+    JOIN dvi_shipped_jobs d ON j.invoice = d.invoice
+    WHERE d.ship_date IS NOT NULL
+      AND (j.status != 'SHIPPED'
+        OR j.current_stage IS NULL OR j.current_stage != 'SHIPPED'
+        OR j.ship_date IS NULL)
+  `).all();
+  if (needsFlip.length > 0) {
+    let audited = 0, auditFailed = 0;
+    for (const r of needsFlip) {
+      try {
+        labDb.jobsRepo.upsert({
+          invoice: String(r.invoice),
+          patch: {
+            current_stage: 'SHIPPED',
+            ship_date: r.shiplog_ship_date,
+            ship_time: r.shiplog_ship_time,
+          },
+          source: 'self-heal',
+          observedAt: Date.now(),
+          actor: 'oven-timer-server.js:startup-self-heal',
+          metadata: null,
+        });
+        audited++;
+      } catch (e) {
+        auditFailed++;
+        if (auditFailed <= 5) {
+          console.warn(`[self-heal-repo-audit] ${r.invoice}: ${e.message}`);
+        }
+      }
+    }
+    console.log(`[startup] self-heal: ${needsFlip.length} candidate(s); ${audited} audited via repo, ${auditFailed} repo failures (bulk UPDATE will catch remaining)`);
+  }
+  // Bulk UPDATE — handles anything the per-row repo loop didn't (SQL injection
+  // safety net + recovery if repo throws across the board).
   const result = labDb.db.prepare(`
     UPDATE jobs SET
       status='SHIPPED',
@@ -146,7 +188,7 @@ try {
         OR ship_date IS NULL)
   `).run();
   if (result.changes > 0) {
-    console.log(`[startup] self-heal: flipped ${result.changes} jobs to SHIPPED based on dvi_shipped_jobs XML truth`);
+    console.log(`[startup] self-heal: bulk UPDATE flipped ${result.changes} jobs (post-repo safety net)`);
   }
 } catch (e) {
   console.warn(`[startup] self-heal failed: ${e.message}`);

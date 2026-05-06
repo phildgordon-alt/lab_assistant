@@ -1990,6 +1990,31 @@ function enrichLensTypeFromPicks(invoice) {
   if (!invoice || !/^\d{4,}$/.test(String(invoice))) return false;
   const row = tier3LookupStmt.get(invoice);
   if (!row || (!row.lens_type_modal && !row.material)) return false;
+
+  // Step 3h of Task #19 — parallel audit through jobs-repo BEFORE the
+  // legacy COALESCE-only UPDATE. This writer is NULL-fill only, so most
+  // calls produce identity writes (no audit row) — only the rare case
+  // where lens_type was actually missing produces a real audit signal.
+  // Note: jobsRepo is defined further down in this file; lazy-evaluate.
+  if (typeof jobsRepo !== 'undefined') {
+    try {
+      jobsRepo.upsert({
+        invoice: String(invoice),
+        patch: {
+          lens_type:     row.lens_type_modal || null,
+          lens_material: row.material || null,
+          lens_opc_r:    row.sku || null,
+        },
+        source: 'picks-derive',
+        observedAt: Date.now(),
+        actor: 'db.js:enrichLensTypeFromPicks',
+        metadata: { tier: 3 },
+      });
+    } catch (e) {
+      console.warn(`[picks-derive-repo-audit] invoice ${invoice}: ${e.message}`);
+    }
+  }
+
   const r = tier3UpdateStmt.run({
     invoice,
     lens_type:     row.lens_type_modal || null,
@@ -3909,6 +3934,39 @@ const upsertJobFromSOMStmt = db.prepare(`
 
 function upsertJobFromSOM(j) {
   if (!j || !j.dviJob) return;
+
+  // Step 3f of Task #19 — parallel audit. SOM is UPDATE-only (legacy stmt
+  // does not INSERT — only mutates existing jobs rows by invoice). Skip the
+  // repo call when the row doesn't exist, otherwise the repo would try to
+  // INSERT and write fields the legacy never would have written.
+  if (/^\d{4,}$/.test(String(j.dviJob))) {
+    const exists = db.prepare('SELECT 1 FROM jobs WHERE invoice = ?').get(String(j.dviJob));
+    if (exists) {
+      try {
+        jobsRepo.upsert({
+          invoice: String(j.dviJob),
+          patch: {
+            som_order: j.somOrder || null,
+            current_dept: j.dept || null,
+            previous_dept: j.prevDept || null,
+            som_side: j.side || null,
+            som_entry_date: j.entryDate || null,
+            som_frame_no: j.frameNo || null,
+            som_frame_ref: j.frameRef || null,
+            som_lds: j.lds || null,
+            reference: j.reference || null,
+          },
+          source: 'som',
+          observedAt: Date.now(),
+          actor: 'db.js:upsertJobFromSOM',
+          metadata: null,
+        });
+      } catch (e) {
+        console.warn(`[som-repo-audit] invoice ${j.dviJob}: ${e.message}`);
+      }
+    }
+  }
+
   upsertJobFromSOMStmt.run(
     j.somOrder || null, j.dept || null, j.prevDept || null,
     j.side || null, j.entryDate || null, j.frameNo || null,
@@ -3929,6 +3987,34 @@ const upsertJobFromLookerStmt = db.prepare(`
 
 function upsertJobFromLooker(j) {
   if (!j || !j.order_number) return;
+
+  // Step 3g of Task #19 — parallel audit. Looker uniquely keys by reference,
+  // not invoice. We resolve reference → invoice(s) first, then audit each
+  // matching invoice through repo. The contract's looker special-case (it
+  // requires currentRow with invoice or reference) is satisfied because the
+  // repo's SELECT-by-invoice will return the row we just looked up.
+  const matches = db.prepare('SELECT invoice FROM jobs WHERE reference = ?').all(j.order_number);
+  for (const m of matches) {
+    if (!/^\d{4,}$/.test(String(m.invoice))) continue;
+    try {
+      jobsRepo.upsert({
+        invoice: String(m.invoice),
+        patch: {
+          looker_job_id: j.job_id || null,
+          dvi_destination: j.dvi_destination || null,
+          count_lenses: j.count_lenses || 0,
+          count_breakages: j.count_breakages || 0,
+        },
+        source: 'looker',
+        observedAt: Date.now(),
+        actor: 'db.js:upsertJobFromLooker',
+        metadata: { reference: j.order_number },
+      });
+    } catch (e) {
+      console.warn(`[looker-repo-audit] invoice ${m.invoice} ref ${j.order_number}: ${e.message}`);
+    }
+  }
+
   upsertJobFromLookerStmt.run(
     j.job_id || null, j.dvi_destination || null,
     j.count_lenses || 0, j.count_breakages || 0,
@@ -4455,6 +4541,7 @@ function setDviTraceOffset(filename, offset) {
 
 module.exports = {
   db,
+  jobsRepo, // Step 3 of Task #19 — exposed so startup self-heal + future callers can audit through it
   logSync,
   getLastSync,
   recordHeartbeat,
