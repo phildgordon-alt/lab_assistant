@@ -12,7 +12,14 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 5173,
     proxy: {
-      '/api': 'http://localhost:3002'
+      // All same-origin API paths route through the Lab Server (3002).
+      // Lab Server forwards Gateway-owned paths (/web/*, /gateway/*,
+      // /api/slack/*) to localhost:3001 internally — see proxyToGateway
+      // in oven-timer-server.js. This keeps prod (Cloudflare tunnel) and
+      // dev (vite) using identical same-origin URLs in the frontend.
+      '/api':     'http://localhost:3002',
+      '/web':     'http://localhost:3002',
+      '/gateway': 'http://localhost:3002',
     },
     hmr: {
       overlay: true,

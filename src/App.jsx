@@ -142,7 +142,7 @@ const getAnthropicApiKey = (settings) => {
 
 // ── Gateway helper — calls MCP gateway or falls back to direct Anthropic ─────
 const callGateway = async (settings, question, { onChunk, agent, userId = 'web-user', context } = {}) => {
-  const gatewayUrl = settings?.gatewayUrl || `http://${window.location.hostname}:3001`;
+  const gatewayUrl = settings?.gatewayUrl || ``;
 
   // If streaming with onChunk callback, use SSE endpoint
   if (onChunk) {
@@ -211,7 +211,7 @@ const DEFAULT_SETTINGS = {
   pin: null,           // null = no PIN, otherwise 4-6 digit string
   pinEnabled: false,
   anthropicApiKey: '', // Claude API key for AI features (fallback if no gateway)
-  gatewayUrl: `http://${window.location.hostname}:3001`, // MCP Gateway URL — uses current hostname for network access
+  gatewayUrl: ``, // MCP Gateway URL — uses current hostname for network access
   // API Connections
   itempathUrl: '',
   itempathToken: '',
@@ -308,7 +308,7 @@ function DevOpsAICard({settings,connections}){
     if(!question.trim()) return;
     setLoading(true);
     setResponse('');
-    const gwUrl = settings?.gatewayUrl || `http://${window.location.hostname}:3001`;
+    const gwUrl = settings?.gatewayUrl || ``;
     try {
       // Build context from connections
       const ctx = connections ? `Current connection status:\n${JSON.stringify(connections.connections,null,2)}` : '';
@@ -404,7 +404,7 @@ function AgentsPanel({settings}){
   const [showCreate,setShowCreate]=useState(false);
   const [newAgentName,setNewAgentName]=useState('');
   const [newAgentContent,setNewAgentContent]=useState('');
-  const gwUrl=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+  const gwUrl=settings?.gatewayUrl||``;
 
   // Load agents on mount
   useEffect(()=>{
@@ -655,7 +655,7 @@ function DataImportPanel({settings}){
   const [dviData,setDviData]=useState(null);
   const [uploads,setUploads]=useState({uploads:[],missingDates:[],missingCount:0});
   const [error,setError]=useState(null);
-  const gwUrl=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+  const gwUrl=settings?.gatewayUrl||``;
   const fileInputRef=useRef(null);
 
   // Load existing DVI data and upload history on mount
@@ -1111,7 +1111,7 @@ function ConfigurableKPIRow({data, settings, cardConfig, onConfigChange}){
     try{
       const agent=KPI_AGENTS[modalKpi]||'ShiftReportAgent';
       const context=`KPI: ${KPI_METRICS[modalKpi]?.label}\nUse your MCP tools to get real data for this KPI. Do not use any sample or mock data.`;
-      const res=await fetch(`http://${window.location.hostname}:3001/web/ask-sync`,{
+      const res=await fetch(`/web/ask-sync`,{
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify({question:aiQuery,agent,userId:'kpi-modal',context})
@@ -1859,7 +1859,7 @@ function useElapsed(startedAt, running) {
 function useSlackConfig(onIncoming, setMessages){
   const KEY="la_slack_v2";
   const DEFAULTS={
-    proxyUrl:`http://${window.location.hostname}:3001/api/slack/messages?channel=C0AJH9LG96D`,
+    proxyUrl:`/api/slack/messages?channel=C0AJH9LG96D`,
     channel:"lab-assistant",
     channelId:"C0AJH9LG96D"
   };
@@ -1875,7 +1875,7 @@ function useSlackConfig(onIncoming, setMessages){
     setStatus("sending");
     try{
       // Use server proxy endpoint which has the bot token
-      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || `http://${window.location.hostname}:3001/api/slack/send`;
+      const sendUrl=cfg.proxyUrl?.replace('/messages','/send').split('?')[0] || `/api/slack/send`;
       const r=await fetch(sendUrl,{
         method:"POST",
         headers:{"Content-Type":"application/json"},
@@ -2857,7 +2857,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
   const getAiBatchAdvice=async()=>{
     setAiLoading(true);setAiAdvice("");
     try{
-      const gatewayUrl=`http://${window.location.hostname}:3001`;
+      const gatewayUrl=``;
       const r=await fetch(`${gatewayUrl}/web/ask`,{
         method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({
@@ -3188,7 +3188,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
                 <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>Rate this recommendation:</span>
                 {[1,2,3,4,5].map(n=>(
                   <button key={n} onClick={()=>{
-                    fetch(`http://${window.location.hostname}:3001/web/ask-sync`,{
+                    fetch(`/web/ask-sync`,{
                       method:'POST',headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({question:`Record feedback rating ${n}/5 for the most recent batch plan. Call get_coating_batch_history to find the latest plan ID, then note this rating.`,agent:'coating',userId:'coating-feedback'})
                     }).catch(()=>{});
@@ -6703,7 +6703,7 @@ function BreakageHistory({breakage,serverHistory=[]}){
 function NetworkTab({ovenServerUrl,settings}){
   const base=ovenServerUrl||`http://${window.location.hostname}:3002`;
   const mono="'JetBrains Mono',monospace";
-  const gwBase=settings?.gatewayUrl||`http://${window.location.hostname}:3001`;
+  const gwBase=settings?.gatewayUrl||``;
 
   const [status,setStatus]=useState(null);
   const [devices,setDevices]=useState({irvine1:[],irvine2:[]});
@@ -9825,7 +9825,7 @@ Generate a concise situation report:
 
 Be direct. No hedging. This is a live production environment.`;
     try{
-      const gwBase=`http://${window.location.hostname}:3001`;
+      const gwBase=``;
       const res=await fetch(`${gwBase}/web/ask-sync`,{
         method:"POST",
         headers:{"Content-Type":"application/json"},

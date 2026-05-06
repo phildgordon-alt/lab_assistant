@@ -1228,10 +1228,48 @@ function buildLandingPage() {
 
 // ── Request handler ───────────────────────────────────────────
 
+// ── Reverse proxy to Gateway (port 3001) ──────────────────────────
+// The Lab Server (3002) runs through the Cloudflare tunnel; the Gateway
+// (3001) is local-only. This proxy forwards /web/*, /gateway/*, and
+// /api/slack/* through the tunnel so the SPA can reach AI / agent
+// endpoints from a browser anywhere. Pipes streaming responses
+// (SSE for /web/ask) through unchanged. Bypasses lab-server auth —
+// the Gateway has its own auth model.
+function proxyToGateway(req, res) {
+  const proxyReq = http.request({
+    hostname: '127.0.0.1',
+    port: 3001,
+    path: req.url,
+    method: req.method,
+    headers: { ...req.headers, host: '127.0.0.1:3001' },
+  }, (proxyRes) => {
+    cors(res);
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+  proxyReq.on('error', (err) => {
+    cors(res);
+    res.writeHead(502, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'gateway-unreachable', message: err.message, target: '127.0.0.1:3001' }));
+  });
+  req.pipe(proxyReq);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
   if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); res.end(); return; }
+
+  // Forward Gateway-owned paths before auth — Gateway runs locally on 3001
+  // and has its own auth; lab-server auth would double-gate or block valid
+  // requests. Order matters: must come before the SPA / static handlers.
+  if (
+    url.pathname.startsWith('/web/') ||
+    url.pathname.startsWith('/gateway/') ||
+    url.pathname.startsWith('/api/slack/')
+  ) {
+    return proxyToGateway(req, res);
+  }
 
   // ── Authentication & Authorization ──────────────────────────
   const authContext = auth.authenticate(req);
