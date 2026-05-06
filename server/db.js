@@ -3974,13 +3974,22 @@ function queryJobsAgingFull() {
   // the backfill-jobs-classification one-shot), but belt-and-suspenders — if
   // any stale row has status='ACTIVE' with current_stage='CANCELED' it still
   // gets filtered out of the aging dashboard.
+  //
+  // Manual SKU holds (migration 004): jobs whose lens_opc_r OR lens_opc_l
+  // matches an active hold are excluded so SLA / outlier metrics aren't
+  // polluted by intentionally paused work. Released holds don't filter.
+  // The HOLD stage (set automatically by dvi-trace.js station mapping) is
+  // also excluded — kickout / laser-reject / QC-hold jobs aren't aging
+  // candidates either.
   return db.prepare(`
     SELECT invoice, tray, current_stage, current_station, days_in_lab, entry_date,
            coating, rush, operator, lens_style, lens_type, frame_name, first_seen_at,
            status
     FROM jobs
     WHERE status IN ('ACTIVE','Active')
-      AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE'))
+      AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
+      AND lens_opc_r NOT IN (SELECT sku FROM holds WHERE status = 'active')
+      AND (lens_opc_l IS NULL OR lens_opc_l NOT IN (SELECT sku FROM holds WHERE status = 'active'))
     ORDER BY days_in_lab DESC
   `).all();
 }

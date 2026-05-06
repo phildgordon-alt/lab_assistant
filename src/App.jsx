@@ -5756,7 +5756,14 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   const [data, setData] = useState(null);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
-  const [subView, setSubView] = useState('buckets'); // 'buckets' | 'lensType'
+  const [subView, setSubView] = useState(() => {
+    // Honors ?sub= query param so landing-page tiles can deep-link to a sub-tab
+    try {
+      const s = new URLSearchParams(window.location.search).get('sub');
+      if (s === 'lensType' || s === 'holds') return s;
+    } catch {}
+    return 'buckets';
+  }); // 'buckets' | 'lensType' | 'holds'
   const [lensTypeView, setLensTypeView] = useState('active'); // 'active' | 'shipped7' | 'shipped30' | 'shipped90'
   const [shippedData, setShippedData] = useState(null);
   const [shippedLoading, setShippedLoading] = useState(false);
@@ -5822,11 +5829,12 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
         </div>
       </div>
 
-      {/* Sub-tab toggle: buckets vs by-lens-type */}
+      {/* Sub-tab toggle: buckets vs by-lens-type vs holds */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: `1px solid ${T.border}` }}>
         {[
           { key: 'buckets',  label: 'Aging Buckets' },
           { key: 'lensType', label: 'By Lens Type' },
+          { key: 'holds',    label: 'On Hold' },
         ].map(t => (
           <button key={t.key} onClick={() => setSubView(t.key)}
             style={{
@@ -6163,7 +6171,174 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
         </div>
       </Card>
       </>)}
+
+      {subView === 'holds' && <HoldsView ovenServerUrl={ovenServerUrl} />}
     </ProductionStageTab>
+  );
+}
+
+// SKU-level manual holds. Phil enters a lens SKU as on-hold; every active
+// job whose lens_opc_r or lens_opc_l matches gets auto-excluded from aging
+// SLA / outlier metrics. Released holds restore those jobs to aging.
+function HoldsView({ ovenServerUrl }) {
+  const mono = "'JetBrains Mono',monospace";
+  const [holds, setHolds] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [form, setForm] = useState({ sku: '', reason: '', placed_by: '' });
+  const [submitting, setSubmitting] = useState(false);
+
+  const refresh = useCallback(() => {
+    setLoading(true);
+    fetch('/api/holds?status=active')
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+      .then(d => { setHolds(d.holds || []); setError(''); })
+      .catch(e => { console.error('[holds] list failed', e); setError(e.message); })
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => { refresh(); const iv = setInterval(refresh, 30000); return () => clearInterval(iv); }, [refresh]);
+
+  const submit = async () => {
+    if (!form.sku.trim() || !form.reason.trim() || !form.placed_by.trim()) {
+      setError('All three fields required');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/holds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      setForm({ sku: '', reason: '', placed_by: form.placed_by });
+      setError('');
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const release = async (id) => {
+    const released_by = prompt('Released by (your name):', form.placed_by || '');
+    if (!released_by) return;
+    try {
+      const res = await fetch(`/api/holds/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ released_by }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
+      refresh();
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  const daysHeld = (placedAt) => {
+    if (!placedAt) return 0;
+    const ms = Date.now() - new Date(placedAt.replace(' ', 'T') + 'Z').getTime();
+    return Math.floor(ms / 86400000);
+  };
+
+  const totalAffected = holds.reduce((s, h) => s + (h.affected_count || 0), 0);
+
+  return (
+    <div>
+      {/* Stats */}
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: '12px 16px', flex: 1 }}>
+          <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>ACTIVE HOLDS</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: T.amber, fontFamily: mono }}>{holds.length}</div>
+        </div>
+        <div style={{ background: T.surface, border: `1px solid ${T.border}`, borderRadius: 8, padding: '12px 16px', flex: 1 }}>
+          <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, letterSpacing: 1 }}>JOBS EXCLUDED FROM AGING</div>
+          <div style={{ fontSize: 28, fontWeight: 800, color: T.red, fontFamily: mono }}>{totalAffected}</div>
+        </div>
+      </div>
+
+      {/* Add Hold Form */}
+      <Card title="Place SKU on Hold" subtitle="Enter a lens SKU — jobs picking it will be excluded from aging until released">
+        <div style={{ padding: 12, display: 'grid', gridTemplateColumns: '1fr 2fr 1fr auto', gap: 8, alignItems: 'start' }}>
+          <input
+            placeholder="SKU (e.g. 4800040265)"
+            value={form.sku}
+            onChange={e => setForm({ ...form, sku: e.target.value })}
+            disabled={submitting}
+            style={{ padding: 10, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontFamily: mono, fontSize: 13 }}
+          />
+          <textarea
+            placeholder="Reason (defective batch, FDA recall, etc.)"
+            value={form.reason}
+            onChange={e => setForm({ ...form, reason: e.target.value.slice(0, 500) })}
+            disabled={submitting}
+            rows={2}
+            style={{ padding: 10, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13, resize: 'vertical', minHeight: 38 }}
+          />
+          <input
+            placeholder="Your name"
+            value={form.placed_by}
+            onChange={e => setForm({ ...form, placed_by: e.target.value })}
+            disabled={submitting}
+            style={{ padding: 10, background: T.bg, border: `1px solid ${T.border}`, borderRadius: 6, color: T.text, fontSize: 13 }}
+          />
+          <button
+            onClick={submit}
+            disabled={submitting}
+            style={{ padding: '10px 16px', background: T.amber, border: 'none', borderRadius: 6, color: '#000', fontWeight: 700, fontSize: 12, cursor: submitting ? 'wait' : 'pointer', fontFamily: mono, letterSpacing: 1 }}
+          >
+            {submitting ? 'PLACING…' : '+ HOLD'}
+          </button>
+        </div>
+        {error && <div style={{ padding: '0 12px 12px', color: T.red, fontSize: 12 }}>{error}</div>}
+      </Card>
+
+      {/* Active Holds List */}
+      <Card title={`Active Holds (${holds.length})`} subtitle="Click Release when the issue is resolved">
+        {loading && holds.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>Loading…</div>
+        ) : holds.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: T.textDim }}>No active holds</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontFamily: mono, fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: T.surface, color: T.textMuted, fontSize: 10, letterSpacing: 1 }}>
+                <th style={{ padding: 10, textAlign: 'left' }}>SKU</th>
+                <th style={{ padding: 10, textAlign: 'left' }}>REASON</th>
+                <th style={{ padding: 10, textAlign: 'right' }}>JOBS</th>
+                <th style={{ padding: 10, textAlign: 'left' }}>PLACED BY</th>
+                <th style={{ padding: 10, textAlign: 'right' }}>DAYS</th>
+                <th style={{ padding: 10, textAlign: 'right' }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {holds.map(h => (
+                <tr key={h.id} style={{ borderBottom: `1px solid ${T.border}`, color: T.text }}>
+                  <td style={{ padding: 10, fontWeight: 700, color: T.amber }}>{h.sku}</td>
+                  <td style={{ padding: 10, color: T.textMuted, fontFamily: 'inherit', fontSize: 12 }}>{h.reason}</td>
+                  <td style={{ padding: 10, textAlign: 'right', color: (h.affected_count || 0) > 0 ? T.red : T.textDim, fontWeight: 700 }}>{h.affected_count || 0}</td>
+                  <td style={{ padding: 10, color: T.textMuted }}>{h.placed_by}</td>
+                  <td style={{ padding: 10, textAlign: 'right' }}>{daysHeld(h.placed_at)}</td>
+                  <td style={{ padding: 10, textAlign: 'right' }}>
+                    <button
+                      onClick={() => release(h.id)}
+                      style={{ padding: '4px 10px', background: 'transparent', border: `1px solid ${T.green}`, borderRadius: 4, color: T.green, fontSize: 10, fontWeight: 700, cursor: 'pointer', fontFamily: mono, letterSpacing: 0.5 }}
+                    >
+                      RELEASE
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
   );
 }
 
@@ -11986,7 +12161,11 @@ function CorporateViewer({trays,batches,events,settings}){
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 function LabAssistantV2(){
   const appMode=getMode(); // "desktop" | "tablet" | "corporate"
-  const [view,setView]=useState("overview");
+  const [view,setView]=useState(() => {
+    // Allow deep links from the landing-page tiles, e.g. /?view=aging&sub=holds
+    try { return new URLSearchParams(window.location.search).get('view') || 'overview'; }
+    catch { return 'overview'; }
+  });
   const [trays,setTrays]=useState([]);
   const [putWall,setPutWall]=useState([]);
   const [batches,setBatches]=useState([]);

@@ -1167,6 +1167,7 @@ function buildLandingPage() {
     { name:'Coating Dashboard', icon:'🧪', desc:'Coating pipeline — queue, coaters, throughput', path:'/standalone/CoatingDashboard.html', color:'#06B6D4' },
     { name:'Cutting Dashboard', icon:'✂️', desc:'Cutting/edging floor — stations, queue, pipeline', path:'/standalone/CuttingDashboard.html', color:'#3B82F6' },
     { name:'Shipping Dashboard', icon:'📦', desc:'Shipped today, rate, pipeline — visible across the floor', path:'/standalone/ShippingDashboard.html', color:'#10B981' },
+    { name:'Holds', icon:'⛔', desc:'Place SKUs on hold — jobs picking them excluded from aging', path:'/?view=aging&sub=holds', color:'#DC2626' },
     { name:'Oven Timer', icon:'🔥', desc:'Coating oven rack timers — 6 racks per oven', path:'/standalone/OvenTimer.html', color:'#F59E0B' },
     { name:'Coating Timer', icon:'⏱', desc:'Per-coater timer — single large display', path:'/standalone/CoatingTimer.html', color:'#06B6D4' },
   ];
@@ -3282,6 +3283,103 @@ Respond with a structured batching plan in this format:
       d01: g.d01, d12: g.d12, d23: g.d23, d35: g.d35, d510: g.d510, d10p: g.d10p,
     })).sort((a, b) => b.count - a.count);
     return json(res, { days, total, byLensTypeShipped });
+  }
+
+  // ── Holds (manual SKU-level pause) ─────────────────────────
+  // Phil's workflow: enter a lens SKU as "on hold" — every active job
+  // whose lens_opc_r or lens_opc_l matches that SKU gets excluded from
+  // the aging dashboard so SLA / outlier metrics stay clean. Release
+  // the hold and the affected jobs return to aging.
+  if (req.method === 'GET' && url.pathname === '/api/holds') {
+    const status = url.searchParams.get('status') || 'active';
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '200', 10) || 200, 1000);
+    try {
+      let q = 'SELECT * FROM holds';
+      const params = [];
+      if (status !== 'all') { q += ' WHERE status = ?'; params.push(status); }
+      q += ' ORDER BY placed_at DESC LIMIT ?';
+      params.push(limit);
+      const rows = labDb.db.prepare(q).all(...params);
+      // Enrich each hold with affected_count: jobs currently picking this SKU
+      // and not in a terminal stage. Cheap query — runs once per hold.
+      const enriched = rows.map(h => {
+        const cnt = labDb.db.prepare(`
+          SELECT COUNT(*) AS n FROM jobs
+          WHERE status IN ('ACTIVE','Active')
+            AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
+            AND (lens_opc_r = ? OR lens_opc_l = ?)
+        `).get(h.sku, h.sku).n;
+        return { ...h, affected_count: cnt };
+      });
+      return json(res, { holds: enriched });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
+  // List jobs affected by a single hold — for drill-down in the UI
+  if (req.method === 'GET' && /^\/api\/holds\/(\d+)\/jobs$/.test(url.pathname)) {
+    const id = parseInt(url.pathname.split('/')[3], 10);
+    try {
+      const hold = labDb.db.prepare('SELECT sku, status FROM holds WHERE id = ?').get(id);
+      if (!hold) return json(res, { error: 'Hold not found' }, 404);
+      const rows = labDb.db.prepare(`
+        SELECT invoice, current_stage, current_station, days_in_lab, lens_type, lens_opc_r, lens_opc_l, rush
+        FROM jobs
+        WHERE status IN ('ACTIVE','Active')
+          AND (current_stage IS NULL OR current_stage NOT IN ('CANCELED','SHIPPED','COMPLETE','HOLD'))
+          AND (lens_opc_r = ? OR lens_opc_l = ?)
+        ORDER BY days_in_lab DESC
+      `).all(hold.sku, hold.sku);
+      return json(res, { hold, jobs: rows });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/holds') {
+    try {
+      const body = await readBody(req);
+      const sku = String(body.sku || '').trim();
+      const reason = String(body.reason || '').trim();
+      const placed_by = String(body.placed_by || body.operator || '').trim();
+      if (!sku || !reason || !placed_by) {
+        return json(res, { error: 'Missing required: sku, reason, placed_by' }, 400);
+      }
+      if (sku.length > 64) return json(res, { error: 'sku too long (max 64)' }, 400);
+      if (reason.length > 500) return json(res, { error: 'reason too long (max 500)' }, 400);
+      try {
+        const r = labDb.db.prepare(
+          'INSERT INTO holds (sku, reason, placed_by, notes) VALUES (?, ?, ?, ?)'
+        ).run(sku, reason, placed_by, body.notes ? String(body.notes).slice(0, 1000) : null);
+        return json(res, { ok: true, id: r.lastInsertRowid });
+      } catch (e) {
+        if (/UNIQUE constraint failed/.test(e.message)) {
+          return json(res, { error: `Hold already active for SKU ${sku}` }, 409);
+        }
+        throw e;
+      }
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
+  if (req.method === 'PATCH' && /^\/api\/holds\/(\d+)$/.test(url.pathname)) {
+    const id = parseInt(url.pathname.split('/')[3], 10);
+    try {
+      const body = await readBody(req);
+      const released_by = String(body.released_by || body.operator || '').trim();
+      if (!released_by) return json(res, { error: 'Missing required: released_by' }, 400);
+      const r = labDb.db.prepare(`
+        UPDATE holds
+           SET status = 'released', released_at = datetime('now'), released_by = ?
+         WHERE id = ? AND status = 'active'
+      `).run(released_by, id);
+      if (r.changes === 0) return json(res, { error: 'Hold not found or already released' }, 404);
+      return json(res, { ok: true });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
   }
 
   // ── Lens Intelligence ──────────────────────────────────────
