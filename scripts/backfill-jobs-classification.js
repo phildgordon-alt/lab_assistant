@@ -72,9 +72,19 @@ function main() {
 
   const db = new Database(DB_PATH);
 
-  // ─── Part 1: status normalization ─────────────────────────────────────────
-  // CANCELED-stage rows should have status='CANCELED', not 'ACTIVE'.
-  // SHIPPED-stage rows or rows in dvi_shipped_jobs should be status='SHIPPED'.
+  // Route writes through jobs-repo (Step 3j of Task #19).
+  const { runMigrations } = require('../server/migration-runner');
+  const { createRepo } = require('../server/domain/jobs-repo');
+  if (APPLY) runMigrations(db);
+  const jobsRepo = APPLY ? createRepo(db) : null;
+
+  // ─── Status normalization audit (no longer writes) ────────────────────────
+  // The legacy script ran three direct UPDATEs to fix status='ACTIVE' rows
+  // whose stage was CANCELED/SHIPPED. Under the contract, status is DERIVED
+  // from current_stage on every upsert via deriveStatus(). The historical
+  // rows in this state will get fixed automatically on the next legitimate
+  // write to current_stage, OR can be re-derived in bulk by repointing the
+  // existing rows through any noop-stage upsert. We just report the count.
   const canceledCount = db.prepare(`
     SELECT COUNT(*) AS n FROM jobs
     WHERE current_stage = 'CANCELED' AND status IN ('ACTIVE','Active')
@@ -92,9 +102,9 @@ function main() {
     `).get().n;
   } catch (e) { /* dvi_shipped_jobs may not exist */ }
 
-  console.log(`[backfill/status] CANCELED-stage with status=ACTIVE: ${canceledCount}`);
-  console.log(`[backfill/status] SHIPPED-stage with status=ACTIVE: ${shippedStageCount}`);
-  console.log(`[backfill/status] in dvi_shipped_jobs with status=ACTIVE: ${dviShippedCount}`);
+  console.log(`[backfill/status] CANCELED-stage with status=ACTIVE: ${canceledCount} (auto-derived on next stage write)`);
+  console.log(`[backfill/status] SHIPPED-stage with status=ACTIVE: ${shippedStageCount} (auto-derived on next stage write)`);
+  console.log(`[backfill/status] in dvi_shipped_jobs with status=ACTIVE: ${dviShippedCount} (covered by SHIPLOG flow)`);
 
   // ─── Part 2: classification backfill ──────────────────────────────────────
   const candidates = db.prepare(`
@@ -107,30 +117,6 @@ function main() {
   console.log(`[backfill] Mode: ${APPLY ? 'APPLY (commit)' : 'DRY RUN (no writes — pass --apply to commit)'}`);
 
   const stats = { xmlFound: 0, xmlMissing: 0, updated: 0, noop: 0, byType: {} };
-
-  const update = db.prepare(`
-    UPDATE jobs
-    SET lens_type     = COALESCE(lens_type, @lens_type),
-        coating       = COALESCE(coating, @coating),
-        lens_material = COALESCE(lens_material, @lens_material),
-        lens_style    = COALESCE(lens_style, @lens_style),
-        frame_name    = COALESCE(frame_name, @frame_name),
-        rush          = CASE WHEN rush IS NULL OR rush = 'N' THEN COALESCE(@rush, rush) ELSE rush END,
-        updated_at    = datetime('now')
-    WHERE invoice = @invoice
-  `);
-
-  if (APPLY) {
-    // Status normalization first (small, fast)
-    const fixCanceled = db.prepare(`UPDATE jobs SET status='CANCELED', updated_at=datetime('now') WHERE current_stage='CANCELED' AND status IN ('ACTIVE','Active')`);
-    const fixShippedStage = db.prepare(`UPDATE jobs SET status='SHIPPED', updated_at=datetime('now') WHERE current_stage IN ('SHIPPED','COMPLETE') AND status IN ('ACTIVE','Active')`);
-    const fixShippedFromDvi = db.prepare(`UPDATE jobs SET status='SHIPPED', updated_at=datetime('now') WHERE status IN ('ACTIVE','Active') AND invoice IN (SELECT invoice FROM dvi_shipped_jobs)`);
-    db.transaction(() => {
-      fixCanceled.run();
-      fixShippedStage.run();
-      try { fixShippedFromDvi.run(); } catch {}
-    })();
-  }
 
   // Classification backfill
   const tx = db.transaction((rows) => {
@@ -153,15 +139,26 @@ function main() {
       if (!needsLens && !needsCoat && !needsMat && !needsStyle && !needsFrame) { stats.noop++; continue; }
 
       if (APPLY) {
-        update.run({
-          invoice: row.invoice,
-          lens_type: parsed.lensType,
-          coating: parsed.coating,
-          lens_material: parsed.material,
-          lens_style: parsed.lensStyle,
-          frame_name: parsed.frameName,
-          rush: parsed.rush,
-        });
+        try {
+          jobsRepo.upsert({
+            invoice: String(row.invoice),
+            patch: {
+              lens_type: parsed.lensType,
+              coating: parsed.coating,
+              lens_material: parsed.material,
+              lens_style: parsed.lensStyle,
+              frame_name: parsed.frameName,
+              rush: parsed.rush,
+            },
+            source: 'xml-classification',
+            observedAt: Date.now(),
+            actor: 'backfill:jobs-classification',
+            metadata: { xml_source: 'data/dvi/jobs' },
+          });
+        } catch (e) {
+          console.error(`[backfill/class] upsert failed ${row.invoice}: ${e.message}`);
+          continue;
+        }
       }
       stats.updated++;
       if (parsed.lensType) stats.byType[parsed.lensType] = (stats.byType[parsed.lensType] || 0) + 1;

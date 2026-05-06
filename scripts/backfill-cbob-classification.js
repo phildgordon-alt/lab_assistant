@@ -42,6 +42,12 @@ const log = (...a) => console.log('[backfill-cbob]', ...a);
 const db = new Database(DB_PATH, { readonly: !APPLY });
 db.pragma('journal_mode = WAL');
 
+// Route writes through jobs-repo (Step 3j of Task #19).
+const { runMigrations } = require('../server/migration-runner');
+const { createRepo } = require('../server/domain/jobs-repo');
+if (APPLY) runMigrations(db);
+const jobsRepo = APPLY ? createRepo(db) : null;
+
 // ── Pull every job whose current_station might be misclassified ─────────────
 // Scope: all jobs (not just active stages) — there may be stale rows in HOLD/
 // COATING/etc. that were stamped from a CBOB station event in the past. The
@@ -59,41 +65,60 @@ log(`Scanning ${rows.length} jobs for stage / lens_type corrections…`);
 let stageChanged = 0, stageGuardSkipped = 0, lensTypeFilled = 0, unchanged = 0;
 const stageDelta = {}; // 'CUTTING→INCOMING' → count
 
-const updateStageStmt = APPLY ? db.prepare(`
-  UPDATE jobs SET current_stage = @newStage, updated_at = datetime('now')
-  WHERE invoice = @invoice
-    AND status NOT IN ('SHIPPED','CANCELED')
-    AND current_stage NOT IN ('SHIPPED','CANCELED')
-`) : null;
-
-const updateLensTypeStmt = APPLY ? db.prepare(`
-  UPDATE jobs SET lens_type = @newLensType, updated_at = datetime('now')
-  WHERE invoice = @invoice
-    AND (lens_type IS NULL OR lens_type = '')
-`) : null;
+// The repo's contract handles both guards we used to enforce inline:
+//   - terminal-stage guard (SHIPPED/CANCELED never downgrade) — built into
+//     current_stage's guards array via terminalStageGuard.
+//   - first-non-null-wins on lens_type — preserves any existing value, so a
+//     non-null patch is auto-skipped if the current row already has lens_type.
+// We still pre-filter terminal stages to keep stageGuardSkipped accounting
+// honest and avoid generating no-op audit rows.
 
 const tx = APPLY ? db.transaction((rows) => {
   for (const r of rows) {
     const newStage    = stationToStage(r.current_station);
     const newLensType = lensTypeFromStation(r.current_station);
 
-    // Stage update — only if differs AND not in terminal state
-    if (newStage && newStage !== r.current_stage) {
-      if (r.status === 'SHIPPED' || r.current_stage === 'SHIPPED' ||
-          r.status === 'CANCELED' || r.current_stage === 'CANCELED') {
-        stageGuardSkipped++;
-      } else {
-        updateStageStmt.run({ invoice: r.invoice, newStage });
+    const isTerminal = r.status === 'SHIPPED' || r.current_stage === 'SHIPPED' ||
+                       r.status === 'CANCELED' || r.current_stage === 'CANCELED';
+
+    // Two distinct semantic writes — different sources, different contract
+    // priorities. Stage repair is `self-heal` (in current_stage's priority);
+    // lens_type fallback inferred from station naming is `picks-derive`
+    // (lowest-priority slot in lens_type's priority list).
+    if (newStage && newStage !== r.current_stage && !isTerminal) {
+      try {
+        jobsRepo.upsert({
+          invoice: String(r.invoice),
+          patch: { current_stage: newStage },
+          source: 'self-heal',
+          observedAt: Date.now(),
+          actor: 'backfill:cbob-classification',
+          metadata: { station: r.current_station, kind: 'stage-repair' },
+        });
         stageChanged++;
         const k = `${r.current_stage}→${newStage}`;
         stageDelta[k] = (stageDelta[k] || 0) + 1;
+      } catch (e) {
+        console.error(`[backfill-cbob] stage upsert failed ${r.invoice}: ${e.message}`);
       }
+    } else if (newStage && newStage !== r.current_stage && isTerminal) {
+      stageGuardSkipped++;
     }
 
-    // Lens type fill — only if currently NULL and we can derive from station
     if (newLensType && (r.lens_type === null || r.lens_type === '')) {
-      updateLensTypeStmt.run({ invoice: r.invoice, newLensType });
-      lensTypeFilled++;
+      try {
+        jobsRepo.upsert({
+          invoice: String(r.invoice),
+          patch: { lens_type: newLensType },
+          source: 'picks-derive',
+          observedAt: Date.now(),
+          actor: 'backfill:cbob-classification',
+          metadata: { station: r.current_station, kind: 'lens-type-from-station' },
+        });
+        lensTypeFilled++;
+      } catch (e) {
+        console.error(`[backfill-cbob] lens_type upsert failed ${r.invoice}: ${e.message}`);
+      }
     }
   }
 }) : null;

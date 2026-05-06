@@ -70,6 +70,12 @@ function main() {
   const Database = require('better-sqlite3');
   const db = new Database(DB_PATH);
 
+  // Route writes through jobs-repo (Step 3j of Task #19).
+  const { runMigrations } = require('../server/migration-runner');
+  const { createRepo } = require('../server/domain/jobs-repo');
+  if (APPLY) runMigrations(db);
+  const jobsRepo = APPLY ? createRepo(db) : null;
+
   console.log(`[tier4] Mode: ${APPLY ? 'APPLY' : 'DRY RUN — pass --apply to commit'}`);
 
   // ── Step 1: build DVI Job# → [lens SKUs] index from every daily file ──
@@ -128,19 +134,8 @@ function main() {
     WHERE sku = ?
   `);
 
-  const updateStmt = db.prepare(`
-    UPDATE jobs SET
-      lens_type     = COALESCE(lens_type, @lens_type),
-      lens_material = COALESCE(lens_material, @lens_material),
-      lens_opc_r    = COALESCE(lens_opc_r, @lens_opc_r),
-      lens_opc_l    = COALESCE(lens_opc_l, @lens_opc_l),
-      rx_r_sphere   = COALESCE(rx_r_sphere, @r_sphere),
-      rx_r_cylinder = COALESCE(rx_r_cylinder, @r_cyl),
-      rx_l_sphere   = COALESCE(rx_l_sphere, @l_sphere),
-      rx_l_cylinder = COALESCE(rx_l_cylinder, @l_cyl),
-      updated_at    = datetime('now')
-    WHERE invoice = @invoice
-  `);
+  // Repo handles first-non-null-wins on every classification slot via the
+  // contract — equivalent to the original COALESCE behaviour.
 
   ensureReportsDir();
   const reportPath = reportPathForToday();
@@ -190,16 +185,25 @@ function main() {
 
       if (!APPLY) continue;
       try {
-        updateStmt.run({
-          invoice:       row.invoice,
-          lens_type:     lt,
-          lens_material: resolved.material || null,
-          lens_opc_r:    resolvedSku,
-          lens_opc_l:    resolvedSkuL,
-          r_sphere:      rx.r_sphere,
-          r_cyl:         rx.r_cyl,
-          l_sphere:      rx.l_sphere,
-          l_cyl:         rx.l_cyl,
+        jobsRepo.upsert({
+          invoice: String(row.invoice),
+          patch: {
+            lens_type:     lt,
+            lens_material: resolved.material || null,
+            lens_opc_r:    resolvedSku,
+            lens_opc_l:    resolvedSkuL,
+            rx_r_sphere:   rx.r_sphere,
+            rx_r_cylinder: rx.r_cyl,
+            rx_l_sphere:   rx.l_sphere,
+            rx_l_cylinder: rx.l_cyl,
+          },
+          // Tier-4 fallback derived from DVI daily file → lens_sku_properties.
+          // Lowest-priority slot in the contract; treat as picks-derive (the
+          // closest semantic match — any SKU-table-driven derivation).
+          source: 'picks-derive',
+          observedAt: Date.now(),
+          actor: 'backfill:tier4-from-daily',
+          metadata: { sku: resolvedSku, sku_l: resolvedSkuL },
         });
       } catch (e) {
         stats.errors++;

@@ -66,6 +66,14 @@ if (!fs.existsSync(DB_PATH)) {
 const db = new Database(DB_PATH, { readonly: !APPLY });
 db.pragma('journal_mode = WAL');
 
+// Route writes through the canonical jobs-repo (Step 3j of Task #19).
+// Migrations are no-op on prod (already applied) but make this script
+// self-bootstrapping on a fresh dev DB.
+const { runMigrations } = require('../server/migration-runner');
+const { createRepo } = require('../server/domain/jobs-repo');
+if (APPLY) runMigrations(db);
+const jobsRepo = APPLY ? createRepo(db) : null;
+
 const log = (...a) => console.log('[recover]', ...a);
 
 // ── Stage breakdown of ALL NULL-lens_type active jobs (incl. INCOMING) ──────
@@ -216,16 +224,12 @@ function shipped_lookupSku(invoice) {
   return null;
 }
 
-// ── Apply update (only when --apply) ────────────────────────────────────────
-const updateStmt = APPLY ? db.prepare(`
-  UPDATE jobs SET
-    lens_type     = COALESCE(lens_type,     @lens_type),
-    lens_material = COALESCE(lens_material, @lens_material),
-    lens_opc_r    = COALESCE(lens_opc_r,    @lens_opc_r),
-    updated_at    = datetime('now')
-  WHERE invoice = @invoice
-    AND (lens_type IS NULL OR lens_type = '')
-`) : null;
+// Writes route through jobsRepo.upsert with source='picks-derive'. The
+// contract's first-non-null-wins semantics on lens_type/lens_material/lens_opc_r
+// preserve any existing non-null value, so the WHERE clause guard ("only fill
+// NULL") is redundant — the repo will skip the field if currentRow already has
+// it. We still pre-skip rows where lens_type is non-null to avoid generating
+// noise audit rows.
 
 // ── Main ────────────────────────────────────────────────────────────────────
 async function main() {
@@ -270,15 +274,21 @@ async function main() {
 
     if (APPLY) {
       try {
-        const r = updateStmt.run({
-          invoice: job.invoice,
-          lens_type: hit.lens_type,
-          lens_material: hit.material || null,
-          lens_opc_r: hit.sku || null,
+        jobsRepo.upsert({
+          invoice: String(job.invoice),
+          patch: {
+            lens_type: hit.lens_type,
+            lens_material: hit.material || null,
+            lens_opc_r: hit.sku || null,
+          },
+          source: 'picks-derive',
+          observedAt: Date.now(),
+          actor: 'backfill:recover-null-lens-type',
+          metadata: { source_tier: source, sku: hit.sku || null },
         });
-        if (r.changes > 0) recovered++;
+        recovered++;
       } catch (e) {
-        console.error(`[recover] UPDATE failed for ${job.invoice}: ${e.message}`);
+        console.error(`[recover] upsert failed for ${job.invoice}: ${e.message}`);
       }
     } else {
       recovered++; // count as "would recover" in dry run

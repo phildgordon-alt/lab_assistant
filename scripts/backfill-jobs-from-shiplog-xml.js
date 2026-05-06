@@ -24,8 +24,9 @@
  *
  * Scope:
  *   - Walks data/dvi/shipped/*.xml
- *   - For each XML: parse, then UPDATE jobs SET <fields> = COALESCE(...)
- *     keyed on invoice
+ *   - For each XML: parse, then route through jobsRepo.upsert() with
+ *     source='xml-shiplog' so the contract handles the COALESCE-style merge
+ *     and writes a state_history audit row.
  *   - Skips XMLs whose invoice doesn't exist in jobs (unjoinable)
  *   - Reports per-field fill counts at end
  *
@@ -149,57 +150,18 @@ function main() {
   const Database = require('better-sqlite3');
   const db = new Database(DB_PATH);
 
-  // UPDATE-only with COALESCE on every classification slot. Never overwrites
-  // a non-NULL value — defense against seeding overwrite per Phil's
-  // authoritative-seeds rule. Does NOT touch status, current_stage,
-  // current_station, ship_date (the SHIPLOG-flow already owns ship_date).
-  const updateStmt = db.prepare(`
-    UPDATE jobs SET
-      reference     = COALESCE(reference,     @reference),
-      rx_number     = COALESCE(rx_number,     @rx_number),
-      tray          = COALESCE(tray,          @tray),
-      entry_date    = COALESCE(entry_date,    @entry_date),
-      entry_time    = COALESCE(entry_time,    @entry_time),
-      ship_date     = COALESCE(ship_date,     @ship_date),
-      ship_time     = COALESCE(ship_time,     @ship_time),
-      days_in_lab   = COALESCE(days_in_lab,   @days_in_lab),
-      department    = COALESCE(department,    @department),
-      job_type      = COALESCE(job_type,      @job_type),
-      operator      = COALESCE(operator,      @operator),
-      job_origin    = COALESCE(job_origin,    @job_origin),
-      machine_id    = COALESCE(machine_id,    @machine_id),
-      is_hko        = MAX(IFNULL(is_hko,0),   @is_hko),
-      lens_type     = COALESCE(lens_type,     @lens_type),
-      lens_material = COALESCE(lens_material, @lens_material),
-      lens_style    = COALESCE(lens_style,    @lens_style),
-      lens_color    = COALESCE(lens_color,    @lens_color),
-      coating       = COALESCE(coating,       @coating),
-      coat_type     = COALESCE(coat_type,     @coat_type),
-      lens_opc_r    = COALESCE(lens_opc_r,    @lens_opc_r),
-      lens_opc_l    = COALESCE(lens_opc_l,    @lens_opc_l),
-      frame_upc     = COALESCE(frame_upc,     @frame_upc),
-      frame_name    = COALESCE(frame_name,    @frame_name),
-      frame_style   = COALESCE(frame_style,   @frame_style),
-      frame_sku     = COALESCE(frame_sku,     @frame_sku),
-      frame_mfr     = COALESCE(frame_mfr,     @frame_mfr),
-      frame_color   = COALESCE(frame_color,   @frame_color),
-      eye_size      = COALESCE(eye_size,      @eye_size),
-      bridge        = COALESCE(bridge,        @bridge),
-      edge_type     = COALESCE(edge_type,     @edge_type),
-      rx_r_sphere   = COALESCE(rx_r_sphere,   @r_sphere),
-      rx_r_cylinder = COALESCE(rx_r_cylinder, @r_cyl),
-      rx_r_axis     = COALESCE(rx_r_axis,     @r_axis),
-      rx_r_pd       = COALESCE(rx_r_pd,       @r_pd),
-      rx_r_add      = COALESCE(rx_r_add,      @r_add),
-      rx_l_sphere   = COALESCE(rx_l_sphere,   @l_sphere),
-      rx_l_cylinder = COALESCE(rx_l_cylinder, @l_cyl),
-      rx_l_axis     = COALESCE(rx_l_axis,     @l_axis),
-      rx_l_pd       = COALESCE(rx_l_pd,       @l_pd),
-      rx_l_add      = COALESCE(rx_l_add,      @l_add),
-      updated_at    = datetime('now')
-    WHERE invoice = @invoice
-  `);
+  // Route writes through jobs-repo (Step 3j of Task #19). Migrations are
+  // no-op on prod (already applied) but make this script self-bootstrapping.
+  const { runMigrations } = require('../server/migration-runner');
+  const { createRepo } = require('../server/domain/jobs-repo');
+  if (APPLY) runMigrations(db);
+  const jobsRepo = APPLY ? createRepo(db) : null;
 
+  // The repo's contract enforces first-non-null-wins on every classification
+  // slot (matching the original COALESCE semantics) and the terminal-stage /
+  // status-derivation rules from xml-shiplog. We pre-check existence to
+  // preserve the script's "never INSERT from SHIPLOG" rule (resurrecting
+  // canceled/purged invoices via INSERT would be wrong).
   const existsStmt = db.prepare(`SELECT 1 FROM jobs WHERE invoice = ? LIMIT 1`);
 
   const files = fs.readdirSync(SHIPPED_DIR).filter(f => f.endsWith('.xml'));
@@ -287,51 +249,57 @@ function main() {
       }
 
       try {
-        const r = updateStmt.run({
-          invoice:       parsed.invoice,
-          reference:     parsed.reference || null,
-          rx_number:     parsed.rxNum || null,
-          tray:          parsed.tray || null,
-          entry_date:    parsed.entryDate || null,
-          entry_time:    parsed.entryTime || null,
-          ship_date:     parsed.shipDate || null,
-          ship_time:     parsed.shipTime || null,
-          days_in_lab:   parsed.daysInLab || null,
-          department:    parsed.department || null,
-          job_type:      parsed.jobType || null,
-          operator:      parsed.operator || null,
-          job_origin:    parsed.jobOrigin || null,
-          machine_id:    parsed.machineId || null,
-          is_hko:        parsed.isHko ? 1 : 0,
-          lens_type:     parsed.lensType || null,
-          lens_material: parsed.lensMat || null,
-          lens_style:    parsed.lensStyle || null,
-          lens_color:    parsed.lensColor || null,
-          coating:       parsed.coating || null,
-          coat_type:     parsed.coatType || null,
-          lens_opc_r:    parsed.lensOpc || null,
-          lens_opc_l:    parsed.lensOpcL || null,
-          frame_upc:     parsed.frameUpc || null,
-          frame_name:    parsed.frameName || null,
-          frame_style:   parsed.frameStyle || null,
-          frame_sku:     parsed.frameSku || null,
-          frame_mfr:     parsed.frameMfr || null,
-          frame_color:   parsed.frameColor || null,
-          eye_size:      parsed.eyeSize || null,
-          bridge:        parsed.bridge || null,
-          edge_type:     parsed.edgeType || null,
-          r_sphere:      parsed.rx?.R?.sphere || null,
-          r_cyl:         parsed.rx?.R?.cylinder || null,
-          r_axis:        parsed.rx?.R?.axis || null,
-          r_pd:          parsed.rx?.R?.pd || null,
-          r_add:         parsed.rx?.R?.add || null,
-          l_sphere:      parsed.rx?.L?.sphere || null,
-          l_cyl:         parsed.rx?.L?.cylinder || null,
-          l_axis:        parsed.rx?.L?.axis || null,
-          l_pd:          parsed.rx?.L?.pd || null,
-          l_add:         parsed.rx?.L?.add || null,
+        jobsRepo.upsert({
+          invoice: String(parsed.invoice),
+          patch: {
+            reference:     parsed.reference || null,
+            rx_number:     parsed.rxNum || null,
+            tray:          parsed.tray || null,
+            entry_date:    parsed.entryDate || null,
+            entry_time:    parsed.entryTime || null,
+            ship_date:     parsed.shipDate || null,
+            ship_time:     parsed.shipTime || null,
+            days_in_lab:   parsed.daysInLab || null,
+            department:    parsed.department || null,
+            job_type:      parsed.jobType || null,
+            operator:      parsed.operator || null,
+            job_origin:    parsed.jobOrigin || null,
+            machine_id:    parsed.machineId || null,
+            is_hko:        parsed.isHko ? 1 : 0,
+            lens_type:     parsed.lensType || null,
+            lens_material: parsed.lensMat || null,
+            lens_style:    parsed.lensStyle || null,
+            lens_color:    parsed.lensColor || null,
+            coating:       parsed.coating || null,
+            coat_type:     parsed.coatType || null,
+            lens_opc_r:    parsed.lensOpc || null,
+            lens_opc_l:    parsed.lensOpcL || null,
+            frame_upc:     parsed.frameUpc || null,
+            frame_name:    parsed.frameName || null,
+            frame_style:   parsed.frameStyle || null,
+            frame_sku:     parsed.frameSku || null,
+            frame_mfr:     parsed.frameMfr || null,
+            frame_color:   parsed.frameColor || null,
+            eye_size:      parsed.eyeSize || null,
+            bridge:        parsed.bridge || null,
+            edge_type:     parsed.edgeType || null,
+            rx_r_sphere:   parsed.rx?.R?.sphere || null,
+            rx_r_cylinder: parsed.rx?.R?.cylinder || null,
+            rx_r_axis:     parsed.rx?.R?.axis || null,
+            rx_r_pd:       parsed.rx?.R?.pd || null,
+            rx_r_add:      parsed.rx?.R?.add || null,
+            rx_l_sphere:   parsed.rx?.L?.sphere || null,
+            rx_l_cylinder: parsed.rx?.L?.cylinder || null,
+            rx_l_axis:     parsed.rx?.L?.axis || null,
+            rx_l_pd:       parsed.rx?.L?.pd || null,
+            rx_l_add:      parsed.rx?.L?.add || null,
+          },
+          source: 'xml-shiplog',
+          observedAt: Date.now(),
+          actor: 'backfill:jobs-from-shiplog-xml',
+          metadata: { file },
         });
-        stats.rowsAffected += r.changes;
+        stats.rowsAffected += 1;
         stats.updated++;
       } catch (e) {
         stats.parseError++;

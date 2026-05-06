@@ -109,6 +109,12 @@ function main() {
   const Database = require('better-sqlite3');
   const db = new Database(DB_PATH);
 
+  // Route writes through jobs-repo (Step 3j of Task #19).
+  const { runMigrations } = require('../server/migration-runner');
+  const { createRepo } = require('../server/domain/jobs-repo');
+  if (APPLY) runMigrations(db);
+  const jobsRepo = APPLY ? createRepo(db) : null;
+
   const candidates = db.prepare(`
     SELECT invoice, current_stage, current_station, status
     FROM jobs
@@ -127,44 +133,10 @@ function main() {
     '',
   ];
 
-  // Mirror of upsertJobClassificationFromXML — used for dry-run counting AND
-  // for applying writes. We can't require server/db.js (it opens the prod DB
-  // on require with WAL flags, which would conflict with this script's own
-  // handle). Inline the same UPSERT body verbatim — keep in lockstep.
-  const upsert = db.prepare(`
-    INSERT INTO jobs (invoice, reference, rx_number, entry_date, entry_time,
-                      department, job_type, is_hko,
-                      lens_type, lens_material, lens_style, lens_color,
-                      coating, coat_type, lens_opc_r, lens_opc_l,
-                      frame_upc, frame_name, frame_style,
-                      status, current_stage, updated_at)
-    VALUES (@invoice, @reference, @rx_number, @entry_date, @entry_time,
-            @department, @job_type, @is_hko,
-            @lens_type, @lens_material, @lens_style, @lens_color,
-            @coating, @coat_type, @lens_opc_r, @lens_opc_l,
-            @frame_upc, @frame_name, @frame_style,
-            'ACTIVE', 'INCOMING', datetime('now'))
-    ON CONFLICT(invoice) DO UPDATE SET
-      reference     = COALESCE(jobs.reference,     excluded.reference),
-      rx_number     = COALESCE(jobs.rx_number,     excluded.rx_number),
-      entry_date    = COALESCE(jobs.entry_date,    excluded.entry_date),
-      entry_time    = COALESCE(jobs.entry_time,    excluded.entry_time),
-      department    = COALESCE(jobs.department,    excluded.department),
-      job_type      = COALESCE(jobs.job_type,      excluded.job_type),
-      is_hko        = MAX(jobs.is_hko, excluded.is_hko),
-      lens_type     = COALESCE(jobs.lens_type,     excluded.lens_type),
-      lens_material = COALESCE(jobs.lens_material, excluded.lens_material),
-      lens_style    = COALESCE(jobs.lens_style,    excluded.lens_style),
-      lens_color    = COALESCE(jobs.lens_color,    excluded.lens_color),
-      coating       = COALESCE(jobs.coating,       excluded.coating),
-      coat_type     = COALESCE(jobs.coat_type,     excluded.coat_type),
-      lens_opc_r    = COALESCE(jobs.lens_opc_r,    excluded.lens_opc_r),
-      lens_opc_l    = COALESCE(jobs.lens_opc_l,    excluded.lens_opc_l),
-      frame_upc     = COALESCE(jobs.frame_upc,     excluded.frame_upc),
-      frame_name    = COALESCE(jobs.frame_name,    excluded.frame_name),
-      frame_style   = COALESCE(jobs.frame_style,   excluded.frame_style),
-      updated_at    = datetime('now')
-  `);
+  // Replaces the previous inlined mirror of upsertJobClassificationFromXML.
+  // The repo enforces the same first-non-null-wins semantics on every
+  // classification slot AND writes a state_history audit row, so we get
+  // both the COALESCE merge and the audit trail for free.
 
   // Tier 3 lookup — picks_history JOIN lens_sku_properties.
   // NOTE: planner spec said `lens_sku_params` but that table only holds
@@ -192,17 +164,10 @@ function main() {
     LIMIT 1
   `);
 
-  // Tier 3 writer — UPDATE-only with COALESCE. Does NOT touch status /
-  // current_stage. Distinct from upsertJobClassificationFromXML because we
-  // only have a small slice of fields (sku, material, lens_type_modal).
-  const tier3Update = db.prepare(`
-    UPDATE jobs SET
-      lens_type     = COALESCE(lens_type, @lens_type),
-      lens_material = COALESCE(lens_material, @lens_material),
-      lens_opc_r    = COALESCE(lens_opc_r, @lens_opc_r),
-      updated_at    = datetime('now')
-    WHERE invoice = @invoice
-  `);
+  // Tier 3 routes through the repo with source='picks-derive' — the
+  // contract's lens_type/lens_material/lens_opc_r priority lists place
+  // picks-derive below xml-shiplog and xml-classification, so this never
+  // overwrites a value already set by an XML-driven path.
 
   const stats = {
     examined: 0,
@@ -320,33 +285,48 @@ function main() {
 
       try {
         if (tier === 1 || tier === 2) {
-          upsert.run({
-            invoice:       row.invoice,
-            reference:     parsed.reference || null,
-            rx_number:     parsed.rxNum || null,
-            entry_date:    parsed.entryDate || null,
-            entry_time:    parsed.entryTime || null,
-            department:    parsed.department || null,
-            job_type:      parsed.jobType || null,
-            is_hko:        parsed.isHko ? 1 : 0,
-            lens_type:     parsed.lensType || null,
-            lens_material: parsed.lensMat || null,
-            lens_style:    parsed.lensStyle || null,
-            lens_color:    parsed.lensColor || null,
-            coating:       parsed.coating || null,
-            coat_type:     parsed.coatType || null,
-            lens_opc_r:    parsed.lensOpc || null,
-            lens_opc_l:    parsed.lensOpcL || null,
-            frame_upc:     parsed.frameUpc || null,
-            frame_name:    parsed.frameName || null,
-            frame_style:   parsed.frameStyle || null,
+          // Tier 1/2: inbound XML or SHIPLOG XML re-parse — same data shape
+          // as the live xml-classification path.
+          jobsRepo.upsert({
+            invoice: String(row.invoice),
+            patch: {
+              reference:     parsed.reference || null,
+              rx_number:     parsed.rxNum || null,
+              entry_date:    parsed.entryDate || null,
+              entry_time:    parsed.entryTime || null,
+              department:    parsed.department || null,
+              job_type:      parsed.jobType || null,
+              is_hko:        parsed.isHko ? 1 : 0,
+              lens_type:     parsed.lensType || null,
+              lens_material: parsed.lensMat || null,
+              lens_style:    parsed.lensStyle || null,
+              lens_color:    parsed.lensColor || null,
+              coating:       parsed.coating || null,
+              coat_type:     parsed.coatType || null,
+              lens_opc_r:    parsed.lensOpc || null,
+              lens_opc_l:    parsed.lensOpcL || null,
+              frame_upc:     parsed.frameUpc || null,
+              frame_name:    parsed.frameName || null,
+              frame_style:   parsed.frameStyle || null,
+            },
+            source: 'xml-classification',
+            observedAt: Date.now(),
+            actor: 'backfill:active-wip-lens-type',
+            metadata: { tier },
           });
         } else {
-          tier3Update.run({
-            invoice:       row.invoice,
-            lens_type:     tier3Result.lens_type,
-            lens_material: tier3Result.lens_material,
-            lens_opc_r:    tier3Result.lens_opc_r,
+          // Tier 3: picks_history → lens_sku_properties.
+          jobsRepo.upsert({
+            invoice: String(row.invoice),
+            patch: {
+              lens_type:     tier3Result.lens_type,
+              lens_material: tier3Result.lens_material,
+              lens_opc_r:    tier3Result.lens_opc_r,
+            },
+            source: 'picks-derive',
+            observedAt: Date.now(),
+            actor: 'backfill:active-wip-lens-type',
+            metadata: { tier: 3 },
           });
         }
       } catch (e) {
