@@ -49,10 +49,17 @@ function ensureDir() { if (!fs.existsSync(REPORTS_DIR)) fs.mkdirSync(REPORTS_DIR
 // mapping, and that gets recorded as the Phase 1 spec.
 const CANDIDATES = {
   materials_inventory:   ['Material', 'Materials', 'Inventory', 'Stock', 'OnHand'],
-  locations:             ['Location', 'Locations', 'Bin', 'Bins', 'StorageUnit'],
-  location_contents:     ['LocationContent', 'LocationContents', 'BinContent', 'StockLocation', 'MaterialLocation'],
+  locations:             ['Location', 'Locations', 'Bin', 'Bins'],
+  // Note: 'LocContent' (no 'ation') is Power Pick's actual table name —
+  // confirmed in the 2026-05-07 phase-0 run.
+  location_contents:     ['LocContent', 'LocContentbreakdown', 'LocationContent', 'BinContent', 'StockLocation', 'MaterialLocation'],
   warehouses:            ['Warehouse', 'Warehouses'],
-  vlms:                  ['VLM', 'StorageDevice', 'CarrouselUnit', 'Carousel'],
+  // VLMs in Power Pick are 'Storageunit' rows (one per physical Kardex
+  // unit). Lab has 6 VLMs (3 per warehouse) — this table had 8 rows in
+  // the 2026-05-07 run, likely some inactive.
+  vlms:                  ['Storageunit', 'VLM', 'StorageDevice', 'Carrousel', 'Carousel', 'Shuttle'],
+  shelves:               ['Shelf', 'Shelves'],
+  carriers:              ['Carrier', 'Carriers', 'Trolley'],
   orders_picks_puts:     ['Order', 'Orders', 'OrderHeader', 'OrderLine', 'OrderLines'],
   transactions:          ['Transaction', 'Transactions', 'History', 'PickHistory'],
   customers:             ['Customer', 'Customers'],
