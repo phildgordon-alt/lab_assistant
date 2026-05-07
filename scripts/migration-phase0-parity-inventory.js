@@ -47,10 +47,13 @@ const itempath  = require('../server/itempath-adapter');
 
 function ensureDir() { if (!fs.existsSync(REPORTS_DIR)) fs.mkdirSync(REPORTS_DIR, { recursive: true }); }
 
-// Power Pick: aggregate on-hand qty by (SKU, warehouse). One row per
-// (Materialreference, WarehouseName) — sums across all VLMs / shelves /
-// locations within the warehouse.
-const PP_QUERY = `
+// Power Pick: aggregate on-hand qty BOTH by (SKU, warehouse) AND by
+// SKU-only. ItemPath's /api/inventory endpoint emits one row per SKU
+// with a single aggregate qty — no per-warehouse split — so the apples-
+// to-apples Phase 0 parity check is at the SKU level, not the
+// (SKU, warehouse) level. We still capture per-warehouse so we can
+// report a per-warehouse table for context.
+const PP_QUERY_BY_WH = `
   SELECT
     m.MaterialName       AS sku,
     w.WarehouseName      AS warehouse,
@@ -65,13 +68,18 @@ const PP_QUERY = `
   WHERE lc.QuantityCurrent IS NOT NULL
   GROUP BY m.MaterialName, w.WarehouseName
 `;
+const PP_QUERY_SKU_TOTAL = `
+  SELECT
+    m.MaterialName        AS sku,
+    SUM(lc.QuantityCurrent) AS qty
+  FROM dbo.LocContent lc
+  JOIN dbo.Materialbase m ON m.MaterialId = lc.MaterialId
+  WHERE lc.QuantityCurrent IS NOT NULL
+  GROUP BY m.MaterialName
+`;
 
 async function pullPowerPickInventory() {
-  // Use the adapter's connect/pool wiring rather than re-implementing
   await powerpick.testConnection(); // ensures pool is live
-  const pool = powerpick._getPool ? powerpick._getPool() : null;
-  // The adapter doesn't export the pool directly. Use sampleRows-style
-  // direct query through mssql package.
   let sql;
   try { sql = require('mssql'); } catch { throw new Error('mssql package not installed'); }
   const env = process.env;
@@ -89,8 +97,9 @@ async function pullPowerPickInventory() {
   };
   const p = await sql.connect(cfg);
   try {
-    const r = await p.request().query(PP_QUERY);
-    return r.recordset || [];
+    const byWh   = (await p.request().query(PP_QUERY_BY_WH)).recordset || [];
+    const totals = (await p.request().query(PP_QUERY_SKU_TOTAL)).recordset || [];
+    return { byWh, totals };
   } finally {
     try { await p.close(); } catch {}
   }
@@ -126,16 +135,17 @@ async function run() {
 
   // ── 1. Pull Power Pick ─────────────────────────────────────────
   console.log('[parity-inv] querying Power Pick (LocContent join)…');
-  let ppRows;
-  try { ppRows = await pullPowerPickInventory(); }
+  let ppData;
+  try { ppData = await pullPowerPickInventory(); }
   catch (e) {
     console.error('[parity-inv] Power Pick query failed:', e.message);
     fs.writeFileSync(reportPath, `# Parity Inventory ${today}\n\n**ABORTED:** Power Pick query failed: ${e.message}\n`);
     process.exit(1);
   }
-  const ppByKey = indexBySkuWh(ppRows);
-  const ppSkus = new Set(ppRows.map(r => r.sku));
-  console.log(`[parity-inv] Power Pick: ${ppRows.length} (sku, warehouse) rows · ${ppSkus.size} distinct SKUs`);
+  const ppByKey = indexBySkuWh(ppData.byWh);
+  const ppSkuTotal = new Map(ppData.totals.map(r => [r.sku, Number(r.qty) || 0]));
+  const ppSkus = new Set([...ppSkuTotal.keys()]);
+  console.log(`[parity-inv] Power Pick: ${ppData.byWh.length} (sku, warehouse) rows · ${ppSkus.size} distinct SKUs`);
 
   // ── 2. Pull ItemPath data from the running lab server ─────────
   // Reading itempath.getInventory() in this child process gives an
@@ -157,69 +167,51 @@ async function run() {
   const ipMaterials = Array.isArray(invJson.materials) ? invJson.materials : [];
   console.log(`[parity-inv] ItemPath (via lab server): ${ipMaterials.length} materials`);
   if (ipMaterials.length === 0) {
-    const msg = 'ItemPath returned 0 materials. Possible causes: (1) ITEMPATH_TOKEN not set on lab server, (2) ItemPath REST API down, (3) adapter in mock mode. CANNOT validate parity without a populated ItemPath cache.';
+    const msg = 'ItemPath returned 0 materials. Possible causes: (1) ITEMPATH_TOKEN not set on lab server, (2) ItemPath REST API down, (3) adapter in mock mode.';
     console.error(`[parity-inv] ${msg}`);
-    fs.writeFileSync(reportPath, `# Parity Inventory ${today}\n\n**ABORTED:** ${msg}\n\nLab server response:\n\n\`\`\`\n${JSON.stringify(invJson, null, 2).slice(0, 1000)}\n\`\`\`\n`);
+    fs.writeFileSync(reportPath, `# Parity Inventory ${today}\n\n**ABORTED:** ${msg}\n`);
     process.exit(2);
   }
-  // ItemPath material shape varies — handle both flattened-per-warehouse
-  // (one row per (sku, warehouse) with .qty) and aggregated (one row per
-  // sku with .warehouseStock {WH1: qty, WH2: qty}).
-  const ipByKey = new Map();
+  // ItemPath /api/inventory emits one row per SKU with `qty` already
+  // aggregated across all warehouses (see m.warehouse=null in sample
+  // 0620034231). For Phase 0 parity, compare SKU-level totals.
+  const ipSkuTotal = new Map();
   for (const m of ipMaterials) {
     const sku = m.sku || m.materialName || m.MaterialName;
     if (!sku) continue;
-    if (m.warehouse && (m.qty != null)) {
-      ipByKey.set(`${sku}::${m.warehouse}`, Number(m.qty) || 0);
-    } else if (m.warehouseStock && typeof m.warehouseStock === 'object') {
-      for (const [wh, q] of Object.entries(m.warehouseStock)) {
-        ipByKey.set(`${sku}::${wh}`, Number(q) || 0);
-      }
-    } else if (m.qty != null) {
-      // No warehouse breakdown — aggregate under unknown
-      ipByKey.set(`${sku}::(unspecified)`, Number(m.qty) || 0);
-    }
+    const q = Number(m.qty) || 0;
+    ipSkuTotal.set(sku, (ipSkuTotal.get(sku) || 0) + q);
   }
-  const ipSkus = new Set([...ipByKey.keys()].map(k => k.split('::')[0]));
-  console.log(`[parity-inv] ItemPath: ${ipByKey.size} (sku, warehouse) keys · ${ipSkus.size} distinct SKUs`);
+  const ipSkus = new Set([...ipSkuTotal.keys()]);
+  console.log(`[parity-inv] ItemPath SKU-totals: ${ipSkuTotal.size} distinct SKUs`);
 
-  // ── 3. Sample SKUs (intersection by default) ───────────────────
+  // ── 3. Sample SKUs from the intersection ───────────────────────
   const intersection = [...ppSkus].filter(s => ipSkus.has(s)).sort();
   const sampleSkus = pickSample(intersection, SAMPLE);
   console.log(`[parity-inv] comparing ${sampleSkus.length} SKUs (intersection of ${intersection.length})`);
 
-  // ── 4. Diff (sku, warehouse) → qty ─────────────────────────────
+  // ── 4. Diff at SKU-total level ─────────────────────────────────
   const diffs = [];
   const matches = [];
   const onlyPp = [];
   const onlyIp = [];
   for (const sku of sampleSkus) {
-    // gather all warehouses present in either side for this SKU
-    const wh = new Set();
-    for (const k of ppByKey.keys()) if (k.startsWith(sku + '::')) wh.add(k.split('::')[1]);
-    for (const k of ipByKey.keys()) if (k.startsWith(sku + '::')) wh.add(k.split('::')[1]);
-    for (const w of wh) {
-      const k = `${sku}::${w}`;
-      const ppQ = ppByKey.has(k) ? ppByKey.get(k) : null;
-      const ipQ = ipByKey.has(k) ? ipByKey.get(k) : null;
-      if (ppQ === null && ipQ !== null) onlyIp.push({ sku, warehouse: w, ipQ });
-      else if (ipQ === null && ppQ !== null) onlyPp.push({ sku, warehouse: w, ppQ });
-      else if (Math.abs((ppQ || 0) - (ipQ || 0)) >= 1) diffs.push({ sku, warehouse: w, ppQ, ipQ, delta: (ppQ || 0) - (ipQ || 0) });
-      else matches.push({ sku, warehouse: w, qty: ppQ });
-    }
+    const ppQ = ppSkuTotal.has(sku) ? ppSkuTotal.get(sku) : null;
+    const ipQ = ipSkuTotal.has(sku) ? ipSkuTotal.get(sku) : null;
+    if (ppQ === null && ipQ !== null) onlyIp.push({ sku, ipQ });
+    else if (ipQ === null && ppQ !== null) onlyPp.push({ sku, ppQ });
+    else if (Math.abs((ppQ || 0) - (ipQ || 0)) >= 1) diffs.push({ sku, ppQ, ipQ, delta: (ppQ || 0) - (ipQ || 0) });
+    else matches.push({ sku, qty: ppQ });
   }
 
-  // ── 5. Universe-level totals (every SKU, not just sample) ──────
+  // ── 5. Universe-level totals ──────────────────────────────────
   const ppTotalsByWh = {};
   for (const [k, q] of ppByKey) {
     const w = k.split('::')[1];
     ppTotalsByWh[w] = (ppTotalsByWh[w] || 0) + q;
   }
-  const ipTotalsByWh = {};
-  for (const [k, q] of ipByKey) {
-    const w = k.split('::')[1];
-    ipTotalsByWh[w] = (ipTotalsByWh[w] || 0) + q;
-  }
+  const ppGrand = [...ppSkuTotal.values()].reduce((s, q) => s + q, 0);
+  const ipGrand = [...ipSkuTotal.values()].reduce((s, q) => s + q, 0);
 
   const out = {
     runAt: new Date().toISOString(),
@@ -227,7 +219,7 @@ async function run() {
     sampleSize: sampleSkus.length,
     intersectionSize: intersection.length,
     counts: {
-      ppRows: ppRows.length,
+      ppByWhRows: ppData.byWh.length,
       ppSkus: ppSkus.size,
       ipMaterials: ipMaterials.length,
       ipSkus: ipSkus.size,
@@ -236,7 +228,7 @@ async function run() {
       onlyPp: onlyPp.length,
       onlyIp: onlyIp.length,
     },
-    ppTotalsByWh, ipTotalsByWh,
+    ppTotalsByWh, ppGrand, ipGrand,
     sampleSkus, diffs, onlyPp, onlyIp,
   };
   fs.writeFileSync(jsonPath, JSON.stringify(out, null, 2));
@@ -244,6 +236,7 @@ async function run() {
   // ── 6. Markdown report ─────────────────────────────────────────
   let md = `# Parity Inventory · ItemPath ↔ Power Pick · ${today}\n\n`;
   md += `_Run: ${out.runAt}_\n\n`;
+  md += `_Comparison key: SKU-total qty (ItemPath /api/inventory emits per-SKU aggregate; Power Pick LocContent summed across all warehouses for the same shape)._\n\n`;
   md += `## Summary\n\n`;
   md += `| Metric | Value |\n|---|---:|\n`;
   md += `| Sample size | ${out.sampleSize} |\n`;
@@ -251,41 +244,44 @@ async function run() {
   md += `| ✅ Matches (qty equal within ±1) | **${out.counts.matches}** |\n`;
   md += `| ❌ Differences | **${out.counts.diffs}** |\n`;
   md += `| Only in Power Pick | ${out.counts.onlyPp} |\n`;
-  md += `| Only in ItemPath | ${out.counts.onlyIp} |\n`;
+  md += `| Only in ItemPath  | ${out.counts.onlyIp} |\n`;
   md += `\n`;
   const verdict = (out.counts.diffs === 0 && out.counts.onlyPp === 0 && out.counts.onlyIp === 0)
     ? '✅ **PASS** — exact parity for sampled SKUs.'
     : '❌ **FAIL** — investigate divergences before Phase 1 cutover.';
   md += `### Verdict: ${verdict}\n\n`;
-  md += `## Universe Totals (every SKU, not just sample)\n\n`;
-  md += `| Warehouse | Power Pick total qty | ItemPath total qty | Δ |\n|---|---:|---:|---:|\n`;
-  const allWh = new Set([...Object.keys(ppTotalsByWh), ...Object.keys(ipTotalsByWh)]);
-  for (const w of [...allWh].sort()) {
-    const pp = Math.round(ppTotalsByWh[w] || 0);
-    const ip = Math.round(ipTotalsByWh[w] || 0);
-    const pct = ip > 0 ? (((pp - ip) / ip) * 100).toFixed(1) : '∞';
-    md += `| ${w} | ${pp.toLocaleString()} | ${ip.toLocaleString()} | ${(pp - ip).toLocaleString()} (${pct}%) |\n`;
+  md += `## Grand Totals (every SKU, every warehouse)\n\n`;
+  md += `| Source | Total qty |\n|---|---:|\n`;
+  md += `| Power Pick (sum LocContent.QuantityCurrent) | ${Math.round(ppGrand).toLocaleString()} |\n`;
+  md += `| ItemPath (sum materials[].qty)              | ${Math.round(ipGrand).toLocaleString()} |\n`;
+  const grandDelta = Math.round(ppGrand - ipGrand);
+  const grandPct = ipGrand > 0 ? ((grandDelta / ipGrand) * 100).toFixed(2) : '∞';
+  md += `| **Δ**                                       | **${grandDelta.toLocaleString()} (${grandPct}%)** |\n\n`;
+  md += `## Per-Warehouse (Power Pick only — ItemPath endpoint doesn't break out by warehouse)\n\n`;
+  md += `| Warehouse | Power Pick total qty |\n|---|---:|\n`;
+  for (const w of Object.keys(ppTotalsByWh).sort()) {
+    md += `| ${w} | ${Math.round(ppTotalsByWh[w]).toLocaleString()} |\n`;
   }
   md += `\n`;
   if (diffs.length) {
-    md += `## Differences (sample)\n\n`;
-    md += `| SKU | Warehouse | Power Pick | ItemPath | Δ |\n|---|---|---:|---:|---:|\n`;
+    md += `## Differences (sample, SKU-total level)\n\n`;
+    md += `| SKU | Power Pick | ItemPath | Δ |\n|---|---:|---:|---:|\n`;
     for (const d of diffs.slice(0, 100)) {
-      md += `| ${d.sku} | ${d.warehouse} | ${(d.ppQ ?? 'null').toString()} | ${(d.ipQ ?? 'null').toString()} | ${d.delta} |\n`;
+      md += `| ${d.sku} | ${(d.ppQ ?? 'null').toString()} | ${(d.ipQ ?? 'null').toString()} | ${d.delta} |\n`;
     }
     if (diffs.length > 100) md += `\n_…${diffs.length - 100} more diffs in JSON._\n`;
     md += `\n`;
   }
   if (onlyPp.length) {
     md += `## Only in Power Pick (top 50)\n\n`;
-    md += `| SKU | Warehouse | Qty |\n|---|---|---:|\n`;
-    for (const r of onlyPp.slice(0, 50)) md += `| ${r.sku} | ${r.warehouse} | ${r.ppQ} |\n`;
+    md += `| SKU | Qty |\n|---|---:|\n`;
+    for (const r of onlyPp.slice(0, 50)) md += `| ${r.sku} | ${r.ppQ} |\n`;
     md += `\n`;
   }
   if (onlyIp.length) {
     md += `## Only in ItemPath (top 50)\n\n`;
-    md += `| SKU | Warehouse | Qty |\n|---|---|---:|\n`;
-    for (const r of onlyIp.slice(0, 50)) md += `| ${r.sku} | ${r.warehouse} | ${r.ipQ} |\n`;
+    md += `| SKU | Qty |\n|---|---:|\n`;
+    for (const r of onlyIp.slice(0, 50)) md += `| ${r.sku} | ${r.ipQ} |\n`;
     md += `\n`;
   }
   fs.writeFileSync(reportPath, md);
