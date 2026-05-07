@@ -4423,6 +4423,31 @@ Respond with a structured batching plan in this format:
   if (req.method==='GET' && url.pathname==='/api/powerpick/status') {
     return json(res, powerpick.getStatus());
   }
+  // Today's picks from picks_history (Power Pick truth, replaces ItemPath
+  // counts which over-counted via phantom rows). Used by the Put Wall card
+  // on the Overview tab — gives trustworthy numbers for PICKS TODAY.
+  if (req.method==='GET' && url.pathname==='/api/powerpick/picks-today') {
+    try {
+      const rows = labDb.db.prepare(`
+        SELECT warehouse, COUNT(*) AS picks
+        FROM picks_history
+        WHERE completed_at >= date('now', 'localtime')
+          AND warehouse IS NOT NULL
+        GROUP BY warehouse
+      `).all();
+      const byWh = { WH1: 0, WH2: 0, WH3: 0, total: 0 };
+      for (const r of rows) {
+        if (r.warehouse in byWh) byWh[r.warehouse] = r.picks;
+        byWh.total += r.picks;
+      }
+      const last = labDb.db.prepare(
+        `SELECT MAX(completed_at) AS last FROM picks_history`
+      ).get();
+      return json(res, { ...byWh, lastPickAt: last?.last || null, source: 'powerpick' });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
   if (req.method==='GET' && url.pathname==='/api/powerpick/test') {
     try { return json(res, await powerpick.testConnection()); }
     catch (e) { return json(res, { ok: false, error: e.message }, 500); }

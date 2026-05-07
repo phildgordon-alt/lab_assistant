@@ -905,13 +905,21 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   const [pickStats,setPickStats]=useState({WH1:0,WH2:0});
   const [putStats,setPutStats]=useState({WH1:0,WH2:0});
   const [hourlyPicks,setHourlyPicks]=useState({WH1:{},WH2:{}});
+  // PICKS TODAY now sources from Power Pick (picks_history) instead of
+  // ItemPath. ItemPath over-counted via phantom rows (the bug that drove
+  // the Power Pick migration in the first place). Power Pick numbers
+  // are the source of truth. PUTS TODAY remains on ItemPath because
+  // Power Pick doesn't track replenishment puts yet — that's part of
+  // the broader ItemPath migration still on the list.
+  const [ppLastPickAt,setPpLastPickAt]=useState(null);
   useEffect(()=>{
     const fetchPutWall=async()=>{
       try{
-        const [pwRes,invRes,dailyRes]=await Promise.all([
+        const [pwRes,invRes,dailyRes,ppRes]=await Promise.all([
           fetch(`/api/inventory/putwall`),
           fetch(`/api/inventory`),
-          fetch(`/api/inventory/picks/daily`)
+          fetch(`/api/inventory/picks/daily`),
+          fetch(`/api/powerpick/picks-today`),
         ]);
         const data=await pwRes.json();
         setPutWallData({
@@ -920,12 +928,17 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           status:data.status||"ok",
           lastSync:data.lastSync
         });
+        // Power Pick (truth) for PICKS TODAY
+        if(ppRes.ok){
+          const pp=await ppRes.json();
+          if(!pp.error){
+            setPickStats({WH1:pp.WH1||0,WH2:pp.WH2||0});
+            setPpLastPickAt(pp.lastPickAt||null);
+          }
+        }
+        // ItemPath for PUTS TODAY (until that migrates too)
         if(invRes.ok){
           const inv=await invRes.json();
-          setPickStats({
-            WH1:inv.warehouseStats?.WH1?.todayPicks||0,
-            WH2:inv.warehouseStats?.WH2?.todayPicks||0
-          });
           setPutStats({
             WH1:inv.warehouseStats?.WH1?.todayPuts||0,
             WH2:inv.warehouseStats?.WH2?.todayPuts||0
@@ -936,6 +949,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           if(daily.hourlyPicks) setHourlyPicks(daily.hourlyPicks);
         }
       }catch(e){
+        console.error('[overview-putwall] fetch failed',e);
         setPutWallData(prev=>({...prev,status:"error"}));
       }
     };
@@ -1483,9 +1497,17 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
               {renderWarehouseStats('WH1', wh1)}
               {renderWarehouseStats('WH2', wh2)}
             </div>
-            {putWallData.lastSync && (
-              <div style={{ fontSize: 9, color: T.textDim, textAlign: 'center', marginTop: 8, fontFamily: mono }}>
-                ItemPath sync: {new Date(putWallData.lastSync).toLocaleTimeString()}
+            {(putWallData.lastSync || ppLastPickAt) && (
+              <div style={{ fontSize: 9, color: T.textDim, textAlign: 'center', marginTop: 8, fontFamily: mono, lineHeight: 1.5 }}>
+                {ppLastPickAt && (
+                  <span style={{ color: T.green }}>
+                    Picks · Power Pick (Kardex) — last pick {new Date(ppLastPickAt).toLocaleTimeString()}
+                  </span>
+                )}
+                {ppLastPickAt && putWallData.lastSync && <span> · </span>}
+                {putWallData.lastSync && (
+                  <span>Puts &amp; positions · ItemPath sync {new Date(putWallData.lastSync).toLocaleTimeString()}</span>
+                )}
               </div>
             )}
           </div>
