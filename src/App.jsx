@@ -2343,7 +2343,7 @@ function CoatingPipelineView({serverUrl,settings}){
       return;
     }
     fetch(`${base}/api/containers/${encodeURIComponent(selectedContainer)}/manifest`)
-      .then(r=>r.ok?r.json():null).then(d=>{if(d)setManifest(d.jobs||[]);}).catch(()=>{});
+      .then(r=>r.ok?r.json():null).then(d=>{if(d)setManifest(d.jobs||[]);}).catch(e=>console.error("[fetch-failed]",e));
   },[selectedContainer,base,isDemo]);
 
   // Actions
@@ -2730,7 +2730,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
   // Poll active coating runs
   useEffect(()=>{
     if (serverUrl == null) return;
-    const poll=()=>fetch(`${serverUrl}/api/coating/runs`).then(r=>r.json()).then(d=>{if(d.ok) setActiveRuns(d.active||{});}).catch(()=>{});
+    const poll=()=>fetch(`${serverUrl}/api/coating/runs`).then(r=>r.json()).then(d=>{if(d.ok) setActiveRuns(d.active||{});}).catch(e=>console.error("[fetch-failed]",e));
     poll();
     const iv=setInterval(poll,5000);
     return()=>clearInterval(iv);
@@ -2848,7 +2848,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
       body:JSON.stringify({coaterId})
     }).then(r=>r.json()).then(d=>{
       if(d.ok){setActiveRuns(prev=>{const n={...prev};delete n[coaterId];return n;});}
-    }).catch(()=>{});
+    }).catch(e=>console.error("[fetch-failed]",e));
   };
 
   const fmtTimer=(sec)=>{const m=Math.floor(sec/60);const s=sec%60;return`${m}:${String(s).padStart(2,'0')}`;};
@@ -3191,7 +3191,7 @@ function CoatingIntelView({intel,error,lastFetch,serverUrl,batchEdits,setBatchEd
                     fetch(`/web/ask-sync`,{
                       method:'POST',headers:{'Content-Type':'application/json'},
                       body:JSON.stringify({question:`Record feedback rating ${n}/5 for the most recent batch plan. Call get_coating_batch_history to find the latest plan ID, then note this rating.`,agent:'coating',userId:'coating-feedback'})
-                    }).catch(()=>{});
+                    }).catch(e=>console.error("[fetch-failed]",e));
                     setAiAdvice(prev=>prev+`\n\n--- Rated ${n}/5 ---`);
                   }}
                     style={{width:36,height:36,borderRadius:8,border:`1px solid ${n<=2?T.red:n===3?T.amber:T.green}`,background:"transparent",color:n<=2?T.red:n===3?T.amber:T.green,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:mono}}>{n}</button>
@@ -3538,7 +3538,7 @@ function OvenStatusView({intel,serverUrl}){
   const [ovenHistory,setOvenHistory]=useState([]);
   useEffect(()=>{
     const base=serverUrl||``;
-    fetch(`${base}/api/oven-runs?limit=50`).then(r=>r.json()).then(d=>setOvenHistory(d.runs||[])).catch(()=>{});
+    fetch(`${base}/api/oven-runs?limit=50`).then(r=>r.json()).then(d=>setOvenHistory(d.runs||[])).catch(e=>console.error("[fetch-failed]",e));
   },[serverUrl]);
 
   if(!intel) return <Card><div style={{color:T.textDim,fontFamily:mono,fontSize:13,textAlign:"center",padding:40}}>Loading...</div></Card>;
@@ -5786,7 +5786,7 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
 
   useEffect(() => {
     if (ovenServerUrl == null) return;
-    const go = () => fetch(`${ovenServerUrl}/api/aging/jobs`).then(r => r.json()).then(setData).catch(() => {});
+    const go = () => fetch(`${ovenServerUrl}/api/aging/jobs`).then(r => r.json()).then(setData).catch(e=>console.error("[fetch-failed]",e));
     go();
     const iv = setInterval(go, 60000);
     return () => clearInterval(iv);
@@ -8215,8 +8215,8 @@ function FlowAgentTab({ovenServerUrl,settings}){
   // Load configs when config drawer opens
   useEffect(()=>{
     if(!showConfig)return;
-    fetch(`${base}/api/flow/config/stages`).then(r=>r.json()).then(setStageConfigs).catch(()=>{});
-    fetch(`${base}/api/flow/config/lines`).then(r=>r.json()).then(setLineConfigs).catch(()=>{});
+    fetch(`${base}/api/flow/config/stages`).then(r=>r.json()).then(setStageConfigs).catch(e=>console.error("[fetch-failed]",e));
+    fetch(`${base}/api/flow/config/lines`).then(r=>r.json()).then(setLineConfigs).catch(e=>console.error("[fetch-failed]",e));
   },[showConfig,base]);
 
   // Load catch-up when tab switches or scenario changes
@@ -8233,9 +8233,9 @@ function FlowAgentTab({ovenServerUrl,settings}){
     if(catchUpScenario.workDays)body.workDays=catchUpScenario.workDays;
     const hasOverrides=Object.keys(body).length>0;
     if(hasOverrides){
-      fetch(`${base}/api/flow/catchup/${catchUpLine}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json()).then(setCatchUp).catch(()=>{});
+      fetch(`${base}/api/flow/catchup/${catchUpLine}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>r.json()).then(setCatchUp).catch(e=>console.error("[fetch-failed]",e));
     }else{
-      fetch(`${base}/api/flow/catchup/${catchUpLine}`).then(r=>r.json()).then(setCatchUp).catch(()=>{});
+      fetch(`${base}/api/flow/catchup/${catchUpLine}`).then(r=>r.json()).then(setCatchUp).catch(e=>console.error("[fetch-failed]",e));
     }
   },[subTab,catchUpLine,base,catchUpScenario]);
   useEffect(()=>{loadCatchUp();},[loadCatchUp]);
@@ -8246,13 +8246,13 @@ function FlowAgentTab({ovenServerUrl,settings}){
   const [historyStage,setHistoryStage]=useState("ASSEMBLY");
   useEffect(()=>{
     if(subTab!=="history-analysis")return;
-    fetch(`${base}/api/flow/history-analysis?days=${historyDays}`).then(r=>r.json()).then(setHistoryData).catch(()=>{});
+    fetch(`${base}/api/flow/history-analysis?days=${historyDays}`).then(r=>r.json()).then(setHistoryData).catch(e=>console.error("[fetch-failed]",e));
   },[subTab,historyDays,base]);
 
   // Load trend when tab switches
   useEffect(()=>{
     if(subTab!=="trend")return;
-    fetch(`${base}/api/flow/line/${trendLine}/trend?hours=8`).then(r=>r.json()).then(setTrendData).catch(()=>{});
+    fetch(`${base}/api/flow/line/${trendLine}/trend?hours=8`).then(r=>r.json()).then(setTrendData).catch(e=>console.error("[fetch-failed]",e));
   },[subTab,trendLine,base]);
 
   const ackRec=async(id)=>{
@@ -8269,13 +8269,13 @@ function FlowAgentTab({ovenServerUrl,settings}){
     if(!pushForm.qty)return;
     await fetch(`${base}/api/flow/push`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({line_id:pushForm.line_id,qty:parseInt(pushForm.qty),operator:pushForm.operator,note:pushForm.note})});
     setPushForm(p=>({...p,qty:"",note:""}));
-    fetch(`${base}/api/flow/history?hours=24`).then(r=>r.json()).then(setPushHistory).catch(()=>{});
+    fetch(`${base}/api/flow/history?hours=24`).then(r=>r.json()).then(setPushHistory).catch(e=>console.error("[fetch-failed]",e));
   };
 
   const saveStageConfig=async(stageId)=>{
     await fetch(`${base}/api/flow/config/stages/${stageId}`,{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(stageEdits)});
     setEditingStage(null);setStageEdits({});
-    fetch(`${base}/api/flow/config/stages`).then(r=>r.json()).then(setStageConfigs).catch(()=>{});
+    fetch(`${base}/api/flow/config/stages`).then(r=>r.json()).then(setStageConfigs).catch(e=>console.error("[fetch-failed]",e));
   };
 
   // Status colors
@@ -8332,7 +8332,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
     setLphData(null);
     const d = new Date(); d.setDate(d.getDate() - lphDay);
     const dateStr = d.toISOString().slice(0, 10);
-    const go = () => fetch(`${base}/api/som/lens-per-hour?date=${dateStr}`).then(r=>r.json()).then(setLphData).catch(()=>{});
+    const go = () => fetch(`${base}/api/som/lens-per-hour?date=${dateStr}`).then(r=>r.json()).then(setLphData).catch(e=>console.error("[fetch-failed]",e));
     go();
     const iv = setInterval(go, 300000);
     return () => clearInterval(iv);
@@ -8726,7 +8726,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
           {/* Actions */}
           <div style={{display:"flex",justifyContent:"center",gap:12}}>
             <button onClick={()=>window.open(`${base}/api/flow/put-list/report`,'_blank')} style={{background:"rgba(59,130,246,0.15)",border:"1px solid rgba(59,130,246,0.3)",borderRadius:6,padding:"6px 16px",color:"#60a5fa",fontSize:11,cursor:"pointer",fontFamily:mono}}>Export CSV</button>
-            <button onClick={()=>{setPutList(null);fetch(`${base}/api/flow/put-list`).then(r=>r.json()).then(setPutList).catch(()=>{});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,padding:"6px 16px",color:"#9ca3af",fontSize:11,cursor:"pointer",fontFamily:mono}}>Refresh</button>
+            <button onClick={()=>{setPutList(null);fetch(`${base}/api/flow/put-list`).then(r=>r.json()).then(setPutList).catch(e=>console.error("[fetch-failed]",e));}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:6,padding:"6px 16px",color:"#9ca3af",fontSize:11,cursor:"pointer",fontFamily:mono}}>Refresh</button>
           </div>
         </div>);
       })()}
@@ -8802,7 +8802,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
         <div>
           {/* Readiness dashboard — what can we process NOW */}
           {(()=>{
-            if(!readiness) fetch(`${base}/api/flow/readiness`).then(r=>r.ok?r.json():null).then(setReadiness).catch(()=>{});
+            if(!readiness) fetch(`${base}/api/flow/readiness`).then(r=>r.ok?r.json():null).then(setReadiness).catch(e=>console.error("[fetch-failed]",e));
             const r=readiness;
             if(!r||!r.totalWip)return null;
             const greenPct=r.totalWip>0?Math.round(((r.inProcess+r.readyToProcess)/r.totalWip)*100):0;
@@ -8812,7 +8812,7 @@ function FlowAgentTab({ovenServerUrl,settings}){
             <div style={{background:"rgba(0,0,0,0.2)",borderRadius:10,padding:16,marginBottom:16}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
                 <div style={{fontFamily:"'Bebas Neue',sans-serif",fontSize:16,color:"#e5e7eb",letterSpacing:1}}>WIP READINESS — {r.totalWip.toLocaleString()} JOBS</div>
-                <button onClick={()=>{setReadiness(null);fetch(`${base}/api/flow/readiness`).then(x=>x.json()).then(setReadiness).catch(()=>{});}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,padding:"3px 10px",color:"#6b7280",fontSize:9,cursor:"pointer",fontFamily:mono}}>Refresh</button>
+                <button onClick={()=>{setReadiness(null);fetch(`${base}/api/flow/readiness`).then(x=>x.json()).then(setReadiness).catch(e=>console.error("[fetch-failed]",e));}} style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,255,255,0.08)",borderRadius:4,padding:"3px 10px",color:"#6b7280",fontSize:9,cursor:"pointer",fontFamily:mono}}>Refresh</button>
               </div>
               {/* Stacked bar */}
               <div style={{height:12,background:"rgba(255,255,255,0.06)",borderRadius:6,overflow:"hidden",display:"flex",marginBottom:10}}>
@@ -9814,7 +9814,7 @@ function EarlyWarningTab({ovenServerUrl,settings}){
       setMetricHistory(hist);return;
     }
     fetch(`${base}/api/ews/history?metric=${encodeURIComponent(selectedMetric)}&limit=48`)
-      .then(r=>r.ok?r.json():[]).then(setMetricHistory).catch(()=>{});
+      .then(r=>r.ok?r.json():[]).then(setMetricHistory).catch(e=>console.error("[fetch-failed]",e));
   },[selectedMetric,base,isDemo]);
 
   // Fetch sub-tab data when switching
@@ -9845,8 +9845,8 @@ function EarlyWarningTab({ovenServerUrl,settings}){
         setGlobalConfig({p1_sigma:"3.5",p2_sigma:"2.5",p3_sigma:"1.5",poll_interval_sec:"300",baseline_days:"30",auto_resolve_hours:"4",min_baseline_samples:"10",dedup_window_min:"30"});
         return;
       }
-      fetch(`${base}/api/ews/rules`).then(r=>r.ok?r.json():[]).then(setEwsRules).catch(()=>{});
-      fetch(`${base}/api/ews/config`).then(r=>r.ok?r.json():{}).then(d=>{setGlobalConfig(d);setConfigEdits(d);}).catch(()=>{});
+      fetch(`${base}/api/ews/rules`).then(r=>r.ok?r.json():[]).then(setEwsRules).catch(e=>console.error("[fetch-failed]",e));
+      fetch(`${base}/api/ews/config`).then(r=>r.ok?r.json():{}).then(d=>{setGlobalConfig(d);setConfigEdits(d);}).catch(e=>console.error("[fetch-failed]",e));
     }
     if(ewsSub==="baselines"&&labBaselines.length===0){
       if(isDemo){
@@ -9890,8 +9890,8 @@ function EarlyWarningTab({ovenServerUrl,settings}){
         ]);
         return;
       }
-      fetch(`${base}/api/lab/baselines`).then(r=>r.ok?r.json():[]).then(setLabBaselines).catch(()=>{});
-      fetch(`${base}/api/lab/baselines/history?limit=20`).then(r=>r.ok?r.json():[]).then(setBaselineHistory).catch(()=>{});
+      fetch(`${base}/api/lab/baselines`).then(r=>r.ok?r.json():[]).then(setLabBaselines).catch(e=>console.error("[fetch-failed]",e));
+      fetch(`${base}/api/lab/baselines/history?limit=20`).then(r=>r.ok?r.json():[]).then(setBaselineHistory).catch(e=>console.error("[fetch-failed]",e));
     }
     if(ewsSub==="backlog"&&backlog.length===0){
       if(isDemo){
@@ -9904,8 +9904,8 @@ function EarlyWarningTab({ovenServerUrl,settings}){
         setBacklogTrend(Array.from({length:30},(_,i)=>({day:`2026-02-${String(17+i>28?17+i-28:17+i).padStart(2,"0")}`,avg_backlog:Math.round(20+Math.random()*40),max_backlog:Math.round(40+Math.random()*50),samples:12})));
         return;
       }
-      fetch(`${base}/api/lab/backlog`).then(r=>r.ok?r.json():[]).then(setBacklog).catch(()=>{});
-      fetch(`${base}/api/lab/backlog/trend?department=${backlogDept}&days=30`).then(r=>r.ok?r.json():[]).then(setBacklogTrend).catch(()=>{});
+      fetch(`${base}/api/lab/backlog`).then(r=>r.ok?r.json():[]).then(setBacklog).catch(e=>console.error("[fetch-failed]",e));
+      fetch(`${base}/api/lab/backlog/trend?department=${backlogDept}&days=30`).then(r=>r.ok?r.json():[]).then(setBacklogTrend).catch(e=>console.error("[fetch-failed]",e));
     }
   },[ewsSub,base,isDemo]);
 

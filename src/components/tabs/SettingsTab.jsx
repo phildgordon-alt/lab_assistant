@@ -2989,6 +2989,27 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
                 Reset to Defaults
               </button>
               <button onClick={()=>{
+                if(!confirm('Clear stored network URLs (serverUrl / gatewayUrl / ovenServerUrl)?\n\nThis fixes "Gateway not reachable" / blank dashboards on browsers that have stale URLs from before the same-origin migration. Page will reload.')) return;
+                try {
+                  // Wipe URL fields from the persisted settings blob
+                  const raw = localStorage.getItem('la_settings_v1');
+                  if (raw) {
+                    const obj = JSON.parse(raw);
+                    delete obj.serverUrl;
+                    delete obj.gatewayUrl;
+                    delete obj.ovenServerUrl;
+                    delete obj.itempathUrl;
+                    localStorage.setItem('la_settings_v1', JSON.stringify(obj));
+                  }
+                  // Defensive: also wipe any top-level URL keys some
+                  // older builds wrote standalone
+                  ['serverUrl','gatewayUrl','ovenServerUrl','itempathUrl'].forEach(k => localStorage.removeItem(k));
+                } catch (e) { console.error('[reset-network] failed', e); }
+                location.reload();
+              }} style={{background:"transparent",border:`1px solid ${T.red}`,borderRadius:8,padding:"10px 16px",color:T.red,fontSize:12,fontWeight:700,cursor:"pointer"}}>
+                Reset Network Config
+              </button>
+              <button onClick={()=>{
                 const data = JSON.stringify(settings, null, 2);
                 const blob = new Blob([data], { type: 'application/json' });
                 const a = document.createElement('a');

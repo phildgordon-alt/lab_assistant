@@ -224,7 +224,7 @@ function LensIntelSection({ sku }) {
   useEffect(() => {
     if (!sku) return;
     fetch(`/api/lens-intel/sku/${encodeURIComponent(sku)}`)
-      .then(r => r.json()).then(setData).catch(() => {});
+      .then(r => r.json()).then(setData).catch(e=>console.error("[fetch-failed]",e));
   }, [sku]);
   if (!data?.status) return null;
   const s = data.status;
@@ -1090,7 +1090,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
           if (Object.keys(skuCategories).length === 0) {
             fetch(`${ovenServerUrl}/api/netsuite/categories`).then(r => r.json()).then(c => {
               if (c && Object.keys(c).length > 100) setSkuCategories(c);
-            }).catch(() => {});
+            }).catch(e=>console.error("[fetch-failed]",e));
           }
         }
         if (tab === 'reconciliation') {
@@ -1109,7 +1109,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
         }
         if (tab === 'tops') {
           if (!fetchedRef.current.tops) {
-            fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json()).then(setTopsData).catch(() => {});
+            fetch(`${ovenServerUrl}/api/inventory/tops`).then(r => r.json()).then(setTopsData).catch(e=>console.error("[fetch-failed]",e));
             fetchedRef.current.tops = true;
           }
         }
@@ -2731,7 +2731,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
         {sub === "pipeline" && (() => {
           if (!pipelineData || pipelineData._days !== pipelineDays) {
-            fetch(`${ovenServerUrl}/api/usage/pipeline?days=${pipelineDays}`).then(r => r.json()).then(d => { d._days = pipelineDays; setPipelineData(d); }).catch(() => {});
+            fetch(`${ovenServerUrl}/api/usage/pipeline?days=${pipelineDays}`).then(r => r.json()).then(d => { d._days = pipelineDays; setPipelineData(d); }).catch(e=>console.error("[fetch-failed]",e));
           }
           const daily = pipelineData?.daily || [];
           const totals = pipelineData?.totals || {};
@@ -2859,7 +2859,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
                               setPipelineDetailDate(d.date);
                               setPipelineDetail(null);
                               setPipelineDetailSearch("");
-                              fetch(`${ovenServerUrl}/api/shipping/detail?date=${d.date}`).then(r => r.json()).then(setPipelineDetail).catch(() => {});
+                              fetch(`${ovenServerUrl}/api/shipping/detail?date=${d.date}`).then(r => r.json()).then(setPipelineDetail).catch(e=>console.error("[fetch-failed]",e));
                             }
                           }} style={{ borderBottom: `1px solid ${T.border}22`, background: isExpanded ? `${T.amber}10` : isToday ? `${T.blue}10` : 'transparent', cursor: 'pointer' }}>
                             <td style={{ padding: '6px 12px', color: isToday ? T.blue : T.textMuted, fontWeight: isToday ? 700 : 400 }}>{isToday ? 'TODAY' : dayName} {isExpanded ? '▲' : '▼'}</td>
@@ -3093,7 +3093,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
         {sub === "lens-usage" && (() => {
           if (!usageData || usageData._days !== usageDays) {
-            fetch(`${ovenServerUrl}/api/usage/daily?days=${usageDays}`).then(r => r.json()).then(d => { d._days = usageDays; setUsageData(d); }).catch(() => {});
+            fetch(`${ovenServerUrl}/api/usage/daily?days=${usageDays}`).then(r => r.json()).then(d => { d._days = usageDays; setUsageData(d); }).catch(e=>console.error("[fetch-failed]",e));
           }
           const daily = usageData?.dailyTotals || [];
           const skus = usageData?.skuComparison || [];
@@ -3217,7 +3217,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
         {sub === "lens-intel" && (() => {
           if (!lensIntelData) {
-            fetch(`${ovenServerUrl}/api/lens-intel/status`).then(r => r.json()).then(setLensIntelData).catch(() => {});
+            fetch(`${ovenServerUrl}/api/lens-intel/status`).then(r => r.json()).then(setLensIntelData).catch(e=>console.error("[fetch-failed]",e));
           }
           const items = lensIntelData?.items || [];
           const sm = lensIntelData?.summary || {};
@@ -4097,7 +4097,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
               {/* ═══ LONG TAIL SUB-TAB ═══ */}
               {lensSubTab === 'long-tail' && (() => {
                 if (!longTailData) {
-                  fetch(`${ovenServerUrl}/api/lens-intel/long-tail`).then(r => r.json()).then(d => { if (d.results) setLongTailData(d); }).catch(() => {});
+                  fetch(`${ovenServerUrl}/api/lens-intel/long-tail`).then(r => r.json()).then(d => { if (d.results) setLongTailData(d); }).catch(e=>console.error("[fetch-failed]",e));
                 }
                 return (<Card>
                 <div style={{ padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -4758,7 +4758,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
         {sub === "inbound" && (() => {
           if (!inboundData) {
-            fetch(`${ovenServerUrl}/api/inventory/inbound`).then(r => r.json()).then(setInboundData).catch(() => {});
+            fetch(`${ovenServerUrl}/api/inventory/inbound`).then(r => r.json()).then(setInboundData).catch(e=>console.error("[fetch-failed]",e));
           }
           const bp = inboundData?.byPhase || {};
           const phaseColors = { 'On the Water': T.blue, 'Pending': T.amber, 'Received': T.green };
@@ -4863,7 +4863,7 @@ function InventoryTab({ ovenServerUrl, settings }) {
 
         {sub === "pos" && (() => {
           if (!poData) {
-            fetch(`${ovenServerUrl}/api/netsuite/pos`).then(r => r.json()).then(setPoData).catch(() => {});
+            fetch(`${ovenServerUrl}/api/netsuite/pos`).then(r => r.json()).then(setPoData).catch(e=>console.error("[fetch-failed]",e));
           }
           const orders = poData?.orders || [];
           const sm = poData?.summary || {};

@@ -218,14 +218,26 @@ function trackCompletedOrders(currentOrders) {
     console.log(`[ItemPath] +${completedPuts} completed puts (WH1: ${dailyPutTotals.WH1}, WH2: ${dailyPutTotals.WH2}, WH3: ${dailyPutTotals.WH3})`);
   }
   if (historyLines.length > 0) {
-    try {
-      const db = require('./db');
-      const { inserted } = db.upsertPicksHistory(historyLines, 'live');
-      if (inserted > 0) {
-        console.log(`[ItemPath] poll→picks_history (live-writer): ${inserted} new rows from ${historyLines.length} completed pick lines`);
+    // Gate the live-writer behind ITEMPATH_PICKSYNC_DISABLED. Without
+    // this gate, the orders-poll path keeps inserting source='live'
+    // rows into picks_history even when the flag is on (only the
+    // transaction-delta pickSync at line 2090 was previously gated).
+    // Result before this fix: 1,811 'live' rows/day vs 609 'powerpick'
+    // rows/day = ¾ of picks_history was inflated phantom-row data
+    // we don't trust. Power Pick's source='powerpick' is the truth.
+    const livePicksDisabled = String(process.env.ITEMPATH_PICKSYNC_DISABLED || '').toLowerCase() === 'true';
+    if (livePicksDisabled) {
+      // Don't write — Power Pick adapter is the canonical source.
+    } else {
+      try {
+        const db = require('./db');
+        const { inserted } = db.upsertPicksHistory(historyLines, 'live');
+        if (inserted > 0) {
+          console.log(`[ItemPath] poll→picks_history (live-writer): ${inserted} new rows from ${historyLines.length} completed pick lines`);
+        }
+      } catch (e) {
+        console.warn(`[ItemPath] poll→picks_history write failed: ${e.message}`);
       }
-    } catch (e) {
-      console.warn(`[ItemPath] poll→picks_history write failed: ${e.message}`);
     }
   }
   if (completedPicks > 0 || completedPuts > 0) {
