@@ -4426,6 +4426,13 @@ Respond with a structured batching plan in this format:
   // Today's picks from picks_history (Power Pick truth, replaces ItemPath
   // counts which over-counted via phantom rows). Used by the Put Wall card
   // on the Overview tab — gives trustworthy numbers for PICKS TODAY.
+  //
+  // CRITICAL: filter to source='powerpick' explicitly. picks_history is
+  // dual-written by the legacy ItemPath adapter (source='live') AND the
+  // new Power Pick adapter (source='powerpick'), so an unfiltered COUNT(*)
+  // double-counts every pick (today, that meant ~3000 reported when the
+  // truth was ~500). The 'live' rows are the inflated phantom-row count
+  // we migrated AWAY from.
   if (req.method==='GET' && url.pathname==='/api/powerpick/picks-today') {
     try {
       const rows = labDb.db.prepare(`
@@ -4433,6 +4440,7 @@ Respond with a structured batching plan in this format:
         FROM picks_history
         WHERE completed_at >= date('now', 'localtime')
           AND warehouse IS NOT NULL
+          AND source = 'powerpick'
         GROUP BY warehouse
       `).all();
       const byWh = { WH1: 0, WH2: 0, WH3: 0, total: 0 };
@@ -4441,7 +4449,7 @@ Respond with a structured batching plan in this format:
         byWh.total += r.picks;
       }
       const last = labDb.db.prepare(
-        `SELECT MAX(completed_at) AS last FROM picks_history`
+        `SELECT MAX(completed_at) AS last FROM picks_history WHERE source = 'powerpick'`
       ).get();
       return json(res, { ...byWh, lastPickAt: last?.last || null, source: 'powerpick' });
     } catch (e) {
