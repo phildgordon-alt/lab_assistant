@@ -137,11 +137,31 @@ async function run() {
   const ppSkus = new Set(ppRows.map(r => r.sku));
   console.log(`[parity-inv] Power Pick: ${ppRows.length} (sku, warehouse) rows · ${ppSkus.size} distinct SKUs`);
 
-  // ── 2. Pull ItemPath cache ────────────────────────────────────
-  console.log('[parity-inv] reading ItemPath cache…');
-  const inv = itempath.getInventory();
-  const ipMaterials = (inv && Array.isArray(inv.materials)) ? inv.materials : [];
-  console.log(`[parity-inv] ItemPath: ${ipMaterials.length} materials in cache`);
+  // ── 2. Pull ItemPath data from the running lab server ─────────
+  // Reading itempath.getInventory() in this child process gives an
+  // empty cache because the adapter needs start() + poll cycle. The
+  // PRODUCTION ItemPath cache lives in the long-running lab-server
+  // process — fetch via its HTTP endpoint instead.
+  console.log('[parity-inv] fetching ItemPath data from lab server (/api/inventory)…');
+  const labUrl = process.env.LAB_SERVER_URL || 'http://localhost:3002';
+  let invJson = {};
+  try {
+    const resp = await fetch(`${labUrl}/api/inventory`, { signal: AbortSignal.timeout(15000) });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    invJson = await resp.json();
+  } catch (e) {
+    console.error(`[parity-inv] lab-server fetch failed: ${e.message}`);
+    fs.writeFileSync(reportPath, `# Parity Inventory ${today}\n\n**ABORTED:** could not reach ${labUrl}/api/inventory — is the lab server running?\n\n\`\`\`\n${e.message}\n\`\`\`\n`);
+    process.exit(1);
+  }
+  const ipMaterials = Array.isArray(invJson.materials) ? invJson.materials : [];
+  console.log(`[parity-inv] ItemPath (via lab server): ${ipMaterials.length} materials`);
+  if (ipMaterials.length === 0) {
+    const msg = 'ItemPath returned 0 materials. Possible causes: (1) ITEMPATH_TOKEN not set on lab server, (2) ItemPath REST API down, (3) adapter in mock mode. CANNOT validate parity without a populated ItemPath cache.';
+    console.error(`[parity-inv] ${msg}`);
+    fs.writeFileSync(reportPath, `# Parity Inventory ${today}\n\n**ABORTED:** ${msg}\n\nLab server response:\n\n\`\`\`\n${JSON.stringify(invJson, null, 2).slice(0, 1000)}\n\`\`\`\n`);
+    process.exit(2);
+  }
   // ItemPath material shape varies — handle both flattened-per-warehouse
   // (one row per (sku, warehouse) with .qty) and aggregated (one row per
   // sku with .warehouseStock {WH1: qty, WH2: qty}).
