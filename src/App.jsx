@@ -12432,7 +12432,7 @@ function LabAssistantV2(){
               <div style={{width:42,height:42,borderRadius:10,background:`linear-gradient(135deg,${T.blue},${T.blueGlow})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:17,fontWeight:900,color:"#fff",fontFamily:mono,boxShadow:`0 0 24px ${T.blue}30`}}>LA</div>
               <div>
                 <div style={{fontSize:19,fontWeight:800,color:T.text,letterSpacing:-0.5}}>Lab_Assistant</div>
-                <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>MES v2.1 — OPTICAL MANUFACTURING</div>
+                <div style={{fontSize:10,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>MES v2.1 — OPTICAL MANUFACTURING · POWERED BY DVI</div>
               </div>
             </div>
             <div style={{display:"flex",gap:3,marginLeft:24,alignItems:"center"}}>
@@ -12477,7 +12477,7 @@ function LabAssistantV2(){
             <div style={{width:38,height:38,borderRadius:9,background:`linear-gradient(135deg,${T.blue},${T.blueGlow})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:900,color:"#fff",fontFamily:mono}}>LA</div>
             <div>
               <div style={{fontSize:16,fontWeight:800,letterSpacing:-0.5}}>Lab_Assistant</div>
-              <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>MANAGER VIEW — FULL ACCESS</div>
+              <div style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1.5}}>MANAGER VIEW · POWERED BY DVI</div>
             </div>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12}}>
