@@ -889,6 +889,49 @@ app.delete('/api/slack/messages', async (req: Request, res: Response) => {
   }
 });
 
+// Delete a single Slack message by ts. Used by the per-message × button on
+// the Overview tab's Slack feed so Phil can clear noise without nuking the
+// whole channel. Bot token deletes its own messages; user token (if set)
+// deletes anyone's. We try bot first, fall back to user — matches the
+// existing bulk-delete semantics.
+app.delete('/api/slack/messages/:ts', async (req: Request, res: Response) => {
+  const ts = req.params.ts;
+  const channel = (req.query.channel as string) || process.env.SLACK_CHANNEL_ID || 'C07RZ2DLHGZ';
+  const userToken = process.env.SLACK_USER_TOKEN;
+  const botToken = process.env.SLACK_BOT_TOKEN;
+
+  if (!ts || !/^\d+\.\d+$/.test(ts)) {
+    return res.status(400).json({ ok: false, error: 'Missing or malformed message ts (expected "1234567890.123456")' });
+  }
+  if (!botToken && !userToken) {
+    return res.status(400).json({ ok: false, error: 'No Slack token configured' });
+  }
+
+  const tokens = [botToken, userToken].filter(Boolean) as string[];
+  let lastError = 'Unknown error';
+  for (const tok of tokens) {
+    try {
+      const r = await fetch('https://slack.com/api/chat.delete', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${tok}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel, ts }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const d = await r.json() as any;
+      if (d.ok) {
+        slackMessages = slackMessages.filter(m => m.ts !== ts && m.id !== ts);
+        return res.json({ ok: true, ts });
+      }
+      lastError = d.error || 'unknown';
+      // cant_delete_message means this token doesn't own this message — try the next.
+      if (lastError !== 'cant_delete_message' && lastError !== 'message_not_found') break;
+    } catch (e) {
+      lastError = e instanceof Error ? e.message : 'fetch failed';
+    }
+  }
+  return res.status(400).json({ ok: false, error: lastError, ts });
+});
+
 // No mock data — all endpoints require real API credentials
 
 // ─────────────────────────────────────────────────────────────────────────────

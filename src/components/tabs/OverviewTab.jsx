@@ -1196,9 +1196,9 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           )}
           <div ref={messagesRef} style={{maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:6,marginBottom:10}}>
             {[...messages.slice(0,12)].reverse().map((m,i)=>(
-              <div key={m.id||i} style={{display:"flex",gap:8,padding:"7px 10px",background:m.priority==="high"?"#7F1D1D33":T.bg,borderRadius:7,border:`2px solid ${m.priority==="high"?T.red:T.border}`,boxShadow:m.priority==="high"?`0 0 8px ${T.red}40`:""}}>
+              <div key={m.id||i} style={{position:"relative",display:"flex",gap:8,padding:"7px 10px",background:m.priority==="high"?"#7F1D1D33":T.bg,borderRadius:7,border:`2px solid ${m.priority==="high"?T.red:T.border}`,boxShadow:m.priority==="high"?`0 0 8px ${T.red}40`:""}}>
                 <div style={{width:7,height:7,borderRadius:"50%",background:m.source==="slack"?"#4A154B":T.blue,marginTop:4,flexShrink:0}}/>
-                <div style={{flex:1}}>
+                <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",justifyContent:"space-between",marginBottom:2}}>
                     <span style={{fontSize:11,fontWeight:700,color:T.text,fontFamily:mono}}>{m.from||"System"}</span>
                     <span style={{display:"flex",alignItems:"center",gap:6}}>
@@ -1206,8 +1206,35 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                       <span style={{fontSize:9,color:T.textDim,fontFamily:mono}}>{m.time instanceof Date?m.time.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}):""}</span>
                     </span>
                   </div>
-                  <div style={{fontSize:slack.cfg.textSize||12,color:T.textMuted}}>{m.text}</div>
+                  <div style={{fontSize:slack.cfg.textSize||12,color:T.textMuted,wordBreak:"break-word"}}>{m.text}</div>
                 </div>
+                {(m.id||m.ts)&&(
+                  <button
+                    title="Delete this message from Slack"
+                    onClick={async()=>{
+                      if(!confirm("Delete this message from Slack?")) return;
+                      const ts=m.ts||m.id;
+                      const ch=slack?.cfg?.channelId||"";
+                      const url=`/api/slack/messages/${encodeURIComponent(ts)}${ch?`?channel=${encodeURIComponent(ch)}`:""}`;
+                      try{
+                        const r=await fetch(url,{method:"DELETE"});
+                        const d=await r.json().catch(()=>({}));
+                        if(r.ok&&d.ok){
+                          setMessages(prev=>prev.filter(x=>(x.ts||x.id)!==ts));
+                        }else{
+                          console.error("[slack-delete] failed",d);
+                          alert(`Couldn't delete: ${d.error||r.statusText}`);
+                        }
+                      }catch(e){
+                        console.error("[slack-delete] network error",e);
+                        alert("Network error deleting message");
+                      }
+                    }}
+                    style={{position:"absolute",top:4,right:6,background:"transparent",border:"none",color:T.textDim,cursor:"pointer",fontSize:14,lineHeight:1,padding:"2px 5px",borderRadius:3,opacity:0.4,transition:"opacity 0.15s"}}
+                    onMouseEnter={e=>{e.currentTarget.style.opacity="1";e.currentTarget.style.color=T.red;}}
+                    onMouseLeave={e=>{e.currentTarget.style.opacity="0.4";e.currentTarget.style.color=T.textDim;}}
+                  >×</button>
+                )}
               </div>
             ))}
             {messages.length===0&&<div style={{textAlign:"center",padding:20,fontSize:12,color:T.textDim}}>No messages yet</div>}
