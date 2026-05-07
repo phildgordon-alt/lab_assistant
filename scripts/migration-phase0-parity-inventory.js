@@ -250,9 +250,27 @@ async function run() {
   md += `| Only in Power Pick | ${out.counts.onlyPp} |\n`;
   md += `| Only in ItemPath  | ${out.counts.onlyIp} |\n`;
   md += `\n`;
-  const verdict = (out.counts.diffs === 0 && out.counts.onlyPp === 0 && out.counts.onlyIp === 0)
-    ? '✅ **PASS** — exact parity for sampled SKUs.'
-    : '❌ **FAIL** — investigate divergences before Phase 1 cutover.';
+  // Tolerance B (Phil 2026-05-07): a "pass" doesn't require ±0 because
+  // ItemPath polls every ~60s and Power Pick is live SQL — small SKU
+  // drift during a picking shift is clock skew, not data corruption.
+  // Pass criteria:
+  //   - grand-total drift < 0.1% AND
+  //   - ≤2 sample SKUs differ AND
+  //   - max |Δ| on any sample SKU ≤ 5 units AND
+  //   - 0 only-in-PP / only-in-IP rows (universe must match)
+  const grandPctAbs = Math.abs(grandPct === '∞' ? 100 : parseFloat(grandPct));
+  const maxSampleDelta = diffs.reduce((m, d) => Math.max(m, Math.abs(d.delta)), 0);
+  const isPass =
+    out.counts.onlyPp === 0 &&
+    out.counts.onlyIp === 0 &&
+    grandPctAbs < 0.1 &&
+    out.counts.diffs <= 2 &&
+    maxSampleDelta <= 5;
+  out.verdictPass = isPass;
+  out.tolerance = { grandPctAbs, maxSampleDelta, criteria: 'B (Phil 2026-05-07): grand <0.1%, diffs ≤2, maxΔ ≤5, 0 only-in' };
+  const verdict = isPass
+    ? '✅ **PASS** — within tolerance B (grand-total drift ' + grandPct + '%, max sample Δ=' + maxSampleDelta + ', diffs=' + out.counts.diffs + '/50).'
+    : '❌ **FAIL** — exceeds tolerance B (grand=' + grandPct + '%, maxΔ=' + maxSampleDelta + ', diffs=' + out.counts.diffs + ', onlyPP=' + out.counts.onlyPp + ', onlyIP=' + out.counts.onlyIp + ').';
   md += `### Verdict: ${verdict}\n\n`;
   md += `## Grand Totals (every SKU, every warehouse)\n\n`;
   md += `| Source | Total qty |\n|---|---:|\n`;
@@ -292,6 +310,9 @@ async function run() {
   console.log(`[parity-inv] report: ${reportPath}`);
   console.log(`[parity-inv] ${verdict.replace(/\*\*/g, '')}`);
   console.log('[parity-inv] DONE.');
+  // Exit code communicates result to launchd / wrapper:
+  //   0 = pass, 2 = fail (within parity but out of tolerance), 1 = error
+  process.exitCode = isPass ? 0 : 2;
 }
 
 run().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });

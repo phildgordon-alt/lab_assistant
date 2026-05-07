@@ -8386,6 +8386,113 @@ setTimeout(runDailyDodCheck, 6 * 60 * 1000);
 setInterval(runDailyDodCheck, 24 * 60 * 60 * 1000);
 
 // ──────────────────────────────────────────────────────────
+// ItemPath ↔ Power Pick inventory parity — daily 5am Pacific.
+// Phase 0 gate before any inventory cutover. Spawns the parity script
+// as a child process (it has its own mssql + lab-server-HTTP wiring),
+// reads the JSON result, records it in parity_inventory_log, and logs
+// the streak. 7 consecutive PASS days unblock Phase 1.
+function runDailyParityCheck() {
+  try {
+    const { spawn } = require('child_process');
+    const path = require('path');
+    const scriptPath = path.join(__dirname, '..', 'scripts', 'migration-phase0-parity-inventory.js');
+    const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+    const fs = require('fs');
+    const dataDir = process.env.LAB_DATA_DIR || '/Users/Shared/lab_assistant/data';
+    const jsonPath = path.join(dataDir, 'migration-reports', `parity-inventory-${today}.json`);
+
+    console.log('[parity-cron] starting daily inventory parity check…');
+    const child = spawn('node', [scriptPath], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stdout.on('data', d => process.stdout.write(`[parity-cron|out] ${d}`));
+    child.stderr.on('data', d => { stderr += d; process.stderr.write(`[parity-cron|err] ${d}`); });
+    child.on('exit', (code) => {
+      let result = null;
+      try {
+        if (fs.existsSync(jsonPath)) result = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+      } catch (e) {
+        console.error(`[parity-cron] could not parse ${jsonPath}: ${e.message}`);
+      }
+      if (!result) {
+        console.error(`[parity-cron] ❌ child exited ${code} with no JSON output. stderr=${stderr.slice(0,200)}`);
+        return;
+      }
+      const passed = result.verdictPass ? 1 : 0;
+      try {
+        labDb.db.prepare(`
+          INSERT INTO parity_inventory_log
+            (check_date, passed, grand_pct, max_delta, diffs, only_pp, only_ip, pp_grand, ip_grand)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(check_date) DO UPDATE SET
+            passed=excluded.passed, grand_pct=excluded.grand_pct, max_delta=excluded.max_delta,
+            diffs=excluded.diffs, only_pp=excluded.only_pp, only_ip=excluded.only_ip,
+            pp_grand=excluded.pp_grand, ip_grand=excluded.ip_grand,
+            recorded_at=datetime('now')
+        `).run(
+          today, passed,
+          result.tolerance?.grandPctAbs || null,
+          result.tolerance?.maxSampleDelta || null,
+          result.counts?.diffs || 0,
+          result.counts?.onlyPp || 0,
+          result.counts?.onlyIp || 0,
+          Math.round(result.ppGrand || 0),
+          Math.round(result.ipGrand || 0)
+        );
+      } catch (e) {
+        console.error(`[parity-cron] DB write failed: ${e.message}`);
+        return;
+      }
+      // Streak: count trailing days where passed=1, walking back from today
+      try {
+        const streakRow = labDb.db.prepare(`
+          WITH RECURSIVE walk AS (
+            SELECT check_date, passed, 0 AS step FROM parity_inventory_log
+              WHERE check_date = (SELECT MAX(check_date) FROM parity_inventory_log)
+            UNION ALL
+            SELECT p.check_date, p.passed, walk.step + 1
+              FROM parity_inventory_log p JOIN walk
+                ON p.check_date = date(walk.check_date, '-1 day')
+              WHERE p.passed = 1 AND walk.passed = 1
+          )
+          SELECT COUNT(*) AS streak FROM walk WHERE passed = 1
+        `).get();
+        const streak = streakRow ? streakRow.streak : 0;
+        if (passed && streak >= 7) {
+          console.log(`[parity-cron] ✅ ${today} parity PASS streak=${streak} — Phase 1 inventory cutover UNBLOCKED`);
+        } else if (passed) {
+          console.log(`[parity-cron] ✅ ${today} parity PASS streak=${streak}/7 — ${7 - streak} more clean days for Phase 1`);
+        } else {
+          console.log(`[parity-cron] ❌ ${today} parity FAIL streak reset — investigate report`);
+        }
+      } catch (e) {
+        console.error(`[parity-cron] streak compute failed: ${e.message}`);
+      }
+    });
+  } catch (e) {
+    console.error('[parity-cron] failed to spawn:', e.message);
+  }
+}
+// Schedule at 5am Pacific. Compute next 5am from now, then re-fire every 24h.
+function msUntilNext5amPacific() {
+  const now = new Date();
+  // Get current time in Pacific
+  const pacificStr = now.toLocaleString('en-US', { timeZone: 'America/Los_Angeles', hour12: false });
+  // Build a "today 5am Pacific" Date by parsing back. Simpler: use a
+  // 24-hour boundary via the date string trick.
+  const todayPacific = now.toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' }); // YYYY-MM-DD
+  const target = new Date(`${todayPacific}T05:00:00-07:00`); // PDT — close enough; DST shifts are ±1h, harmless
+  let ms = target.getTime() - now.getTime();
+  if (ms <= 0) ms += 24 * 60 * 60 * 1000; // already past 5am — schedule tomorrow
+  return ms;
+}
+const _firstParityFire = msUntilNext5amPacific();
+console.log(`[parity-cron] next run in ${Math.round(_firstParityFire / 60000)} min`);
+setTimeout(() => {
+  runDailyParityCheck();
+  setInterval(runDailyParityCheck, 24 * 60 * 60 * 1000);
+}, _firstParityFire);
+
+// ──────────────────────────────────────────────────────────
 // Daily Ship Target snapshot — runs once per hour. On the first run of each
 // workday, captures the SLA target from current WIP. On every run, updates
 // shipped_actual + variance so the history reflects in-progress days.
