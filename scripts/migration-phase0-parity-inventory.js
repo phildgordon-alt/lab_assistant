@@ -68,13 +68,17 @@ const PP_QUERY_BY_WH = `
   WHERE lc.QuantityCurrent IS NOT NULL
   GROUP BY m.MaterialName, w.WarehouseName
 `;
+// LEFT JOIN from Materialbase so SKUs with zero stock (no LocContent
+// row) still appear in the result with qty=0 — same shape as
+// ItemPath's /api/inventory which emits every master-catalog SKU.
+// Without this, Power Pick was hiding ~11,750 zero-stock SKUs that
+// Kardex absolutely still tracks.
 const PP_QUERY_SKU_TOTAL = `
   SELECT
-    m.MaterialName        AS sku,
-    SUM(lc.QuantityCurrent) AS qty
-  FROM dbo.LocContent lc
-  JOIN dbo.Materialbase m ON m.MaterialId = lc.MaterialId
-  WHERE lc.QuantityCurrent IS NOT NULL
+    m.MaterialName                       AS sku,
+    COALESCE(SUM(lc.QuantityCurrent), 0) AS qty
+  FROM dbo.Materialbase m
+  LEFT JOIN dbo.LocContent lc ON lc.MaterialId = m.MaterialId
   GROUP BY m.MaterialName
 `;
 
