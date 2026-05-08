@@ -606,16 +606,6 @@ function renderLive(){
 
   const avgRate = shiftH > 0 ? (totalTodayJobs / shiftH).toFixed(1) : '—';
 
-  // Projection — extrapolate today's total from current rate × hours
-  // remaining in shift. Same 8.5h shift assumption as ShippingDashboard.
-  // Falls back to current count if rate is zero (early shift / no data yet).
-  const SHIFT_HOURS = 8.5;
-  const hoursRemaining = Math.max(0, SHIFT_HOURS - shiftH);
-  const ratePerHourNum = shiftH > 0 ? totalTodayJobs / shiftH : 0;
-  const projectedToday = ratePerHourNum > 0 && shiftH > 0
-    ? Math.round(totalTodayJobs + ratePerHourNum * hoursRemaining)
-    : totalTodayJobs;
-
   const kpis = `
   <div class="kpi-row">
     <div class="kpi">
@@ -625,12 +615,11 @@ function renderLive(){
     <div class="kpi">
       <div class="kpi-val" style="color:var(--purple);font-size:36px;">${totalTodayJobs}</div>
       <div class="kpi-lbl">ASSEMBLED TODAY</div>
-      <div class="kpi-sub" style="color:var(--dim);">~${projectedToday} projected EOD</div>
     </div>
     <div class="kpi">
       <div class="kpi-val" style="color:var(--teal)">${avgRate}</div>
       <div class="kpi-lbl">JOBS / HOUR</div>
-      <div class="kpi-sub">${shiftH.toFixed(1)}h in · ${hoursRemaining.toFixed(1)}h left</div>
+      <div class="kpi-sub">${shiftH.toFixed(1)}h into shift</div>
     </div>
     <div class="kpi">
       <div class="kpi-val" style="color:var(--blue)">${shippedToday}</div>
