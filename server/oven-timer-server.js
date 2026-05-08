@@ -969,7 +969,16 @@ function json(res, data, status=200) {
 }
 function html(res, body) {
   cors(res);
-  res.writeHead(200, {'Content-Type':'text/html;charset=utf-8'});
+  // Cache-Control: no-cache prevents Cloudflare's edge AND the
+  // browser from holding stale HTML for the live dashboards. The
+  // landing page + /status auto-refresh every 30s; without these
+  // headers Cloudflare was serving stale numbers for hours.
+  res.writeHead(200, {
+    'Content-Type':  'text/html;charset=utf-8',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma':        'no-cache',
+    'Expires':       '0',
+  });
   res.end(body);
 }
 function readBody(req) {
@@ -4785,40 +4794,56 @@ Respond with a structured batching plan in this format:
     // Assembly jobs: currently at ASSEMBLY stage
     const assemblyJobs = allJobs.filter(j => j.stage === 'ASSEMBLY');
 
-    // Count assembly completions today from the events ring buffer.
-    // The ring buffer survives shipped-job purges, unlike per-job getJobHistory
-    // which loses data once a job is purged from the trace's in-memory map.
-    // This is critical: most assembly-completed jobs DO ship, so per-job lookup
-    // misses them entirely (bug fixed 2026-04-14: was undercounting by ~85%).
+    // Count assembly completions today from the persistent job_events
+    // table. The previous implementation walked dviTrace.getRecentEvents()
+    // (a 5K-50K in-memory ring buffer) which had two bugs:
+    //   1. Server restart drops the in-memory state — anything earlier
+    //      today is lost until the trace re-tails enough of LT*.DAT.
+    //   2. The ring buffer is finite — high-volume days could push
+    //      today's earlier events out of the window before they get
+    //      counted.
+    // job_events is the persisted, indexed source of truth — every
+    // event the trace adapter emits gets written there. SQL count is
+    // restart-proof and complete.
     const completedToday = [];
     const passFailToday = { pass: 0, fail: 0 };
     const stationCompletions = {}; // 'ASSEMBLY #7' → count
     const seenJobs = new Map(); // jobId → last pass/fail event today (dedup)
 
-    // Pull a deep slice of events; the ring buffer holds up to 5000 most recent.
-    const allEvents = dviTrace.getRecentEvents(50000);
-    // Reverse to chronological so the "last event today" wins per job
-    const chronological = [...allEvents].reverse();
+    // Pull every assembly-related event today (PASS/FAIL + the
+    // ASSEMBLY #N stations that precede them). One SQL query, indexed
+    // on event_ts. Returns ordered by event_ts ASC so the LAST event
+    // per job wins on dedup.
+    const todayAssemblyEvents = labDb.db.prepare(`
+      SELECT invoice AS jobId, station, event_ts AS timestamp, operator
+      FROM job_events
+      WHERE event_ts >= ?
+        AND (
+          station IN ('ASSEMBLY PASS','ASSEMBLY FAIL')
+          OR station LIKE 'ASSEMBLY #%'
+          OR station LIKE 'RECOMBOB%'
+        )
+      ORDER BY event_ts ASC
+    `).all(todayMs);
 
-    for (let i = 0; i < chronological.length; i++) {
-      const e = chronological[i];
-      if (e.timestamp < todayMs) continue;
-      if (e.station !== 'ASSEMBLY PASS' && e.station !== 'ASSEMBLY FAIL') continue;
-      // Dedup: keep only the LAST pass/fail event per job today
+    // First pass: identify the last PASS/FAIL per job (dedup)
+    todayAssemblyEvents.forEach((e, i) => {
+      if (e.station !== 'ASSEMBLY PASS' && e.station !== 'ASSEMBLY FAIL') return;
       seenJobs.set(e.jobId, { event: e, idx: i });
-    }
+    });
 
-    // Now process unique pass/fail events
+    // Second pass: for each deduped pass/fail, walk backward to find
+    // the ASSEMBLY #N station that produced it (and operator if not
+    // already on the pass/fail event).
     for (const [jobId, { event: lastAssemblyEvent, idx }] of seenJobs) {
       if (lastAssemblyEvent.station === 'ASSEMBLY PASS') passFailToday.pass++;
       if (lastAssemblyEvent.station === 'ASSEMBLY FAIL') passFailToday.fail++;
 
-      // Look backward in the events stream for the ASSEMBLY #N station this job came from
       let fromStation = null;
       let fromOperator = lastAssemblyEvent.operator || null;
       for (let k = idx - 1; k >= 0; k--) {
-        const prev = chronological[k];
-        if (prev.jobId !== jobId) continue; // only this job's events
+        const prev = todayAssemblyEvents[k];
+        if (prev.jobId !== jobId) continue;
         if (/^ASSEMBLY #\d+/.test(prev.station)) {
           fromStation = prev.station;
           if (!fromOperator && prev.operator) fromOperator = prev.operator;
