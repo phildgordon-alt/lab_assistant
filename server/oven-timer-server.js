@@ -5137,12 +5137,12 @@ Respond with a structured batching plan in this format:
   // ── SHIPPING DASHBOARD ─────────────────────────────────────
   // ══════════════════════════════════════════════════════════════
   if (req.method==='GET' && url.pathname==='/api/shipping/dashboard') {
-    // ── v2 formula opt-in via ?formula=v2 (side-by-side soak before flip) ──
-    // Phil-approved 2026-05-08. v2 is priority-weighted, carries forward
-    // missed shipments, surfaces capacity gap as a separate signal. The
-    // shape returned merges the v2 breakdown into the existing target
-    // payload so the frontend dashboard can render either version.
-    if (url.searchParams.get('formula') === 'v2') {
+    // ── v2 formula is now the DEFAULT (Phil 2026-05-08 16:30 PT) ──
+    // After validating the breakdown matches operational reality
+    // (target=796 today, all signals make sense), v2 takes over the
+    // dashboard tile. Legacy v1 stays available via ?formula=v1 for
+    // 1 week as escape hatch in case of regression, then deletes.
+    if (url.searchParams.get('formula') !== 'v1') {
       try {
         const { computeShipTarget } = require('./domain/ship-target');
         const v2 = computeShipTarget(labDb.db);
