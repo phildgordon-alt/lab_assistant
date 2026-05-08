@@ -1,0 +1,21 @@
+-- 008_drop_live_picks.sql
+--
+-- Deletes legacy ItemPath dual-writer rows from picks_history. Yesterday
+-- (2026-05-07) the dual-writer was disabled forward, but historical
+-- rows from before that fix remained — concentrated on 2026-05-04
+-- through 2026-05-06 where ItemPath was inflating counts via phantom
+-- rows. Any chart or aggregate that hits picks_history without
+-- filtering source double- or triple-counts those days.
+--
+-- Source distribution before this migration (verified on prod 2026-05-08):
+--   powerpick — 980,622 rows (truth, kept)
+--   live      —  15,998 rows (ItemPath dual-writer, deleted)
+--
+-- 'powerpick' is the only authoritative source going forward; the
+-- ITEMPATH_PICKSYNC_DISABLED flag prevents new 'live' rows. After
+-- this migration, every existing picks_history query naturally
+-- produces correct counts without per-query source filters.
+--
+-- Idempotent — second run is a 0-row no-op since the rows are gone.
+
+DELETE FROM picks_history WHERE source = 'live';
