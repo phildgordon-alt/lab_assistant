@@ -1180,6 +1180,19 @@ function buildLandingPage() {
   }
   const avgRate = shiftH > 0 ? (assembledToday / shiftH).toFixed(1) : '—';
 
+  // Projection — extrapolate today's totals from current rate × hours
+  // remaining in shift. 11h shift assumption (5am start, 4pm-ish end).
+  const SHIFT_HOURS = 11;
+  const hoursRemaining = Math.max(0, SHIFT_HOURS - shiftH);
+  const ratePerHourNum = shiftH > 0 ? assembledToday / shiftH : 0;
+  const projectedAssembled = ratePerHourNum > 0 && shiftH > 0
+    ? Math.round(assembledToday + ratePerHourNum * hoursRemaining)
+    : assembledToday;
+  const shippedRate = shiftH > 0 ? shippedToday / shiftH : 0;
+  const projectedShipped = shippedRate > 0 && shiftH > 0
+    ? Math.round(shippedToday + shippedRate * hoursRemaining)
+    : shippedToday;
+
   const apps = [
     { name:'Assembly Dashboard', icon:'🔧', desc:'Live assembly floor — stations, operators, leaderboard', path:'/standalone/AssemblyDashboard.html', color:'#8B5CF6' },
     { name:'Coating Dashboard', icon:'🧪', desc:'Coating pipeline — queue, coaters, throughput', path:'/standalone/CoatingDashboard.html', color:'#06B6D4' },
@@ -1219,14 +1232,17 @@ function buildLandingPage() {
     <div style="text-align:center;">
       <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#8B5CF6;line-height:1;">${assembledToday}</div>
       <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">ASSEMBLED TODAY</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5566AA;margin-top:2px;">~${projectedAssembled} EOD</div>
     </div>
     <div style="text-align:center;">
       <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#06B6D4;line-height:1;">${avgRate}</div>
       <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">JOBS / HOUR</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5566AA;margin-top:2px;">${shiftH.toFixed(1)}h in · ${hoursRemaining.toFixed(1)}h left</div>
     </div>
     <div style="text-align:center;">
       <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#3B82F6;line-height:1;">${shippedToday}</div>
       <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">SHIPPED TODAY</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#5566AA;margin-top:2px;">~${projectedShipped} EOD</div>
     </div>
     <div style="text-align:center;">
       <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#10B981;line-height:1;">${wipCount}</div>
