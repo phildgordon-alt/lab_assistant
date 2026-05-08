@@ -5137,6 +5137,71 @@ Respond with a structured batching plan in this format:
   // ── SHIPPING DASHBOARD ─────────────────────────────────────
   // ══════════════════════════════════════════════════════════════
   if (req.method==='GET' && url.pathname==='/api/shipping/dashboard') {
+    // ── v2 formula opt-in via ?formula=v2 (side-by-side soak before flip) ──
+    // Phil-approved 2026-05-08. v2 is priority-weighted, carries forward
+    // missed shipments, surfaces capacity gap as a separate signal. The
+    // shape returned merges the v2 breakdown into the existing target
+    // payload so the frontend dashboard can render either version.
+    if (url.searchParams.get('formula') === 'v2') {
+      try {
+        const { computeShipTarget } = require('./domain/ship-target');
+        const v2 = computeShipTarget(labDb.db);
+        const sc = getShippedCounts();
+        const allJobs = dviTrace.getJobs();
+        const shippingJobs = allJobs.filter(j => j.stage === 'SHIPPING');
+        const readyToShip = shippingJobs.filter(j => j.status !== 'SHIPPED');
+        const operatorStats = buildOperatorStats(dviTrace, /SH CONVEY|SHIP/i);
+        const shiftStart = new Date(); shiftStart.setHours(7,0,0,0);
+        const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
+        const ratePerHour = sc.today > 0 ? Math.round(sc.today / shiftH) : 0;
+        return json(res, {
+          jobs: shippingJobs.map(j => enrichJob(j, dviJobIndex)),
+          shippedToday: sc.today,
+          shippedYesterday: sc.yesterday,
+          shippedThisWeek: sc.thisWeek,
+          ratePerHour,
+          shiftHours: Math.round(shiftH * 10) / 10,
+          readyToShip: readyToShip.length,
+          operatorStats,
+          pipeline: { assembly: 0, cutting: 0 },
+          totalWip: v2.activeWipCount,
+          target: {
+            // Existing fields the frontend already consumes
+            daily:        v2.target,
+            remaining:    Math.max(0, v2.target - sc.today),
+            requiredRate: 0,
+            hoursLeft:    Math.max(0, 17 - (new Date().getHours() + new Date().getMinutes() / 60)),
+            pctComplete:  v2.target > 0 ? Math.round(sc.today / v2.target * 100) : 0,
+            // v2 breakdown — drives the planning-aware tile UI
+            v2: {
+              operationalTarget:  v2.operationalTarget,
+              slaFloor:           v2.slaFloor,
+              priorityWeighted:   v2.priorityWeightedWip,
+              intakeProjection:   v2.intakeProjection,
+              capacityEstimate:   v2.capacityEstimate,
+              rolloverIn:         v2.rolloverIn,
+              rolloverFromDate:   v2.rolloverFromDate,
+              gap:                v2.gap,
+              agedWip:            v2.agedWip,
+              freshWip:           v2.freshWip,
+              unknownWip:         v2.unknownWip,
+              svWip:              v2.svWip,
+              surfWip:            v2.surfWip,
+              slaFloorCohort:     v2.slaFloorCohort,
+              slaFloorRolloverIn: v2.slaFloorRolloverIn,
+              config:             v2.config,
+            }
+          },
+          source: 'jobs-table-v2',
+          formulaVersion: 2,
+          timestamp: new Date().toISOString()
+        });
+      } catch (e) {
+        console.error('[shipping/dashboard?formula=v2] failed:', e.message);
+        return json(res, { error: 'v2 formula failed', message: e.message }, 500);
+      }
+    }
+    // ── v1 (legacy) — current default until v2 soaks 24h+ ───────────────
     const allJobs = dviTrace.getJobs();
     const now = Date.now();
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
