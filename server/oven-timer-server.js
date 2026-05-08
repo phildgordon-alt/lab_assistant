@@ -1214,16 +1214,15 @@ function buildLandingPage() {
                             : '#EF4444';
   const goalPct   = (proj) => dailyGoal > 0 ? Math.min(100, Math.round(proj / dailyGoal * 100)) : 0;
   const renderGoalBlock = (proj) => dailyGoal > 0 ? `
-        <div style="margin-top:14px;padding-top:10px;border-top:1px solid #1C2733;">
-          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#E8EDF2;margin-bottom:8px;">
-            → <span style="color:${goalColor(proj)};">${fmt(proj)}</span> EOD
-          </div>
+        <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1C2733;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:2px;margin-bottom:4px;">PROJECTED EOD</div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:24px;font-weight:800;color:#10B981;line-height:1;margin-bottom:10px;">${fmt(proj)}</div>
           <div style="width:100%;height:14px;background:#1C2733;border-radius:7px;overflow:hidden;margin-bottom:8px;">
-            <div style="width:${goalPct(proj)}%;height:100%;background:${goalColor(proj)};transition:width .8s ease;"></div>
+            <div style="width:${goalPct(proj)}%;height:100%;background:#10B981;transition:width .8s ease;"></div>
           </div>
-          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;display:flex;justify-content:space-between;">
-            <span style="color:#445566;">${fmt(dailyGoal)} GOAL</span>
-            <span style="color:${goalColor(proj)};font-weight:700;">${(proj - dailyGoal) >= 0 ? '+' : ''}${fmt(proj - dailyGoal)}</span>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:12px;display:flex;justify-content:space-between;align-items:baseline;">
+            <span style="color:#cbd5e1;font-weight:600;">GOAL ${fmt(dailyGoal)}</span>
+            <span style="color:${(proj - dailyGoal) >= 0 ? '#10B981' : '#EF4444'};font-weight:800;font-size:14px;">${(proj - dailyGoal) >= 0 ? '+' : ''}${fmt(proj - dailyGoal)}</span>
           </div>
         </div>` : '';
 
