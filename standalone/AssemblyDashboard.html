@@ -861,6 +861,38 @@ function renderLeaderboard(){
   const totalToday = assemblyData ? (assemblyData.completedToday || 0) : jobs.filter(j=>j.status==='completed' && isToday(j.completedAt)).length;
   const avgRate = shiftH > 0 ? (totalToday / shiftH).toFixed(1) : '—';
 
+  // EOD projection + goal slider (Phil 2026-05-08). Same model as
+  // Live Floor tile: rate × hoursRemaining + current count, vs the
+  // /api/assembly/jobs daily goal. Compact horizontal layout to fit
+  // alongside the existing total on TV displays.
+  const SHIFT_HOURS_LB = 8.5;
+  const hoursRemainingLB = Math.max(0, SHIFT_HOURS_LB - shiftH);
+  const lbRate = shiftH > 0 ? totalToday / shiftH : 0;
+  const projectedLB = lbRate > 0 && shiftH > 0
+    ? Math.round(totalToday + lbRate * hoursRemainingLB)
+    : totalToday;
+  const goalLB = (assemblyData && assemblyData.dailyGoal) || 0;
+  const goalPctLB = goalLB > 0 ? Math.min(100, Math.round(projectedLB / goalLB * 100)) : 0;
+  const goalColorLB = goalLB === 0 ? '#5a6678'
+                    : projectedLB >= goalLB ? '#10B981'
+                    : projectedLB >= goalLB * 0.8 ? '#F59E0B'
+                    : '#EF4444';
+  const lbDelta = projectedLB - goalLB;
+  const fmtLB = n => Math.round(n || 0).toLocaleString();
+  const goalBarRow = goalLB > 0 ? `
+    <div style="display:flex;align-items:center;gap:14px;padding:6px 14px;background:rgba(255,255,255,0.02);border-radius:8px;margin:6px 0;">
+      <div style="font-family:var(--mono);font-size:13px;font-weight:700;color:#cbd5e1;white-space:nowrap;">
+        → <span style="color:${goalColorLB};">${fmtLB(projectedLB)}</span> EOD
+      </div>
+      <div style="flex:1;height:12px;background:var(--border);border-radius:6px;overflow:hidden;">
+        <div style="width:${goalPctLB}%;height:100%;background:${goalColorLB};transition:width .8s ease;"></div>
+      </div>
+      <div style="font-family:var(--mono);font-size:11px;white-space:nowrap;">
+        <span style="color:var(--dimmer);">${fmtLB(goalLB)} GOAL</span>
+        <span style="margin-left:10px;color:${goalColorLB};font-weight:700;">${lbDelta >= 0 ? '+' : ''}${fmtLB(lbDelta)}</span>
+      </div>
+    </div>` : '';
+
   return `
   <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;">
     <div style="display:flex;align-items:baseline;gap:12px;flex:1;justify-content:center;">
@@ -870,6 +902,7 @@ function renderLeaderboard(){
     </div>
     <span class="card-badge">${ranked.length} OPERATORS · SHIFT ${shiftH.toFixed(1)}H</span>
   </div>
+  ${goalBarRow}
   <div class="lb-list">${rows}</div>
   <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;">
     <div style="font-family:var(--mono);font-size:9px;color:var(--dimmer);">Tap row for detail · Resets at ${shiftStart}</div>
