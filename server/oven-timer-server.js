@@ -1193,6 +1193,40 @@ function buildLandingPage() {
   }
   const avgRate = shiftH > 0 ? (assembledToday / shiftH).toFixed(1) : '—';
 
+  // EOD projection + goal status (Phil 2026-05-08). Daily goal is
+  // the v2 ship target — same for assembly + shipping because the
+  // lab assembles what it ships.
+  const SHIFT_HOURS = 11;
+  const hoursRemaining = Math.max(0, SHIFT_HOURS - shiftH);
+  const aRate = shiftH > 0 ? assembledToday / shiftH : 0;
+  const sRate = shiftH > 0 ? shippedToday    / shiftH : 0;
+  const projectedAssembled = aRate > 0 && shiftH > 0 ? Math.round(assembledToday + aRate * hoursRemaining) : assembledToday;
+  const projectedShipped   = sRate > 0 && shiftH > 0 ? Math.round(shippedToday    + sRate * hoursRemaining) : shippedToday;
+  let dailyGoal = 0;
+  try {
+    const { computeShipTarget } = require('./domain/ship-target');
+    dailyGoal = computeShipTarget(labDb.db).target || 0;
+  } catch (e) { console.error('[landing-page] target compute failed', e.message); }
+  const fmt = n => Math.round(n || 0).toLocaleString();
+  const goalColor = (proj) => dailyGoal === 0 ? '#5a6678'
+                            : proj >= dailyGoal ? '#10B981'
+                            : proj >= dailyGoal * 0.8 ? '#F59E0B'
+                            : '#EF4444';
+  const goalPct   = (proj) => dailyGoal > 0 ? Math.min(100, Math.round(proj / dailyGoal * 100)) : 0;
+  const renderGoalBlock = (proj) => dailyGoal > 0 ? `
+        <div style="margin-top:14px;padding-top:10px;border-top:1px solid #1C2733;">
+          <div style="font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:#E8EDF2;margin-bottom:8px;">
+            → <span style="color:${goalColor(proj)};">${fmt(proj)}</span> EOD
+          </div>
+          <div style="width:100%;height:14px;background:#1C2733;border-radius:7px;overflow:hidden;margin-bottom:8px;">
+            <div style="width:${goalPct(proj)}%;height:100%;background:${goalColor(proj)};transition:width .8s ease;"></div>
+          </div>
+          <div style="font-family:'JetBrains Mono',monospace;font-size:11px;display:flex;justify-content:space-between;">
+            <span style="color:#445566;">${fmt(dailyGoal)} GOAL</span>
+            <span style="color:${goalColor(proj)};font-weight:700;">${(proj - dailyGoal) >= 0 ? '+' : ''}${fmt(proj - dailyGoal)}</span>
+          </div>
+        </div>` : '';
+
   const apps = [
     { name:'Assembly Dashboard', icon:'🔧', desc:'Live assembly floor — stations, operators, leaderboard', path:'/standalone/AssemblyDashboard.html', color:'#8B5CF6' },
     { name:'Coating Dashboard', icon:'🧪', desc:'Coating pipeline — queue, coaters, throughput', path:'/standalone/CoatingDashboard.html', color:'#06B6D4' },
@@ -1229,21 +1263,29 @@ function buildLandingPage() {
     <div style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#445566;letter-spacing:3px;">PAIR EYEWEAR · IRVINE</div>
   </div>
   <div style="display:flex;gap:24px;justify-content:center;margin-bottom:32px;">
-    <div style="text-align:center;">
+    <!-- Assembled — hero number + EOD projection + goal bar -->
+    <div style="background:#111820;border:1px solid #1C2733;border-radius:14px;padding:20px;min-width:280px;text-align:center;">
       <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#8B5CF6;line-height:1;">${assembledToday}</div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">ASSEMBLED TODAY</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8899AA;letter-spacing:2px;margin-top:6px;">ASSEMBLED TODAY</div>
+      ${renderGoalBlock(projectedAssembled)}
     </div>
-    <div style="text-align:center;">
-      <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#06B6D4;line-height:1;">${avgRate}</div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">JOBS / HOUR</div>
-    </div>
-    <div style="text-align:center;">
+    <!-- Shipped — hero number + EOD projection + goal bar -->
+    <div style="background:#111820;border:1px solid #1C2733;border-radius:14px;padding:20px;min-width:280px;text-align:center;">
       <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#3B82F6;line-height:1;">${shippedToday}</div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">SHIPPED TODAY</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8899AA;letter-spacing:2px;margin-top:6px;">SHIPPED TODAY</div>
+      ${renderGoalBlock(projectedShipped)}
     </div>
-    <div style="text-align:center;">
-      <div style="font-family:'JetBrains Mono',monospace;font-size:48px;font-weight:800;color:#10B981;line-height:1;">${wipCount}</div>
-      <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">TOTAL WIP</div>
+    <!-- Pace + WIP — secondary signals on the right -->
+    <div style="display:flex;flex-direction:column;justify-content:center;gap:18px;min-width:140px;">
+      <div style="text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:800;color:#06B6D4;line-height:1;">${avgRate}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">JOBS / HOUR</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#445566;margin-top:2px;">${shiftH.toFixed(1)}h in · ${hoursRemaining.toFixed(1)}h left</div>
+      </div>
+      <div style="text-align:center;">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:800;color:#10B981;line-height:1;">${wipCount}</div>
+        <div style="font-family:'JetBrains Mono',monospace;font-size:9px;color:#8899AA;letter-spacing:2px;margin-top:4px;">TOTAL WIP</div>
+      </div>
     </div>
   </div>
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:900px;width:100%;">
@@ -4941,6 +4983,15 @@ Respond with a structured batching plan in this format:
       };
     });
 
+    // Daily goal — same v2 ship target. Lab assembles whatever it
+    // ships, so the same number serves as the assembly goal too.
+    let dailyGoal = 0;
+    try {
+      const { computeShipTarget } = require('./domain/ship-target');
+      const t = computeShipTarget(labDb.db);
+      dailyGoal = t.target || 0;
+    } catch (e) { console.error('[api/assembly/jobs] target compute failed', e.message); }
+
     return json(res, {
       jobs: enrichedAssembly,
       assemblyWip: assemblyJobs.length,
@@ -4951,6 +5002,7 @@ Respond with a structured batching plan in this format:
       operatorStats,
       stationOperators,
       shippedToday: getShippedCounts().today,
+      dailyGoal,
       incomingToday: allJobs.filter(j => j.stage === 'INCOMING' && j.lastSeen >= todayMs).length,
       totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
       source: 'dvi-trace',
