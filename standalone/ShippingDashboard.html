@@ -359,9 +359,13 @@ function render(){
 let historyData = null;
 async function fetchHistory(){
   try {
-    const resp = await fetch(cfg.serverUrl + '/api/shipping/performance?days=60', { signal: AbortSignal.timeout(8000) });
+    // Use the with-fallback `serverUrl` (declared up top), not `cfg.serverUrl`
+    // directly — the latter is undefined on a fresh setup and broke this fetch
+    // through the Cloudflare tunnel (every other call on this dashboard uses
+    // the right variable; this one was the outlier).
+    const resp = await fetch(`${serverUrl}/api/shipping/performance?days=60`, { signal: AbortSignal.timeout(8000) });
     if (resp.ok) historyData = await resp.json();
-  } catch(e) { historyData = null; }
+  } catch(e) { console.error('[ShippingDashboard] history fetch failed', e); historyData = null; }
 }
 
 // ---- LIVE TAB ------------------------------------------------
