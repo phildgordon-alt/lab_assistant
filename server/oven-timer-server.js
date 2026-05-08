@@ -1161,22 +1161,26 @@ function buildLandingPage() {
   const shiftStart = new Date(); shiftStart.setHours(5,0,0,0);
   const shiftH = Math.max(0, (now - shiftStart) / 3600000);
 
-  // Get live stats from trace
-  const allJobs = dviTrace.getJobs();
+  // Read from the persistent job_events table — restart-proof and
+  // captures jobs that already shipped today (which the in-memory
+  // trace walk used to miss because shipped jobs fall out of getJobs()).
+  // Bug pre-2026-05-08: counted only ASSEMBLY events on jobs still
+  // in the active list, so the count decreased through the day as
+  // assembled jobs shipped. The right source is always the events
+  // table, not in-memory trace state.
   const _sc = getShippedCounts();
   const shippedToday = _sc.today;
-  const wipCount = allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length;
-
-  // Assembly completions (count ASSEMBLY PASS/FAIL events today)
+  const wipCount = dviTrace.getJobs().filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length;
   let assembledToday = 0;
-  for (const j of allJobs) {
-    const history = dviTrace.getJobHistory(j.job_id);
-    if (!history || !history.events) continue;
-    for (const e of history.events) {
-      if (e.timestamp >= todayMs && (e.station === 'ASSEMBLY PASS' || e.station === 'ASSEMBLY FAIL')) {
-        assembledToday++;
-      }
-    }
+  try {
+    const row = labDb.db.prepare(`
+      SELECT COUNT(*) AS n FROM job_events
+      WHERE station IN ('ASSEMBLY PASS','ASSEMBLY FAIL')
+        AND event_ts >= ?
+    `).get(todayMs);
+    assembledToday = row?.n || 0;
+  } catch (e) {
+    console.error('[landing-page] assembled count query failed', e.message);
   }
   const avgRate = shiftH > 0 ? (assembledToday / shiftH).toFixed(1) : '—';
 
