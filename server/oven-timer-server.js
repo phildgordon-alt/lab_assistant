@@ -5192,6 +5192,8 @@ Respond with a structured batching plan in this format:
               wipExcess:          v2.wipExcess,
               workdaysRemaining:  v2.workdaysRemainingThisWeek,
               drainShare:         v2.drainShare,
+              intakeFloor:        v2.intakeFloor,
+              weeklyRollover:     v2.weeklyRollover,
               config:             v2.config,
             }
           },

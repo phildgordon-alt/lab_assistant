@@ -21,7 +21,15 @@
  *   wipExcess         = max(0, activeWipCount - desired_eow_wip)
  *   drainShare        = wipExcess / workdaysRemainingThisWeek
  *
+ *   rolloverIn        = max(0, sum_over_workdays_this_week_prior_to_today(target - shipped))
+ *                       (cumulative weekly debt; over-ships pay down misses)
+ *
  *   operationalTarget = round( max(priorityWeightedWIP, drainShare) + rolloverIn )
+ *
+ *   intakeFloor       = intakeProjection
+ *                       (target must be ≥ incoming rate or queue accumulates)
+ *
+ *   target            = max(operationalTarget, slaFloor, intakeFloor)
  *
  * The drainShare and priorityWeightedWIP are two independent
  * demand signals (one says "weekly pace," one says "aging
@@ -201,15 +209,48 @@ function capacityRate(db, today, windowDays) {
  * recommendation — yesterday's carryover already absorbed the
  * day-before's, so applying yesterday's miss alone is correct.
  */
+/**
+ * Cumulative weekly rollover (Phil 2026-05-08, revised):
+ *
+ *   sum, over all workdays this week PRIOR to today, of
+ *      (target - shipped)
+ *   clamped to >= 0 (over-ships in the week pay down prior misses;
+ *   net credit doesn't subtract from today's target).
+ *
+ * Resets every Monday — the running tab is week-scoped so a bad
+ * day weeks ago doesn't haunt us forever. A miss Monday compounds
+ * onto Tuesday, Wednesday, etc. until the running variance climbs
+ * back to >= 0 (i.e. lab caught up).
+ *
+ * Returns the debt + the per-day breakdown for transparency in
+ * the dashboard tile.
+ */
 function rolloverFrom(db, today) {
-  const prior = priorWorkday(today);
-  const row = db.prepare(`
-    SELECT total_target, shipped_actual
-    FROM daily_ship_targets WHERE date = ?
-  `).get(prior);
-  if (!row || row.total_target == null) return { rolloverIn: 0, fromDate: prior };
-  const miss = Math.max(0, (row.total_target || 0) - (row.shipped_actual || 0));
-  return { rolloverIn: miss, fromDate: prior };
+  const dow = new Date(today + 'T12:00:00Z').getUTCDay();
+  if (dow === 0 || dow === 6) return { rolloverIn: 0, fromDate: null, weekly: [] };
+  // Walk back to Monday of this week
+  const cursor = new Date(today + 'T12:00:00Z');
+  while (cursor.getUTCDay() !== 1) cursor.setUTCDate(cursor.getUTCDate() - 1);
+  const monday = cursor.toISOString().slice(0, 10);
+  // Pull every workday this week strictly before today
+  const rows = db.prepare(`
+    SELECT date, total_target, shipped_actual
+    FROM daily_ship_targets
+    WHERE date >= ? AND date < ?
+    ORDER BY date
+  `).all(monday, today);
+  let netMiss = 0;
+  const weekly = [];
+  for (const r of rows) {
+    const miss = (r.total_target || 0) - (r.shipped_actual || 0);
+    netMiss += miss;
+    weekly.push({ date: r.date, target: r.total_target, shipped: r.shipped_actual, miss });
+  }
+  return {
+    rolloverIn: Math.max(0, netMiss),
+    fromDate: weekly.length ? weekly[weekly.length - 1].date : null,
+    weekly,
+  };
 }
 
 function slaFloorRolloverFrom(db, today) {
@@ -258,7 +299,7 @@ function computeShipTarget(db, options) {
   const intakeProjection = isWorkday(today) ? intakeRate(db, today, cfg.intake_window_days) : 0;
   const capacityEstimate = capacityRate(db, today, cfg.capacity_window_days);
 
-  const { rolloverIn, fromDate: rolloverFromDate } = rolloverFrom(db, today);
+  const { rolloverIn, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
   const slaRolloverIn = slaFloorRolloverFrom(db, today);
 
   // Drain component (Phil 2026-05-08): distribute excess WIP over
@@ -283,7 +324,13 @@ function computeShipTarget(db, options) {
     ? slaFloorCohort + slaRolloverIn
     : 0;
 
-  const target = Math.max(operationalTarget, slaFloor);
+  // Intake floor: never plan to ship LESS than the incoming rate,
+  // otherwise the queue accumulates day over day. This catches the
+  // case where priority + drain are both quiet but new work keeps
+  // arriving — we still need to maintain throughput.
+  const intakeFloor = isWorkday(today) ? intakeProjection : 0;
+
+  const target = Math.max(operationalTarget, slaFloor, intakeFloor);
   const gap    = target - capacityEstimate;
 
   return {
@@ -301,8 +348,10 @@ function computeShipTarget(db, options) {
     capacityEstimate,
     rolloverIn,
     rolloverFromDate,
+    weeklyRollover,
     slaFloorCohort,
     slaFloorRolloverIn: slaRolloverIn,
+    intakeFloor,
     wipExcess,
     workdaysRemainingThisWeek: remaining,
     drainShare,
