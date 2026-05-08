@@ -80,7 +80,7 @@ function lsGet(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d
 function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
 
 let cfg=lsGet(K.CFG,{});
-let serverUrl=cfg.serverUrl||'http://localhost:3002';
+let serverUrl=cfg.serverUrl||'';
 let operator=cfg.operator||'';
 let stationName=cfg.stationName||'DIP STATION';
 

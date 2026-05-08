@@ -248,7 +248,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 // CONFIG & STATE
 // ─────────────────────────────────────────────────────────────────
 let cfg = JSON.parse(localStorage.getItem('asy_cfg') || '{}');
-let serverUrl  = cfg.serverUrl  || 'http://localhost:3002';
+let serverUrl  = cfg.serverUrl  || '';
 let dviApiKey  = cfg.dviApiKey  || '';
 let dviUrl     = cfg.dviUrl     || '';
 let shiftStart = cfg.shiftStart || '07:00';

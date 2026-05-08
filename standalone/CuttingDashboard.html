@@ -206,7 +206,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 // CONFIG & STATE
 // -----------------------------------------------------------------
 let cfg = JSON.parse(localStorage.getItem('cut_cfg') || '{}');
-let serverUrl  = cfg.serverUrl  || 'http://localhost:3002';
+let serverUrl  = cfg.serverUrl  || '';
 let shiftStart = cfg.shiftStart || '07:00';
 
 const AVATAR_COLORS = [

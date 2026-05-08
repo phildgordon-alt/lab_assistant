@@ -253,7 +253,7 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 // CONFIG & STATE
 // ─────────────────────────────────────────────────────────────────
 let cfg = JSON.parse(localStorage.getItem('coat_cfg') || '{}');
-let serverUrl = cfg.serverUrl || 'http://localhost:3002';
+let serverUrl = cfg.serverUrl || '';
 
 let currentTab = 'pipeline';
 let intelData = null;   // /api/coating/intelligence response
@@ -712,7 +712,7 @@ function openSetup() {
 }
 
 function saveSetup() {
-  serverUrl = document.getElementById('cfgServer').value.replace(/\/+$/, '') || 'http://localhost:3002';
+  serverUrl = document.getElementById('cfgServer').value.replace(/\/+$/, '') || '';
   cfg.serverUrl = serverUrl;
   localStorage.setItem('coat_cfg', JSON.stringify(cfg));
   closeModal();

@@ -77,7 +77,7 @@ const K={CFG:'ba_cfg'};
 function lsGet(k,d){try{return JSON.parse(localStorage.getItem(k))||d;}catch{return d;}}
 function lsSet(k,v){try{localStorage.setItem(k,JSON.stringify(v));}catch{}}
 let cfg=lsGet(K.CFG,{});
-let serverUrl=cfg.serverUrl||'http://localhost:3002';
+let serverUrl=cfg.serverUrl||'';
 let operator=cfg.operator||'';
 let machineId=cfg.machineId||'EB9 #1';
 let serverOk=false;

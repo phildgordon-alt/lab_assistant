@@ -286,7 +286,7 @@ coats = coats.map(c=>({...c, id:c.id||('C_'+Date.now()+'_'+Math.random().toStrin
 let coaterId    = cfg.coaterId    || '';
 let coaterLabel = cfg.coaterLabel || '';
 let operator    = cfg.operator    || '';
-let serverUrl   = cfg.serverUrl   || 'http://localhost:3002';
+let serverUrl   = cfg.serverUrl   || '';
 
 let selCoatId   = null;   // selected type id while idle
 let manageOpen  = false;  // manage panel visible

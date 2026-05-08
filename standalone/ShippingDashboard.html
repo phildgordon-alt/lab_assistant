@@ -251,7 +251,7 @@ body.dense .progress-bar-bg{ height:12px !important; }
 // CONFIG & STATE
 // ---------------------------------------------------------------
 let cfg = JSON.parse(localStorage.getItem('ship_cfg') || '{}');
-let serverUrl   = cfg.serverUrl   || 'http://localhost:3002';
+let serverUrl   = cfg.serverUrl   || '';
 let dailyTarget = cfg.dailyTarget || 600;
 let shiftStart  = cfg.shiftStart  || '07:00';
 
