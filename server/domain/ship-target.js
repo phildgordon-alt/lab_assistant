@@ -17,7 +17,19 @@
  *   overdueBoost(j)   = min(1.0, max(0, (daysInLab - slaWorkdays) * 0.2))
  *   priorityWeight(j) = sigmoid + overdueBoost           // max ~2.0 per job
  *   priorityWeightedWIP = Σ priorityWeight(j) over active WIP
- *   operationalTarget   = round( priorityWeightedWIP + rolloverIn )
+ *
+ *   wipExcess         = max(0, activeWipCount - desired_eow_wip)
+ *   drainShare        = wipExcess / workdaysRemainingThisWeek
+ *
+ *   operationalTarget = round( max(priorityWeightedWIP, drainShare) + rolloverIn )
+ *
+ * The drainShare and priorityWeightedWIP are two independent
+ * demand signals (one says "weekly pace," one says "aging
+ * urgency"), not additive — taking the max() prevents double
+ * counting while letting whichever pulls harder set the bar.
+ * On Mon (5 days left) drain is small, priority dominates. On
+ * Fri (1 day left) drain absorbs all remaining excess and
+ * typically dominates. No arbitrary day-of-week multipliers.
  *
  * Bounded sigmoid replaces unbounded exp() — without the bound, a
  * single stuck/forgotten row with stale entry_date produced a 20-
@@ -93,6 +105,17 @@ function priorWorkday(ymd) {
   const d = new Date(ymd + 'T12:00:00Z');
   do { d.setUTCDate(d.getUTCDate() - 1); } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
   return d.toISOString().slice(0, 10);
+}
+
+/**
+ * Workdays remaining this week including today. Mon=5, Tue=4, …
+ * Fri=1. Sat/Sun=0. Used by the drain-share component to spread
+ * WIP excess over the remaining workdays of the calendar week.
+ */
+function workdaysRemainingThisWeek(ymd) {
+  const dow = new Date(ymd + 'T12:00:00Z').getUTCDay();
+  if (dow === 0 || dow === 6) return 0;     // weekend
+  return 6 - dow;                            // Mon=1→5, Tue=2→4, ... Fri=5→1
 }
 
 /**
@@ -238,12 +261,22 @@ function computeShipTarget(db, options) {
   const { rolloverIn, fromDate: rolloverFromDate } = rolloverFrom(db, today);
   const slaRolloverIn = slaFloorRolloverFrom(db, today);
 
+  // Drain component (Phil 2026-05-08): distribute excess WIP over
+  // remaining workdays this week so Friday naturally peaks.
+  const wipExcess = Math.max(0, wip.length - cfg.desired_eow_wip);
+  const remaining = workdaysRemainingThisWeek(today);
+  const drainShare = remaining > 0 ? Math.round(wipExcess / remaining) : 0;
+
   // intakeProjection is informational only — not added to today's
   // target. New jobs entering today are tomorrow's WIP, not today's
   // must-ship. Adding intake here would double-count (those jobs
   // appear in tomorrow's WIP query already).
+  //
+  // priorityWeighted and drainShare are independent demand signals;
+  // take max() rather than sum to avoid double-counting (a deeply
+  // aged job is BOTH part of the priority sum AND part of wipExcess).
   const operationalTarget = isWorkday(today)
-    ? Math.round(prioritySum + rolloverIn)
+    ? Math.round(Math.max(prioritySum, drainShare) + rolloverIn)
     : 0;
 
   const slaFloor = isWorkday(today)
@@ -270,6 +303,9 @@ function computeShipTarget(db, options) {
     rolloverFromDate,
     slaFloorCohort,
     slaFloorRolloverIn: slaRolloverIn,
+    wipExcess,
+    workdaysRemainingThisWeek: remaining,
+    drainShare,
 
     // Outputs
     operationalTarget,
@@ -294,6 +330,7 @@ module.exports = {
   // Helpers exported for the test suite + scenario tooling
   classify,
   workdaysBetween,
+  workdaysRemainingThisWeek,
   isWorkday,
   priorWorkday,
   loadConfig,

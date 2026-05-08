@@ -5189,6 +5189,9 @@ Respond with a structured batching plan in this format:
               surfWip:            v2.surfWip,
               slaFloorCohort:     v2.slaFloorCohort,
               slaFloorRolloverIn: v2.slaFloorRolloverIn,
+              wipExcess:          v2.wipExcess,
+              workdaysRemaining:  v2.workdaysRemainingThisWeek,
+              drainShare:         v2.drainShare,
               config:             v2.config,
             }
           },
