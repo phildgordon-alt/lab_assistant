@@ -11,11 +11,23 @@
  * hourly capture persists; the planning module (forthcoming) will
  * call this with hypothetical inputs for what-if forecasting.
  *
- * Formula (Phil 2026-05-08):
+ * Formula (Phil 2026-05-08, revised after first prod run):
  *
- *   priorityWeight(j)  = exp( (workdaysInLab(j) - slaWorkdays(j)) / agingExponent )
+ *   sigmoid(j)        = 1 / (1 + exp((slaWorkdays - daysInLab) * 1.5))
+ *   overdueBoost(j)   = min(1.0, max(0, (daysInLab - slaWorkdays) * 0.2))
+ *   priorityWeight(j) = sigmoid + overdueBoost           // max ~2.0 per job
  *   priorityWeightedWIP = Σ priorityWeight(j) over active WIP
- *   operationalTarget   = round( priorityWeightedWIP + intakeProjection + rolloverIn )
+ *   operationalTarget   = round( priorityWeightedWIP + rolloverIn )
+ *
+ * Bounded sigmoid replaces unbounded exp() — without the bound, a
+ * single stuck/forgotten row with stale entry_date produced a 20-
+ * trillion target on the first prod run (2026-05-08). Sigmoid maxes
+ * at 1.0 per job; overdueBoost adds up to 1.0 more for past-SLA
+ * jobs. Total per-job weight ≤ 2.0.
+ *
+ * intakeProjection is NOT added to operationalTarget — it's
+ * informational only. Today's target is about today's WIP; new
+ * incoming jobs are tomorrow's WIP, not today's must-ship.
  *
  *   slaFloor            = count of WIP whose workday SLA deadline ≤ today
  *                         + slaFloorRolloverFromPrior
@@ -210,9 +222,11 @@ function computeShipTarget(db, options) {
 
     const sla = SLA_WORKDAYS[tier];
     const days = workdaysBetween(j.entry_ymd, today);
-    const exponent = (days - sla) / cfg.aging_exponent;
-    const w = Math.exp(exponent);
-    prioritySum += w;
+    // Bounded sigmoid + capped overdue boost. Each job contributes
+    // 0 → ~2.0 to the priority sum. See header comment for rationale.
+    const sigmoid = 1 / (1 + Math.exp((sla - days) * cfg.aging_exponent));
+    const overdueBoost = Math.min(1, Math.max(0, (days - sla) * 0.2));
+    prioritySum += sigmoid + overdueBoost;
 
     if (days >= sla) { agedWip++; slaFloorCohort++; }
     else freshWip++;
@@ -224,8 +238,12 @@ function computeShipTarget(db, options) {
   const { rolloverIn, fromDate: rolloverFromDate } = rolloverFrom(db, today);
   const slaRolloverIn = slaFloorRolloverFrom(db, today);
 
+  // intakeProjection is informational only — not added to today's
+  // target. New jobs entering today are tomorrow's WIP, not today's
+  // must-ship. Adding intake here would double-count (those jobs
+  // appear in tomorrow's WIP query already).
   const operationalTarget = isWorkday(today)
-    ? Math.round(prioritySum + intakeProjection + rolloverIn)
+    ? Math.round(prioritySum + rolloverIn)
     : 0;
 
   const slaFloor = isWorkday(today)
