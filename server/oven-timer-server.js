@@ -5009,85 +5009,57 @@ Respond with a structured batching plan in this format:
     });
   }
 
-  // GET /api/assembly/history — daily assembly totals from DVI trace
+  // GET /api/assembly/history — daily assembly totals from job_events.
+  // Pre-2026-05-08 this walked dviTrace.getJobs() + per-job
+  // getJobHistory() — which (a) drops shipped jobs, (b) loses on
+  // restart. Same architectural fix as the assembled-today count:
+  // query the persistent job_events table.
   if (req.method==='GET' && url.pathname==='/api/assembly/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
     const sinceMs = Date.now() - (days * 86400000);
 
-    // Build daily totals from DVI trace events at ASSEMBLY stations
-    const allJobs = dviTrace.getJobs();
+    // One SQL query gives us every ASSEMBLY #N event in the window.
+    // Group by date in JS (SQLite's date functions don't play nicely
+    // with our integer-ms event_ts column without conversion gymnastics).
+    const rows = labDb.db.prepare(`
+      SELECT invoice AS jobId, station, event_ts AS timestamp, operator
+      FROM job_events
+      WHERE event_ts >= ?
+        AND station LIKE 'ASSEMBLY #%'
+      ORDER BY event_ts ASC
+    `).all(sinceMs);
+
     const byDay = {};
-
-    for (const job of allJobs) {
-      const history = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
-      if (!history || !history.events) continue;
-
-      for (const evt of history.events) {
-        if (!evt.timestamp || evt.timestamp < sinceMs) continue;
-        if (!/^ASSEMBLY #\d+/.test(evt.station)) continue;
-
-        const day = new Date(evt.timestamp).toISOString().slice(0, 10);
-        if (!byDay[day]) byDay[day] = { date: day, jobs: new Set(), events: 0, operators: new Set(), byOperator: {} };
-        byDay[day].jobs.add(job.job_id);
-        byDay[day].events++;
-        if (evt.operator) {
-          byDay[day].operators.add(evt.operator);
-          if (!byDay[day].byOperator[evt.operator]) byDay[day].byOperator[evt.operator] = new Set();
-          byDay[day].byOperator[evt.operator].add(job.job_id);
-        }
-      }
-    }
-
-    // Convert sets to counts and enrich names
-    const assignments = assemblyConfig.assignments || {};
-    const opMap = assemblyConfig.operatorMap || {};
-    // Build initials→name from assignments
-    const nameFromAssign = {};
-    const ASM_STN = [];
-    for (let i = 1; i <= 15; i++) ASM_STN.push({ id: `STN-${String(i).padStart(2,'0')}`, dvi: `ASSEMBLY #${i}` });
-    for (const [stnId, info] of Object.entries(assignments)) {
-      if (!info?.operatorName) continue;
-      const direct = info.operatorName.replace(/[^A-Z]/gi,'').slice(0,2).toUpperCase();
-      if (direct) nameFromAssign[direct] = info.operatorName;
-    }
-    const fullNameMap = { ...nameFromAssign, ...opMap };
-
-    // Also count per-station for the day (more reliable than per-operator)
     const byDayStation = {};
-    for (const job of allJobs) {
-      const history2 = dviTrace.getJobHistory ? dviTrace.getJobHistory(job.job_id) : null;
-      if (!history2 || !history2.events) continue;
-      for (const evt of history2.events) {
-        if (!evt.timestamp || evt.timestamp < sinceMs) continue;
-        const m = evt.station?.match(/^ASSEMBLY #(\d+)/);
-        if (!m) continue;
-        const day = new Date(evt.timestamp).toISOString().slice(0, 10);
-        if (!byDayStation[day]) byDayStation[day] = {};
-        if (!byDayStation[day][evt.station]) byDayStation[day][evt.station] = new Set();
-        byDayStation[day][evt.station].add(job.job_id);
-      }
+    for (const evt of rows) {
+      const day = new Date(evt.timestamp).toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      if (!byDay[day]) byDay[day] = { date: day, jobs: new Set(), events: 0, operators: new Set() };
+      byDay[day].jobs.add(evt.jobId);
+      byDay[day].events++;
+      if (evt.operator) byDay[day].operators.add(evt.operator);
+
+      if (!byDayStation[day]) byDayStation[day] = {};
+      if (!byDayStation[day][evt.station]) byDayStation[day][evt.station] = new Set();
+      byDayStation[day][evt.station].add(evt.jobId);
     }
 
-    // Use station assignments to attribute station counts to operators
-    const ASM_STN2 = [];
-    for (let i = 1; i <= 15; i++) ASM_STN2.push({ id: `STN-${String(i).padStart(2,'0')}`, dvi: `ASSEMBLY #${i}` });
+    // Map ASSEMBLY #N → operator name via station assignments
+    const assignments = assemblyConfig.assignments || {};
     const stnToName = {};
-    for (const [stnId, info] of Object.entries(assignments)) {
-      if (!info?.operatorName) continue;
-      const stn = ASM_STN2.find(s => s.id === stnId);
-      if (stn) stnToName[stn.dvi] = info.operatorName;
+    for (let i = 1; i <= 15; i++) {
+      const stnId = `STN-${String(i).padStart(2,'0')}`;
+      const info = assignments[stnId];
+      if (info?.operatorName) stnToName[`ASSEMBLY #${i}`] = info.operatorName;
     }
 
     const history = Object.values(byDay)
       .map(d => {
-        // Build operator attribution from station assignments
         const dayStations = byDayStation[d.date] || {};
         const opJobs = {};
         for (const [station, jobSet] of Object.entries(dayStations)) {
           const name = stnToName[station] || station.replace('ASSEMBLY ', 'Stn ');
           opJobs[name] = (opJobs[name] || 0) + jobSet.size;
         }
-
         return {
           date: d.date,
           jobs: d.jobs.size,
@@ -5100,7 +5072,7 @@ Respond with a structured batching plan in this format:
       })
       .sort((a, b) => b.date.localeCompare(a.date));
 
-    return json(res, { history, days });
+    return json(res, { history, days, source: 'job_events' });
   }
 
   // ══════════════════════════════════════════════════════════════
