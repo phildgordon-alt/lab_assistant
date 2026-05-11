@@ -837,8 +837,13 @@ async function poll() {
         }
       }
     }
-    // Puts: count by confirmed quantity (each line = X items put away into Kardex)
-    // API already filters to today via `after: todayStart`
+    // Puts: count one per put event (transaction line) — lenses AND frames. Each
+    // operator put-away action = 1 put, regardless of how many units the tote
+    // held. The old code summed quantityConfirmed which inflated the tile to
+    // tens of thousands (a single 200-lens tote scanned in = 200 puts, vs. the
+    // intent that one stocking event = one put). Matches the incremental
+    // tracker at line ~183 which already counts by lineCount, not qty.
+    // API already filters to today via `after: todayStart`.
     for (const tx of putTxList) {
       const wh = tx.warehouseName
         || (tx.orderName && tx.orderName.includes('WH2') ? 'WH2' : null)
@@ -847,9 +852,8 @@ async function poll() {
       const date = tx.creationDate || '';
       if (wh === 'WH1' || wh === 'WH2') {
         const hr = parseInt((date.substring(11, 13) || String(now.getHours()))) || 0;
-        const qty = Math.abs(parseFloat(tx.quantityConfirmed) || parseFloat(tx.quantity) || 1);
-        txHourlyPuts[wh][hr] += qty;
-        txPutsTotal[wh] += qty;
+        txHourlyPuts[wh][hr] += 1;
+        txPutsTotal[wh] += 1;
       }
     }
 
