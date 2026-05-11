@@ -341,7 +341,8 @@ async function sampleRows(tableName, limit = 5) {
 // without state pulls last 24h. Each poll uses `Creationdate > @lastSync`.
 // ─────────────────────────────────────────────────────────────────────────────
 
-let lastSyncCreationdate = null; // ISO string of the most-recent History row already ingested
+let lastSyncCreationdate = null; // ISO string of the most-recent picks History row ingested
+let lastSyncPutCreationdate = null; // ISO string of the most-recent puts History row ingested
 
 // Restore cursor from disk on boot (loadFromDisk does this generically; this is the picks-side init)
 function _initPickCursor() {
@@ -349,6 +350,7 @@ function _initPickCursor() {
     if (fs.existsSync(DATA_FILE)) {
       const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
       if (data.lastSyncCreationdate) lastSyncCreationdate = data.lastSyncCreationdate;
+      if (data.lastSyncPutCreationdate) lastSyncPutCreationdate = data.lastSyncPutCreationdate;
     }
   } catch { /* ignore — fresh start is fine */ }
 }
@@ -359,11 +361,43 @@ function _savePickCursor() {
     let data = {};
     try { if (fs.existsSync(DATA_FILE)) data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch {}
     data.lastSyncCreationdate = lastSyncCreationdate;
+    data.lastSyncPutCreationdate = lastSyncPutCreationdate;
     data.savedAt = new Date().toISOString();
     fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
   } catch (e) {
     console.warn('[PowerPick] Could not persist pick cursor:', e.message);
   }
+}
+
+// Power Pick puts share the same History schema as picks. Type=1 = operator
+// restocking puts. The picks query filtered fulfillment with
+// `PickWarehouseName IS NOT NULL`; that field is NULL for puts. For puts we
+// filter on `QuantityConfirmed > 0` (real putaways have a non-zero confirmed
+// quantity; phantom request rows do not).
+//
+// Warehouse normalization: Power Pick may surface the destination in
+// CostcenterName, or the MasterorderName ("ManualPut-LAPTOP-...") may embed
+// WH1/WH2. Mirror itempath-adapter.js:843-846 fallback chain so puts end up
+// tagged WH1/WH2/WH3 regardless of where the signal is.
+function _historyRowToPutLine(row) {
+  const orderName = (row.MasterorderName || '').trim();
+  // No PutWarehouseName field assumed — fall back through likely sources.
+  const whGuess = row.PickWarehouseName // unlikely but present in some shapes
+    || row.CostcenterName
+    || (orderName.includes('WH2') ? 'WH2' : null)
+    || (orderName.includes('WH1') ? 'WH1' : null)
+    || '';
+  return {
+    putId: `pp-put-${row.HistoryId}`,
+    id: row.HistoryId,
+    orderName,
+    materialName: row.Materialreference || row.MaterialName || '',
+    quantityConfirmed: row.QuantityConfirmed,
+    warehouseName: whGuess,
+    costCenterName: row.CostcenterName || '',
+    modifiedDate: row.Creationdate ? new Date(row.Creationdate).toISOString() : new Date().toISOString(),
+    creationDate: row.Creationdate ? new Date(row.Creationdate).toISOString() : new Date().toISOString(),
+  };
 }
 
 // Convert a Power Pick `History` row to the line object shape that
@@ -479,6 +513,84 @@ async function pollPicks(opts = {}) {
     failCount++;
     connectionError = err.message;
     try { require('./db').recordHeartbeatError('powerpick', err.message, 60 * 60 * 1000); } catch {}
+    return { ok: false, error: err.message, since };
+  }
+}
+
+/**
+ * Phase 2 (2026-05-11): poll Power Pick puts. Mirrors pollPicks() but
+ * Type=1 instead of Type=4, no PickWarehouseName filter (NULL for puts),
+ * QuantityConfirmed > 0 instead. Writes via db.upsertPutsHistory with
+ * source='powerpick'. Idempotent — put_id = `pp-put-${HistoryId}` is
+ * unique on puts_history, so re-polling overlapping windows is harmless.
+ *
+ * Replaces the ItemPath puts feed which counted lens-quantity rather
+ * than put events (21k+ daily on a busy shift).
+ */
+async function pollPuts(opts = {}) {
+  if (!sql) return { ok: false, error: 'mssql package not installed' };
+  if (!configReady()) return { ok: false, error: `missing env: ${configIssues().join(', ')}` };
+
+  const since = opts.since
+    ? new Date(opts.since).toISOString()
+    : (lastSyncPutCreationdate || new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
+  const limit = Math.max(100, Math.min(50000, parseInt(opts.limit, 10) || 5000));
+
+  try {
+    if (!pool || !pool.connected) {
+      const ok = await connect();
+      if (!ok) return { ok: false, error: connectionError };
+    }
+
+    const result = await pool.request()
+      .input('since', sql.DateTime, new Date(since))
+      .query(`
+        SELECT TOP ${limit}
+          HistoryId,
+          MasterorderName,
+          Materialreference,
+          MaterialName,
+          QuantityConfirmed,
+          PickWarehouseName,
+          CostcenterName,
+          Creationdate
+        FROM History
+        WHERE Type = 1
+          AND QuantityConfirmed > 0
+          AND Creationdate > @since
+        ORDER BY Creationdate ASC
+      `);
+
+    const rows = result.recordset || [];
+    if (rows.length === 0) {
+      return { ok: true, fetched: 0, inserted: 0, since };
+    }
+
+    const lines = rows.map(_historyRowToPutLine);
+    let inserted = 0, rejected = 0;
+    try {
+      const r = require('./db').upsertPutsHistory(lines, 'powerpick');
+      inserted = r.inserted;
+      rejected = r.rejected || 0;
+    } catch (e) {
+      return { ok: false, error: `upsertPutsHistory failed: ${e.message}`, fetched: rows.length };
+    }
+
+    const newestCreationdate = rows[rows.length - 1].Creationdate;
+    if (newestCreationdate) {
+      lastSyncPutCreationdate = new Date(newestCreationdate).toISOString();
+      _savePickCursor(); // shared cursor file — saves both pick + put cursors
+    }
+
+    return {
+      ok: true,
+      fetched: rows.length,
+      inserted,
+      rejected,
+      since,
+      newestPutCreationdate: lastSyncPutCreationdate,
+    };
+  } catch (err) {
     return { ok: false, error: err.message, since };
   }
 }
@@ -862,6 +974,10 @@ async function _pollTick() {
   pollInFlight = true;
   try {
     await pollPicks();
+    // Phase 2: puts share the same Kardex connection — poll sequentially in
+    // the same tick. A failure in puts must not block subsequent picks polls.
+    try { await pollPuts(); }
+    catch (e) { console.error('[PowerPick] puts poll error:', e.message); }
   } catch (e) {
     console.error('[PowerPick] poll tick error:', e.message);
   } finally {
@@ -942,6 +1058,8 @@ module.exports = {
   // Phase 2 — picks
   pollPicks,
   backfillRecentPicks,
+  // Phase 2 (2026-05-11) — puts
+  pollPuts,
   // Phase 3 — picks_history canonicalization (2026-05-02)
   pollPicksWindow,
   backfillPicksHistory,

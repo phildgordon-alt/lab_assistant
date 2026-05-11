@@ -2095,6 +2095,47 @@ function upsertPicksHistory(lines, source) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PUTS — Phase 2 of the ItemPath → Power Pick migration.
+//
+// Mirrors upsertPicksHistory but with looser order_id validation: puts have
+// no DVI invoice linkage. MasterorderName is freeform ("ManualPut-LAPTOP-..."
+// or similar) and stored as-is for traceability. No Trigger A — puts don't
+// derive lens_type. put_id PK + INSERT OR IGNORE = idempotent re-polling.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const upsertPutsHistoryStmt = db.prepare(`
+  INSERT OR IGNORE INTO puts_history (put_id, order_id, sku, name, qty, put_qty, warehouse, completed_at, source)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const PUTS_HISTORY_MAX_QTY = 10000; // sanity clamp — single put-away of 10k+ is a data error
+
+function upsertPutsHistory(lines, source) {
+  let inserted = 0, skipped = 0, rejected = 0;
+  const src = source || null;
+  const save = db.transaction(() => {
+    for (const line of lines) {
+      const sku = line.materialName || '';
+      const qty = Math.abs(parseFloat(line.quantityConfirmed) || 0);
+      if (!sku || qty <= 0) { skipped++; continue; }
+      if (qty > PUTS_HISTORY_MAX_QTY) {
+        rejected++;
+        console.warn(`[DB] upsertPutsHistory: rejecting qty=${qty} sku=${sku} id=${line.id} (over ${PUTS_HISTORY_MAX_QTY} clamp)`);
+        continue;
+      }
+      const candidate = (line.orderName || '').trim() || null; // freeform — no validation
+      const wh = normalizeWarehouse(line.warehouseName || line.costCenterName || '');
+      const completedAt = line.modifiedDate || line.creationDate || new Date().toISOString();
+      const putId = line.putId || `pp-put-${line.id || ''}`;
+      const result = upsertPutsHistoryStmt.run(putId, candidate, sku, candidate, qty, qty, wh, completedAt, src);
+      if (result.changes > 0) inserted++;
+    }
+  });
+  save();
+  return { inserted, skipped, rejected, total: lines.length };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TRANSACTIONS — persistent mirror of ItemPath /api/transactions.
 // Stub: returns early until the `transactions` table is created (Phase 5).
 // When the table exists, populates via INSERT OR IGNORE on transaction_id PK.
@@ -4278,6 +4319,7 @@ module.exports = {
   upsertAlerts,
   upsertPicks,
   upsertPicksHistory,
+  upsertPutsHistory,
   enrichLensTypeFromPicks,
   // Delta-poll cursor persistence (itempath-adapter)
   getDeltaCursor,

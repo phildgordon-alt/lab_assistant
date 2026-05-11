@@ -905,21 +905,21 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   const [pickStats,setPickStats]=useState({WH1:0,WH2:0});
   const [putStats,setPutStats]=useState({WH1:0,WH2:0});
   const [hourlyPicks,setHourlyPicks]=useState({WH1:{},WH2:{}});
-  // PICKS TODAY now sources from Power Pick (picks_history) instead of
-  // ItemPath. ItemPath over-counted via phantom rows (the bug that drove
-  // the Power Pick migration in the first place). Power Pick numbers
-  // are the source of truth. PUTS TODAY remains on ItemPath because
-  // Power Pick doesn't track replenishment puts yet — that's part of
-  // the broader ItemPath migration still on the list.
+  // PICKS TODAY and PUTS TODAY both source from Power Pick (Kardex direct).
+  // ItemPath REST is deprecated for both — Phase 1 (picks) shipped 2026-05-01,
+  // Phase 2 (puts) shipped 2026-05-11. Power Pick counts one row per event;
+  // ItemPath had been summing quantityConfirmed on puts which inflated the
+  // tile by ~50x on busy shifts.
   const [ppLastPickAt,setPpLastPickAt]=useState(null);
+  const [ppLastPutAt,setPpLastPutAt]=useState(null);
   useEffect(()=>{
     const fetchPutWall=async()=>{
       try{
-        const [pwRes,invRes,dailyRes,ppRes]=await Promise.all([
+        const [pwRes,dailyRes,ppPicksRes,ppPutsRes]=await Promise.all([
           fetch(`/api/inventory/putwall`),
-          fetch(`/api/inventory`),
           fetch(`/api/inventory/picks/daily`),
           fetch(`/api/powerpick/picks-today`),
+          fetch(`/api/powerpick/puts-today`),
         ]);
         const data=await pwRes.json();
         setPutWallData({
@@ -928,21 +928,19 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           status:data.status||"ok",
           lastSync:data.lastSync
         });
-        // Power Pick (truth) for PICKS TODAY
-        if(ppRes.ok){
-          const pp=await ppRes.json();
+        if(ppPicksRes.ok){
+          const pp=await ppPicksRes.json();
           if(!pp.error){
             setPickStats({WH1:pp.WH1||0,WH2:pp.WH2||0});
             setPpLastPickAt(pp.lastPickAt||null);
           }
         }
-        // ItemPath for PUTS TODAY (until that migrates too)
-        if(invRes.ok){
-          const inv=await invRes.json();
-          setPutStats({
-            WH1:inv.warehouseStats?.WH1?.todayPuts||0,
-            WH2:inv.warehouseStats?.WH2?.todayPuts||0
-          });
+        if(ppPutsRes.ok){
+          const pp=await ppPutsRes.json();
+          if(!pp.error){
+            setPutStats({WH1:pp.WH1||0,WH2:pp.WH2||0});
+            setPpLastPutAt(pp.lastPutAt||null);
+          }
         }
         if(dailyRes.ok){
           const daily=await dailyRes.json();

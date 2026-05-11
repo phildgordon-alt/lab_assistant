@@ -4537,6 +4537,52 @@ Respond with a structured batching plan in this format:
       return json(res, { error: e.message }, 500);
     }
   }
+  // Today's puts from puts_history (Power Pick truth — Phase 2, 2026-05-11).
+  // Replaces ItemPath REST puts which summed quantityConfirmed (each 200-lens
+  // tote = 200 puts → 21k+ daily). Counts one row per put event, matching
+  // picks-today semantics. Same heterogeneous-format date guard as
+  // picks-today: PT-offset, UTC-Z, and naive PT timestamps all bucket to
+  // the correct PT calendar day.
+  if (req.method==='GET' && url.pathname==='/api/powerpick/puts-today') {
+    try {
+      const ptDate = `
+        CASE
+          WHEN completed_at LIKE '%-0%' OR completed_at LIKE '%+0%' OR completed_at LIKE '%Z'
+            THEN date(completed_at, 'localtime')
+          ELSE substr(completed_at, 1, 10)
+        END
+      `;
+      const ptHM = `
+        CASE
+          WHEN completed_at LIKE '%-0%' OR completed_at LIKE '%+0%' OR completed_at LIKE '%Z'
+            THEN strftime('%Y-%m-%d %H:%M', datetime(completed_at, 'localtime'))
+          ELSE strftime('%Y-%m-%d %H:%M', completed_at)
+        END
+      `;
+      const rows = labDb.db.prepare(`
+        SELECT COALESCE(warehouse, 'UNKNOWN') AS warehouse, COUNT(*) AS puts
+        FROM puts_history
+        WHERE ${ptDate} = date('now', 'localtime')
+          AND source = 'powerpick'
+        GROUP BY COALESCE(warehouse, 'UNKNOWN')
+      `).all();
+      const byWh = { WH1: 0, WH2: 0, WH3: 0, UNKNOWN: 0, total: 0 };
+      for (const r of rows) {
+        if (r.warehouse in byWh) byWh[r.warehouse] = r.puts;
+        else byWh.UNKNOWN += r.puts;
+        byWh.total += r.puts;
+      }
+      const last = labDb.db.prepare(`
+        SELECT MAX(${ptHM}) AS lastPT
+        FROM puts_history
+        WHERE source = 'powerpick'
+          AND ${ptDate} = date('now', 'localtime')
+      `).get();
+      return json(res, { ...byWh, lastPutAt: last?.lastPT || null, source: 'powerpick' });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
   if (req.method==='GET' && url.pathname==='/api/powerpick/test') {
     try { return json(res, await powerpick.testConnection()); }
     catch (e) { return json(res, { ok: false, error: e.message }, 500); }
