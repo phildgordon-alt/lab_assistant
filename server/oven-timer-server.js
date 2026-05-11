@@ -2019,9 +2019,31 @@ const server = http.createServer(async (req, res) => {
     }
     const totalWip = Object.values(pipeline).reduce((s, jobs) => s + jobs.length, 0);
 
+    // Daily coating goal (Phil 2026-05-11) — intake + rollover, no SLA.
+    // See server/domain/coating-target.js. Exposed here so the CoatingTab
+    // can render the goal bar without an extra fetch.
+    let coatingTarget = null;
+    let coatingCompletedToday = 0;
+    try {
+      const { computeCoatingTarget, countCoatingExits } = require('./domain/coating-target');
+      coatingTarget = computeCoatingTarget(labDb.db);
+      const todayYMD = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const tomorrowYMD = (() => {
+        const d = new Date(todayYMD + 'T12:00:00Z');
+        d.setUTCDate(d.getUTCDate() + 1);
+        return d.toISOString().slice(0, 10);
+      })();
+      coatingCompletedToday = countCoatingExits(labDb.db, todayYMD, tomorrowYMD);
+    } catch (e) { console.error('[coating/intelligence] target compute failed', e.message); }
+
     return json(res, {
       ok: true,
       timestamp: now,
+      // Goal-bar inputs (Phil 2026-05-11) — completedToday from job_events SQL,
+      // dailyGoal from coating-target v1.
+      dailyGoal: coatingTarget?.target || 0,
+      completedToday: coatingCompletedToday,
+      target: coatingTarget,
       capacity: { rackSize: RACK_CAPACITY, ovenCount: OVEN_COUNT, racksPerOven: RACKS_PER_OVEN, totalRacks: TOTAL_RACKS, ovenRunHours: OVEN_RUN_HOURS },
       coaters: COATERS.map(c => ({ id: c.id, name: c.name, somId: c.somId, lensCapacity: c.lensCapacity, orderCapacity: c.orderCapacity, runHours: c.runHours })),
       totalCoaterCapacity,
@@ -5190,6 +5212,15 @@ Respond with a structured batching plan in this format:
 
     const enriched = coatingJobs.map(j => enrichJob(j, dviJobIndex));
 
+    // Coating daily target — v1 (Phil 2026-05-11). Intake + rollover only;
+    // no SLA escalation because coating has no per-job customer deadline.
+    // See server/domain/coating-target.js for the formula.
+    let target = null;
+    try {
+      const { computeCoatingTarget } = require('./domain/coating-target');
+      target = computeCoatingTarget(labDb.db);
+    } catch (e) { console.error('[coating/dashboard] target compute failed', e.message); }
+
     return json(res, {
       jobs: enriched,
       coatingWip: coatingJobs.length,
@@ -5199,6 +5230,8 @@ Respond with a structured batching plan in this format:
       byCoater,
       byCoatingType,
       operatorStats,
+      target,
+      dailyGoal: target?.target || 0,
       totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
       shippedToday: getShippedCounts().today,
       source: 'dvi-trace',
@@ -5244,6 +5277,15 @@ Respond with a structured batching plan in this format:
 
     const enriched = cuttingJobs.map(j => enrichJob(j, dviJobIndex));
 
+    // Cutting daily target — Phil 2026-05-11: everything that ships passes
+    // through cutting, so cutting volume = shipping volume. Reuse the
+    // ship-target formula directly rather than maintain a second pipeline.
+    let target = null;
+    try {
+      const { computeShipTarget } = require('./domain/ship-target');
+      target = computeShipTarget(labDb.db);
+    } catch (e) { console.error('[cutting/dashboard] target compute failed', e.message); }
+
     return json(res, {
       jobs: enriched,
       cuttingWip: cuttingJobs.length,
@@ -5251,6 +5293,8 @@ Respond with a structured batching plan in this format:
       byStation,
       operatorStats,
       pipeline: { surfacing: surfacingJobs.length, coating: coatingJobs.length },
+      target,
+      dailyGoal: target?.target || 0,
       totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
       shippedToday: getShippedCounts().today,
       source: 'dvi-trace',

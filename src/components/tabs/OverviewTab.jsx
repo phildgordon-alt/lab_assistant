@@ -145,6 +145,7 @@ const CARD_REGISTRY = [
   { type:"assembly_summary",  label:"Assembly Summary",  icon:"🔧", desc:"Assembly station status — station queues, operator metrics, QC returns" },
   { type:"shipping_summary",  label:"Shipping Summary",  icon:"📤", desc:"Shipping status — ready to ship, overdue, due today counts" },
   { type:"maintenance_summary", label:"Maintenance Summary", icon:"🔩", desc:"Maintenance status — open work orders, PM compliance, equipment health, critical tasks" },
+  { type:"department_goals",  label:"Department Goals",  icon:"🎯", desc:"Daily projected-vs-goal bars stacked for Shipping, Coating, Assembly, Cutting" },
 ];
 
 const DEFAULT_CARDS = [
@@ -825,6 +826,38 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     try{ const s=localStorage.getItem(STORAGE_KEY); return s?JSON.parse(s):DEFAULT_CARDS; }
     catch{ return DEFAULT_CARDS; }
   });
+
+  // Per-department goal+completed for the department_goals tile. Fetched
+  // in parallel; the tile renders only the departments whose goal>0 so
+  // pre-formula stages auto-hide. 60s cadence matches other slow tiles.
+  const [deptGoals,setDeptGoals]=useState({
+    shipping:{completed:0,goal:0}, coating:{completed:0,goal:0},
+    assembly:{completed:0,goal:0}, cutting:{completed:0,goal:0},
+  });
+  useEffect(()=>{
+    let alive=true;
+    const fetchAll=async()=>{
+      try{
+        const [s,c,a,cu]=await Promise.all([
+          fetch('/api/shipping/dashboard').then(r=>r.ok?r.json():null).catch(()=>null),
+          fetch('/api/coating/intelligence').then(r=>r.ok?r.json():null).catch(()=>null),
+          fetch('/api/assembly/jobs').then(r=>r.ok?r.json():null).catch(()=>null),
+          fetch('/api/cutting/dashboard').then(r=>r.ok?r.json():null).catch(()=>null),
+        ]);
+        if(!alive)return;
+        setDeptGoals({
+          shipping:{completed:s?.shippedToday||0, goal:s?.target?.daily||0},
+          coating:{completed:c?.completedToday||0, goal:c?.dailyGoal||0},
+          assembly:{completed:a?.completedToday||0, goal:a?.dailyGoal||0},
+          cutting:{completed:cu?.completedToday||0, goal:cu?.dailyGoal||0},
+        });
+      }catch(e){ console.error('[department_goals] fetch failed',e); }
+    };
+    fetchAll();
+    const iv=setInterval(fetchAll,60000);
+    return()=>{alive=false;clearInterval(iv);};
+  },[]);
+
   const [msgInput,setMsgInput]=useState("");
   const [messages,setMessages]=useState(initMessages||[]);
   const messagesRef=useRef(null);
@@ -1992,6 +2025,49 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
               <KPICard label="In Progress" value={inProgress.length} sub="packing" accent={T.blue}/>
               <KPICard label="Rush" value={rushJobs.length} sub="priority" accent={rushJobs.length>0?T.red:T.textDim}/>
             </div>
+          </div>
+        );
+      }
+
+      case "department_goals":{
+        // Departments with no goal (returns 0) are hidden. Cutting goal
+        // is the same number as shipping (everything passes through) but
+        // we render it as its own row so the supervisor sees both being
+        // tracked independently.
+        const rows = [
+          { key:'shipping', label:'SHIPPING', completed: deptGoals.shipping.completed, goal: deptGoals.shipping.goal, view:'shipping' },
+          { key:'coating',  label:'COATING',  completed: deptGoals.coating.completed,  goal: deptGoals.coating.goal,  view:'coating' },
+          { key:'assembly', label:'ASSEMBLY', completed: deptGoals.assembly.completed, goal: deptGoals.assembly.goal, view:'production' },
+          { key:'cutting',  label:'CUTTING',  completed: deptGoals.cutting.completed,  goal: deptGoals.cutting.goal,  view:'production-analysis' },
+        ].filter(r => r.goal > 0);
+        if (rows.length === 0) {
+          return <div style={{padding:16, color:T.textDim, fontSize:12, textAlign:'center'}}>No department goals reporting yet.</div>;
+        }
+        // Project EOD per department: shift 7am→3:30pm, 8.5h total.
+        const shiftStart = new Date(); shiftStart.setHours(7,0,0,0);
+        const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
+        const hoursRemaining = Math.max(0, 8.5 - shiftH);
+        return (
+          <div style={{display:'flex', flexDirection:'column', gap:8, padding:'4px 0'}}>
+            {rows.map(r => {
+              const rate = shiftH > 0 ? r.completed / shiftH : 0;
+              const projected = rate > 0 ? Math.round(r.completed + rate * hoursRemaining) : r.completed;
+              const pct = Math.min(100, Math.round(projected / r.goal * 100));
+              const delta = projected - r.goal;
+              return (
+                <div key={r.key} onClick={()=>setView&&setView(r.view)} style={{display:'flex', alignItems:'center', gap:10, cursor:'pointer'}}>
+                  <div style={{width:90, fontFamily:mono, fontSize:11, color:T.textMuted, fontWeight:700, letterSpacing:1}}>{r.label}</div>
+                  <div style={{minWidth:54, fontFamily:mono, fontSize:14, color:'#10B981', fontWeight:800, textAlign:'right'}}>{projected.toLocaleString()}</div>
+                  <div style={{flex:1, height:8, background:'#1f2937', borderRadius:4, overflow:'hidden'}}>
+                    <div style={{width:`${pct}%`, height:'100%', background:'#10B981', transition:'width 0.6s ease'}}/>
+                  </div>
+                  <div style={{minWidth:90, textAlign:'right', fontFamily:mono, fontSize:11, color:'#cbd5e1'}}>
+                    goal {r.goal.toLocaleString()}
+                    <span style={{marginLeft:6, color: delta>=0 ? '#10B981' : '#EF4444', fontWeight:800}}>{delta>=0 ? '+' : ''}{delta.toLocaleString()}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         );
       }

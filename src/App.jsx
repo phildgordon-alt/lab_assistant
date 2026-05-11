@@ -256,6 +256,42 @@ const sans = "'Outfit','DM Sans',system-ui,sans-serif";
 // 1500→ "1d 1h"
 // 1440→ "1d"
 // Anything ≤0 or null returns "0m".
+// GoalBar — canonical goal-at-top-of-tab visual codified from the Assembly
+// precedent (Phil 2026-05-11). PROJECTED [N] big number on the left, green
+// progress slider in the middle, GOAL [N] + signed delta on the right.
+// Renders nothing when dailyGoal===0 so it self-hides until a formula ships.
+//
+// shiftStartHour/shiftEndHour bound the projection rate. Defaults match the
+// lab's standard 7am→3:30pm shift.
+function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'PROJECTED EOD', shiftStartHour = 7, shiftEndHour = 15.5 }) {
+  if (!dailyGoal) return null;
+  const mono = "'JetBrains Mono',monospace";
+  const fmt = n => Math.round(n || 0).toLocaleString();
+  const shiftStart = new Date(); shiftStart.setHours(shiftStartHour, 0, 0, 0);
+  const shiftLenH = shiftEndHour - shiftStartHour;
+  const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
+  const hoursRemaining = Math.max(0, shiftLenH - shiftH);
+  const rate = shiftH > 0 ? completedToday / shiftH : 0;
+  const projected = rate > 0 && shiftH > 0 ? Math.round(completedToday + rate * hoursRemaining) : completedToday;
+  const pct = dailyGoal > 0 ? Math.min(100, Math.round(projected / dailyGoal * 100)) : 0;
+  const delta = projected - dailyGoal;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', background: 'rgba(16,185,129,0.04)', border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
+        <div style={{ fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 }}>{label}</div>
+        <div style={{ fontSize: 22, fontFamily: mono, color: '#10B981', fontWeight: 800, lineHeight: 1.1 }}>{fmt(projected)}</div>
+      </div>
+      <div style={{ flex: 1, height: 12, background: T.bg, borderRadius: 6, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: '#10B981', transition: 'width 0.8s ease' }} />
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 130 }}>
+        <div style={{ fontSize: 11, fontFamily: mono, color: '#cbd5e1', fontWeight: 600 }}>GOAL {fmt(dailyGoal)}</div>
+        <div style={{ fontSize: 16, fontFamily: mono, fontWeight: 800, color: delta >= 0 ? '#10B981' : '#EF4444' }}>{delta >= 0 ? '+' : ''}{fmt(delta)}</div>
+      </div>
+    </div>
+  );
+}
+
 function fmtMins(n) {
   const m = Math.round(Number(n) || 0);
   if (m <= 0) return "0m";
@@ -2255,6 +2291,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
           <button key={sv.id} onClick={()=>setSubView(sv.id)} style={{background:subView===sv.id?T.blueDark:"transparent",border:`1px solid ${subView===sv.id?T.blue:"transparent"}`,borderRadius:8,padding:"10px 20px",cursor:"pointer",color:subView===sv.id?T.blue:T.textMuted,fontSize:13,fontWeight:700,display:"flex",alignItems:"center",gap:8,fontFamily:sans}}><span>{sv.icon}</span>{sv.label}</button>
         ))}
       </div>
+      <GoalBar completedToday={intel?.completedToday || 0} dailyGoal={intel?.dailyGoal || 0} />
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
       {subView==="pipeline"&&<CoatingPipelineView serverUrl={ovenServerUrl} settings={settings}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
@@ -5579,18 +5616,21 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
   const [search,setSearch]=useState('');
   const [shippedHistory,setShippedHistory]=useState([]);
 
-  // Fetch shipped history + today's shipped jobs detail
+  // Fetch shipped history + today's shipped jobs detail + dashboard (for daily goal)
   const [todayShippedJobs,setTodayShippedJobs]=useState([]);
+  const [shipTarget,setShipTarget]=useState({ daily: 0, shippedToday: 0 });
   useEffect(()=>{
     const fetchAll=async()=>{
       try{
         const today = new Date().toISOString().slice(0,10);
-        const [histRes, todayRes] = await Promise.all([
+        const [histRes, todayRes, dashRes] = await Promise.all([
           fetch(`${ovenServerUrl}/api/shipping/history?days=14`),
           fetch(`${ovenServerUrl}/api/shipping/detail?date=${today}`),
+          fetch(`${ovenServerUrl}/api/shipping/dashboard`),
         ]);
         if(histRes.ok){ const d=await histRes.json(); setShippedHistory(d.history||[]); }
         if(todayRes.ok){ const d=await todayRes.json(); setTodayShippedJobs(d.jobs||[]); }
+        if(dashRes.ok){ const d=await dashRes.json(); setShipTarget({ daily: d.target?.daily || 0, shippedToday: d.shippedToday || 0 }); }
       }catch{}
     };
     fetchAll();
@@ -5664,6 +5704,8 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
           </div>
         </div>
       </div>
+
+      <GoalBar completedToday={shipTarget.shippedToday} dailyGoal={shipTarget.daily} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
