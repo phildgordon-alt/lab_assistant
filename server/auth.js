@@ -97,7 +97,7 @@ function authenticateCloudflare(jwt, req) {
     }
 
     // Update last login
-    db.prepare('UPDATE users SET last_login = datetime("now") WHERE id = ?').run(user.id);
+    db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(user.id);
 
     // Get or create session
     let session = db.prepare(
@@ -111,7 +111,7 @@ function authenticateCloudflare(jwt, req) {
       ).run(user.id, token, 'okta', req.socket?.remoteAddress, req.headers['user-agent']);
       session = db.prepare('SELECT * FROM user_sessions WHERE token = ?').get(token);
     } else {
-      db.prepare('UPDATE user_sessions SET last_activity = datetime("now") WHERE id = ?').run(session.id);
+      db.prepare("UPDATE user_sessions SET last_activity = datetime('now') WHERE id = ?").run(session.id);
     }
 
     return { user, session, role: user.role, source: 'okta' };
@@ -131,7 +131,7 @@ function authenticateToken(token) {
     ).get(token);
     if (!session) return null;
 
-    db.prepare('UPDATE user_sessions SET last_activity = datetime("now") WHERE id = ?').run(session.id);
+    db.prepare("UPDATE user_sessions SET last_activity = datetime('now') WHERE id = ?").run(session.id);
 
     return {
       user: { id: session.user_id, email: session.email, name: session.name, role: session.role },
