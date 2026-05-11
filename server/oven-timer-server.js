@@ -4489,10 +4489,32 @@ Respond with a structured batching plan in this format:
   // we migrated AWAY from.
   if (req.method==='GET' && url.pathname==='/api/powerpick/picks-today') {
     try {
+      // picks_history.completed_at is heterogeneous:
+      //   - PT-offset:  '2026-05-11 08:15:00.000-07:00'  (live mssql write)
+      //   - UTC ISO Z:  '2026-05-11T01:00:00.000Z'        (powerpick-adapter toISOString())
+      //   - Naive PT:   '2026-05-11 14:30:00'             (older backfill paths)
+      // The old WHERE used a lex compare against date('now','localtime'), which
+      // counted UTC-Z rows whose date-prefix lex-matched today even though they
+      // landed at 6pm PT yesterday. Match db.js _labHourFromCompletedAt: convert
+      // suffixed rows with 'localtime', treat naive rows as already PT.
+      const ptDate = `
+        CASE
+          WHEN completed_at LIKE '%-0%' OR completed_at LIKE '%+0%' OR completed_at LIKE '%Z'
+            THEN date(completed_at, 'localtime')
+          ELSE substr(completed_at, 1, 10)
+        END
+      `;
+      const ptHM = `
+        CASE
+          WHEN completed_at LIKE '%-0%' OR completed_at LIKE '%+0%' OR completed_at LIKE '%Z'
+            THEN strftime('%Y-%m-%d %H:%M', datetime(completed_at, 'localtime'))
+          ELSE strftime('%Y-%m-%d %H:%M', completed_at)
+        END
+      `;
       const rows = labDb.db.prepare(`
         SELECT warehouse, COUNT(*) AS picks
         FROM picks_history
-        WHERE completed_at >= date('now', 'localtime')
+        WHERE ${ptDate} = date('now', 'localtime')
           AND warehouse IS NOT NULL
           AND source = 'powerpick'
         GROUP BY warehouse
@@ -4502,10 +4524,15 @@ Respond with a structured batching plan in this format:
         if (r.warehouse in byWh) byWh[r.warehouse] = r.picks;
         byWh.total += r.picks;
       }
-      const last = labDb.db.prepare(
-        `SELECT MAX(completed_at) AS last FROM picks_history WHERE source = 'powerpick'`
-      ).get();
-      return json(res, { ...byWh, lastPickAt: last?.last || null, source: 'powerpick' });
+      // lastPickAt: scope to today's PT picks and format server-side so the
+      // SPA can't re-interpret in UTC. Null when no picks today.
+      const last = labDb.db.prepare(`
+        SELECT MAX(${ptHM}) AS lastPT
+        FROM picks_history
+        WHERE source = 'powerpick'
+          AND ${ptDate} = date('now', 'localtime')
+      `).get();
+      return json(res, { ...byWh, lastPickAt: last?.lastPT || null, source: 'powerpick' });
     } catch (e) {
       return json(res, { error: e.message }, 500);
     }
