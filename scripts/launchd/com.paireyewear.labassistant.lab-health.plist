@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Lab Server Health Watchdog
+  ==========================
+  External liveness probe + auto-recovery for the lab server. Runs every
+  60 seconds. Three consecutive HTTP failures (3 minutes) triggers an
+  auto-kickstart of com.paireyewear.labassistant.server.
+
+  Deploy:
+    cp scripts/launchd/com.paireyewear.labassistant.lab-health.plist \
+       ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) \
+       ~/Library/LaunchAgents/com.paireyewear.labassistant.lab-health.plist
+
+  Verify:
+    launchctl list | grep paireyewear.labassistant.lab-health
+
+  Stop:
+    launchctl bootout gui/$(id -u)/com.paireyewear.labassistant.lab-health
+
+  Slack alerts (optional):
+    Set SLACK_WEBHOOK_URL in the EnvironmentVariables block below before
+    deploy. With it set, you get pings when the watchdog auto-restarts.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.paireyewear.labassistant.lab-health</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/Shared/lab_assistant/scripts/lab-server-health-watchdog.sh</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>60</integer>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/Shared/lab_assistant/server/data/lab-health-watchdog.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/Shared/lab_assistant/server/data/lab-health-watchdog.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+        <!--
+          Set SLACK_WEBHOOK_URL here for alert pings on auto-restart events.
+          Leave empty to disable Slack alerts (the watchdog still works).
+        <key>SLACK_WEBHOOK_URL</key>
+        <string>https://hooks.slack.com/services/YOUR/WEBHOOK/HERE</string>
+        -->
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+</dict>
+</plist>

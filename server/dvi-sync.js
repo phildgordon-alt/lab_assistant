@@ -218,6 +218,86 @@ class SmbClient {
 // Local File Client (for mounted paths)
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SMB Circuit Breaker (Phil 2026-05-12)
+// ─────────────────────────────────────────────────────────────────────────────
+// When the SMB mount goes stale, every `ls` / `cat` / `rm` takes its full
+// timeout (300s / 10s / 5s) before failing. Queueing those operations
+// starves libuv's worker pool and blocks the lab server's HTTP handler.
+//
+// This circuit breaker counts consecutive SMB failures. After 3 in a row,
+// it OPENS the circuit — subsequent SMB calls fail FAST (1ms) instead of
+// hitting the slow timeout. The breaker stays open for COOLDOWN_MS, then
+// goes into HALF-OPEN to try one probe. Success closes it; failure re-opens
+// with a fresh cooldown.
+//
+// The smb-watchdog continues running in parallel and will remount when
+// needed. The breaker just stops us from beating on a dead mount during
+// the recovery window.
+
+const CB_FAIL_THRESHOLD = 3;
+const CB_COOLDOWN_MS = 5 * 60 * 1000; // 5 min
+const _smbBreaker = {
+  state: 'closed',     // 'closed' | 'open' | 'half-open'
+  consecFails: 0,
+  openedAt: 0,
+};
+
+function _smbCircuitAllow() {
+  if (_smbBreaker.state === 'closed') return true;
+  if (_smbBreaker.state === 'open') {
+    if (Date.now() - _smbBreaker.openedAt >= CB_COOLDOWN_MS) {
+      _smbBreaker.state = 'half-open';
+      console.log('[DVI-Sync] circuit half-open — attempting probe');
+      return true;
+    }
+    return false;
+  }
+  // half-open — allow one probe
+  return true;
+}
+
+function _smbCircuitOnSuccess() {
+  if (_smbBreaker.state !== 'closed') {
+    console.log(`[DVI-Sync] circuit closed (recovered after ${_smbBreaker.consecFails} fails)`);
+  }
+  _smbBreaker.state = 'closed';
+  _smbBreaker.consecFails = 0;
+}
+
+function _smbCircuitOnFailure(reason) {
+  _smbBreaker.consecFails++;
+  if (_smbBreaker.state === 'half-open') {
+    // Probe failed — slam the circuit back open with fresh cooldown.
+    _smbBreaker.state = 'open';
+    _smbBreaker.openedAt = Date.now();
+    console.warn(`[DVI-Sync] circuit re-opened (half-open probe failed): ${reason}`);
+    return;
+  }
+  if (_smbBreaker.consecFails >= CB_FAIL_THRESHOLD && _smbBreaker.state === 'closed') {
+    _smbBreaker.state = 'open';
+    _smbBreaker.openedAt = Date.now();
+    console.warn(`[DVI-Sync] circuit OPEN after ${_smbBreaker.consecFails} consecutive failures — SMB calls will fast-fail for ${CB_COOLDOWN_MS / 1000}s. Last error: ${reason}`);
+  }
+}
+
+function _smbBreakerOpenError(op, fullPath) {
+  const remainingMs = Math.max(0, CB_COOLDOWN_MS - (Date.now() - _smbBreaker.openedAt));
+  return new Error(`CIRCUIT_OPEN: ${op} skipped (${Math.ceil(remainingMs / 1000)}s cooldown remaining) for ${fullPath}`);
+}
+
+// Exported for /api/dvi-sync/status if you want to surface breaker state.
+function getSmbCircuitState() {
+  return {
+    state: _smbBreaker.state,
+    consecFails: _smbBreaker.consecFails,
+    openedAt: _smbBreaker.openedAt || null,
+    cooldownRemainingMs: _smbBreaker.state === 'open'
+      ? Math.max(0, CB_COOLDOWN_MS - (Date.now() - _smbBreaker.openedAt))
+      : 0,
+  };
+}
+
 class LocalClient {
   constructor(basePath) {
     this.basePath = basePath;
@@ -231,6 +311,10 @@ class LocalClient {
 
   async listFiles(shareName, remotePath, patterns) {
     const fullPath = this._resolvePath(shareName, remotePath);
+
+    if (!_smbCircuitAllow()) {
+      throw _smbBreakerOpenError('listFiles', fullPath);
+    }
 
     // Use execFile('/bin/ls') instead of fs.promises.readdir — async fs operations
     // hang indefinitely on macOS SMB mounts (macOS SMB driver + libuv incompatibility).
@@ -265,15 +349,16 @@ class LocalClient {
       execFile('/bin/ls', [fullPath], { timeout: 300000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
         if (err) {
           if (err.killed) {
-            // Real failure — surface it so the caller marks the sync as
-            // errored. Empty stdout pretending to be success was the original
-            // bug that hid this for 14h.
-            return reject(new Error(`ETIMEDOUT: ls ${fullPath} killed after 90s`));
+            const msg = `ETIMEDOUT: ls ${fullPath} killed after 300s`;
+            _smbCircuitOnFailure(msg);
+            return reject(new Error(msg));
           }
           // Non-timeout error (path missing, permission denied, etc.) — also
           // surface, don't pretend success.
+          _smbCircuitOnFailure(err.message);
           return reject(new Error(`ls failed on ${fullPath}: ${err.message}`));
         }
+        _smbCircuitOnSuccess();
         const names = stdout.split('\n')
           .map(n => n.trim())
           .filter(n => n && n !== '.' && n !== '..');
@@ -291,6 +376,9 @@ class LocalClient {
 
   async readFile(shareName, remotePath) {
     const fullPath = this._resolvePath(shareName, remotePath);
+    if (!_smbCircuitAllow()) {
+      throw _smbBreakerOpenError('readFile', fullPath);
+    }
     return new Promise((resolve, reject) => {
       execFile('/bin/cat', [fullPath], {
         timeout: 10000,
@@ -298,9 +386,15 @@ class LocalClient {
         encoding: 'buffer',
       }, (err, stdout) => {
         if (err) {
-          if (err.killed) return reject(new Error(`ETIMEDOUT: cat ${path.basename(fullPath)} killed after 10s`));
+          if (err.killed) {
+            const msg = `ETIMEDOUT: cat ${path.basename(fullPath)} killed after 10s`;
+            _smbCircuitOnFailure(msg);
+            return reject(new Error(msg));
+          }
+          _smbCircuitOnFailure(err.message);
           return reject(err);
         }
+        _smbCircuitOnSuccess();
         resolve(stdout);
       });
     });
@@ -311,12 +405,21 @@ class LocalClient {
     // Use execFile('/bin/rm') instead of fs.promises.unlink — same SMB hang risk
     // as readdir on macOS. Sync unlink would block the event loop; rm via spawn
     // gives us a timeout.
+    if (!_smbCircuitAllow()) {
+      throw _smbBreakerOpenError('deleteFile', fullPath);
+    }
     return new Promise((resolve, reject) => {
       execFile('/bin/rm', [fullPath], { timeout: 5000 }, (err) => {
         if (err) {
-          if (err.killed) return reject(new Error(`ETIMEDOUT: rm ${path.basename(fullPath)} killed after 5s`));
+          if (err.killed) {
+            const msg = `ETIMEDOUT: rm ${path.basename(fullPath)} killed after 5s`;
+            _smbCircuitOnFailure(msg);
+            return reject(new Error(msg));
+          }
+          _smbCircuitOnFailure(err.message);
           return reject(err);
         }
+        _smbCircuitOnSuccess();
         resolve();
       });
     });
@@ -648,6 +751,9 @@ module.exports = {
   getStatus() {
     return service.getStatus();
   },
+
+  // SMB circuit breaker state — surface via /api/dvi-sync/status for visibility.
+  getSmbCircuitState,
 
   async forcePoll(syncId) {
     return service.forcePoll(syncId);
