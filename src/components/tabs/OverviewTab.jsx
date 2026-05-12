@@ -2049,17 +2049,28 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         const hoursRemaining = Math.max(0, 8.5 - shiftH);
         return (
           <div style={{display:'flex', flexDirection:'column', gap:8, padding:'4px 0'}}>
+            {/* Header row — orients the eye to the columns (UI-agent recommendation, 2026-05-12) */}
+            <div style={{display:'flex', alignItems:'center', gap:10, padding:'0 0 4px 0', borderBottom:`1px solid ${T.border}`, marginBottom:2}}>
+              <div style={{width:90, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1}}>DEPT</div>
+              <div style={{minWidth:54, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, textAlign:'right', letterSpacing:1}}>PROJ</div>
+              <div style={{flex:1, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1, textAlign:'center'}}>VS GOAL</div>
+              <div style={{minWidth:90, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, textAlign:'right', letterSpacing:1}}>GOAL · Δ</div>
+            </div>
             {rows.map(r => {
               const rate = shiftH > 0 ? r.completed / shiftH : 0;
               const projected = rate > 0 ? Math.round(r.completed + rate * hoursRemaining) : r.completed;
               const pct = Math.min(100, Math.round(projected / r.goal * 100));
               const delta = projected - r.goal;
+              // Threshold ramp — match GoalBar's logic so the eye reads
+              // green/amber/red the same way across SPA surfaces.
+              const rawPct = r.goal > 0 ? projected / r.goal : 0;
+              const barColor = rawPct >= 1.0 ? '#10B981' : rawPct >= 0.85 ? '#F59E0B' : '#EF4444';
               return (
                 <div key={r.key} onClick={()=>setView&&setView(r.view)} style={{display:'flex', alignItems:'center', gap:10, cursor:'pointer'}}>
                   <div style={{width:90, fontFamily:mono, fontSize:11, color:T.textMuted, fontWeight:700, letterSpacing:1}}>{r.label}</div>
-                  <div style={{minWidth:54, fontFamily:mono, fontSize:14, color:'#10B981', fontWeight:800, textAlign:'right'}}>{projected.toLocaleString()}</div>
+                  <div style={{minWidth:54, fontFamily:mono, fontSize:14, color:barColor, fontWeight:800, textAlign:'right'}}>{projected.toLocaleString()}</div>
                   <div style={{flex:1, height:8, background:'#1f2937', borderRadius:4, overflow:'hidden'}}>
-                    <div style={{width:`${pct}%`, height:'100%', background:'#10B981', transition:'width 0.6s ease'}}/>
+                    <div style={{width:`${pct}%`, height:'100%', background:barColor, transition:'width 0.6s ease, background 0.4s ease'}}/>
                   </div>
                   <div style={{minWidth:90, textAlign:'right', fontFamily:mono, fontSize:11, color:'#cbd5e1'}}>
                     goal {r.goal.toLocaleString()}

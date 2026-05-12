@@ -257,12 +257,22 @@ const sans = "'Outfit','DM Sans',system-ui,sans-serif";
 // 1440→ "1d"
 // Anything ≤0 or null returns "0m".
 // GoalBar — canonical goal-at-top-of-tab visual codified from the Assembly
-// precedent (Phil 2026-05-11). PROJECTED [N] big number on the left, green
-// progress slider in the middle, GOAL [N] + signed delta on the right.
-// Renders nothing when dailyGoal===0 so it self-hides until a formula ships.
+// precedent (Phil 2026-05-11). PROJECTED [N] big number on the left, progress
+// slider in the middle (color-coded by % to goal), GOAL [N] + signed delta
+// on the right. Renders nothing when dailyGoal===0 so it self-hides until a
+// formula ships.
+//
+// Threshold ramp on the bar color (Phil 2026-05-12, UI-agent flagged):
+//   ≥100% projected/goal → green   (#10B981)
+//   ≥ 85% projected/goal → amber   (#F59E0B)
+//   <  85% projected/goal → red    (#EF4444)
+// The PROJECTED number on the left matches the bar color so the eye reads
+// the signal in one glance. Previously the bar was always green which made
+// "40% of goal" visually indistinguishable from "100% of goal."
 //
 // shiftStartHour/shiftEndHour bound the projection rate. Defaults match the
-// lab's standard 7am→3:30pm shift.
+// lab's standard 7am→3:30pm shift. Task #29 will replace these with auto-
+// detected shift windows fetched from /api/shift-window.
 function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'PROJECTED EOD', shiftStartHour = 7, shiftEndHour = 15.5 }) {
   if (!dailyGoal) return null;
   const mono = "'JetBrains Mono',monospace";
@@ -275,14 +285,17 @@ function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'PROJECTED EOD', s
   const projected = rate > 0 && shiftH > 0 ? Math.round(completedToday + rate * hoursRemaining) : completedToday;
   const pct = dailyGoal > 0 ? Math.min(100, Math.round(projected / dailyGoal * 100)) : 0;
   const delta = projected - dailyGoal;
+  const rawPct = dailyGoal > 0 ? projected / dailyGoal : 0;
+  const barColor = rawPct >= 1.0 ? '#10B981' : rawPct >= 0.85 ? '#F59E0B' : '#EF4444';
+  const bgTint = rawPct >= 1.0 ? 'rgba(16,185,129,0.04)' : rawPct >= 0.85 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)';
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', background: 'rgba(16,185,129,0.04)', border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', background: bgTint, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
         <div style={{ fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 }}>{label}</div>
-        <div style={{ fontSize: 22, fontFamily: mono, color: '#10B981', fontWeight: 800, lineHeight: 1.1 }}>{fmt(projected)}</div>
+        <div style={{ fontSize: 22, fontFamily: mono, color: barColor, fontWeight: 800, lineHeight: 1.1 }}>{fmt(projected)}</div>
       </div>
       <div style={{ flex: 1, height: 12, background: T.bg, borderRadius: 6, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: '#10B981', transition: 'width 0.8s ease' }} />
+        <div style={{ width: `${pct}%`, height: '100%', background: barColor, transition: 'width 0.8s ease, background 0.4s ease' }} />
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 130 }}>
         <div style={{ fontSize: 11, fontFamily: mono, color: '#cbd5e1', fontWeight: 600 }}>GOAL {fmt(dailyGoal)}</div>
@@ -4813,6 +4826,10 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
   const [somDevices,setSomDevices]=useState([]);
+  // Cutting target — sourced from /api/cutting/dashboard which reuses
+  // computeShipTarget (everything that ships passes through cutting, so the
+  // cutting daily target IS the shipping daily target).
+  const [cuttingTarget,setCuttingTarget]=useState({ dailyGoal: 0, completedToday: 0 });
 
   // Fetch SOM cutting machines
   useEffect(()=>{
@@ -4824,6 +4841,22 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
     };
     fetchSom();
     const iv=setInterval(fetchSom,30000);
+    return()=>clearInterval(iv);
+  },[ovenServerUrl]);
+
+  // Poll cutting dashboard for goal + completed
+  useEffect(()=>{
+    const fetchTarget=async()=>{
+      try{
+        const res=await fetch(`${ovenServerUrl}/api/cutting/dashboard`);
+        if(res.ok){
+          const d=await res.json();
+          setCuttingTarget({ dailyGoal: d.dailyGoal||0, completedToday: d.completedToday||0 });
+        }
+      }catch(e){ /* silent — GoalBar self-hides on goal=0 */ }
+    };
+    fetchTarget();
+    const iv=setInterval(fetchTarget,60000);
     return()=>clearInterval(iv);
   },[ovenServerUrl]);
 
@@ -4893,6 +4926,8 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
           </div>
         </div>
       </div>
+
+      <GoalBar completedToday={cuttingTarget.completedToday} dailyGoal={cuttingTarget.dailyGoal} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
