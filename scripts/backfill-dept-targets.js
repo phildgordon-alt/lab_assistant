@@ -246,6 +246,64 @@ function countStageExitsOnDay(stage, ymd) {
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Historical KPI columns — Phil 2026-05-13 late: extend backfill to
+// fill breakage_count / breakage_pct on past days. Other KPI columns
+// (aging, dwell, throughput) are inherently point-in-time and can't be
+// reconstructed faithfully without an EOD WIP replay — left at 0 on
+// historical rows. Going-forward captureDailyDeptKpis fills them.
+// ─────────────────────────────────────────────────────────────────────
+
+const BREAKAGE_CODE = { surfacing:'S', coating:'C', cutting:'E', assembly:'A' };
+
+function historicalBreakageKpi(db, dept, ymd, exitedCount) {
+  const code = BREAKAGE_CODE[dept];
+  if (!code) return { breakageCount: 0, breakagePct: 0 };
+  try {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS n FROM breakage_events
+      WHERE department = ?
+        AND date(occurred_at, 'localtime') = ?
+    `).get(code, ymd);
+    const breakageCount = row?.n || 0;
+    const breakagePct = exitedCount > 0
+      ? Math.round((breakageCount / exitedCount) * 10000) / 100
+      : 0;
+    return { breakageCount, breakagePct };
+  } catch (_) { return { breakageCount: 0, breakagePct: 0 }; }
+}
+
+function writeHistoricalKpis(db, dept, ymd, breakageCount, breakagePct) {
+  const tables = {
+    shipping:  'daily_ship_targets',
+    coating:   'daily_coating_targets',
+    surfacing: 'daily_surfacing_targets',
+    picking:   'daily_picking_targets',
+    assembly:  'daily_assembly_kpis',
+    cutting:   'daily_cutting_kpis',
+  };
+  const tbl = tables[dept];
+  if (!tbl) return;
+  const targetTables = ['daily_ship_targets','daily_coating_targets','daily_surfacing_targets','daily_picking_targets'];
+  try {
+    if (targetTables.includes(tbl)) {
+      // Only UPDATE — assume row was already created by the dept's
+      // own target backfill block earlier in this loop iteration.
+      db.prepare(`UPDATE ${tbl} SET kpi_breakage_count = ?, kpi_breakage_pct = ? WHERE date = ?`).run(breakageCount, breakagePct, ymd);
+    } else {
+      // assembly / cutting — dedicated KPI tables. UPSERT.
+      db.prepare(`
+        INSERT INTO ${tbl} (date, kpi_breakage_count, kpi_breakage_pct, backfilled)
+        VALUES (?, ?, ?, 1)
+        ON CONFLICT(date) DO UPDATE SET
+          kpi_breakage_count = excluded.kpi_breakage_count,
+          kpi_breakage_pct   = excluded.kpi_breakage_pct,
+          backfilled = 1
+      `).run(ymd, breakageCount, breakagePct);
+    }
+  } catch (_) { /* breakage_events may not exist on dev */ }
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // Per-day backfill — one transaction per day so rollover reads see
 // committed prior-day rows even within the same script run
 // ─────────────────────────────────────────────────────────────────────
@@ -546,6 +604,38 @@ for (const ymd of workdays) {
         ymd, dept: 'picking', new: result.target,
         old: existing?.total_target ?? null
       });
+    }
+  }
+
+  // ── KPI BREAKAGE (Phil 2026-05-13 late) ──
+  // Deterministic from breakage_events; safe to backfill every dept
+  // every workday regardless of whether the target row exists.
+  if (APPLY) {
+    const stages = {
+      surfacing: 'SURFACING',
+      coating:   'COATING',
+      cutting:   'CUTTING',
+      assembly:  null, // count_assembly_today uses station, not stage
+      shipping:  'SHIPPING',
+    };
+    for (const dept of ['surfacing','coating','cutting','assembly','shipping']) {
+      let exited = 0;
+      if (dept === 'assembly') {
+        exited = db.prepare(`
+          SELECT COUNT(DISTINCT invoice) AS n FROM job_events
+          WHERE station = 'ASSEMBLY PASS'
+            AND date(event_ts/1000, 'unixepoch', 'localtime') = ?
+        `).get(ymd)?.n || 0;
+      } else if (dept === 'shipping') {
+        exited = db.prepare(`
+          SELECT COUNT(*) AS n FROM dvi_shipped_jobs
+          WHERE is_hko = 0 AND ship_date = ?
+        `).get(ymd)?.n || 0;
+      } else {
+        exited = countStageExitsOnDay(stages[dept], ymd);
+      }
+      const { breakageCount, breakagePct } = historicalBreakageKpi(db, dept, ymd, exited);
+      writeHistoricalKpis(db, dept, ymd, breakageCount, breakagePct);
     }
   }
 }
