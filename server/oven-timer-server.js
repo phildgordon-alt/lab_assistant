@@ -9096,11 +9096,16 @@ setTimeout(() => dailyCapture.captureDailyCoatingTarget(labDb.db),    2 * 60 * 1
 setTimeout(() => dailyCapture.captureDailySurfacingTarget(labDb.db),  2 * 60 * 1000 + 7500);
 setTimeout(() => dailyCapture.captureDailyDeptActuals(labDb.db),      2 * 60 * 1000 + 10000);
 setTimeout(() => dailyCapture.captureDailyPickingTarget(labDb.db),    2 * 60 * 1000 + 12500);
+// KPI capture runs LAST — offset +20s after picking — so target writers
+// have populated daily_*_targets rows first (KPI UPSERT updates existing
+// rows for target tables).
+setTimeout(() => dailyCapture.captureDailyDeptKpis(labDb.db),         2 * 60 * 1000 + 20000);
 // Hourly refresh for all dept-target writers (same cadence as ship)
 setInterval(() => dailyCapture.captureDailySurfacingTarget(labDb.db), 60 * 60 * 1000);
 setInterval(() => dailyCapture.captureDailyCoatingTarget(labDb.db),   60 * 60 * 1000);
 setInterval(() => dailyCapture.captureDailyDeptActuals(labDb.db),     60 * 60 * 1000);
 setInterval(() => dailyCapture.captureDailyPickingTarget(labDb.db),   60 * 60 * 1000);
+setInterval(() => dailyCapture.captureDailyDeptKpis(labDb.db),        60 * 60 * 1000);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌡  Lab_Assistant Server`);

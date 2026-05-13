@@ -30,6 +30,7 @@
 const { computeCoatingTarget, countCoatingExits } = require('./coating-target');
 const { computeSurfacingTarget } = require('./surfacing-target');
 const { computePickingTarget, countPickingExits } = require('./picking-target');
+const { computeDeptKpis } = require('./dept-kpis');
 
 /**
  * Helper — PT-local date parts. Mirrors the labLocalParts() pattern in
@@ -362,11 +363,105 @@ function captureDailyDeptActuals(db) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Dept KPIs capture — Phil 2026-05-13 late: fans out across all 6 depts,
+// calls computeDeptKpis (single source of truth) for each, UPSERTs the
+// snapshot into the right table (target table for picking/coating/
+// surfacing/shipping; dedicated KPI tables for assembly + cutting).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const KPI_TABLE_BY_DEPT = {
+  shipping:  'daily_ship_targets',
+  coating:   'daily_coating_targets',
+  surfacing: 'daily_surfacing_targets',
+  picking:   'daily_picking_targets',
+  assembly:  'daily_assembly_kpis',
+  cutting:   'daily_cutting_kpis',
+};
+
+function captureDailyDeptKpis(db) {
+  const { ymd } = ptLocalParts();
+  for (const dept of ['picking','surfacing','coating','cutting','assembly','shipping']) {
+    try {
+      const result = computeDeptKpis(db, dept, { today: ymd });
+      const k = result.kpis;
+      const tbl = KPI_TABLE_BY_DEPT[dept];
+
+      // Use direct ALTER-added columns; assembly+cutting use the dedicated
+      // tables that have the same column shape. UPSERT on `date` PK.
+      // Two table shapes:
+      //   - target tables (4 of them): have many other columns (target,
+      //     actual, variance, etc.) so the UPSERT clauses only touch the
+      //     KPI columns.
+      //   - dedicated KPI tables (assembly+cutting): only KPI columns.
+      // SQL is the same UPSERT either way — INSERT defaults the other
+      // columns to 0 on first write; UPDATE only touches KPI columns.
+      const targetTables = ['daily_ship_targets','daily_coating_targets','daily_surfacing_targets','daily_picking_targets'];
+      if (targetTables.includes(tbl)) {
+        // For target tables, ensure a row exists for today first (created
+        // by the dept's own target writer); just UPDATE KPI columns.
+        const exists = db.prepare(`SELECT date FROM ${tbl} WHERE date = ?`).get(ymd);
+        if (exists) {
+          db.prepare(`
+            UPDATE ${tbl}
+            SET kpi_aging_count = ?, kpi_max_age_hours = ?, kpi_avg_dwell_hours = ?,
+                kpi_breakage_pct = ?, kpi_breakage_count = ?, kpi_throughput_per_hour = ?,
+                kpi_dept_specific = ?
+            WHERE date = ?
+          `).run(
+            k.agingCount, k.maxAgeHours, k.avgDwellHours,
+            k.breakagePct, k.breakageCount, k.throughputPerHour,
+            JSON.stringify(k.deptSpecific || {}),
+            ymd
+          );
+        }
+        // If target row doesn't exist yet, the dept's target writer
+        // hasn't fired — KPIs will be captured on the next pass after
+        // that writer creates the row. Acceptable; capture is hourly
+        // and skewed by 15s offsets so target writers run first.
+      } else {
+        // Dedicated KPI tables — UPSERT with all columns.
+        const exists = db.prepare(`SELECT date FROM ${tbl} WHERE date = ?`).get(ymd);
+        if (exists) {
+          db.prepare(`
+            UPDATE ${tbl}
+            SET kpi_aging_count = ?, kpi_max_age_hours = ?, kpi_avg_dwell_hours = ?,
+                kpi_breakage_pct = ?, kpi_breakage_count = ?, kpi_throughput_per_hour = ?,
+                kpi_dept_specific = ?
+            WHERE date = ?
+          `).run(
+            k.agingCount, k.maxAgeHours, k.avgDwellHours,
+            k.breakagePct, k.breakageCount, k.throughputPerHour,
+            JSON.stringify(k.deptSpecific || {}),
+            ymd
+          );
+        } else {
+          db.prepare(`
+            INSERT INTO ${tbl}
+            (date, kpi_aging_count, kpi_max_age_hours, kpi_avg_dwell_hours,
+             kpi_breakage_pct, kpi_breakage_count, kpi_throughput_per_hour,
+             kpi_dept_specific)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            ymd,
+            k.agingCount, k.maxAgeHours, k.avgDwellHours,
+            k.breakagePct, k.breakageCount, k.throughputPerHour,
+            JSON.stringify(k.deptSpecific || {})
+          );
+        }
+      }
+    } catch (e) {
+      console.error(`[DeptKpis] ${dept} capture failed:`, e.message);
+    }
+  }
+}
+
 module.exports = {
   captureDailyCoatingTarget,
   captureDailySurfacingTarget,
   captureDailyPickingTarget,
   captureDailyDeptActuals,
+  captureDailyDeptKpis,
   countAssemblyToday,
   countCuttingExitsToday,
   countSurfacingExitsToday,
