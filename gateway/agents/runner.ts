@@ -85,19 +85,28 @@ function truncateToolResult(result: unknown): string {
 // secrets module (DB-backed with 60s TTL cache) so a key rotation via
 // the Settings UI takes effect within a minute without Gateway restart.
 // Falls back to process.env.ANTHROPIC_API_KEY if DB row is absent.
+//
+// ESM gateway → CJS secrets bridge via createRequire (bare require()
+// is undefined in ESM). First attempt without createRequire used a
+// raw require() which silently threw and fell through to the revoked
+// env key — that's the bug Phil hit at 21:50 PT.
+import { createRequire } from 'module';
+const cjsRequire = createRequire(import.meta.url);
+
 function getAnthropic(): Anthropic {
   let apiKey: string | undefined = process.env.ANTHROPIC_API_KEY;
   try {
-    // @ts-ignore — CommonJS bridge handled by tsx
-    const secrets = require('../../server/domain/secrets');
-    const Database = require('better-sqlite3');
-    const path = require('path');
-    const dbPath = path.join(__dirname, '..', '..', 'data', 'lab_assistant.db');
-    const db = new Database(dbPath, { readonly: true });
+    const secrets = cjsRequire('../../server/domain/secrets');
+    const DatabaseCtor = cjsRequire('better-sqlite3');
+    const pathMod = cjsRequire('path');
+    const dbPath = pathMod.join(__dirname, '..', '..', 'data', 'lab_assistant.db');
+    const db = new DatabaseCtor(dbPath, { readonly: true });
     const fromDb = secrets.getSecret(db, 'ANTHROPIC_API_KEY');
     db.close();
     if (fromDb) apiKey = fromDb;
-  } catch (_) { /* fall through to env */ }
+  } catch (e) {
+    console.warn('[runner.getAnthropic] secrets load failed, using env:', (e as Error)?.message);
+  }
   return new Anthropic({ apiKey });
 }
 

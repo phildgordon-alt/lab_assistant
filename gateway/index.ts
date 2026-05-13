@@ -12,7 +12,14 @@ import cors from 'cors';
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import Database from 'better-sqlite3';
+
+// Phil 2026-05-13: ESM gateway needs createRequire to load the
+// CommonJS secrets module from server/domain. Bare `require()` is
+// undefined in ESM; using createRequire(import.meta.url) gives us a
+// require function that resolves like a CJS file in this directory.
+const cjsRequire = createRequire(import.meta.url);
 import { initCircuitBreaker, getState as getCircuitState, forceHealthCheck } from './circuit-breaker.js';
 import { requestTimingMiddleware, log } from './logger.js';
 import { getRecentRequests, getRequestStats, getUsageStats, healthCheck as dbHealthCheck } from './db/client.js';
@@ -146,9 +153,9 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
   // restart needed.
   let anthropicKey: string | null = null;
   let anthropicSource = 'env';
+  let anthropicLoadError: string | null = null;
   try {
-    // @ts-ignore — CommonJS module, tsx handles the bridge
-    const secrets = require('../server/domain/secrets');
+    const secrets = cjsRequire('../server/domain/secrets');
     const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
     const secDb = new Database(dbPath, { readonly: false });
     anthropicKey = secrets.getSecret(secDb, 'ANTHROPIC_API_KEY');
@@ -157,14 +164,17 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
       anthropicSource = info?.source || 'env';
     }
     secDb.close();
-  } catch (e) {
-    // Fallback to direct env read if secrets module unavailable
+  } catch (e: any) {
+    // Diagnostic: surface load failure into the health response so we
+    // can tell whether DB lookup is broken vs the key simply not set.
+    anthropicLoadError = e?.message || String(e);
     anthropicKey = process.env.ANTHROPIC_API_KEY || null;
+    anthropicSource = 'env (DB lookup failed)';
   }
   if (!anthropicKey) {
-    connections.anthropic = { status: 'unconfigured', message: 'ANTHROPIC_API_KEY not set (DB or env)' };
+    connections.anthropic = { status: 'unconfigured', message: `ANTHROPIC_API_KEY not set (DB or env)${anthropicLoadError ? ' — load error: ' + anthropicLoadError : ''}` };
   } else {
-    connections.anthropic = { status: 'connected', message: `API key configured (source: ${anthropicSource})` };
+    connections.anthropic = { status: 'connected', message: `API key configured (source: ${anthropicSource})${anthropicLoadError ? ' — load error: ' + anthropicLoadError : ''}` };
   }
 
   // 6. ItemPath (if configured)
