@@ -5165,6 +5165,13 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 
   return (
     <ProductionStageTab domain="assembly" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+      {/* Phil 2026-05-13 (HID review): canonical GoalBar replaces the
+          bespoke inline projected-EOD bar that lived here. Same data
+          source — asmData.completedToday + asmData.dailyGoal — but
+          uses the shared component grammar with overage hatch, goal
+          mark, projected tick, etc. */}
+      <GoalBar completedToday={asmData?.completedToday || 0} dailyGoal={asmData?.dailyGoal || 0} label="ASSEMBLED" />
+
       {/* Stage Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
@@ -5175,10 +5182,6 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>TOTAL WIP</div>
             <div style={{ fontSize: 28, fontWeight: 800, color: T.text, fontFamily: mono }}>{assemblyJobs.length}</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>ASSEMBLED</div>
-            <div style={{ fontSize: 28, fontWeight: 800, color: T.green, fontFamily: mono }}>{asmData?.completedToday || 0}</div>
           </div>
           <div style={{ textAlign: "center" }}>
             <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono }}>PASSED</div>
@@ -5194,37 +5197,6 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         </div>
       </div>
-
-      {/* Projected EOD + goal slider — same v2 ship target serves as the
-          assembly goal because the lab assembles whatever it ships. */}
-      {(() => {
-        const completedToday = asmData?.completedToday || 0;
-        const dailyGoal = asmData?.dailyGoal || 0;
-        if (dailyGoal === 0) return null;
-        const shiftStart = new Date(); shiftStart.setHours(7,0,0,0);
-        const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
-        const hoursRemaining = Math.max(0, 8.5 - shiftH);
-        const rate = shiftH > 0 ? completedToday / shiftH : 0;
-        const projected = rate > 0 && shiftH > 0 ? Math.round(completedToday + rate * hoursRemaining) : completedToday;
-        const pct = dailyGoal > 0 ? Math.min(100, Math.round(projected / dailyGoal * 100)) : 0;
-        const delta = projected - dailyGoal;
-        const fmt = n => Math.round(n || 0).toLocaleString();
-        return (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', background: 'rgba(16,185,129,0.04)', border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
-            <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
-              <div style={{ fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 }}>PROJECTED EOD</div>
-              <div style={{ fontSize: 22, fontFamily: mono, color: '#10B981', fontWeight: 800, lineHeight: 1.1 }}>{fmt(projected)}</div>
-            </div>
-            <div style={{ flex: 1, height: 12, background: T.bg, borderRadius: 6, overflow: 'hidden' }}>
-              <div style={{ width: `${pct}%`, height: '100%', background: '#10B981', transition: 'width 0.8s ease' }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 130 }}>
-              <div style={{ fontSize: 11, fontFamily: mono, color: '#cbd5e1', fontWeight: 600 }}>GOAL {fmt(dailyGoal)}</div>
-              <div style={{ fontSize: 16, fontFamily: mono, fontWeight: 800, color: delta >= 0 ? '#10B981' : '#EF4444' }}>{delta >= 0 ? '+' : ''}{fmt(delta)}</div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
