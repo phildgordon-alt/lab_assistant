@@ -8917,6 +8917,21 @@ function captureDailyShipTarget() {
     const { ymd: date, hour: ptHour, dow } = labLocalParts(now);
     const isWorkday = dow >= 1 && dow <= 5 ? 1 : 0;
 
+    // Phil 2026-05-13: this writer used to compute `total_target` from the
+    // legacy v1 formula (`svWip*0.5 + surfWip*0.33`) while the /api/shipping/
+    // dashboard returned v2 numbers from computeShipTarget(). Result: every
+    // row in daily_ship_targets had v1 numbers, the dashboard never showed
+    // v1 numbers, and the GoalHistory tile rendered wrong numbers for every
+    // past day. "Same count, same math, same code" — this writer now calls
+    // the same computeShipTarget() the dashboard calls. Migration 009's v2
+    // signal columns finally get populated too.
+    const { computeShipTarget } = require('./domain/ship-target');
+    const result = computeShipTarget(labDb.db, { today: date });
+
+    // Keep the v1 sv_target/surf_target columns populated as diagnostic
+    // signals (sv_target = SV-cohort fraction of ship target by SLA;
+    // surf_target = SURF-cohort fraction). They are NO LONGER added to
+    // produce total_target — total_target now comes from v2.
     const allJobs = dviTrace.getJobs();
     let svWip = 0, surfWip = 0, unknownWip = 0;
     for (const j of allJobs) {
@@ -8927,29 +8942,66 @@ function captureDailyShipTarget() {
       else if (tier === 'SURF') surfWip++;
       else                      unknownWip++;
     }
-    const svTarget = Math.ceil(svWip * 0.5);
-    // Unknown lens type jobs use surfacing (3-day) SLA as conservative default
-    const surfTarget = Math.ceil((surfWip + unknownWip) * 0.33);
-    const totalTarget = isWorkday ? svTarget + surfTarget : 0;
+    const svTargetV1Diag   = Math.ceil(svWip * 0.5);
+    const surfTargetV1Diag = Math.ceil((surfWip + unknownWip) * 0.33);
+
+    const totalTarget = isWorkday ? result.target : 0;
     const shipped = getShippedCounts().today;
     const variance = shipped - totalTarget;
     const variancePct = totalTarget > 0 ? Math.round((variance / totalTarget) * 10000) / 100 : 0;
 
     const existing = labDb.db.prepare('SELECT date FROM daily_ship_targets WHERE date = ?').get(date);
     if (existing) {
-      // Already captured today — just update actual + variance as more jobs ship
+      // Mid-day refresh — update everything that can move within a day.
+      // The targets themselves drift as WIP changes; signals refresh too.
       labDb.db.prepare(`
         UPDATE daily_ship_targets
-        SET shipped_actual = ?, variance = ?, variance_pct = ?
+        SET sv_wip = ?, surf_wip = ?, unknown_wip = ?,
+            sv_target = ?, surf_target = ?,
+            total_target = ?, shipped_actual = ?, variance = ?, variance_pct = ?,
+            aged_wip = ?, fresh_wip = ?,
+            priority_weighted = ?, intake_projection = ?, capacity_estimate = ?,
+            rollover_in = ?, operational_target = ?, sla_floor = ?, gap = ?,
+            formula_version = 2
         WHERE date = ?
-      `).run(shipped, variance, variancePct, date);
+      `).run(
+        result.svWip, result.surfWip, result.unknownWip,
+        svTargetV1Diag, surfTargetV1Diag,
+        totalTarget, shipped, variance, variancePct,
+        result.agedWip, result.freshWip,
+        result.priorityWeightedWip, result.intakeProjection, result.capacityEstimate,
+        result.rolloverIn, result.operationalTarget, result.slaFloor, result.gap,
+        date
+      );
     } else {
       labDb.db.prepare(`
         INSERT INTO daily_ship_targets
-        (date, is_workday, sv_wip, surf_wip, sv_target, surf_target, total_target, shipped_actual, variance, variance_pct)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(date, isWorkday, svWip, surfWip, svTarget, surfTarget, totalTarget, shipped, variance, variancePct);
-      console.log(`[ShipTarget] Captured ${date}: target=${totalTarget} (SV ${svTarget} + Surf ${surfTarget}), shipped=${shipped}`);
+        (date, is_workday,
+         sv_wip, surf_wip, unknown_wip,
+         sv_target, surf_target,
+         total_target, shipped_actual, variance, variance_pct,
+         aged_wip, fresh_wip,
+         priority_weighted, intake_projection, capacity_estimate,
+         rollover_in, operational_target, sla_floor, gap,
+         formula_version)
+        VALUES (?, ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?, ?, ?,
+                ?, ?,
+                ?, ?, ?,
+                ?, ?, ?, ?,
+                2)
+      `).run(
+        date, isWorkday,
+        result.svWip, result.surfWip, result.unknownWip,
+        svTargetV1Diag, surfTargetV1Diag,
+        totalTarget, shipped, variance, variancePct,
+        result.agedWip, result.freshWip,
+        result.priorityWeightedWip, result.intakeProjection, result.capacityEstimate,
+        result.rolloverIn, result.operationalTarget, result.slaFloor, result.gap
+      );
+      console.log(`[ShipTarget] Captured ${date} v2: target=${totalTarget} (op=${result.operationalTarget} slaFloor=${result.slaFloor} intakeFloor=${result.intakeFloor}), shipped=${shipped}`);
     }
 
     // At 11 PM or later (PT), mark yesterday as finalized if not already.
