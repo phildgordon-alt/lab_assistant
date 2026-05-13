@@ -109,6 +109,234 @@ export const Pill = ({children,color,bg})=>(
   <span style={{fontSize:11,fontWeight:700,padding:"3px 10px",borderRadius:5,background:bg||`${color}20`,color,fontFamily:mono,textTransform:"uppercase",whiteSpace:"nowrap"}}>{children}</span>
 );
 
+// ──────────────────────────────────────────────────────────────────────────
+// DeptKpiStrip — horizontal KPI tile strip for dept landing pages.
+// HID spec 2026-05-13: dense KPICard variant, CSS grid 6/4/3/2 cols by
+// width, 4 universal + 1-2 dept-specific tiles, three color directions:
+//   PACE    (higher = better; vs goal)         Throughput / Pass Rate
+//   INVERSE (lower = better; vs ceiling)       Breakage / Aging / Avg Dwell
+//   NEUTRAL (no state)                          Stations Active / Coating Mix
+// Top 4px accent stripe carries state. Value text always high-contrast
+// slate (per shop-floor distance rule — read number first, glance at
+// stripe for tone). Sub-line picks up state hue only on red/amber.
+// ──────────────────────────────────────────────────────────────────────────
+
+const KPI_COLOR_BY_DIRECTION = (direction, valueRatio) => {
+  // valueRatio:
+  //   PACE   — actual/goal (1.0 = on goal, >1 = ahead)
+  //   INVERSE— value/threshold (0 = perfect, 1 = at threshold, >1 = over)
+  if (direction === 'NEUTRAL') return '#94a3b8'; // slate-400
+  if (direction === 'PACE') {
+    if (valueRatio >= 1.0)  return '#10B981';
+    if (valueRatio >= 0.85) return '#F59E0B';
+    return '#EF4444';
+  }
+  // INVERSE
+  if (valueRatio <= 0.5) return '#10B981';
+  if (valueRatio <= 1.0) return '#F59E0B';
+  return '#EF4444';
+};
+
+const DenseKpiTile = ({ label, value, sub, accent, onClick }) => (
+  <div
+    onClick={onClick}
+    style={{
+      background: T.card,
+      border: `1px solid ${T.border}`,
+      borderTop: `4px solid ${accent || '#94a3b8'}`,
+      borderRadius: 12,
+      padding: '14px 16px',
+      cursor: onClick ? 'pointer' : 'default',
+      transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+    }}
+    onMouseEnter={e => { if (onClick) { e.currentTarget.style.transform = 'translateY(-1px)'; e.currentTarget.style.boxShadow = `0 4px 12px ${(accent || '#94a3b8')}30`; } }}
+    onMouseLeave={e => { if (onClick) { e.currentTarget.style.transform = 'none'; e.currentTarget.style.boxShadow = 'none'; } }}
+  >
+    <div style={{ fontSize: 11, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase' }}>{label}</div>
+    <div style={{ fontSize: 30, fontFamily: mono, fontWeight: 800, color: '#e2e8f0', lineHeight: 1.1, marginTop: 4, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+    {sub && <div style={{ fontSize: 11, fontFamily: mono, color: accent && accent !== '#94a3b8' && accent !== '#10B981' ? accent : '#94a3b8', fontWeight: 600, marginTop: 4 }}>{sub}</div>}
+  </div>
+);
+
+// Build the tile list for a given dept from the /api/{dept}/kpis response.
+// Returns [{ label, value, sub, direction, valueRatio, accent }].
+function buildDeptKpiTiles(dept, kpis, thresholds) {
+  if (!kpis) return [];
+  const fmtH = h => (h >= 24 ? `${(h / 24).toFixed(1)}d` : `${Math.round(h)}h`);
+  const tiles = [];
+
+  // 1. Aging in Dept — count >1d, sub: max-age, color by max-age (HID)
+  const maxH = kpis.maxAgeHours || 0;
+  const maxRatio = thresholds && thresholds.maxAgeRedHours
+    ? maxH / thresholds.maxAgeRedHours
+    : maxH / 120;
+  tiles.push({
+    label: `AGING >${Math.round((thresholds?.agingHours || 24) / 24)}D`,
+    value: kpis.agingCount || 0,
+    sub: maxH > 0 ? `max: ${fmtH(maxH)}` : null,
+    direction: 'INVERSE',
+    valueRatio: maxRatio,
+    accent: KPI_COLOR_BY_DIRECTION('INVERSE', maxRatio),
+  });
+
+  // 2. Avg Dwell — INVERSE
+  const avg = kpis.avgDwellHours || 0;
+  const avgRatio = thresholds && thresholds.avgDwellRedHours
+    ? avg / thresholds.avgDwellRedHours
+    : avg / 36;
+  tiles.push({
+    label: 'AVG DWELL',
+    value: fmtH(avg),
+    sub: kpis.wipCount != null ? `${kpis.wipCount} WIP` : null,
+    direction: 'INVERSE',
+    valueRatio: avgRatio,
+    accent: KPI_COLOR_BY_DIRECTION('INVERSE', avgRatio),
+  });
+
+  // 3. Breakage % — INVERSE
+  const brk = kpis.breakagePct || 0;
+  const brkRatio = thresholds && thresholds.breakagePctRed
+    ? brk / thresholds.breakagePctRed
+    : brk / 5;
+  tiles.push({
+    label: 'BREAKAGE %',
+    value: `${brk.toFixed(brk < 10 ? 1 : 0)}%`,
+    sub: kpis.breakageCount != null ? `${kpis.breakageCount} events` : null,
+    direction: 'INVERSE',
+    valueRatio: brkRatio,
+    accent: KPI_COLOR_BY_DIRECTION('INVERSE', brkRatio),
+  });
+
+  // 4. Throughput per hour — PACE (no real "goal" yet so show neutral)
+  tiles.push({
+    label: 'THRU/HR',
+    value: Math.round(kpis.throughputPerHour || 0),
+    sub: kpis.exitedToday != null ? `${kpis.exitedToday} today` : null,
+    direction: 'NEUTRAL',
+    valueRatio: 1,
+    accent: '#94a3b8',
+  });
+
+  // 5-6. Dept-specific
+  const ds = kpis.deptSpecific || {};
+  if (dept === 'picking') {
+    tiles.push({ label: 'BACKLOG',  value: ds.backlog ?? 0, direction: 'INVERSE', valueRatio: (ds.backlog ?? 0) / 200, accent: KPI_COLOR_BY_DIRECTION('INVERSE', (ds.backlog ?? 0) / 200) });
+    tiles.push({ label: 'RUSH',     value: ds.rush ?? 0,    direction: 'INVERSE', valueRatio: (ds.rush ?? 0) / 20,      accent: KPI_COLOR_BY_DIRECTION('INVERSE', (ds.rush ?? 0) / 20) });
+  } else if (dept === 'assembly') {
+    const pr = ds.passRate ?? 0;
+    tiles.push({ label: 'PASS RATE', value: `${pr}%`,           direction: 'PACE',   valueRatio: pr / 95,                  accent: KPI_COLOR_BY_DIRECTION('PACE', pr / 95) });
+    tiles.push({ label: 'STATIONS',  value: ds.stationsActive ?? 0, direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+  } else if (dept === 'shipping') {
+    tiles.push({ label: 'READY',     value: ds.readyToShip ?? 0,    direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+    tiles.push({ label: 'RUSH',      value: ds.rushInQueue ?? 0,    direction: 'INVERSE', valueRatio: (ds.rushInQueue ?? 0) / 20, accent: KPI_COLOR_BY_DIRECTION('INVERSE', (ds.rushInQueue ?? 0) / 20) });
+  } else if (dept === 'surfacing') {
+    const br = ds.blockRate ?? 0;
+    tiles.push({ label: 'BLOCK RATE', value: `${br}%`, direction: 'INVERSE', valueRatio: br / 20, accent: KPI_COLOR_BY_DIRECTION('INVERSE', br / 20) });
+    tiles.push({ label: 'GENERATORS', value: ds.generatorsActive ?? '—', direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+  } else if (dept === 'coating') {
+    tiles.push({ label: 'IN COATING', value: ds.inCoatingWip ?? 0, direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+    tiles.push({ label: 'BATCHES',    value: ds.activeBatches ?? '—', direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+  } else if (dept === 'cutting') {
+    tiles.push({ label: 'IN CUTTING', value: ds.inCuttingWip ?? 0, direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+    tiles.push({ label: 'EDGERS',     value: ds.activeEdgers ?? '—', direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+  }
+  return tiles;
+}
+
+export function DeptKpiStrip({ dept, serverUrl }) {
+  const [data, setData] = useState({ kpis: null, thresholds: null });
+  useEffect(() => {
+    if (!serverUrl && serverUrl !== '') return;
+    let alive = true;
+    const go = async () => {
+      try {
+        const r = await fetch(`${serverUrl}/api/${dept}/kpis`);
+        if (r.ok && alive) {
+          const d = await r.json();
+          setData({ kpis: d.kpis || null, thresholds: d.thresholds || null });
+        }
+      } catch (_) {}
+    };
+    go();
+    const iv = setInterval(go, 60000);
+    return () => { alive = false; clearInterval(iv); };
+  }, [serverUrl, dept]);
+
+  if (!data.kpis) return null;
+  const tiles = buildDeptKpiTiles(dept, data.kpis, data.thresholds);
+  return (
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+      gap: 10,
+      marginBottom: 16,
+    }}>
+      {tiles.map((t, i) => <DenseKpiTile key={i} {...t} />)}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// DeptKpiDayDetail — slide-in panel showing a single day's KPI snapshot.
+// Triggered by GoalHistory row click. Mirrors JobDetailPanel geometry:
+// fixed right edge, 480px wide, full-height, dark backdrop.
+// ──────────────────────────────────────────────────────────────────────────
+
+export function DeptKpiDayDetail({ row, dept, deptLabel, onClose }) {
+  if (!row) return null;
+  const fmtH = h => (h == null ? '—' : h >= 24 ? `${(h / 24).toFixed(1)}d` : `${Math.round(h)}h`);
+  const ds = (() => { try { return JSON.parse(row.kpiDeptSpecific || '{}'); } catch (_) { return {}; } })();
+  const variance = row.variance ?? 0;
+  const varianceColor = variance >= 0 ? '#10B981' : '#EF4444';
+
+  const Field = ({ label, value, sub, color }) => (
+    <div style={{ padding: '8px 0', borderBottom: `1px solid ${T.border}22` }}>
+      <div style={{ fontSize: 10, fontFamily: mono, color: T.textDim, letterSpacing: 1, textTransform: 'uppercase' }}>{label}</div>
+      <div style={{ fontSize: 22, fontFamily: mono, fontWeight: 800, color: color || T.text, marginTop: 2, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, fontFamily: mono, color: T.textMuted, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 480, background: T.surface, borderLeft: `1px solid ${T.border}`, zIndex: 1100, display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px #00000040' }}>
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{row.date}</div>
+          <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono, textTransform: 'uppercase', letterSpacing: 1 }}>{deptLabel || dept} · Daily Snapshot</div>
+        </div>
+        <button onClick={onClose} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, cursor: 'pointer', fontSize: 12 }}>✕ Close</button>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <Field label="ACTUAL" value={row.actual?.toLocaleString() ?? '—'} />
+          <Field label="GOAL"   value={row.target?.toLocaleString() ?? '—'} />
+          <Field label="Δ"       value={`${variance >= 0 ? '+' : ''}${variance.toLocaleString()}`} color={varianceColor} />
+          <Field label="% TO GOAL" value={row.variancePct != null ? `${row.variancePct}%` : '—'} color={varianceColor} />
+        </div>
+        <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+          <div style={{ fontSize: 10, fontFamily: mono, color: T.textDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>KPIs</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Field label={`AGING >${Math.round((row.kpiThresholdHours || 24) / 24)}D`} value={row.kpiAgingCount ?? 0} sub={row.kpiMaxAgeHours ? `max ${fmtH(row.kpiMaxAgeHours)}` : null} />
+            <Field label="AVG DWELL" value={fmtH(row.kpiAvgDwellHours)} />
+            <Field label="BREAKAGE %" value={row.kpiBreakagePct != null ? `${row.kpiBreakagePct}%` : '—'} sub={row.kpiBreakageCount != null ? `${row.kpiBreakageCount} events` : null} />
+            <Field label="THRU/HR" value={row.kpiThroughputPerHour ? Math.round(row.kpiThroughputPerHour) : '—'} />
+          </div>
+        </div>
+        {Object.keys(ds).length > 0 && (
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${T.border}` }}>
+            <div style={{ fontSize: 10, fontFamily: mono, color: T.textDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 8 }}>Dept Specific</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {Object.entries(ds).map(([k, v]) => (
+                <Field key={k} label={k.replace(/([A-Z])/g, ' $1').toUpperCase()} value={v == null ? '—' : (typeof v === 'number' ? v.toLocaleString() : String(v))} />
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export const KPICard = ({label,value,sub,trend,accent,onRemove,editable,onClick,clickable})=>(
   <div
     onClick={clickable&&onClick?onClick:undefined}
@@ -150,6 +378,7 @@ export const KPICard = ({label,value,sub,trend,accent,onRemove,editable,onClick,
 export function GoalHistory({ serverUrl, dept, deptLabel, days = 14 }) {
   const [rows, setRows] = useState(null);
   const [error, setError] = useState(null);
+  const [selectedRow, setSelectedRow] = useState(null);
 
   useEffect(() => {
     if (!serverUrl && serverUrl !== '') return;
@@ -232,10 +461,17 @@ export function GoalHistory({ serverUrl, dept, deptLabel, days = 14 }) {
               const tgtPct = max > 0 ? Math.round((r.target / max) * 100) : 0;
               const variance = r.variance != null ? r.variance : (r.actual - (r.target || 0));
               return (
-                <tr key={r.date} style={{
-                  background: isToday ? `${T.blue}15` : variance < -1 ? 'rgba(239,68,68,0.04)' : variance > 1 ? 'rgba(16,185,129,0.04)' : 'transparent',
-                  borderBottom: `1px solid ${T.border}`,
-                }}>
+                <tr key={r.date}
+                  onClick={() => setSelectedRow(r)}
+                  style={{
+                    background: isToday ? `${T.blue}15` : variance < -1 ? 'rgba(239,68,68,0.04)' : variance > 1 ? 'rgba(16,185,129,0.04)' : 'transparent',
+                    borderBottom: `1px solid ${T.border}`,
+                    cursor: 'pointer',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = `${T.blue}25`; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = isToday ? `${T.blue}15` : variance < -1 ? 'rgba(239,68,68,0.04)' : variance > 1 ? 'rgba(16,185,129,0.04)' : 'transparent'; }}
+                  title="Click for daily KPI snapshot"
+                >
                   <td style={{ padding: '6px 10px', color: isToday ? T.text : T.textMuted, fontWeight: isToday ? 700 : 500 }}>
                     {r.date.slice(5)}
                   </td>
@@ -262,6 +498,9 @@ export function GoalHistory({ serverUrl, dept, deptLabel, days = 14 }) {
           </tbody>
         </table>
       </div>
+      {selectedRow && (
+        <DeptKpiDayDetail row={selectedRow} dept={dept} deptLabel={deptLabel} onClose={() => setSelectedRow(null)} />
+      )}
     </Card>
   );
 }
