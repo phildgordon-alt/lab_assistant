@@ -6864,6 +6864,11 @@ ${ovenStats.activeTimers || 0} active oven timers, ${ovenStats.totalRuns || 0} r
 
 Answer questions concisely and helpfully. If asked about specific inventory items, maintenance tasks, or equipment, use the data above. Keep responses under 300 words unless more detail is requested.`;
 
+      // Phil 2026-05-13: prompt caching on the system prompt — the
+      // INVENTORY / MAINTENANCE / SOM / OVEN context block is ~1k-2k
+      // tokens and identical across questions until the underlying
+      // data shifts. Ephemeral cache (5-min TTL) makes repeat questions
+      // in a session 90% cheaper on the cached portion.
       const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -6874,7 +6879,9 @@ Answer questions concisely and helpfully. If asked about specific inventory item
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 1024,
-          system: systemPrompt,
+          system: [
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+          ],
           messages: [{ role: 'user', content: question }]
         })
       });
@@ -6930,7 +6937,9 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
         body: JSON.stringify({
           model: 'claude-sonnet-4-20250514',
           max_tokens: 512,
-          system: systemPrompt,
+          system: [
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+          ],
           messages: [{ role: 'user', content: question }]
         })
       });
@@ -9377,7 +9386,9 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
             body: JSON.stringify({
               model: 'claude-sonnet-4-20250514',
               max_tokens: 512,
-              system: systemPrompt,
+              system: [
+                { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }
+              ],
               messages: [{ role: 'user', content: question }]
             })
           });

@@ -319,11 +319,23 @@ export async function runAgent(
       while (iterations < MAX_ITERATIONS) {
         iterations++;
 
+        // Phil 2026-05-13: Anthropic prompt caching — system prompt and
+        // tools are the static prefix (10k+ tokens). Mark them ephemeral
+        // so iterations 2+ in this agentic loop (and any subsequent
+        // question within 5 min) hit cache at 10% of input cost.
+        // First call pays +25% cache-write premium; payback after one
+        // re-use.
         const response = await withRetry(() => getAnthropic().messages.create({
           model: MODEL,
           max_tokens: MAX_TOKENS,
-          system: systemPrompt,
-          tools: agentTools as Anthropic.Tool[],
+          system: [
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+          ],
+          tools: agentTools.map((t: any, i: number) =>
+            i === agentTools.length - 1
+              ? { ...t, cache_control: { type: 'ephemeral' } }
+              : t
+          ) as Anthropic.Tool[],
           messages,
         }));
 
@@ -471,12 +483,22 @@ export async function runAgentStreaming(
         let currentContent: Anthropic.ContentBlock[] = [];
         let stopReason: string | null = null;
 
+        // Phil 2026-05-13: Anthropic prompt caching on the streaming
+        // variant too — same rationale as the non-streaming call above.
+        // System prompt + tools cached; user message + tool results
+        // remain uncached (vary per call).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const stream: any = await withRetry(async () => getAnthropic().messages.stream({
           model: MODEL,
           max_tokens: MAX_TOKENS,
-          system: systemPrompt,
-          tools: agentTools as Anthropic.Tool[],
+          system: [
+            { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } },
+          ],
+          tools: agentTools.map((t: any, i: number) =>
+            i === agentTools.length - 1
+              ? { ...t, cache_control: { type: 'ephemeral' } }
+              : t
+          ) as Anthropic.Tool[],
           messages,
         }));
 
