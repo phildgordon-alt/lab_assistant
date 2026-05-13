@@ -264,7 +264,12 @@ function computeShipTarget(db, options) {
   const today = (options && options.today) || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const cfg   = loadConfig(db, options && options.configOverrides);
 
-  const wip = getActiveWIP(db);
+  // Phil 2026-05-13: backfill-faithfulness. When options.wipSnapshot is
+  // provided, use it instead of querying live `jobs`. Lets the faithful
+  // backfill script replay the formula against a historical EOD WIP
+  // reconstructed from `job_events`. Live callers (endpoint, hourly
+  // capture) omit the option and behave identically to before.
+  const wip = (options && options.wipSnapshot) || getActiveWIP(db);
 
   // Per-job priority weight + cohort assignment + SLA-floor flag
   let prioritySum = 0;

@@ -195,11 +195,16 @@ function rolloverFrom(db, today) {
  * and output value — designed for both the dashboard endpoint AND the
  * future planning module's what-if scenarios.
  */
+/**
+ * Phil 2026-05-13: backfill-faithfulness. options.wipSnapshot lets a
+ * historical replay supply an EOD WIP reconstruction; live callers
+ * omit and the function pulls today's WIP from jobs as before.
+ */
 function computeCoatingTarget(db, options) {
   const today = (options && options.today) || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const cfg   = loadConfig(db, options && options.configOverrides);
 
-  const wip = getCoatingWIP(db);
+  const wip = (options && options.wipSnapshot) || getCoatingWIP(db);
 
   const intakeProjection = isWorkday(today)
     ? intakeRate(db, today, cfg.coating_intake_window_days)
