@@ -248,7 +248,23 @@ function buildDeptKpiTiles(dept, kpis, thresholds) {
   } else if (dept === 'surfacing') {
     const br = ds.blockRate ?? 0;
     tiles.push({ label: 'BLOCK RATE', value: `${br}%`, direction: 'INVERSE', valueRatio: br / 20, accent: KPI_COLOR_BY_DIRECTION('INVERSE', br / 20) });
-    tiles.push({ label: 'GENERATORS', value: ds.generatorsActive ?? '—', direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
+    // Phil 2026-05-13: generator jobs/hr from Lab DB job_events.
+    // Sub-line shows top 3 generators with their hourly counts so
+    // supervisors can spot which generator is pulling weight (or
+    // sitting idle).
+    const total = ds.generatorJobsPerHour ?? 0;
+    const breakdown = ds.generatorBreakdown || {};
+    const top3 = Object.entries(breakdown).slice(0, 3)
+      .map(([station, n]) => `${station.replace(/^GENERATOR\s*/i, 'GEN ').slice(0, 6)}:${n}`)
+      .join(' ');
+    tiles.push({
+      label: 'GEN JOBS/HR',
+      value: total,
+      sub: top3 || null,
+      direction: 'NEUTRAL',
+      valueRatio: 1,
+      accent: '#94a3b8',
+    });
   } else if (dept === 'coating') {
     tiles.push({ label: 'IN COATING', value: ds.inCoatingWip ?? 0, direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });
     tiles.push({ label: 'BATCHES',    value: ds.activeBatches ?? '—', direction: 'NEUTRAL', valueRatio: 1, accent: '#94a3b8' });

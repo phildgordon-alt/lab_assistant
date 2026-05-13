@@ -397,11 +397,43 @@ function deptSpecificForShipping(db) {
 }
 
 function deptSpecificForSurfacing(db, breakageCount, dwells) {
-  // Block rate stub: % of WIP that has been here >2d (suggests blocking)
+  // Block rate: % of surfacing WIP that has been here >2d (blocked work)
   const blockRate = dwells.length > 0
     ? Math.round((dwells.filter(d => d.dwell_hours > 48).length / dwells.length) * 1000) / 10
     : 0;
-  return { generatorsActive: null, blockRate };  // generatorsActive: SOM-dep, deferred
+
+  // Phil 2026-05-13 very late: generator jobs/hr from Lab DB job_events
+  // (NOT SOM — no jobsPerHour endpoint there, and our event log has
+  // station name on every SURFACING event). Counts distinct invoices
+  // per generator-type station in the last 60 minutes. Same SOM
+  // classifier as som-adapter.js:180 — GENERATOR / HSC / HXS / SURF
+  // patterns in the station name = generator-class machine.
+  let generatorJobsPerHour = 0;
+  const generatorBreakdown = {};
+  try {
+    const rows = db.prepare(`
+      SELECT station, COUNT(DISTINCT invoice) AS jobs
+      FROM job_events
+      WHERE stage = 'SURFACING'
+        AND event_ts >= (CAST(strftime('%s','now') AS INTEGER) * 1000) - 3600000
+        AND (
+          station LIKE '%GENERATOR%' OR
+          station LIKE 'HSC%' OR
+          station LIKE 'HXS%' OR
+          station LIKE '%SURF%'
+        )
+      GROUP BY station
+      ORDER BY jobs DESC
+    `).all();
+    for (const r of rows) {
+      generatorJobsPerHour += r.jobs;
+      generatorBreakdown[r.station] = r.jobs;
+    }
+  } catch (e) {
+    // job_events may not exist on a fresh dev DB — leave at 0
+  }
+
+  return { blockRate, generatorJobsPerHour, generatorBreakdown };
 }
 
 function deptSpecificForCoating(db) {
