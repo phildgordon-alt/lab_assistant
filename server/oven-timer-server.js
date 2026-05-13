@@ -5179,6 +5179,26 @@ Respond with a structured batching plan in this format:
   // same number. completedToday uses the same persisted-event distinct-
   // invoice exits pattern as the other depts so GoalBar and GoalHistory
   // can never disagree.
+  // ── /api/{dept}/kpis — live KPI snapshot for a dept's tile strip ──
+  // Phil 2026-05-13 late: dept landing pages show 4 universal + 1-2
+  // dept-specific KPI tiles. This endpoint serves the live values.
+  // computeDeptKpis is the SOT — same function the capture writer and
+  // history live-overlay use.
+  {
+    const m = url.pathname.match(/^\/api\/(picking|surfacing|coating|cutting|assembly|shipping)\/kpis$/);
+    if (req.method==='GET' && m) {
+      try {
+        const dept = m[1];
+        const { computeDeptKpis } = require('./domain/dept-kpis');
+        const result = computeDeptKpis(labDb.db, dept);
+        return json(res, result);
+      } catch (e) {
+        console.error(`[/api/${m[1]}/kpis] failed:`, e.message);
+        return json(res, { error: e.message, dept: m[1], kpis: {} }, 500);
+      }
+    }
+  }
+
   if (req.method==='GET' && url.pathname==='/api/picking/target') {
     try {
       // Phil 2026-05-13: 6th department — Picking / Lens Kitchen. Goal =
@@ -5581,12 +5601,23 @@ Respond with a structured batching plan in this format:
     try {
       // Single SQL per dept — left join against a generated date range so
       // missing days come back as zeros instead of being absent.
+      // Phil 2026-05-13 late: extended each SELECT to include kpi_*
+      // columns so GoalHistory rows carry the full daily snapshot.
+      // Click-through detail panel reads from the same row.
+      const KPI_COLS = `kpi_aging_count AS kpiAgingCount,
+                        kpi_max_age_hours AS kpiMaxAgeHours,
+                        kpi_avg_dwell_hours AS kpiAvgDwellHours,
+                        kpi_breakage_pct AS kpiBreakagePct,
+                        kpi_breakage_count AS kpiBreakageCount,
+                        kpi_throughput_per_hour AS kpiThroughputPerHour,
+                        kpi_dept_specific AS kpiDeptSpecific`;
       let rows;
       if (dept === 'shipping') {
         rows = labDb.db.prepare(`
           SELECT date, is_workday, total_target AS target, shipped_actual AS actual,
                  variance, variance_pct AS variancePct, rollover_in AS rolloverIn,
-                 (finalized_at IS NOT NULL) AS finalized
+                 (finalized_at IS NOT NULL) AS finalized,
+                 ${KPI_COLS}
           FROM daily_ship_targets
           WHERE date >= date('now','localtime','-' || ? || ' days')
           ORDER BY date DESC
@@ -5599,17 +5630,13 @@ Respond with a structured batching plan in this format:
                       THEN ROUND((CAST(variance AS REAL) / total_target) * 10000) / 100
                       ELSE 0 END AS variancePct,
                  rollover_in AS rolloverIn,
-                 (finalized_at IS NOT NULL) AS finalized
+                 (finalized_at IS NOT NULL) AS finalized,
+                 ${KPI_COLS}
           FROM daily_coating_targets
           WHERE date >= date('now','localtime','-' || ? || ' days')
           ORDER BY date DESC
         `).all(days);
       } else if (dept === 'picking') {
-        // Phil 2026-05-13: 6th dept, own table daily_picking_targets.
-        // Same shape as surfacing branch — single-table read, no
-        // cross-join. picked_actual captured via captureDailyPicking
-        // Target using the same countPickingExitsToday rule the live
-        // endpoint and SPA tab use.
         rows = labDb.db.prepare(`
           SELECT date,
                  is_workday,
@@ -5620,19 +5647,13 @@ Respond with a structured batching plan in this format:
                       THEN ROUND(((CAST(picked_actual AS REAL) - total_target) / total_target) * 10000) / 100
                       ELSE 0 END AS variancePct,
                  rollover_in AS rolloverIn,
-                 (finalized_at IS NOT NULL) AS finalized
+                 (finalized_at IS NOT NULL) AS finalized,
+                 ${KPI_COLS}
           FROM daily_picking_targets
           WHERE date >= date('now','localtime','-' || ? || ' days')
           ORDER BY date DESC
         `).all(days);
       } else if (dept === 'surfacing') {
-        // Phil 2026-05-13 evening: surfacing has its own first-class
-        // target table now (daily_surfacing_targets, migration 013).
-        // Reads target + actual from one table — no cross-join to
-        // coating, no inherited number. surfaced_actual is captured
-        // via captureDailySurfacingTarget using the SAME count rule
-        // (countSurfacingExitsToday) that the dashboard live counter
-        // uses, so capture and display never disagree.
         rows = labDb.db.prepare(`
           SELECT date,
                  is_workday,
@@ -5643,13 +5664,16 @@ Respond with a structured batching plan in this format:
                       THEN ROUND(((CAST(surfaced_actual AS REAL) - total_target) / total_target) * 10000) / 100
                       ELSE 0 END AS variancePct,
                  rollover_in AS rolloverIn,
-                 (finalized_at IS NOT NULL) AS finalized
+                 (finalized_at IS NOT NULL) AS finalized,
+                 ${KPI_COLS}
           FROM daily_surfacing_targets
           WHERE date >= date('now','localtime','-' || ? || ' days')
           ORDER BY date DESC
         `).all(days);
       } else {
-        // cutting + assembly — JOIN ship target to dept actual
+        // cutting + assembly — JOIN ship target to dept actual AND LEFT JOIN
+        // the dedicated KPI table (daily_{dept}_kpis from migration 017).
+        const kpiTable = dept === 'cutting' ? 'daily_cutting_kpis' : 'daily_assembly_kpis';
         rows = labDb.db.prepare(`
           SELECT t.date,
                  t.is_workday,
@@ -5660,10 +5684,19 @@ Respond with a structured batching plan in this format:
                       THEN ROUND(((CAST(COALESCE(a.actual,0) AS REAL) - t.total_target) / t.total_target) * 10000) / 100
                       ELSE 0 END AS variancePct,
                  t.rollover_in AS rolloverIn,
-                 (a.finalized_at IS NOT NULL) AS finalized
+                 (a.finalized_at IS NOT NULL) AS finalized,
+                 COALESCE(k.kpi_aging_count, 0)         AS kpiAgingCount,
+                 COALESCE(k.kpi_max_age_hours, 0)       AS kpiMaxAgeHours,
+                 COALESCE(k.kpi_avg_dwell_hours, 0)     AS kpiAvgDwellHours,
+                 COALESCE(k.kpi_breakage_pct, 0)        AS kpiBreakagePct,
+                 COALESCE(k.kpi_breakage_count, 0)      AS kpiBreakageCount,
+                 COALESCE(k.kpi_throughput_per_hour, 0) AS kpiThroughputPerHour,
+                 COALESCE(k.kpi_dept_specific, '{}')    AS kpiDeptSpecific
           FROM daily_ship_targets t
           LEFT JOIN daily_dept_actuals a
                  ON a.date = t.date AND a.dept = ?
+          LEFT JOIN ${kpiTable} k
+                 ON k.date = t.date
           WHERE t.date >= date('now','localtime','-' || ? || ' days')
           ORDER BY t.date DESC
         `).all(dept, days);
@@ -5705,6 +5738,20 @@ Respond with a structured batching plan in this format:
               ? Math.round(((liveActual - todayRow.target) / todayRow.target) * 10000) / 100
               : 0;
           }
+          // Phil 2026-05-13 late: overlay today's KPI snapshot with live
+          // values too — captureDailyDeptKpis runs hourly, but the SPA
+          // GoalHistory row should reflect "now" not "as of last capture."
+          try {
+            const { computeDeptKpis } = require('./domain/dept-kpis');
+            const live = computeDeptKpis(labDb.db, dept).kpis;
+            todayRow.kpiAgingCount       = live.agingCount;
+            todayRow.kpiMaxAgeHours      = live.maxAgeHours;
+            todayRow.kpiAvgDwellHours    = live.avgDwellHours;
+            todayRow.kpiBreakagePct      = live.breakagePct;
+            todayRow.kpiBreakageCount    = live.breakageCount;
+            todayRow.kpiThroughputPerHour = live.throughputPerHour;
+            todayRow.kpiDeptSpecific     = JSON.stringify(live.deptSpecific || {});
+          } catch (_) { /* fall back to captured KPIs */ }
         }
       } catch (overlayErr) {
         console.warn(`[/api/${dept}/goal-history] live overlay failed:`, overlayErr.message);
