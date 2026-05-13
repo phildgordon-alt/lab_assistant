@@ -7,6 +7,7 @@ import InventoryTab from "./components/tabs/InventoryTab";
 import MaintenanceTab from "./components/tabs/MaintenanceTab";
 import AnalyticsTab from "./components/tabs/AnalyticsTab";
 import ProductionAnalysisTab from "./components/tabs/ProductionAnalysisTab";
+import { PickingTab } from "./components/tabs/PickingTab";
 import LensScanner from "./components/LensScanner";
 import { StageHistory, GoalHistory, GoalBar } from "./components/shared";
 
@@ -12474,10 +12475,14 @@ function LabAssistantV2(){
   const navMenus=[
     {id:"overview",label:"Overview",icon:"◉",type:"button"},
     {id:"production",label:"Production",icon:"🏭",type:"dropdown",items:[
+      // Phil 2026-05-13: order matches physical lab flow — picking
+      // first (upstream), shipping last (downstream). See memory
+      // feedback_dept_flow_order.
       {id:"incoming",label:"Incoming",icon:"📥"},
+      {id:"picking",label:"Picking",icon:"🤏"},
       {id:"surfacing",label:"Surfacing",icon:"🌀"},
-      {id:"cutting",label:"Cutting",icon:"✂️"},
       {id:"coating",label:"Coating",icon:"🌡"},
+      {id:"cutting",label:"Cutting",icon:"✂️"},
       {id:"assembly",label:"Assembly",icon:"🔧"},
       {id:"shipping",label:"Shipping",icon:"📤"},
     ]},
@@ -12589,6 +12594,7 @@ function LabAssistantV2(){
       <div style={{padding:isTablet?"14px 12px 90px":"22px 28px",maxWidth:3600,margin:"0 auto",position:"relative",zIndex:1}}>
         {view==="overview"&&<OverviewTab trays={trays} putWall={putWall} batches={batches} events={events} messages={messages} onSendMessage={sendMessage} onBatchControl={handleBatchControl} settings={settings} breakage={breakage} dviJobs={mergedJobs} wipJobs={wipJobs} shippedStats={shippedStats} assemblyStats={assemblyStats} incomingToday={incomingToday}/>}
         {view==="putwall"&&<PutWallTab putWall={putWall} setPutWall={setPutWall} events={events} wipJobs={wipJobs}/>}
+        {view==="picking"&&<PickingTab ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="coating"&&<CoatingTab batches={batches} trays={trays} dviJobs={mergedJobs} inspections={inspections} onBatchControl={handleBatchControl} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="surfacing"&&<SurfacingTab trays={trays} dviJobs={mergedJobs} ovenServerUrl={ovenServerUrl} settings={settings}/>}
         {view==="cutting"&&<CuttingTab trays={trays} dviJobs={mergedJobs} breakage={breakage} ovenServerUrl={ovenServerUrl} settings={settings}/>}

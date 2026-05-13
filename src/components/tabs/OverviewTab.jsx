@@ -831,15 +831,16 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   // in parallel; the tile renders only the departments whose goal>0 so
   // pre-formula stages auto-hide. 60s cadence matches other slow tiles.
   const [deptGoals,setDeptGoals]=useState({
-    shipping:{completed:0,goal:0}, coating:{completed:0,goal:0},
-    assembly:{completed:0,goal:0}, cutting:{completed:0,goal:0},
-    surfacing:{completed:0,goal:0},
+    picking:{completed:0,goal:0}, surfacing:{completed:0,goal:0},
+    coating:{completed:0,goal:0}, cutting:{completed:0,goal:0},
+    assembly:{completed:0,goal:0}, shipping:{completed:0,goal:0},
   });
   useEffect(()=>{
     let alive=true;
     const fetchAll=async()=>{
       try{
-        const [s,c,a,cu,su]=await Promise.all([
+        const [p,s,c,a,cu,su]=await Promise.all([
+          fetch('/api/picking/target').then(r=>r.ok?r.json():null).catch(()=>null),
           fetch('/api/shipping/dashboard').then(r=>r.ok?r.json():null).catch(()=>null),
           fetch('/api/coating/intelligence').then(r=>r.ok?r.json():null).catch(()=>null),
           fetch('/api/assembly/jobs').then(r=>r.ok?r.json():null).catch(()=>null),
@@ -848,11 +849,12 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         ]);
         if(!alive)return;
         setDeptGoals({
-          shipping:{completed:s?.shippedToday||0, goal:s?.target?.daily||0},
-          coating:{completed:c?.completedToday||0, goal:c?.dailyGoal||0},
-          assembly:{completed:a?.completedToday||0, goal:a?.dailyGoal||0},
-          cutting:{completed:cu?.completedToday||0, goal:cu?.dailyGoal||0},
+          picking:{completed:p?.completedToday||0, goal:p?.dailyGoal||0},
           surfacing:{completed:su?.completedToday||0, goal:su?.dailyGoal||0},
+          coating:{completed:c?.completedToday||0, goal:c?.dailyGoal||0},
+          cutting:{completed:cu?.completedToday||0, goal:cu?.dailyGoal||0},
+          assembly:{completed:a?.completedToday||0, goal:a?.dailyGoal||0},
+          shipping:{completed:s?.shippedToday||0, goal:s?.target?.daily||0},
         });
       }catch(e){ console.error('[department_goals] fetch failed',e); }
     };
@@ -2041,12 +2043,16 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         // (pace color stays on PROJ only — stops "green for blowing past
         // a busted goal"). Axis tick scale above row 1 replaces the dead
         // "VS GOAL" column header.
+        // Phil 2026-05-13: dept order is the lab's physical flow —
+        // picking → surfacing → coating → cutting → assembly → shipping.
+        // Upstream to downstream. See feedback_dept_flow_order memory.
         const rows = [
-          { key:'shipping',  label:'SHIPPING',  completed: deptGoals.shipping.completed,  goal: deptGoals.shipping.goal,  view:'shipping' },
-          { key:'coating',   label:'COATING',   completed: deptGoals.coating.completed,   goal: deptGoals.coating.goal,   view:'coating' },
+          { key:'picking',   label:'PICKING',   completed: deptGoals.picking.completed,   goal: deptGoals.picking.goal,   view:'picking' },
           { key:'surfacing', label:'SURFACING', completed: deptGoals.surfacing.completed, goal: deptGoals.surfacing.goal, view:'surfacing' },
-          { key:'cutting',   label:'CUTTING',   completed: deptGoals.cutting.completed,   goal: deptGoals.cutting.goal,   view:'production-analysis' },
-          { key:'assembly',  label:'ASSEMBLY',  completed: deptGoals.assembly.completed,  goal: deptGoals.assembly.goal,  view:'production' },
+          { key:'coating',   label:'COATING',   completed: deptGoals.coating.completed,   goal: deptGoals.coating.goal,   view:'coating' },
+          { key:'cutting',   label:'CUTTING',   completed: deptGoals.cutting.completed,   goal: deptGoals.cutting.goal,   view:'cutting' },
+          { key:'assembly',  label:'ASSEMBLY',  completed: deptGoals.assembly.completed,  goal: deptGoals.assembly.goal,  view:'assembly' },
+          { key:'shipping',  label:'SHIPPING',  completed: deptGoals.shipping.completed,  goal: deptGoals.shipping.goal,  view:'shipping' },
         ].filter(r => r.goal > 0);
         if (rows.length === 0) {
           return <div style={{padding:16, color:T.textDim, fontSize:12, textAlign:'center'}}>No department goals reporting yet.</div>;
