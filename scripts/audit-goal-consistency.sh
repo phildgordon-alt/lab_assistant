@@ -170,6 +170,45 @@ for pair in "surfacing:$SURF_GOAL:coating:$COAT_GOAL" \
   fi
 done
 
+# ─────────────────────────────────────────────────────────────────────
+# KPI assertions (Phil 2026-05-13 late) — every dept's /api/{dept}/kpis
+# returns valid numeric KPIs, and today's goal-history row carries the
+# same values via live overlay.
+# ─────────────────────────────────────────────────────────────────────
+
+echo ""
+echo "Dept KPIs:"
+for dept in picking surfacing coating cutting assembly shipping; do
+  kpis_json=$(curl -fsS "$HOST/api/${dept}/kpis" 2>/dev/null || echo '{}')
+  aging=$(echo "$kpis_json" | jq -r '.kpis.agingCount // "NA"')
+  max=$(echo "$kpis_json"   | jq -r '.kpis.maxAgeHours // "NA"')
+  brk=$(echo "$kpis_json"   | jq -r '.kpis.breakagePct // "NA"')
+  tput=$(echo "$kpis_json"  | jq -r '.kpis.throughputPerHour // "NA"')
+  # Today's goal-history row's KPI values
+  hist=$(curl -fsS "$HOST/api/${dept}/goal-history?days=1" 2>/dev/null | jq '.history[0] // {}')
+  hist_aging=$(echo "$hist" | jq -r '.kpiAgingCount // "NA"')
+  hist_brk=$(echo "$hist"   | jq -r '.kpiBreakagePct // "NA"')
+  hist_tput=$(echo "$hist"  | jq -r '.kpiThroughputPerHour // "NA"')
+
+  printf "  %-10s kpis: aging=%-4s max=%-6s brk=%-5s thru/hr=%-5s\n" "$dept" "$aging" "${max}h" "${brk}%" "$tput"
+
+  # Aging count should match between live and goal-history today
+  if [ "$aging" != "NA" ] && [ "$hist_aging" != "NA" ] && [ "$aging" != "$hist_aging" ]; then
+    echo "  FAIL  $dept agingCount mismatch: live=$aging history-today=$hist_aging"
+    FAIL=$((FAIL + 1))
+  fi
+  # Breakage % should match (live overlay)
+  if [ "$brk" != "NA" ] && [ "$hist_brk" != "NA" ] && [ "$brk" != "$hist_brk" ]; then
+    echo "  FAIL  $dept breakagePct mismatch: live=$brk history-today=$hist_brk"
+    FAIL=$((FAIL + 1))
+  fi
+  # Throughput should match
+  if [ "$tput" != "NA" ] && [ "$hist_tput" != "NA" ] && [ "$tput" != "$hist_tput" ]; then
+    echo "  FAIL  $dept throughputPerHour mismatch: live=$tput history-today=$hist_tput"
+    FAIL=$((FAIL + 1))
+  fi
+done
+
 echo ""
 if [ "$FAIL" -eq 0 ]; then
   echo "All assertions passed."
