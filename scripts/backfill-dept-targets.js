@@ -57,7 +57,7 @@ const VERBOSE = argv.includes('--verbose');
 const daysIdx = argv.indexOf('--days');
 const DAYS = daysIdx >= 0 ? Math.max(1, parseInt(argv[daysIdx + 1], 10) || 30) : 30;
 const deptsIdx = argv.indexOf('--depts');
-const DEPTS_ARG = deptsIdx >= 0 ? argv[deptsIdx + 1] : 'ship,coating,surfacing';
+const DEPTS_ARG = deptsIdx >= 0 ? argv[deptsIdx + 1] : 'ship,coating,surfacing,picking';
 const DEPTS = new Set(DEPTS_ARG.split(',').map(s => s.trim().toLowerCase()));
 
 const DB_PATH = process.env.LAB_DB_PATH
@@ -125,6 +125,7 @@ const required = [
   ['daily_ship_targets',      'backfilled'],
   ['daily_coating_targets',   'backfilled'],
   ['daily_surfacing_targets', 'backfilled'],
+  ['daily_picking_targets',   'backfilled'],
 ];
 const missing = required.filter(([t, c]) => {
   try { return !hasColumn(t, c); }
@@ -147,6 +148,7 @@ console.log('');
 const { computeShipTarget }      = require('../server/domain/ship-target');
 const { computeCoatingTarget }   = require('../server/domain/coating-target');
 const { computeSurfacingTarget } = require('../server/domain/surfacing-target');
+const { computePickingTarget }   = require('../server/domain/picking-target');
 const { classify } = require('../server/domain/lens-classifier');
 
 // ─────────────────────────────────────────────────────────────────────
@@ -301,6 +303,24 @@ const upsertCoating = db.prepare(`
     backfilled = 1
 `);
 
+const upsertPicking = db.prepare(`
+  INSERT INTO daily_picking_targets
+    (date, is_workday, unpicked_backlog, intake_projection, capacity_estimate,
+     rollover_in, total_target, picked_actual, variance,
+     formula_version, backfilled)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1)
+  ON CONFLICT(date) DO UPDATE SET
+    is_workday = excluded.is_workday,
+    unpicked_backlog = excluded.unpicked_backlog,
+    intake_projection = excluded.intake_projection,
+    capacity_estimate = excluded.capacity_estimate,
+    rollover_in = excluded.rollover_in,
+    total_target = excluded.total_target,
+    picked_actual = excluded.picked_actual,
+    variance = excluded.variance,
+    backfilled = 1
+`);
+
 const upsertSurfacing = db.prepare(`
   INSERT INTO daily_surfacing_targets
     (date, is_workday, surfacing_wip, intake_projection, capacity_estimate,
@@ -355,8 +375,8 @@ console.log('');
 // Main loop
 // ─────────────────────────────────────────────────────────────────────
 
-let shipWrites = 0, coatingWrites = 0, surfacingWrites = 0;
-let shipSkips = 0,  coatingSkips = 0,  surfacingSkips = 0;
+let shipWrites = 0, coatingWrites = 0, surfacingWrites = 0, pickingWrites = 0;
+let shipSkips = 0,  coatingSkips = 0,  surfacingSkips = 0,  pickingSkips = 0;
 const sampleDiffs = [];
 
 for (const ymd of workdays) {
@@ -476,6 +496,58 @@ for (const ymd of workdays) {
       });
     }
   }
+
+  // ── PICKING ──
+  if (DEPTS.has('picking')) {
+    const skip = shouldSkip('daily_picking_targets', ymd);
+    if (skip) {
+      pickingSkips++;
+      if (VERBOSE) console.log(`    PICKING: skip (${skip.reason})`);
+    } else {
+      // For picking backfill: pass wip.active as the snapshot (it's a
+      // superset of unpicked; computePickingTarget uses its length as
+      // unpickedBacklog for backfill replay — approximate but in the
+      // right magnitude). The intake_projection still walks job_events
+      // historically with the same query the live module uses, so the
+      // intake term is exact.
+      const result = computePickingTarget(db, { today: ymd, wipSnapshot: wip.active });
+      // picked_actual for a historical day — count distinct order_id in
+      // picks_history on that PT-local date. Mirrors countPickingExitsToday.
+      const pickedActual = db.prepare(`
+        SELECT COUNT(*) AS n FROM (
+          SELECT DISTINCT order_id FROM picks_history
+          WHERE order_id IS NOT NULL AND order_id != ''
+            AND (
+              CASE
+                WHEN completed_at LIKE '%-0%' OR completed_at LIKE '%+0%' OR completed_at LIKE '%Z'
+                  THEN date(completed_at, 'localtime')
+                ELSE substr(completed_at, 1, 10)
+              END
+            ) = ?
+        )
+      `).get(ymd)?.n || 0;
+      const variance = pickedActual - (result.target || 0);
+
+      if (APPLY) {
+        upsertPicking.run(
+          ymd, isWorkday(ymd) ? 1 : 0,
+          result.unpickedBacklog || 0,
+          result.intakeProjection || 0,
+          result.capacityEstimate || 0,
+          result.rolloverIn || 0,
+          result.target || 0,
+          pickedActual,
+          variance
+        );
+      }
+      pickingWrites++;
+      const existing = db.prepare('SELECT total_target FROM daily_picking_targets WHERE date = ?').get(ymd);
+      sampleDiffs.push({
+        ymd, dept: 'picking', new: result.target,
+        old: existing?.total_target ?? null
+      });
+    }
+  }
 }
 
 console.log('');
@@ -483,6 +555,7 @@ console.log('Summary:');
 console.log(`  daily_ship_targets:      ${shipWrites} ${APPLY ? 'wrote' : 'would write'}, ${shipSkips} skipped`);
 console.log(`  daily_coating_targets:   ${coatingWrites} ${APPLY ? 'wrote' : 'would write'}, ${coatingSkips} skipped`);
 console.log(`  daily_surfacing_targets: ${surfacingWrites} ${APPLY ? 'wrote' : 'would write'}, ${surfacingSkips} skipped`);
+console.log(`  daily_picking_targets:   ${pickingWrites} ${APPLY ? 'wrote' : 'would write'}, ${pickingSkips} skipped`);
 
 if (sampleDiffs.length) {
   // Phil 2026-05-13: show OLDEST 9 + NEWEST 9 so both ends of the

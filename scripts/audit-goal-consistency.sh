@@ -50,13 +50,15 @@ COAT_GOAL=$(curl -fsS  "$HOST/api/coating/intelligence" | jq -r '.dailyGoal // .
 SURF_GOAL=$(curl -fsS  "$HOST/api/surfacing/target"     | jq -r '.dailyGoal // 0')
 CUT_GOAL=$(curl -fsS   "$HOST/api/cutting/dashboard"    | jq -r '.dailyGoal // 0')
 ASM_GOAL=$(curl -fsS   "$HOST/api/assembly/jobs"        | jq -r '.dailyGoal // 0')
+PICK_GOAL=$(curl -fsS  "$HOST/api/picking/target"       | jq -r '.dailyGoal // 0')
 
-echo "Live daily goals from /api/{dept}/* endpoints:"
-echo "  shipping:  $SHIP_GOAL"
-echo "  coating:   $COAT_GOAL"
+echo "Live daily goals from /api/{dept}/* endpoints (lab flow order):"
+echo "  picking:   $PICK_GOAL"
 echo "  surfacing: $SURF_GOAL"
+echo "  coating:   $COAT_GOAL"
 echo "  cutting:   $CUT_GOAL"
 echo "  assembly:  $ASM_GOAL"
+echo "  shipping:  $SHIP_GOAL"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────
@@ -66,11 +68,13 @@ echo ""
 DB_SHIP=$(sqlite3 "$DB_PATH"  "SELECT COALESCE(total_target, 0) FROM daily_ship_targets       WHERE date='$TODAY';" 2>/dev/null || echo "")
 DB_COAT=$(sqlite3 "$DB_PATH"  "SELECT COALESCE(total_target, 0) FROM daily_coating_targets    WHERE date='$TODAY';" 2>/dev/null || echo "")
 DB_SURF=$(sqlite3 "$DB_PATH"  "SELECT COALESCE(total_target, 0) FROM daily_surfacing_targets  WHERE date='$TODAY';" 2>/dev/null || echo "")
+DB_PICK=$(sqlite3 "$DB_PATH"  "SELECT COALESCE(total_target, 0) FROM daily_picking_targets    WHERE date='$TODAY';" 2>/dev/null || echo "")
 
 echo "Captured targets from daily_*_targets for $TODAY:"
-echo "  shipping:  ${DB_SHIP:-no-row}"
-echo "  coating:   ${DB_COAT:-no-row}"
+echo "  picking:   ${DB_PICK:-no-row}"
 echo "  surfacing: ${DB_SURF:-no-row}"
+echo "  coating:   ${DB_COAT:-no-row}"
+echo "  shipping:  ${DB_SHIP:-no-row}"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────
@@ -82,19 +86,22 @@ coat_hist=$(curl -fsS  "$HOST/api/coating/goal-history?days=1"   | jq '.history[
 surf_hist=$(curl -fsS  "$HOST/api/surfacing/goal-history?days=1" | jq '.history[0] // {}')
 cut_hist=$(curl -fsS   "$HOST/api/cutting/goal-history?days=1"   | jq '.history[0] // {}')
 asm_hist=$(curl -fsS   "$HOST/api/assembly/goal-history?days=1"  | jq '.history[0] // {}')
+pick_hist=$(curl -fsS  "$HOST/api/picking/goal-history?days=1"   | jq '.history[0] // {}')
 
 SHIP_HIST_GOAL=$(echo "$ship_hist" | jq -r '.target // 0')
 COAT_HIST_GOAL=$(echo "$coat_hist" | jq -r '.target // 0')
 SURF_HIST_GOAL=$(echo "$surf_hist" | jq -r '.target // 0')
 CUT_HIST_GOAL=$(echo  "$cut_hist"  | jq -r '.target // 0')
 ASM_HIST_GOAL=$(echo  "$asm_hist"  | jq -r '.target // 0')
+PICK_HIST_GOAL=$(echo "$pick_hist" | jq -r '.target // 0')
 
 echo "Today's row in goal-history endpoints (.target):"
-echo "  shipping:  $SHIP_HIST_GOAL"
-echo "  coating:   $COAT_HIST_GOAL"
+echo "  picking:   $PICK_HIST_GOAL"
 echo "  surfacing: $SURF_HIST_GOAL"
+echo "  coating:   $COAT_HIST_GOAL"
 echo "  cutting:   $CUT_HIST_GOAL"
 echo "  assembly:  $ASM_HIST_GOAL"
+echo "  shipping:  $SHIP_HIST_GOAL"
 echo ""
 
 # ─────────────────────────────────────────────────────────────────────
@@ -135,6 +142,7 @@ echo "Assertions:"
 assert_within  "shipping dashboard ≈ daily_ship_targets"           "$SHIP_GOAL" "${DB_SHIP:-0}"
 assert_within  "coating intelligence ≈ daily_coating_targets"      "$COAT_GOAL" "${DB_COAT:-0}"
 assert_within  "surfacing target ≈ daily_surfacing_targets"        "$SURF_GOAL" "${DB_SURF:-0}"
+assert_within  "picking target ≈ daily_picking_targets"            "$PICK_GOAL" "${DB_PICK:-0}"
 
 # Goal-history's today row matches dashboard (overlay logic should make
 # these exactly equal — no jitter allowed)
@@ -143,19 +151,24 @@ assert_eq      "coating intelligence == goal-history today.target" "$COAT_GOAL" 
 assert_eq      "surfacing target == goal-history today.target"     "$SURF_GOAL" "$SURF_HIST_GOAL"
 assert_eq      "cutting dashboard == goal-history today.target"    "$CUT_GOAL"  "$CUT_HIST_GOAL"
 assert_eq      "assembly jobs == goal-history today.target"        "$ASM_GOAL"  "$ASM_HIST_GOAL"
+assert_eq      "picking target == goal-history today.target"       "$PICK_GOAL" "$PICK_HIST_GOAL"
 
 # Cross-dept: SHIP == CUTTING == ASSEMBLY (all share computeShipTarget)
 assert_eq      "shipping == cutting (shared computeShipTarget)"    "$SHIP_GOAL" "$CUT_GOAL"
 assert_eq      "shipping == assembly (shared computeShipTarget)"   "$SHIP_GOAL" "$ASM_GOAL"
 
-# Cross-dept: SURFACING != COATING (proves the surfacing-inherits-coating
-# bug is fixed)
-if [ "$SURF_GOAL" = "$COAT_GOAL" ]; then
-  echo "  FAIL  surfacing != coating (independent formulas): $SURF_GOAL == $COAT_GOAL  ← bug regression?"
-  FAIL=$((FAIL + 1))
-else
-  echo "  PASS  surfacing != coating (independent formulas): $SURF_GOAL ≠ $COAT_GOAL"
-fi
+# Cross-dept: each independent formula returns a distinct number
+for pair in "surfacing:$SURF_GOAL:coating:$COAT_GOAL" \
+            "picking:$PICK_GOAL:coating:$COAT_GOAL" \
+            "picking:$PICK_GOAL:shipping:$SHIP_GOAL"; do
+  IFS=':' read -r d1 v1 d2 v2 <<< "$pair"
+  if [ "$v1" = "$v2" ] && [ "$v1" != "0" ]; then
+    echo "  FAIL  $d1 != $d2 (independent formulas): $v1 == $v2  ← inherit regression?"
+    FAIL=$((FAIL + 1))
+  else
+    echo "  PASS  $d1 != $d2 (independent formulas): $v1 ≠ $v2"
+  fi
+done
 
 echo ""
 if [ "$FAIL" -eq 0 ]; then
