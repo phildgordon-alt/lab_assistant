@@ -316,15 +316,18 @@ function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'ACTUAL', shiftSta
   const shiftElapsedPct = Math.max(0, Math.min(100, (shiftH / shiftLenH) * 100));
   const projDelta = projected - dailyGoal;
   const colorFor = r => r >= 1.0 ? '#10B981' : r >= 0.85 ? '#F59E0B' : '#EF4444';
+  const actualPctOfGoal = dailyGoal > 0 ? completedToday / dailyGoal : 0;
   const projPctOfGoal = dailyGoal > 0 ? projected / dailyGoal : 0;
+  const actualColor = colorFor(actualPctOfGoal);
   const projColor = colorFor(projPctOfGoal);
   // Collision-resistant tick: only render the projected marker when it's
   // ≥3% (axis-relative) away from the actual fill edge.
   const showProjTick = projected !== completedToday && Math.abs(projPct - actualPct) >= 3;
   const overage = Math.max(0, actualPct - goalPct);
-  // Neutral bar fill — HID rec, color stays on PROJ side. Eliminates the
-  // "green for blowing past a busted goal" problem.
-  const fillColor = '#475569'; // slate-600
+  // Phil 2026-05-13 v2: green-for-good on the fill (was neutral slate in
+  // v1, which Phil reverted — "you want a green line for your actuals").
+  // Solid fill colored by actual/goal pace; overage hatch picks up the
+  // PROJ color so the forward-looking signal lives in the stripes.
   const cellLbl = { fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 };
   const cellNum = { fontSize: 22, fontFamily: mono, fontWeight: 800, lineHeight: 1.1 };
   const cellSub = { fontSize: 11, fontFamily: mono, fontWeight: 700, marginTop: 2 };
@@ -332,12 +335,12 @@ function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'ACTUAL', shiftSta
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
       <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
         <div style={cellLbl}>{label}</div>
-        <div style={{ ...cellNum, color: '#cbd5e1' }}>{fmt(completedToday)}</div>
+        <div style={{ ...cellNum, color: actualColor }}>{fmt(completedToday)}</div>
       </div>
       <div style={{ flex: 1, position: 'relative', height: 16, background: T.bg, borderRadius: 6, overflow: 'visible' }}>
         <div style={{ position: 'absolute', inset: 0, borderRadius: 6, overflow: 'hidden' }}>
-          {/* Solid fill up to min(actual, goal) */}
-          <div style={{ position: 'absolute', left: 0, width: `${Math.min(actualPct, goalPct)}%`, height: '100%', background: fillColor, transition: 'width 0.8s ease' }} />
+          {/* Solid fill up to min(actual, goal) — color by actual/goal pace */}
+          <div style={{ position: 'absolute', left: 0, width: `${Math.min(actualPct, goalPct)}%`, height: '100%', background: actualColor, transition: 'width 0.8s ease, background 0.4s ease' }} />
           {/* Overage segment past goal — diagonal hatch in projColor at low opacity */}
           {overage > 0 && (
             <div
@@ -347,7 +350,7 @@ function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'ACTUAL', shiftSta
                 left: `${goalPct}%`,
                 width: `${overage}%`,
                 height: '100%',
-                background: `repeating-linear-gradient(135deg, ${projColor}66 0 4px, ${projColor}22 4px 8px)`,
+                background: `repeating-linear-gradient(135deg, ${projColor}88 0 4px, ${projColor}33 4px 8px)`,
                 transition: 'width 0.8s ease',
               }}
             />

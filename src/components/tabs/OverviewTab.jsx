@@ -2076,7 +2076,6 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => Math.round(axisMax * p));
         const fmtTick = n => n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : `${n}`;
         const hdrStyle = { fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1 };
-        const fillColor = '#475569'; // slate-600 neutral
         return (
           <div style={{display:'flex', flexDirection:'column', gap:12, padding:'4px 0'}}>
             {/* Header row with axis tick scale in the bar column */}
@@ -2104,7 +2103,8 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
               const goalPct   = axisMax > 0 ? (r.goal      / axisMax) * 100 : 0;
               const actualPct = axisMax > 0 ? (r.completed / axisMax) * 100 : 0;
               const projPct   = axisMax > 0 ? (r.projected / axisMax) * 100 : 0;
-              const projColor = colorFor(r.goal > 0 ? r.projected / r.goal : 0);
+              const actualColor = colorFor(r.goal > 0 ? r.completed / r.goal : 0);
+              const projColor   = colorFor(r.goal > 0 ? r.projected / r.goal : 0);
               const projDelta = r.projected - r.goal;
               const showProjTick = r.projected !== r.completed && Math.abs(projPct - actualPct) >= 3;
               const overage = Math.max(0, actualPct - goalPct);
@@ -2113,12 +2113,12 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
               return (
                 <div key={r.key} onClick={()=>setView&&setView(r.view)} style={{display:'flex', alignItems:'center', gap:10, cursor:'pointer', minHeight:32}}>
                   <div style={{width:90, fontFamily:mono, fontSize:11, color:T.textMuted, fontWeight:700, letterSpacing:1}}>{r.label}</div>
-                  <div style={{minWidth:64, ...numStyle, color:'#cbd5e1'}}>
+                  <div style={{minWidth:64, ...numStyle, color:actualColor}}>
                     {r.completed.toLocaleString()}
                   </div>
                   <div style={{flex:1, position:'relative', height:12, background:'#1f2937', borderRadius:4, overflow:'visible'}}>
                     <div style={{position:'absolute', inset:0, borderRadius:4, overflow:'hidden'}}>
-                      <div style={{position:'absolute', left:0, width:`${Math.min(actualPct, goalPct)}%`, height:'100%', background:fillColor, transition:'width 0.6s ease'}}/>
+                      <div style={{position:'absolute', left:0, width:`${Math.min(actualPct, goalPct)}%`, height:'100%', background:actualColor, transition:'width 0.6s ease, background 0.4s ease'}}/>
                       {overage > 0 && (
                         <div
                           title={`Over goal by ${(r.completed - r.goal).toLocaleString()}`}
@@ -2127,7 +2127,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                             left:`${goalPct}%`,
                             width:`${overage}%`,
                             height:'100%',
-                            background:`repeating-linear-gradient(135deg, ${projColor}66 0 4px, ${projColor}22 4px 8px)`,
+                            background:`repeating-linear-gradient(135deg, ${projColor}88 0 4px, ${projColor}33 4px 8px)`,
                             transition:'width 0.6s ease',
                           }}
                         />
