@@ -5493,6 +5493,73 @@ Respond with a structured batching plan in this format:
   // ── Assembly config (operator assignments + name map) ──────────
   // Synced from standalone AssemblyDashboard.html so main app can read them
   // ── Shipped history — daily shipped counts ─────
+  // ══════════════════════════════════════════════════════════════
+  // Goal vs Actual history — uniform shape across all 4 departments
+  // (Phil 2026-05-13: each landing page needs history written to DB,
+  //  read from DB, not computed live.)
+  //
+  // Source by dept:
+  //   shipping → daily_ship_targets         (target + actual + variance)
+  //   coating  → daily_coating_targets      (target + actual + variance)
+  //   cutting  → daily_ship_targets (target) ⨯ daily_dept_actuals (actual)
+  //   assembly → daily_ship_targets (target) ⨯ daily_dept_actuals (actual)
+  // ══════════════════════════════════════════════════════════════
+  if (req.method==='GET' && /^\/api\/(shipping|coating|cutting|assembly)\/goal-history$/.test(url.pathname)) {
+    const dept = url.pathname.split('/')[2];
+    const days = Math.max(1, Math.min(90, parseInt(url.searchParams.get('days') || '14', 10)));
+    try {
+      // Single SQL per dept — left join against a generated date range so
+      // missing days come back as zeros instead of being absent.
+      let rows;
+      if (dept === 'shipping') {
+        rows = labDb.db.prepare(`
+          SELECT date, is_workday, total_target AS target, shipped_actual AS actual,
+                 variance, variance_pct AS variancePct, rollover_in AS rolloverIn,
+                 (finalized_at IS NOT NULL) AS finalized
+          FROM daily_ship_targets
+          WHERE date >= date('now','localtime','-' || ? || ' days')
+          ORDER BY date DESC
+        `).all(days);
+      } else if (dept === 'coating') {
+        rows = labDb.db.prepare(`
+          SELECT date, is_workday, total_target AS target, coated_actual AS actual,
+                 variance,
+                 CASE WHEN total_target > 0
+                      THEN ROUND((CAST(variance AS REAL) / total_target) * 10000) / 100
+                      ELSE 0 END AS variancePct,
+                 rollover_in AS rolloverIn,
+                 (finalized_at IS NOT NULL) AS finalized
+          FROM daily_coating_targets
+          WHERE date >= date('now','localtime','-' || ? || ' days')
+          ORDER BY date DESC
+        `).all(days);
+      } else {
+        // cutting + assembly — JOIN ship target to dept actual
+        rows = labDb.db.prepare(`
+          SELECT t.date,
+                 t.is_workday,
+                 t.total_target AS target,
+                 COALESCE(a.actual, 0) AS actual,
+                 (COALESCE(a.actual, 0) - t.total_target) AS variance,
+                 CASE WHEN t.total_target > 0
+                      THEN ROUND(((CAST(COALESCE(a.actual,0) AS REAL) - t.total_target) / t.total_target) * 10000) / 100
+                      ELSE 0 END AS variancePct,
+                 t.rollover_in AS rolloverIn,
+                 (a.finalized_at IS NOT NULL) AS finalized
+          FROM daily_ship_targets t
+          LEFT JOIN daily_dept_actuals a
+                 ON a.date = t.date AND a.dept = ?
+          WHERE t.date >= date('now','localtime','-' || ? || ' days')
+          ORDER BY t.date DESC
+        `).all(dept, days);
+      }
+      return json(res, { dept, days, history: rows });
+    } catch (e) {
+      console.error(`[/api/${dept}/goal-history] failed:`, e.message);
+      return json(res, { error: e.message, dept }, 500);
+    }
+  }
+
   if (req.method==='GET' && url.pathname==='/api/shipping/history') {
     const days = parseInt(url.searchParams.get('days') || '30');
     let rows;
@@ -8811,6 +8878,16 @@ function captureDailyShipTarget() {
 // First capture 2 min after boot (let trace finish loading), then hourly
 setTimeout(captureDailyShipTarget, 2 * 60 * 1000);
 setInterval(captureDailyShipTarget, 60 * 60 * 1000);
+
+// Daily-capture writers for Coating + (Assembly + Cutting) actuals — Phil
+// 2026-05-13: each department landing page needs goal-vs-actual history
+// written to DB, not computed live on every request. Mirrors the shipping
+// schedule: boot+2min, then hourly. UPSERT — safe to repeat through the day.
+const dailyCapture = require('./domain/daily-capture');
+setTimeout(() => dailyCapture.captureDailyCoatingTarget(labDb.db), 2 * 60 * 1000 + 5000);
+setTimeout(() => dailyCapture.captureDailyDeptActuals(labDb.db), 2 * 60 * 1000 + 10000);
+setInterval(() => dailyCapture.captureDailyCoatingTarget(labDb.db), 60 * 60 * 1000);
+setInterval(() => dailyCapture.captureDailyDeptActuals(labDb.db), 60 * 60 * 1000);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌡  Lab_Assistant Server`);

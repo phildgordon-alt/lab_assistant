@@ -41,6 +41,139 @@ export const KPICard = ({label,value,sub,trend,accent,onRemove,editable,onClick,
   </div>
 );
 
+// ──────────────────────────────────────────────────────────────────────────
+// GoalHistory — Goal vs Actual table for each department tab. Reads from
+// /api/{dept}/goal-history?days=N. Hides until first server response.
+//
+// Threshold convention (matches GoalBar in App.jsx and Department Goals
+// tile in OverviewTab):
+//   actual >= 100% target → green
+//   actual >=  85% target → amber
+//   actual <   85% target → red
+//
+// Phil 2026-05-13: history data is written to DB by daily-capture writers
+// (server/domain/daily-capture.js + captureDailyShipTarget). This component
+// is a pure presenter — no live computation.
+// ──────────────────────────────────────────────────────────────────────────
+export function GoalHistory({ serverUrl, dept, deptLabel, days = 14 }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!serverUrl && serverUrl !== '') return;
+    let cancelled = false;
+    const fetchRows = async () => {
+      try {
+        const r = await fetch(`${serverUrl}/api/${dept}/goal-history?days=${days}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        if (!cancelled) {
+          setRows(data.history || []);
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled) setError(e.message);
+      }
+    };
+    fetchRows();
+    const iv = setInterval(fetchRows, 120000); // 2-min poll
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [serverUrl, dept, days]);
+
+  if (rows === null && !error) {
+    return null; // hide until first response
+  }
+
+  if (error) {
+    return (
+      <Card style={{ marginTop: 16 }}>
+        <SectionHeader>Goal vs Actual — {deptLabel || dept}</SectionHeader>
+        <div style={{ padding: 16, color: T.red, fontSize: 12, fontFamily: mono }}>
+          History unavailable: {error}
+        </div>
+      </Card>
+    );
+  }
+
+  if (!rows.length) {
+    return (
+      <Card style={{ marginTop: 16 }}>
+        <SectionHeader>Goal vs Actual — {deptLabel || dept}</SectionHeader>
+        <div style={{ padding: 24, color: T.textDim, fontSize: 12, fontFamily: mono, textAlign: 'center' }}>
+          No history yet — first day of tracking
+        </div>
+      </Card>
+    );
+  }
+
+  // Compute max value for bar scaling.
+  const max = Math.max(1, ...rows.map(r => Math.max(r.target || 0, r.actual || 0)));
+  const todayYMD = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+
+  const rowColor = (r) => {
+    if (!r.target) return T.textDim;
+    const pct = r.actual / r.target;
+    if (pct >= 1.0) return '#10B981';
+    if (pct >= 0.85) return '#F59E0B';
+    return '#EF4444';
+  };
+
+  return (
+    <Card style={{ marginTop: 16 }}>
+      <SectionHeader right={`${rows.length} day${rows.length === 1 ? '' : 's'}`}>Goal vs Actual — {deptLabel || dept}</SectionHeader>
+      <div style={{ maxHeight: 400, overflowY: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: mono }}>
+          <thead style={{ position: 'sticky', top: 0, background: T.card, zIndex: 1 }}>
+            <tr style={{ borderBottom: `1px solid ${T.border}` }}>
+              <th style={{ padding: '8px 10px', textAlign: 'left', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>DATE</th>
+              <th style={{ padding: '8px 10px', textAlign: 'left', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}></th>
+              <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>TARGET</th>
+              <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>ACTUAL</th>
+              <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>Δ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const isToday = r.date === todayYMD;
+              const color = rowColor(r);
+              const pct = r.target > 0 ? Math.min(100, Math.round((r.actual / r.target) * 100)) : 0;
+              const tgtPct = max > 0 ? Math.round((r.target / max) * 100) : 0;
+              const variance = r.variance != null ? r.variance : (r.actual - (r.target || 0));
+              return (
+                <tr key={r.date} style={{
+                  background: isToday ? `${T.blue}15` : variance < -1 ? 'rgba(239,68,68,0.04)' : variance > 1 ? 'rgba(16,185,129,0.04)' : 'transparent',
+                  borderBottom: `1px solid ${T.border}`,
+                }}>
+                  <td style={{ padding: '6px 10px', color: isToday ? T.text : T.textMuted, fontWeight: isToday ? 700 : 500 }}>
+                    {r.date.slice(5)}
+                  </td>
+                  <td style={{ padding: '6px 10px', width: '40%' }}>
+                    <div style={{ position: 'relative', height: 8, background: T.bg, borderRadius: 4, overflow: 'hidden' }}>
+                      <div style={{ position: 'absolute', left: 0, top: 0, width: `${pct}%`, height: '100%', background: color, transition: 'width 0.6s ease, background 0.4s ease' }} />
+                      {r.target > 0 && (
+                        <div style={{ position: 'absolute', left: `${tgtPct}%`, top: -1, width: 2, height: 10, background: '#cbd5e1' }} title="Goal" />
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', color: T.textMuted, fontWeight: 500 }}>
+                    {(r.target || 0).toLocaleString()}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', color, fontWeight: 700 }}>
+                    {(r.actual || 0).toLocaleString()}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', color: variance >= 0 ? '#10B981' : '#EF4444', fontWeight: 700 }}>
+                    {variance >= 0 ? '+' : ''}{variance.toLocaleString()}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
 export function StageHistory({ serverUrl, stage, stageLabel, color }) {
   const [history, setHistory] = useState([]);
 

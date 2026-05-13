@@ -8,7 +8,7 @@ import MaintenanceTab from "./components/tabs/MaintenanceTab";
 import AnalyticsTab from "./components/tabs/AnalyticsTab";
 import ProductionAnalysisTab from "./components/tabs/ProductionAnalysisTab";
 import LensScanner from "./components/LensScanner";
-import { StageHistory } from "./components/shared";
+import { StageHistory, GoalHistory } from "./components/shared";
 
 // ── Error Boundary — catches render errors and shows fallback UI ───────────────
 class ErrorBoundary extends Component {
@@ -2305,6 +2305,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
         ))}
       </div>
       <GoalBar completedToday={intel?.completedToday || 0} dailyGoal={intel?.dailyGoal || 0} />
+      <GoalHistory serverUrl={ovenServerUrl} dept="coating" deptLabel="Coating" days={14} />
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
       {subView==="pipeline"&&<CoatingPipelineView serverUrl={ovenServerUrl} settings={settings}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
@@ -4928,6 +4929,7 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
       </div>
 
       <GoalBar completedToday={cuttingTarget.completedToday} dailyGoal={cuttingTarget.dailyGoal} />
+      <GoalHistory serverUrl={ovenServerUrl} dept="cutting" deptLabel="Cutting" days={14} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
@@ -5218,6 +5220,8 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         );
       })()}
+
+      <GoalHistory serverUrl={ovenServerUrl} dept="assembly" deptLabel="Assembly" days={14} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
@@ -5741,6 +5745,7 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
       </div>
 
       <GoalBar completedToday={shipTarget.shippedToday} dailyGoal={shipTarget.daily} />
+      <GoalHistory serverUrl={ovenServerUrl} dept="shipping" deptLabel="Shipping" days={14} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
