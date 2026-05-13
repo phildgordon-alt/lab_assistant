@@ -29,6 +29,7 @@
 
 const { computeCoatingTarget, countCoatingExits } = require('./coating-target');
 const { computeSurfacingTarget } = require('./surfacing-target');
+const { computePickingTarget, countPickingExits } = require('./picking-target');
 
 /**
  * Helper — PT-local date parts. Mirrors the labLocalParts() pattern in
@@ -194,6 +195,77 @@ function captureDailySurfacingTarget(db) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Picking capture (Phil 2026-05-13: 6th dept goal — Picking / Lens Kitchen)
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Single source of truth — every consumer of "picks today" calls this.
+function countPickingExitsToday(db, ymd) {
+  const tomorrow = nextDayYMD(ymd);
+  return countPickingExits(db, ymd, tomorrow);
+}
+
+function captureDailyPickingTarget(db) {
+  try {
+    const { ymd, ptHour, ptDow } = ptLocalParts();
+    const isWorkday = ptDow >= 1 && ptDow <= 5 ? 1 : 0;
+
+    const target = computePickingTarget(db);
+    const pickedActual = countPickingExitsToday(db, ymd);
+    const variance = pickedActual - (target.target || 0);
+
+    const existing = db.prepare('SELECT date FROM daily_picking_targets WHERE date = ?').get(ymd);
+    if (existing) {
+      db.prepare(`
+        UPDATE daily_picking_targets
+        SET unpicked_backlog = ?, intake_projection = ?, capacity_estimate = ?,
+            rollover_in = ?, total_target = ?, picked_actual = ?, variance = ?
+        WHERE date = ?
+      `).run(
+        target.unpickedBacklog || 0,
+        target.intakeProjection || 0,
+        target.capacityEstimate || 0,
+        target.rolloverIn || 0,
+        target.target || 0,
+        pickedActual,
+        variance,
+        ymd
+      );
+    } else {
+      db.prepare(`
+        INSERT INTO daily_picking_targets
+        (date, is_workday, unpicked_backlog, intake_projection, capacity_estimate,
+         rollover_in, total_target, picked_actual, variance, formula_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        ymd, isWorkday,
+        target.unpickedBacklog || 0,
+        target.intakeProjection || 0,
+        target.capacityEstimate || 0,
+        target.rolloverIn || 0,
+        target.target || 0,
+        pickedActual,
+        variance,
+        target.formulaVersion || 1
+      );
+      console.log(`[PickingTarget] Captured ${ymd}: target=${target.target} (backlog=${target.unpickedBacklog} + intake=${target.intakeProjection}), picked=${pickedActual}`);
+    }
+
+    if (ptHour >= 23) {
+      const y = new Date(ymd + 'T12:00:00Z');
+      y.setUTCDate(y.getUTCDate() - 1);
+      const yYmd = y.toISOString().slice(0, 10);
+      db.prepare(`
+        UPDATE daily_picking_targets
+        SET finalized_at = datetime('now')
+        WHERE date = ? AND finalized_at IS NULL
+      `).run(yYmd);
+    }
+  } catch (e) {
+    console.error('[PickingTarget] capture failed:', e.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Assembly + Cutting actuals capture
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -293,8 +365,10 @@ function captureDailyDeptActuals(db) {
 module.exports = {
   captureDailyCoatingTarget,
   captureDailySurfacingTarget,
+  captureDailyPickingTarget,
   captureDailyDeptActuals,
   countAssemblyToday,
   countCuttingExitsToday,
   countSurfacingExitsToday,
+  countPickingExitsToday,
 };

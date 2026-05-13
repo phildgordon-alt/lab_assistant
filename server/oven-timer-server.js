@@ -5179,6 +5179,39 @@ Respond with a structured batching plan in this format:
   // same number. completedToday uses the same persisted-event distinct-
   // invoice exits pattern as the other depts so GoalBar and GoalHistory
   // can never disagree.
+  if (req.method==='GET' && url.pathname==='/api/picking/target') {
+    try {
+      // Phil 2026-05-13: 6th department — Picking / Lens Kitchen. Goal =
+      // unpicked-backlog + 14-day rolling intake. Single source of truth
+      // for "picks today" lives in daily-capture.js (countPickingExitsToday)
+      // — every surface that shows this number calls that function.
+      const { computePickingTarget } = require('./domain/picking-target');
+      const { countPickingExitsToday } = require('./domain/daily-capture');
+      const t = computePickingTarget(labDb.db);
+      const { ymd: ymdToday } = labLocalParts(new Date());
+      const completedToday = countPickingExitsToday(labDb.db, ymdToday);
+      return json(res, { dailyGoal: t?.target || 0, completedToday, source: 'picking-target', target: t });
+    } catch (e) {
+      console.error('[/api/picking/target] failed:', e.message);
+      return json(res, { error: e.message, dailyGoal: 0, completedToday: 0 }, 500);
+    }
+  }
+
+  // GET /api/picking/unpicked?limit=50 — list of invoices waiting to be
+  // picked. Powers the WIP queue table on the Picking tab. Uses the same
+  // unpicked-backlog query the target endpoint counts.
+  if (req.method==='GET' && url.pathname==='/api/picking/unpicked') {
+    try {
+      const { getUnpickedBacklog } = require('./domain/picking-target');
+      const limit = Math.min(500, parseInt(url.searchParams.get('limit') || '50', 10));
+      const rows = getUnpickedBacklog(labDb.db, limit);
+      return json(res, { count: rows.length, jobs: rows });
+    } catch (e) {
+      console.error('[/api/picking/unpicked] failed:', e.message);
+      return json(res, { error: e.message, jobs: [] }, 500);
+    }
+  }
+
   if (req.method==='GET' && url.pathname==='/api/surfacing/target') {
     try {
       // Phil 2026-05-13 evening: surfacing is the upstream master, NOT a
@@ -5542,7 +5575,7 @@ Respond with a structured batching plan in this format:
   //   cutting  → daily_ship_targets (target) ⨯ daily_dept_actuals (actual)
   //   assembly → daily_ship_targets (target) ⨯ daily_dept_actuals (actual)
   // ══════════════════════════════════════════════════════════════
-  if (req.method==='GET' && /^\/api\/(shipping|coating|cutting|assembly|surfacing)\/goal-history$/.test(url.pathname)) {
+  if (req.method==='GET' && /^\/api\/(shipping|coating|cutting|assembly|surfacing|picking)\/goal-history$/.test(url.pathname)) {
     const dept = url.pathname.split('/')[2];
     const days = Math.max(1, Math.min(90, parseInt(url.searchParams.get('days') || '14', 10)));
     try {
@@ -5568,6 +5601,27 @@ Respond with a structured batching plan in this format:
                  rollover_in AS rolloverIn,
                  (finalized_at IS NOT NULL) AS finalized
           FROM daily_coating_targets
+          WHERE date >= date('now','localtime','-' || ? || ' days')
+          ORDER BY date DESC
+        `).all(days);
+      } else if (dept === 'picking') {
+        // Phil 2026-05-13: 6th dept, own table daily_picking_targets.
+        // Same shape as surfacing branch — single-table read, no
+        // cross-join. picked_actual captured via captureDailyPicking
+        // Target using the same countPickingExitsToday rule the live
+        // endpoint and SPA tab use.
+        rows = labDb.db.prepare(`
+          SELECT date,
+                 is_workday,
+                 total_target AS target,
+                 picked_actual AS actual,
+                 (picked_actual - total_target) AS variance,
+                 CASE WHEN total_target > 0
+                      THEN ROUND(((CAST(picked_actual AS REAL) - total_target) / total_target) * 10000) / 100
+                      ELSE 0 END AS variancePct,
+                 rollover_in AS rolloverIn,
+                 (finalized_at IS NOT NULL) AS finalized
+          FROM daily_picking_targets
           WHERE date >= date('now','localtime','-' || ? || ' days')
           ORDER BY date DESC
         `).all(days);
@@ -5640,6 +5694,9 @@ Respond with a structured batching plan in this format:
           } else if (dept === 'assembly') {
             const { countAssemblyToday } = require('./domain/daily-capture');
             liveActual = countAssemblyToday(labDb.db, todayYMD);
+          } else if (dept === 'picking') {
+            const { countPickingExitsToday } = require('./domain/daily-capture');
+            liveActual = countPickingExitsToday(labDb.db, todayYMD);
           }
           if (liveActual != null && liveActual !== todayRow.actual) {
             todayRow.actual = liveActual;
@@ -9038,10 +9095,12 @@ const dailyCapture = require('./domain/daily-capture');
 setTimeout(() => dailyCapture.captureDailyCoatingTarget(labDb.db),    2 * 60 * 1000 + 5000);
 setTimeout(() => dailyCapture.captureDailySurfacingTarget(labDb.db),  2 * 60 * 1000 + 7500);
 setTimeout(() => dailyCapture.captureDailyDeptActuals(labDb.db),      2 * 60 * 1000 + 10000);
-// Hourly refresh for surfacing (same cadence as coating + ship)
+setTimeout(() => dailyCapture.captureDailyPickingTarget(labDb.db),    2 * 60 * 1000 + 12500);
+// Hourly refresh for all dept-target writers (same cadence as ship)
 setInterval(() => dailyCapture.captureDailySurfacingTarget(labDb.db), 60 * 60 * 1000);
-setInterval(() => dailyCapture.captureDailyCoatingTarget(labDb.db), 60 * 60 * 1000);
-setInterval(() => dailyCapture.captureDailyDeptActuals(labDb.db), 60 * 60 * 1000);
+setInterval(() => dailyCapture.captureDailyCoatingTarget(labDb.db),   60 * 60 * 1000);
+setInterval(() => dailyCapture.captureDailyDeptActuals(labDb.db),     60 * 60 * 1000);
+setInterval(() => dailyCapture.captureDailyPickingTarget(labDb.db),   60 * 60 * 1000);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌡  Lab_Assistant Server`);
