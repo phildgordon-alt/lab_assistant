@@ -837,26 +837,40 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   });
   useEffect(()=>{
     let alive=true;
+    // Phil 2026-05-13 evening: one slow endpoint must NEVER block the
+    // other 5 from rendering. Hardened from Promise.all → Promise.allSettled
+    // with per-fetch 4-second timeout. A hung /api/picking/target (e.g.,
+    // pre-index-fix) used to take the whole tile offline; now each dept's
+    // goal renders independently, and any failed/timed-out dept just shows
+    // its prior value (auto-hides on first load if it never resolved).
+    const fetchWithTimeout=(url,ms=4000)=>{
+      const ctrl=new AbortController();
+      const tid=setTimeout(()=>ctrl.abort(),ms);
+      return fetch(url,{signal:ctrl.signal})
+        .then(r=>r.ok?r.json():null)
+        .catch(()=>null)
+        .finally(()=>clearTimeout(tid));
+    };
     const fetchAll=async()=>{
-      try{
-        const [p,s,c,a,cu,su]=await Promise.all([
-          fetch('/api/picking/target').then(r=>r.ok?r.json():null).catch(()=>null),
-          fetch('/api/shipping/dashboard').then(r=>r.ok?r.json():null).catch(()=>null),
-          fetch('/api/coating/intelligence').then(r=>r.ok?r.json():null).catch(()=>null),
-          fetch('/api/assembly/jobs').then(r=>r.ok?r.json():null).catch(()=>null),
-          fetch('/api/cutting/dashboard').then(r=>r.ok?r.json():null).catch(()=>null),
-          fetch('/api/surfacing/target').then(r=>r.ok?r.json():null).catch(()=>null),
-        ]);
-        if(!alive)return;
-        setDeptGoals({
-          picking:{completed:p?.completedToday||0, goal:p?.dailyGoal||0},
-          surfacing:{completed:su?.completedToday||0, goal:su?.dailyGoal||0},
-          coating:{completed:c?.completedToday||0, goal:c?.dailyGoal||0},
-          cutting:{completed:cu?.completedToday||0, goal:cu?.dailyGoal||0},
-          assembly:{completed:a?.completedToday||0, goal:a?.dailyGoal||0},
-          shipping:{completed:s?.shippedToday||0, goal:s?.target?.daily||0},
-        });
-      }catch(e){ console.error('[department_goals] fetch failed',e); }
+      const results=await Promise.allSettled([
+        fetchWithTimeout('/api/picking/target'),
+        fetchWithTimeout('/api/shipping/dashboard'),
+        fetchWithTimeout('/api/coating/intelligence'),
+        fetchWithTimeout('/api/assembly/jobs'),
+        fetchWithTimeout('/api/cutting/dashboard'),
+        fetchWithTimeout('/api/surfacing/target'),
+      ]);
+      if(!alive)return;
+      const val=(r)=>r.status==='fulfilled'?r.value:null;
+      const [p,s,c,a,cu,su]=results.map(val);
+      setDeptGoals(prev=>({
+        picking:{   completed:p?.completedToday  ?? prev.picking.completed,   goal:p?.dailyGoal      ?? prev.picking.goal   },
+        surfacing:{ completed:su?.completedToday ?? prev.surfacing.completed, goal:su?.dailyGoal     ?? prev.surfacing.goal },
+        coating:{   completed:c?.completedToday  ?? prev.coating.completed,   goal:c?.dailyGoal      ?? prev.coating.goal   },
+        cutting:{   completed:cu?.completedToday ?? prev.cutting.completed,   goal:cu?.dailyGoal     ?? prev.cutting.goal   },
+        assembly:{  completed:a?.completedToday  ?? prev.assembly.completed,  goal:a?.dailyGoal      ?? prev.assembly.goal  },
+        shipping:{  completed:s?.shippedToday    ?? prev.shipping.completed,  goal:s?.target?.daily  ?? prev.shipping.goal  },
+      }));
     };
     fetchAll();
     const iv=setInterval(fetchAll,60000);
