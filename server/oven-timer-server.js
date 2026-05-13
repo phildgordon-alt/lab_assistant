@@ -121,6 +121,7 @@ const { URL } = require('url');
 
 // ── SQLite database (shared with gateway MCP tools) ────────────
 const labDb = require('./db');
+const lensClassifier = require('./domain/lens-classifier');
 const anthropicTelemetry = require('./anthropic-telemetry');
 
 // ── Startup self-heal: dvi_shipped_jobs → jobs back-prop ────────
@@ -3171,14 +3172,11 @@ Respond with a structured batching plan in this format:
     // shipped-history endpoint below so categories label the same way.
     const _mapLookerCategory = mapLookerCategory;
 
-    // Compute zone/SLA from lens type + days (shared by both code paths)
+    // Compute zone/SLA from lens type + days (shared by both code paths).
+    // Classifier + SLA-days extracted to server/domain/lens-classifier.js.
     const _computeAging = (lensType, daysInLab) => {
-      // 'C' = custom/aspheric SV; classified as SV in NPI/coating-queue/db.js — keep parity here.
-      const jobType = (lensType === 'P' || lensType === 'B') ? 'Surfacing'
-        : (lensType === 'S' || lensType === 'C') ? 'Single Vision' : 'Unknown';
-      // Unknown lens type gets the longer surfacing SLA (3 days) to avoid
-      // misclassifying surfacing jobs as over-SLA on the SV 2-day target
-      const slaTarget = jobType === 'Single Vision' ? 2 : 3;
+      const jobType = lensClassifier.classifyLabel(lensType);
+      const slaTarget = lensClassifier.agingSlaDays(lensType);
       let zone = 'GREEN';
       if (jobType === 'Surfacing' || jobType === 'Unknown') {
         if (daysInLab >= 3) zone = 'CRITICAL';
@@ -5435,19 +5433,19 @@ Respond with a structured batching plan in this format:
     // Operator stats from events ring buffer
     const operatorStats = buildOperatorStats(dviTrace, /SH CONVEY|SHIP/i);
 
-    // Single pass: bucket by stage + classify SLA line
-    // CRITICAL: unknown lens type must NOT be counted as SV or surfacing.
-    // Unknown jobs use the surfacing (3-day) SLA as a conservative default for target calc.
+    // Single pass: bucket by stage + classify SLA line.
+    // Classifier extracted to server/domain/lens-classifier.js — see top
+    // of file for the import. Same rule, no inline copy.
     let assemblyWip = 0, cuttingWip = 0, svWip = 0, surfWip = 0, unknownWip = 0;
     for (const j of allJobs) {
       if (j.stage === 'ASSEMBLY') assemblyWip++;
       if (j.stage === 'CUTTING') cuttingWip++;
       if (j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED') {
         const xml = dviJobIndex.get(j.job_id);
-        const lt = (xml?.lensType || '').toUpperCase();
-        if (lt === 'S' || lt === 'C') svWip++;
-        else if (lt === 'P' || lt === 'B') surfWip++;
-        else unknownWip++;
+        const tier = lensClassifier.classify(xml?.lensType);
+        if (tier === 'SV')        svWip++;
+        else if (tier === 'SURF') surfWip++;
+        else                      unknownWip++;
       }
     }
     const svDailyTarget = Math.ceil(svWip * 0.5);    // 2-day SLA
@@ -8924,10 +8922,10 @@ function captureDailyShipTarget() {
     for (const j of allJobs) {
       if (j.stage === 'SHIPPING' || j.stage === 'CANCELED' || j.status === 'SHIPPED') continue;
       const xml = dviJobIndex.get(j.job_id);
-      const lt = (xml?.lensType || '').toUpperCase();
-      if (lt === 'S' || lt === 'C') svWip++;
-      else if (lt === 'P' || lt === 'B') surfWip++;
-      else unknownWip++;
+      const tier = lensClassifier.classify(xml?.lensType);
+      if (tier === 'SV')        svWip++;
+      else if (tier === 'SURF') surfWip++;
+      else                      unknownWip++;
     }
     const svTarget = Math.ceil(svWip * 0.5);
     // Unknown lens type jobs use surfacing (3-day) SLA as conservative default

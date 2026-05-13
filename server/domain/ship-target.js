@@ -70,18 +70,11 @@
  * 3-day fraction (the v1 bug that produced 670 vs 1,500 expected).
  */
 
-const SLA_WORKDAYS = {
-  SV:      2,
-  SURF:    3,
-  UNKNOWN: 2.3,
-};
-
-function classify(lensType) {
-  const lt = String(lensType || '').toUpperCase().trim();
-  if (lt === 'S' || lt === 'C') return 'SV';
-  if (lt === 'P' || lt === 'B') return 'SURF';
-  return 'UNKNOWN';
-}
+// Canonical classifier moved to ./lens-classifier.js (Phil 2026-05-13:
+// "same count, same math, same code"). This module remains the public
+// home of SLA_WORKDAYS for backward compatibility with existing
+// imports, but the values come from the shared classifier module.
+const { classify, SLA_WORKDAYS } = require('./lens-classifier');
 
 /**
  * Workdays (Mon-Fri) between two YYYY-MM-DD dates, inclusive of the
