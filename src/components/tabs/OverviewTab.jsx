@@ -2183,30 +2183,12 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     }
   };
 
-  const CardPickerModal=()=>(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={()=>setShowCardPicker(false)}>
-      <div style={{background:T.surface,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:28,width:600,maxWidth:"90vw",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div style={{fontSize:16,fontWeight:800,color:T.text}}>Add a Card</div>
-          <button onClick={()=>setShowCardPicker(false)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:20,cursor:"pointer"}}>×</button>
-        </div>
-        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
-          {CARD_REGISTRY.map(ct=>(
-            <button key={ct.type} onClick={()=>addCard(ct.type)}
-              style={{display:"flex",alignItems:"flex-start",gap:12,padding:14,background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,cursor:"pointer",textAlign:"left",transition:"border-color 0.15s"}}
-              onMouseEnter={e=>e.currentTarget.style.borderColor=T.blue}
-              onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}>
-              <span style={{fontSize:24,flexShrink:0}}>{ct.icon}</span>
-              <div>
-                <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:3}}>{ct.label}</div>
-                <div style={{fontSize:11,color:T.textDim,lineHeight:1.4}}>{ct.desc}</div>
-              </div>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
+  // NOTE: CardPickerModal used to be defined here as a nested function
+  // component. That created a new component IDENTITY on every parent render,
+  // causing React to unmount/remount the modal — which reset its scroll
+  // position to the top on every parent state change (deptGoals 60s
+  // interval, etc.). Inlined the JSX at the render site below instead.
+  // (Phil 2026-05-13: scroll-resets-to-top bug.)
 
   // Toggle card size between full and half
   const toggleCardSize = (cardId) => {
@@ -2297,7 +2279,30 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           </button>
         </div>
       )}
-      {showCardPicker&&<CardPickerModal/>}
+      {showCardPicker&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={()=>setShowCardPicker(false)}>
+          <div style={{background:T.surface,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:28,width:600,maxWidth:"90vw",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20,position:"sticky",top:-28,background:T.surface,paddingTop:28,paddingBottom:12,marginTop:-28,zIndex:1}}>
+              <div style={{fontSize:16,fontWeight:800,color:T.text}}>Add a Card</div>
+              <button onClick={()=>setShowCardPicker(false)} style={{background:"transparent",border:"none",color:T.textDim,fontSize:20,cursor:"pointer"}}>×</button>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {CARD_REGISTRY.map(ct=>(
+                <button key={ct.type} onClick={()=>addCard(ct.type)}
+                  style={{display:"flex",alignItems:"flex-start",gap:12,padding:14,background:T.bg,border:`1px solid ${T.border}`,borderRadius:10,cursor:"pointer",textAlign:"left",transition:"border-color 0.15s"}}
+                  onMouseEnter={e=>e.currentTarget.style.borderColor=T.blue}
+                  onMouseLeave={e=>e.currentTarget.style.borderColor=T.border}>
+                  <span style={{fontSize:24,flexShrink:0}}>{ct.icon}</span>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:T.text,marginBottom:3}}>{ct.label}</div>
+                    <div style={{fontSize:11,color:T.textDim,lineHeight:1.4}}>{ct.desc}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
       {editCard&&configCard&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.75)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:1000}} onClick={()=>{setEditCard(null);setOpcSearch("");}}>
           <div style={{background:T.surface,border:`1px solid ${T.borderLight}`,borderRadius:16,padding:28,width:480,maxWidth:"90vw",maxHeight:"80vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>

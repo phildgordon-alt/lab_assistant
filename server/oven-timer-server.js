@@ -121,6 +121,7 @@ const { URL } = require('url');
 
 // ── SQLite database (shared with gateway MCP tools) ────────────
 const labDb = require('./db');
+const anthropicTelemetry = require('./anthropic-telemetry');
 
 // ── Startup self-heal: dvi_shipped_jobs → jobs back-prop ────────
 // Any job whose invoice is in dvi_shipped_jobs (XML ground truth) but whose
@@ -6570,6 +6571,13 @@ Answer questions concisely and helpfully. If asked about specific inventory item
       });
 
       const claudeData = await claudeRes.json();
+      anthropicTelemetry.recordUsage({
+        model: 'claude-sonnet-4-20250514',
+        usage: claudeData?.usage,
+        agentName: 'ai-query',
+        source: 'lab-server-direct',
+        userId: req.headers['cf-access-authenticated-user-email'] || null,
+      });
       const answer = claudeData?.content?.[0]?.text || claudeData?.error?.message || 'Sorry, I could not process that question.';
       return json(res, { ok: true, question, answer });
     } catch (e) {
@@ -6619,6 +6627,13 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
       });
 
       const claudeData = await claudeRes.json();
+      anthropicTelemetry.recordUsage({
+        model: 'claude-sonnet-4-20250514',
+        usage: claudeData?.usage,
+        agentName: 'slack-ai-respond',
+        source: 'lab-server-direct',
+        userId: body.user_id || null,
+      });
       const answer = claudeData?.content?.[0]?.text || 'Sorry, I could not process that question.';
 
       // Post response to Slack
@@ -8987,6 +9002,13 @@ MAINTENANCE: ${maintenanceCtx.summary || 'N/A'}`;
           });
 
           const claudeData = await claudeRes.json();
+          anthropicTelemetry.recordUsage({
+            model: 'claude-sonnet-4-20250514',
+            usage: claudeData?.usage,
+            agentName: 'slack-ai-poller',
+            source: 'lab-server-direct',
+            userId: msg.user || null,
+          });
           const answer = claudeData?.content?.[0]?.text || 'Sorry, I could not process that question.';
 
           // Post response to Slack (in thread)
