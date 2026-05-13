@@ -140,12 +140,31 @@ app.get('/gateway/connections', async (_req: Request, res: Response) => {
     connections.slack = { status: 'connected', message: 'Socket Mode connected' };
   }
 
-  // 5. Anthropic API
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  // 5. Anthropic API — Phil 2026-05-13: prefer system_secrets table
+  // (rotatable via Lab Server's Settings UI) over env. 60s TTL cache in
+  // secrets module means Gateway picks up rotation within a minute, no
+  // restart needed.
+  let anthropicKey: string | null = null;
+  let anthropicSource = 'env';
+  try {
+    // @ts-ignore — CommonJS module, tsx handles the bridge
+    const secrets = require('../server/domain/secrets');
+    const dbPath = join(__dirname, '..', 'data', 'lab_assistant.db');
+    const secDb = new Database(dbPath, { readonly: false });
+    anthropicKey = secrets.getSecret(secDb, 'ANTHROPIC_API_KEY');
+    if (anthropicKey) {
+      const info = secrets.describeSecret(secDb, 'ANTHROPIC_API_KEY');
+      anthropicSource = info?.source || 'env';
+    }
+    secDb.close();
+  } catch (e) {
+    // Fallback to direct env read if secrets module unavailable
+    anthropicKey = process.env.ANTHROPIC_API_KEY || null;
+  }
   if (!anthropicKey) {
-    connections.anthropic = { status: 'unconfigured', message: 'ANTHROPIC_API_KEY not set' };
+    connections.anthropic = { status: 'unconfigured', message: 'ANTHROPIC_API_KEY not set (DB or env)' };
   } else {
-    connections.anthropic = { status: 'connected', message: 'API key configured' };
+    connections.anthropic = { status: 'connected', message: `API key configured (source: ${anthropicSource})` };
   }
 
   // 6. ItemPath (if configured)

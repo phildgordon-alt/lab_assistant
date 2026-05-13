@@ -122,6 +122,7 @@ const { URL } = require('url');
 // ── SQLite database (shared with gateway MCP tools) ────────────
 const labDb = require('./db');
 const lensClassifier = require('./domain/lens-classifier');
+const secrets = require('./domain/secrets');
 const anthropicTelemetry = require('./anthropic-telemetry');
 
 // ── Startup self-heal: dvi_shipped_jobs → jobs back-prop ────────
@@ -5199,6 +5200,44 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Secrets management (Phil 2026-05-13 very late: settings UI key rotation) ──
+  // GET returns masked info — never the raw value. Suitable for rendering
+  // a status indicator + last-updated timestamp.
+  if (req.method==='GET' && url.pathname==='/api/settings/secrets/anthropic-key') {
+    try {
+      const info = secrets.describeSecret(labDb.db, 'ANTHROPIC_API_KEY');
+      return json(res, info);
+    } catch (e) {
+      console.error('[/api/settings/secrets/anthropic-key GET] failed:', e.message);
+      return json(res, { error: e.message, configured: false }, 500);
+    }
+  }
+  // PUT writes the raw value to system_secrets, invalidates cache. No
+  // service restart required — next AI call reads the new value.
+  if (req.method==='PUT' && url.pathname==='/api/settings/secrets/anthropic-key') {
+    let body = '';
+    req.on('data', c => { body += c; });
+    req.on('end', () => {
+      try {
+        const data = JSON.parse(body || '{}');
+        const value = (data.value || '').trim();
+        if (!value || value.length < 20) {
+          return json(res, { error: 'Invalid key (too short or empty)' }, 400);
+        }
+        if (!value.startsWith('sk-ant-')) {
+          return json(res, { error: 'Key must start with sk-ant-' }, 400);
+        }
+        secrets.setSecret(labDb.db, 'ANTHROPIC_API_KEY', value);
+        const info = secrets.describeSecret(labDb.db, 'ANTHROPIC_API_KEY');
+        return json(res, { ok: true, ...info });
+      } catch (e) {
+        console.error('[/api/settings/secrets/anthropic-key PUT] failed:', e.message);
+        return json(res, { error: e.message }, 500);
+      }
+    });
+    return;
+  }
+
   if (req.method==='GET' && url.pathname==='/api/picking/target') {
     try {
       // Phil 2026-05-13: 6th department — Picking / Lens Kitchen. Goal =
@@ -6793,7 +6832,7 @@ Respond with a structured batching plan in this format:
 
   // AI Query endpoint - processes questions with lab context
   if (req.method==='POST' && url.pathname==='/api/ai/query') {
-    const apiKey = process.env.VITE_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+    const apiKey = secrets.getSecret(labDb.db, 'ANTHROPIC_API_KEY') || process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return json(res, { ok: false, error: 'No Anthropic API key configured' });
     try {
       const body = await readBody(req);
@@ -6858,7 +6897,7 @@ Answer questions concisely and helpfully. If asked about specific inventory item
   // Slack AI auto-responder - checks for /ai or @ai messages and responds
   if (req.method==='POST' && url.pathname==='/api/slack/ai-respond') {
     const token = process.env.SLACK_BOT_TOKEN;
-    const apiKey = process.env.VITE_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+    const apiKey = secrets.getSecret(labDb.db, 'ANTHROPIC_API_KEY') || process.env.ANTHROPIC_API_KEY;
     const channelId = process.env.SLACK_CHANNEL_ID;
     if (!token) return json(res, { ok: false, error: 'SLACK_BOT_TOKEN not configured' });
     if (!apiKey) return json(res, { ok: false, error: 'No Anthropic API key configured' });
@@ -9242,7 +9281,7 @@ let slackAiConsecutiveErrors = 0;    // used by poll-error guardrail
 
 async function startSlackAIPolling() {
   const token = process.env.SLACK_BOT_TOKEN;
-  const apiKey = process.env.VITE_ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY;
+  const apiKey = secrets.getSecret(labDb.db, 'ANTHROPIC_API_KEY') || process.env.ANTHROPIC_API_KEY;
   const channelId = process.env.SLACK_CHANNEL_ID;
 
   if (!token || !apiKey || !channelId) {

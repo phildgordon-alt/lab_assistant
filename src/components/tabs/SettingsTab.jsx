@@ -3,6 +3,121 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { T, mono, DEFAULT_SETTINGS } from '../../constants';
 import { Card, SectionHeader } from '../shared';
 
+// ── AnthropicKeyManager ───────────────────────────────────────────────────────
+// Phil 2026-05-13 very late: Settings UI widget for the Anthropic API key.
+// Talks to backend `/api/settings/secrets/anthropic-key` — GET returns
+// masked status, PUT writes the raw value to the system_secrets table.
+// 60s cache TTL on the backend means rotation propagates to all services
+// (Lab Server + Gateway) within a minute, no restart.
+function AnthropicKeyManager(){
+  const [status, setStatus] = useState({ configured: false, masked: null, updatedAt: null, source: null });
+  const [editing, setEditing] = useState(false);
+  const [pending, setPending] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [savedAt, setSavedAt] = useState(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      const r = await fetch('/api/settings/secrets/anthropic-key');
+      if (r.ok) setStatus(await r.json());
+    } catch (e) { /* silent — leave previous status */ }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const save = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await fetch('/api/settings/secrets/anthropic-key', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value: pending.trim() }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        setError(data.error || `HTTP ${r.status}`);
+      } else {
+        setStatus({ configured: data.configured, masked: data.masked, updatedAt: data.updatedAt, source: data.source });
+        setPending('');
+        setEditing(false);
+        setSavedAt(new Date());
+        setTimeout(() => setSavedAt(null), 4000);
+      }
+    } catch (e) { setError(e.message); }
+    finally { setBusy(false); }
+  };
+
+  const dotColor = status.configured ? T.green : T.textDim;
+
+  return (
+    <div style={{maxWidth:560}}>
+      {/* Current status row */}
+      <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,marginBottom:12}}>
+        <div style={{width:10,height:10,borderRadius:"50%",background:dotColor,flexShrink:0}}/>
+        <div style={{flex:1,minWidth:0}}>
+          {status.configured ? (
+            <>
+              <div style={{fontSize:13,fontFamily:mono,color:T.text}}>{status.masked}</div>
+              <div style={{fontSize:11,color:T.textMuted,fontFamily:mono,marginTop:2}}>
+                {status.source === 'db'
+                  ? `Stored in system_secrets · updated ${status.updatedAt || '—'}`
+                  : `Falling back to .env (source: ${status.source})`}
+              </div>
+            </>
+          ) : (
+            <div style={{fontSize:13,color:T.amber,fontFamily:mono}}>No key configured — AI features will not work</div>
+          )}
+        </div>
+        {!editing && (
+          <button
+            onClick={()=>{setEditing(true); setPending(''); setError(null);}}
+            style={{background:T.blue,border:'none',borderRadius:6,padding:"8px 16px",color:'#fff',fontSize:12,fontFamily:mono,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}
+          >{status.configured ? 'Replace Key' : 'Set Key'}</button>
+        )}
+      </div>
+
+      {/* Edit form */}
+      {editing && (
+        <div style={{padding:"14px",background:T.surface,border:`1px solid ${T.blue}`,borderRadius:8}}>
+          <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:6,letterSpacing:1}}>NEW ANTHROPIC API KEY</label>
+          <input
+            type="password"
+            value={pending}
+            onChange={e=>setPending(e.target.value)}
+            placeholder="sk-ant-api03-..."
+            autoFocus
+            style={{width:"100%",background:T.bg,border:`1px solid ${T.border}`,borderRadius:6,padding:"10px 12px",color:T.text,fontSize:13,fontFamily:mono,outline:"none",boxSizing:"border-box",marginBottom:10}}
+          />
+          {error && (
+            <div style={{fontSize:12,color:T.red,fontFamily:mono,marginBottom:10}}>{error}</div>
+          )}
+          <div style={{display:"flex",gap:8}}>
+            <button
+              onClick={save}
+              disabled={busy || !pending.trim() || pending.length < 20}
+              style={{background:busy||!pending.trim()||pending.length<20?T.border:T.green,border:'none',borderRadius:6,padding:"8px 16px",color:'#fff',fontSize:12,fontFamily:mono,fontWeight:700,cursor:busy||!pending.trim()||pending.length<20?'not-allowed':'pointer'}}
+            >{busy ? 'Saving…' : 'Save Key'}</button>
+            <button
+              onClick={()=>{setEditing(false); setPending(''); setError(null);}}
+              disabled={busy}
+              style={{background:'transparent',border:`1px solid ${T.border}`,borderRadius:6,padding:"8px 16px",color:T.textMuted,fontSize:12,fontFamily:mono,cursor:'pointer'}}
+            >Cancel</button>
+          </div>
+          <div style={{fontSize:11,color:T.textDim,fontFamily:mono,marginTop:10,lineHeight:1.5}}>
+            Key never displays after save. Stored as plain text in <code style={{background:T.bg,padding:"1px 3px",borderRadius:3}}>system_secrets</code> table — protected by the same file-system permissions that protect <code style={{background:T.bg,padding:"1px 3px",borderRadius:3}}>.env</code>.
+          </div>
+        </div>
+      )}
+
+      {/* Recent-save confirmation */}
+      {savedAt && (
+        <div style={{fontSize:12,color:T.green,fontFamily:mono,marginTop:8}}>✓ Key saved — propagating to AI services (≤60s cache TTL)</div>
+      )}
+    </div>
+  );
+}
+
 // ── DevOps AI Card ────────────────────────────────────────────────────────────
 function DevOpsAICard({settings,connections}){
   const [query,setQuery]=useState('');
@@ -2836,24 +2951,10 @@ function SettingsTab({settings,setSettings,ovenServerUrl,onNavigate}){
             <div style={{marginBottom:16}}>
               <div style={{fontSize:13,color:T.textMuted,marginBottom:12}}>
                 Enter your Anthropic API key to enable AI features. You can get an API key from{' '}
-                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{color:T.blue}}>console.anthropic.com</a>
+                <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" style={{color:T.blue}}>console.anthropic.com</a>.
+                The key is stored encrypted on the server (in <code style={{background:T.bg,padding:"1px 4px",borderRadius:3}}>system_secrets</code>) and used by both the Lab Server (Slack AI) and the Gateway (web /web/ask agents). No .env edit or service restart needed — rotation propagates within 60 seconds.
               </div>
-              <div style={{marginBottom:16}}>
-                <label style={{fontSize:10,color:T.textDim,fontFamily:mono,display:"block",marginBottom:6,letterSpacing:1}}>ANTHROPIC API KEY</label>
-                <input
-                  type="password"
-                  value={settings.anthropicApiKey||""}
-                  onChange={e=>setSettings(prev=>({...prev,anthropicApiKey:e.target.value}))}
-                  placeholder="sk-ant-api03-..."
-                  style={{width:"100%",maxWidth:500,background:T.bg,border:`1px solid ${T.border}`,borderRadius:8,padding:"12px 14px",color:T.text,fontSize:13,fontFamily:mono,outline:"none",boxSizing:"border-box"}}
-                />
-              </div>
-              <div style={{display:"flex",alignItems:"center",gap:12}}>
-                <div style={{width:10,height:10,borderRadius:"50%",background:settings.anthropicApiKey?T.green:T.textDim}}/>
-                <span style={{fontSize:12,color:settings.anthropicApiKey?T.green:T.textMuted,fontFamily:mono}}>
-                  {settings.anthropicApiKey?"API Key configured":"No API key set — AI features will not work"}
-                </span>
-              </div>
+              <AnthropicKeyManager />
             </div>
           </Card>
           <Card>

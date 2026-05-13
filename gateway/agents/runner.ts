@@ -81,10 +81,25 @@ function truncateToolResult(result: unknown): string {
   return str.substring(0, MAX_TOOL_RESULT_CHARS) + '...(truncated)';
 }
 
-// Initialize Anthropic client
-const anthropic = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY,
-});
+// Phil 2026-05-13: Anthropic client is now built per-call from the
+// secrets module (DB-backed with 60s TTL cache) so a key rotation via
+// the Settings UI takes effect within a minute without Gateway restart.
+// Falls back to process.env.ANTHROPIC_API_KEY if DB row is absent.
+function getAnthropic(): Anthropic {
+  let apiKey: string | undefined = process.env.ANTHROPIC_API_KEY;
+  try {
+    // @ts-ignore — CommonJS bridge handled by tsx
+    const secrets = require('../../server/domain/secrets');
+    const Database = require('better-sqlite3');
+    const path = require('path');
+    const dbPath = path.join(__dirname, '..', '..', 'data', 'lab_assistant.db');
+    const db = new Database(dbPath, { readonly: true });
+    const fromDb = secrets.getSecret(db, 'ANTHROPIC_API_KEY');
+    db.close();
+    if (fromDb) apiKey = fromDb;
+  } catch (_) { /* fall through to env */ }
+  return new Anthropic({ apiKey });
+}
 
 // Model to use for all agents
 // Haiku is 10x cheaper and faster — stays well within rate limits
@@ -295,7 +310,7 @@ export async function runAgent(
       while (iterations < MAX_ITERATIONS) {
         iterations++;
 
-        const response = await withRetry(() => anthropic.messages.create({
+        const response = await withRetry(() => getAnthropic().messages.create({
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: systemPrompt,
@@ -448,7 +463,7 @@ export async function runAgentStreaming(
         let stopReason: string | null = null;
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const stream: any = await withRetry(async () => anthropic.messages.stream({
+        const stream: any = await withRetry(async () => getAnthropic().messages.stream({
           model: MODEL,
           max_tokens: MAX_TOKENS,
           system: systemPrompt,
