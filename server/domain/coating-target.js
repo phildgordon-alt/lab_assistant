@@ -199,7 +199,39 @@ function rolloverFrom(db, today) {
  * Phil 2026-05-13: backfill-faithfulness. options.wipSnapshot lets a
  * historical replay supply an EOD WIP reconstruction; live callers
  * omit and the function pulls today's WIP from jobs as before.
+ *
+ * Phil 2026-05-14: added upstreamDemand signal. Previously the formula
+ * was `intakeProjection + rolloverIn` — 14-day rolling avg of coating
+ * entries. Descriptive, not prescriptive: if surfacing dumps 1,500
+ * semi-finished jobs into the pipeline today, the goal still reads as
+ * the historical entry rate (409) instead of reflecting actual demand
+ * about to hit coating.
+ *
+ * upstreamDemand = count of jobs in upstream stages (SURFACING,
+ * BLOCKING, PICKING) whose lens_type is semi-finished (P/B) — these
+ * are committed to coating once they finish their current stage.
+ *
+ * Formula now:
+ *   operationalTarget = max(intakeProjection, upstreamDemand) + rolloverIn
+ *   target            = operationalTarget (or 0 on non-workdays)
+ *
+ * Take the max so the formula reflects whichever signal is bigger:
+ * historical pace OR actual pipeline pressure. No double-count.
  */
+function getUpstreamCoatingDemand(db) {
+  // Count semi-finished jobs at upstream stages that will need coating.
+  // Excludes jobs already at COATING (those are in coatingWipCount).
+  try {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS n FROM jobs
+      WHERE status IN ('ACTIVE','Active')
+        AND current_stage IN ('SURFACING','BLOCKING','PICKING')
+        AND lens_type IN ('P','B')
+    `).get();
+    return row?.n || 0;
+  } catch (_) { return 0; }
+}
+
 function computeCoatingTarget(db, options) {
   const today = (options && options.today) || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
   const cfg   = loadConfig(db, options && options.configOverrides);
@@ -213,7 +245,15 @@ function computeCoatingTarget(db, options) {
 
   const { rolloverIn, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
 
-  const target = isWorkday(today) ? intakeProjection + rolloverIn : 0;
+  // Phil 2026-05-14: upstream demand from semi-finished pipeline.
+  // For backfill replay: caller's wipSnapshot already accounts for the
+  // historical state, so skip live upstream query when snapshot is set.
+  const upstreamDemand = (options && options.wipSnapshot) ? 0 : getUpstreamCoatingDemand(db);
+
+  const operationalTarget = isWorkday(today)
+    ? Math.max(intakeProjection, upstreamDemand) + rolloverIn
+    : 0;
+  const target = operationalTarget;
   const gap    = target - capacityEstimate;
 
   return {
@@ -223,16 +263,18 @@ function computeCoatingTarget(db, options) {
     coatingWipCount: wip.length,
 
     intakeProjection,
+    upstreamDemand,
     capacityEstimate,
     rolloverIn,
     rolloverFromDate,
     weeklyRollover,
     workdaysRemainingThisWeek: workdaysRemainingThisWeek(today),
 
+    operationalTarget,
     target,
     gap,
 
-    formulaVersion: 1,
+    formulaVersion: 2,
     config: {
       coating_intake_window_days: cfg.coating_intake_window_days,
       coating_rollover_layers:    cfg.coating_rollover_layers,
