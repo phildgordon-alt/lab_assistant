@@ -264,23 +264,28 @@ const sans = "'Outfit','DM Sans',system-ui,sans-serif";
 // 1440→ "1d"
 // Anything ≤0 or null returns "0m".
 // GoalBar — canonical goal-at-top-of-tab visual codified from the Assembly
-// precedent (Phil 2026-05-11). PROJECTED [N] big number on the left, progress
-// slider in the middle (color-coded by % to goal), GOAL [N] + signed delta
-// on the right. Renders nothing when dailyGoal===0 so it self-hides until a
-// formula ships.
+// precedent (Phil 2026-05-11). ACTUAL [N] big number on the left, progress
+// slider in the middle (fill = actual/goal, color = actual threshold,
+// projected tick mark overlay), GOAL [N] + signed delta on the right.
+// Renders nothing when dailyGoal===0 so it self-hides until a formula ships.
 //
-// Threshold ramp on the bar color (Phil 2026-05-12, UI-agent flagged):
-//   ≥100% projected/goal → green   (#10B981)
-//   ≥ 85% projected/goal → amber   (#F59E0B)
-//   <  85% projected/goal → red    (#EF4444)
-// The PROJECTED number on the left matches the bar color so the eye reads
-// the signal in one glance. Previously the bar was always green which made
-// "40% of goal" visually indistinguishable from "100% of goal."
+// Phil 2026-05-13: "the slider should show actuals in the number. Projected
+// in the day is great" — the bar must reflect what the lab has actually
+// produced today, not where it's projected to land. Projected stays as
+// a secondary marker (small subtext + tick) so the on-pace signal is still
+// visible without dominating the bar.
+//
+// Threshold ramp on bar color (actual/goal):
+//   ≥100% → green   (#10B981)
+//   ≥ 85% → amber   (#F59E0B)
+//   <  85% → red    (#EF4444)
+// The projected number colors itself by projected/goal so the "on pace"
+// signal lives on the projected line, not the actual line.
 //
 // shiftStartHour/shiftEndHour bound the projection rate. Defaults match the
 // lab's standard 7am→3:30pm shift. Task #29 will replace these with auto-
 // detected shift windows fetched from /api/shift-window.
-function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'PROJECTED EOD', shiftStartHour = 7, shiftEndHour = 15.5 }) {
+function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'ACTUAL', shiftStartHour = 7, shiftEndHour = 15.5 }) {
   if (!dailyGoal) return null;
   const mono = "'JetBrains Mono',monospace";
   const fmt = n => Math.round(n || 0).toLocaleString();
@@ -290,23 +295,48 @@ function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'PROJECTED EOD', s
   const hoursRemaining = Math.max(0, shiftLenH - shiftH);
   const rate = shiftH > 0 ? completedToday / shiftH : 0;
   const projected = rate > 0 && shiftH > 0 ? Math.round(completedToday + rate * hoursRemaining) : completedToday;
-  const pct = dailyGoal > 0 ? Math.min(100, Math.round(projected / dailyGoal * 100)) : 0;
-  const delta = projected - dailyGoal;
-  const rawPct = dailyGoal > 0 ? projected / dailyGoal : 0;
-  const barColor = rawPct >= 1.0 ? '#10B981' : rawPct >= 0.85 ? '#F59E0B' : '#EF4444';
-  const bgTint = rawPct >= 1.0 ? 'rgba(16,185,129,0.04)' : rawPct >= 0.85 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)';
+  const actualPctRaw = dailyGoal > 0 ? completedToday / dailyGoal : 0;
+  const projPctRaw = dailyGoal > 0 ? projected / dailyGoal : 0;
+  const actualPct = Math.min(100, Math.round(actualPctRaw * 100));
+  const projTickPct = Math.min(100, Math.round(projPctRaw * 100));
+  const actualDelta = completedToday - dailyGoal;
+  const projDelta = projected - dailyGoal;
+  const colorFor = r => r >= 1.0 ? '#10B981' : r >= 0.85 ? '#F59E0B' : '#EF4444';
+  const actualColor = colorFor(actualPctRaw);
+  const projColor = colorFor(projPctRaw);
+  // Background tint follows the projected signal — that's the forward-looking
+  // "are we going to make it" indicator, which is the right cue for the whole
+  // bar's framing even if the big number is actual.
+  const bgTint = projPctRaw >= 1.0 ? 'rgba(16,185,129,0.04)' : projPctRaw >= 0.85 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)';
+  const showProjTick = projected !== completedToday && projTickPct !== actualPct;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', background: bgTint, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 130 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 140 }}>
         <div style={{ fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 }}>{label}</div>
-        <div style={{ fontSize: 22, fontFamily: mono, color: barColor, fontWeight: 800, lineHeight: 1.1 }}>{fmt(projected)}</div>
+        <div style={{ fontSize: 22, fontFamily: mono, color: actualColor, fontWeight: 800, lineHeight: 1.1 }}>{fmt(completedToday)}</div>
+        <div style={{ fontSize: 10, fontFamily: mono, color: projColor, fontWeight: 600, marginTop: 2 }}>
+          PROJ EOD {fmt(projected)}
+        </div>
       </div>
-      <div style={{ flex: 1, height: 12, background: T.bg, borderRadius: 6, overflow: 'hidden' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: barColor, transition: 'width 0.8s ease, background 0.4s ease' }} />
+      <div style={{ flex: 1, position: 'relative', height: 14, background: T.bg, borderRadius: 6, overflow: 'visible' }}>
+        <div style={{ position: 'absolute', inset: 0, borderRadius: 6, overflow: 'hidden' }}>
+          <div style={{ width: `${actualPct}%`, height: '100%', background: actualColor, transition: 'width 0.8s ease, background 0.4s ease' }} />
+        </div>
+        {showProjTick && (
+          <div
+            title={`Projected ${fmt(projected)} (${projTickPct}%)`}
+            style={{ position: 'absolute', left: `calc(${projTickPct}% - 1px)`, top: -3, width: 2, height: 20, background: projColor, opacity: 0.9, borderRadius: 1 }}
+          />
+        )}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 130 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 140 }}>
         <div style={{ fontSize: 11, fontFamily: mono, color: '#cbd5e1', fontWeight: 600 }}>GOAL {fmt(dailyGoal)}</div>
-        <div style={{ fontSize: 16, fontFamily: mono, fontWeight: 800, color: delta >= 0 ? '#10B981' : '#EF4444' }}>{delta >= 0 ? '+' : ''}{fmt(delta)}</div>
+        <div style={{ fontSize: 16, fontFamily: mono, fontWeight: 800, color: actualDelta >= 0 ? '#10B981' : '#EF4444' }}>
+          {actualDelta >= 0 ? '+' : ''}{fmt(actualDelta)}
+        </div>
+        <div style={{ fontSize: 10, fontFamily: mono, color: projColor, fontWeight: 600, marginTop: 2 }}>
+          PROJ Δ {projDelta >= 0 ? '+' : ''}{fmt(projDelta)}
+        </div>
       </div>
     </div>
   );
@@ -2316,7 +2346,6 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
       {subView==="pipeline"&&<CoatingPipelineView serverUrl={ovenServerUrl} settings={settings}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
-      <StageHistory serverUrl={ovenServerUrl} stage="COATING" stageLabel="Coated" color="#F59E0B" />
     </div>
     </ProductionStageTab>
   );
@@ -5035,8 +5064,6 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
           </div>
         </Card>
       )}
-
-      <StageHistory serverUrl={ovenServerUrl} stage="CUTTING" stageLabel="Cut" color="#8B5CF6" />
     </ProductionStageTab>
   );
 }
@@ -5834,30 +5861,6 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
           </div>
         )}
       </Card>
-
-      {/* Shipped History — past days */}
-      {shippedHistory.length > 0 && (
-        <Card style={{ marginBottom: 20 }}>
-          <SectionHeader right={`${shippedHistory.length} days`}>Shipped History</SectionHeader>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {shippedHistory.filter(d=>d.date!==new Date().toISOString().slice(0,10)).map(d => {
-              const dayName = new Date(d.date+'T12:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
-              const maxShipped = Math.max(1, ...shippedHistory.map(h=>h.shipped));
-              const barPct = Math.round((d.shipped / maxShipped) * 100);
-              return (
-                <div key={d.date} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 12px', background: T.bg, borderRadius: 6, border: `1px solid ${T.border}` }}>
-                  <div style={{ width: 100, fontSize: 11, fontWeight: 600, color: T.textMuted, fontFamily: mono }}>{dayName}</div>
-                  <div style={{ flex: 1, height: 6, background: T.surface, borderRadius: 3, overflow: 'hidden' }}>
-                    <div style={{ width: `${barPct}%`, height: '100%', background: d.shipped > 0 ? T.green : T.textDim, borderRadius: 3, transition: 'width 0.5s' }} />
-                  </div>
-                  <div style={{ minWidth: 50, textAlign: 'right', fontSize: 16, fontWeight: 800, color: d.shipped > 0 ? T.green : T.textDim, fontFamily: mono }}>{d.shipped}</div>
-                  {d.rush > 0 && <Pill color={T.red}>{d.rush} rush</Pill>}
-                </div>
-              );
-            })}
-          </div>
-        </Card>
-      )}
 
       {/* Job Detail Panel */}
       {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
