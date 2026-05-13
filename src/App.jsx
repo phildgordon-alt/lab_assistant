@@ -2389,10 +2389,10 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
         ))}
       </div>
       <GoalBar completedToday={intel?.completedToday || 0} dailyGoal={intel?.dailyGoal || 0} />
-      <GoalHistory serverUrl={ovenServerUrl} dept="coating" deptLabel="Coating" days={14} />
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
       {subView==="pipeline"&&<CoatingPipelineView serverUrl={ovenServerUrl} settings={settings}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
+      <GoalHistory serverUrl={ovenServerUrl} dept="coating" deptLabel="Coating" days={14} />
     </div>
     </ProductionStageTab>
   );
@@ -4598,7 +4598,6 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   return (
     <ProductionStageTab domain="surfacing" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
       <GoalBar completedToday={surfacingTarget.completedToday} dailyGoal={surfacingTarget.dailyGoal} />
-      <GoalHistory serverUrl={ovenServerUrl} dept="surfacing" deptLabel="Surfacing" days={14} />
       {/* Stage Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
@@ -4921,6 +4920,7 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
       })()}
 
       <StageHistory serverUrl={ovenServerUrl} stage="SURFACING" stageLabel="Surfaced" color="#3B82F6" />
+      <GoalHistory serverUrl={ovenServerUrl} dept="surfacing" deptLabel="Surfacing" days={14} />
     </ProductionStageTab>
   );
 }
@@ -5035,7 +5035,6 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
       </div>
 
       <GoalBar completedToday={cuttingTarget.completedToday} dailyGoal={cuttingTarget.dailyGoal} />
-      <GoalHistory serverUrl={ovenServerUrl} dept="cutting" deptLabel="Cutting" days={14} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
@@ -5134,6 +5133,7 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
           </div>
         </Card>
       )}
+      <GoalHistory serverUrl={ovenServerUrl} dept="cutting" deptLabel="Cutting" days={14} />
     </ProductionStageTab>
   );
 }
@@ -5324,8 +5324,6 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         );
       })()}
-
-      <GoalHistory serverUrl={ovenServerUrl} dept="assembly" deptLabel="Assembly" days={14} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
@@ -5640,6 +5638,7 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           </div>
         </Card>
       )}
+      <GoalHistory serverUrl={ovenServerUrl} dept="assembly" deptLabel="Assembly" days={14} />
     </ProductionStageTab>
   );
 }
@@ -5849,7 +5848,6 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
       </div>
 
       <GoalBar completedToday={shipTarget.shippedToday} dailyGoal={shipTarget.daily} />
-      <GoalHistory serverUrl={ovenServerUrl} dept="shipping" deptLabel="Shipping" days={14} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
@@ -5934,6 +5932,7 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
 
       {/* Job Detail Panel */}
       {selectedJob && <JobDetailPanel job={selectedJob} onClose={()=>setSelectedJob(null)} />}
+      <GoalHistory serverUrl={ovenServerUrl} dept="shipping" deptLabel="Shipping" days={14} />
     </ProductionStageTab>
   );
 }

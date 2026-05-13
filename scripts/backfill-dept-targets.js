@@ -405,13 +405,11 @@ for (const ymd of workdays) {
         );
       }
       shipWrites++;
-      if (sampleDiffs.length < 5) {
-        const existing = db.prepare('SELECT total_target FROM daily_ship_targets WHERE date = ?').get(ymd);
-        sampleDiffs.push({
-          ymd, dept: 'ship', new: result.target,
-          old: existing?.total_target ?? null
-        });
-      }
+      const existing = db.prepare('SELECT total_target FROM daily_ship_targets WHERE date = ?').get(ymd);
+      sampleDiffs.push({
+        ymd, dept: 'ship', new: result.target,
+        old: existing?.total_target ?? null
+      });
     }
   }
 
@@ -439,13 +437,11 @@ for (const ymd of workdays) {
         );
       }
       coatingWrites++;
-      if (sampleDiffs.length < 10) {
-        const existing = db.prepare('SELECT total_target FROM daily_coating_targets WHERE date = ?').get(ymd);
-        sampleDiffs.push({
-          ymd, dept: 'coating', new: result.target,
-          old: existing?.total_target ?? null
-        });
-      }
+      const existing = db.prepare('SELECT total_target FROM daily_coating_targets WHERE date = ?').get(ymd);
+      sampleDiffs.push({
+        ymd, dept: 'coating', new: result.target,
+        old: existing?.total_target ?? null
+      });
     }
   }
 
@@ -473,13 +469,11 @@ for (const ymd of workdays) {
         );
       }
       surfacingWrites++;
-      if (sampleDiffs.length < 15) {
-        const existing = db.prepare('SELECT total_target FROM daily_surfacing_targets WHERE date = ?').get(ymd);
-        sampleDiffs.push({
-          ymd, dept: 'surfacing', new: result.target,
-          old: existing?.total_target ?? null
-        });
-      }
+      const existing = db.prepare('SELECT total_target FROM daily_surfacing_targets WHERE date = ?').get(ymd);
+      sampleDiffs.push({
+        ymd, dept: 'surfacing', new: result.target,
+        old: existing?.total_target ?? null
+      });
     }
   }
 }
@@ -491,9 +485,22 @@ console.log(`  daily_coating_targets:   ${coatingWrites} ${APPLY ? 'wrote' : 'wo
 console.log(`  daily_surfacing_targets: ${surfacingWrites} ${APPLY ? 'wrote' : 'would write'}, ${surfacingSkips} skipped`);
 
 if (sampleDiffs.length) {
+  // Phil 2026-05-13: show OLDEST 9 + NEWEST 9 so both ends of the
+  // window are visible. The middle would just be a wall — the two ends
+  // are the ones that matter: oldest tells us how far back job_events
+  // has data, newest tells us recent numbers look right.
+  const OLDEST_N = 9, NEWEST_N = 9;
+  const oldest = sampleDiffs.slice(0, OLDEST_N);
+  const newest = sampleDiffs.slice(-NEWEST_N);
+  const dedupedNewest = newest.filter(d => !oldest.includes(d));
+  const showSample = sampleDiffs.length > OLDEST_N + NEWEST_N
+    ? oldest.concat([{ ymd: '─── …', dept: '', new: '', old: '' }], dedupedNewest)
+    : sampleDiffs;
+
   console.log('');
-  console.log('Sample diffs (new vs old in daily_*_targets.total_target):');
-  for (const d of sampleDiffs) {
+  console.log(`Sample diffs (oldest ${oldest.length} + newest ${dedupedNewest.length} of ${sampleDiffs.length} rows):`);
+  for (const d of showSample) {
+    if (d.ymd.startsWith('───')) { console.log(`  ${d.ymd}`); continue; }
     const oldStr = d.old == null ? 'no-row' : String(d.old);
     const change = d.old == null ? '(new row)' : (d.new === d.old ? '(no change)' : `(Δ ${d.new - d.old})`);
     console.log(`  ${d.ymd} ${d.dept.padEnd(10)} new=${String(d.new).padStart(5)} old=${oldStr.padStart(5)}  ${change}`);
