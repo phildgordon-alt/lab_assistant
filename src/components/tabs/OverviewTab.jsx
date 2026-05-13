@@ -833,16 +833,18 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   const [deptGoals,setDeptGoals]=useState({
     shipping:{completed:0,goal:0}, coating:{completed:0,goal:0},
     assembly:{completed:0,goal:0}, cutting:{completed:0,goal:0},
+    surfacing:{completed:0,goal:0},
   });
   useEffect(()=>{
     let alive=true;
     const fetchAll=async()=>{
       try{
-        const [s,c,a,cu]=await Promise.all([
+        const [s,c,a,cu,su]=await Promise.all([
           fetch('/api/shipping/dashboard').then(r=>r.ok?r.json():null).catch(()=>null),
           fetch('/api/coating/intelligence').then(r=>r.ok?r.json():null).catch(()=>null),
           fetch('/api/assembly/jobs').then(r=>r.ok?r.json():null).catch(()=>null),
           fetch('/api/cutting/dashboard').then(r=>r.ok?r.json():null).catch(()=>null),
+          fetch('/api/surfacing/target').then(r=>r.ok?r.json():null).catch(()=>null),
         ]);
         if(!alive)return;
         setDeptGoals({
@@ -850,6 +852,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
           coating:{completed:c?.completedToday||0, goal:c?.dailyGoal||0},
           assembly:{completed:a?.completedToday||0, goal:a?.dailyGoal||0},
           cutting:{completed:cu?.completedToday||0, goal:cu?.dailyGoal||0},
+          surfacing:{completed:su?.completedToday||0, goal:su?.dailyGoal||0},
         });
       }catch(e){ console.error('[department_goals] fetch failed',e); }
     };
@@ -2030,51 +2033,74 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
       }
 
       case "department_goals":{
-        // Departments with no goal (returns 0) are hidden. Cutting goal
-        // is the same number as shipping (everything passes through) but
-        // we render it as its own row so the supervisor sees both being
-        // tracked independently.
+        // Phil 2026-05-13: same three-peer grid as GoalBar (compact scale).
+        // 5 columns: DEPT · ACTUAL · bar · PROJ · GOAL. PROJ gets its own
+        // column (not a subline). All three numbers are 14px peers, each
+        // with a signed delta below in green/red. Bar fill = actual/goal;
+        // shift-time hash + projected tick overlay.
         const rows = [
-          { key:'shipping', label:'SHIPPING', completed: deptGoals.shipping.completed, goal: deptGoals.shipping.goal, view:'shipping' },
-          { key:'coating',  label:'COATING',  completed: deptGoals.coating.completed,  goal: deptGoals.coating.goal,  view:'coating' },
-          { key:'assembly', label:'ASSEMBLY', completed: deptGoals.assembly.completed, goal: deptGoals.assembly.goal, view:'production' },
-          { key:'cutting',  label:'CUTTING',  completed: deptGoals.cutting.completed,  goal: deptGoals.cutting.goal,  view:'production-analysis' },
+          { key:'shipping',  label:'SHIPPING',  completed: deptGoals.shipping.completed,  goal: deptGoals.shipping.goal,  view:'shipping' },
+          { key:'coating',   label:'COATING',   completed: deptGoals.coating.completed,   goal: deptGoals.coating.goal,   view:'coating' },
+          { key:'surfacing', label:'SURFACING', completed: deptGoals.surfacing.completed, goal: deptGoals.surfacing.goal, view:'surfacing' },
+          { key:'cutting',   label:'CUTTING',   completed: deptGoals.cutting.completed,   goal: deptGoals.cutting.goal,   view:'production-analysis' },
+          { key:'assembly',  label:'ASSEMBLY',  completed: deptGoals.assembly.completed,  goal: deptGoals.assembly.goal,  view:'production' },
         ].filter(r => r.goal > 0);
         if (rows.length === 0) {
           return <div style={{padding:16, color:T.textDim, fontSize:12, textAlign:'center'}}>No department goals reporting yet.</div>;
         }
-        // Project EOD per department: shift 7am→3:30pm, 8.5h total.
         const shiftStart = new Date(); shiftStart.setHours(7,0,0,0);
+        const SHIFT_LEN = 8.5;
         const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
-        const hoursRemaining = Math.max(0, 8.5 - shiftH);
+        const hoursRemaining = Math.max(0, SHIFT_LEN - shiftH);
+        const shiftElapsedPct = Math.max(0, Math.min(100, Math.round((shiftH / SHIFT_LEN) * 100)));
+        const colorFor = rr => rr >= 1.0 ? '#10B981' : rr >= 0.85 ? '#F59E0B' : '#EF4444';
+        const hdrStyle = { fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1 };
         return (
-          <div style={{display:'flex', flexDirection:'column', gap:8, padding:'4px 0'}}>
-            {/* Header row — orients the eye to the columns (UI-agent recommendation, 2026-05-12) */}
+          <div style={{display:'flex', flexDirection:'column', gap:10, padding:'4px 0'}}>
+            {/* Header row */}
             <div style={{display:'flex', alignItems:'center', gap:10, padding:'0 0 4px 0', borderBottom:`1px solid ${T.border}`, marginBottom:2}}>
-              <div style={{width:90, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1}}>DEPT</div>
-              <div style={{minWidth:54, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, textAlign:'right', letterSpacing:1}}>PROJ</div>
-              <div style={{flex:1, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1, textAlign:'center'}}>VS GOAL</div>
-              <div style={{minWidth:90, fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, textAlign:'right', letterSpacing:1}}>GOAL · Δ</div>
+              <div style={{width:90, ...hdrStyle}}>DEPT</div>
+              <div style={{minWidth:70, textAlign:'right', ...hdrStyle}}>ACTUAL</div>
+              <div style={{flex:1, textAlign:'center', ...hdrStyle}}>VS GOAL</div>
+              <div style={{minWidth:70, textAlign:'right', ...hdrStyle}}>PROJ</div>
+              <div style={{minWidth:70, textAlign:'right', paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...hdrStyle}}>GOAL</div>
             </div>
             {rows.map(r => {
               const rate = shiftH > 0 ? r.completed / shiftH : 0;
               const projected = rate > 0 ? Math.round(r.completed + rate * hoursRemaining) : r.completed;
-              const pct = Math.min(100, Math.round(projected / r.goal * 100));
-              const delta = projected - r.goal;
-              // Threshold ramp — match GoalBar's logic so the eye reads
-              // green/amber/red the same way across SPA surfaces.
-              const rawPct = r.goal > 0 ? projected / r.goal : 0;
-              const barColor = rawPct >= 1.0 ? '#10B981' : rawPct >= 0.85 ? '#F59E0B' : '#EF4444';
+              const actualPctRaw = r.goal > 0 ? r.completed / r.goal : 0;
+              const projPctRaw   = r.goal > 0 ? projected / r.goal : 0;
+              const actualPct = Math.min(100, Math.round(actualPctRaw * 100));
+              const projTickPct = Math.min(100, Math.round(projPctRaw * 100));
+              const actualColor = colorFor(actualPctRaw);
+              const projColor   = colorFor(projPctRaw);
+              const actualDelta = r.completed - r.goal;
+              const projDelta = projected - r.goal;
+              const showProjTick = projected !== r.completed && Math.abs(projTickPct - actualPct) >= 3;
+              const numStyle = { fontFamily:mono, fontSize:14, fontWeight:800, textAlign:'right', lineHeight:1.1 };
+              const subStyle = { fontFamily:mono, fontSize:10, fontWeight:700, marginTop:1 };
               return (
                 <div key={r.key} onClick={()=>setView&&setView(r.view)} style={{display:'flex', alignItems:'center', gap:10, cursor:'pointer'}}>
                   <div style={{width:90, fontFamily:mono, fontSize:11, color:T.textMuted, fontWeight:700, letterSpacing:1}}>{r.label}</div>
-                  <div style={{minWidth:54, fontFamily:mono, fontSize:14, color:barColor, fontWeight:800, textAlign:'right'}}>{projected.toLocaleString()}</div>
-                  <div style={{flex:1, height:8, background:'#1f2937', borderRadius:4, overflow:'hidden'}}>
-                    <div style={{width:`${pct}%`, height:'100%', background:barColor, transition:'width 0.6s ease, background 0.4s ease'}}/>
+                  <div style={{minWidth:70, ...numStyle, color:actualColor}}>
+                    {r.completed.toLocaleString()}
+                    <div style={{...subStyle, color: actualDelta>=0 ? '#10B981' : '#EF4444'}}>{actualDelta>=0?'+':''}{actualDelta.toLocaleString()}</div>
                   </div>
-                  <div style={{minWidth:90, textAlign:'right', fontFamily:mono, fontSize:11, color:'#cbd5e1'}}>
-                    goal {r.goal.toLocaleString()}
-                    <span style={{marginLeft:6, color: delta>=0 ? '#10B981' : '#EF4444', fontWeight:800}}>{delta>=0 ? '+' : ''}{delta.toLocaleString()}</span>
+                  <div style={{flex:1, position:'relative', height:10, background:'#1f2937', borderRadius:4, overflow:'visible'}}>
+                    <div style={{position:'absolute', inset:0, borderRadius:4, overflow:'hidden'}}>
+                      <div style={{width:`${actualPct}%`, height:'100%', background:actualColor, transition:'width 0.6s ease, background 0.4s ease'}}/>
+                    </div>
+                    <div title={`Shift ${shiftElapsedPct}% elapsed`} style={{position:'absolute', left:`calc(${shiftElapsedPct}% - 0.5px)`, top:0, width:1, height:10, background:'rgba(203,213,225,0.45)', zIndex:1}}/>
+                    {showProjTick && (
+                      <div title={`Projected ${projected.toLocaleString()}`} style={{position:'absolute', left:`calc(${projTickPct}% - 1px)`, top:-2, width:2, height:14, background:projColor, opacity:0.9, borderRadius:1, zIndex:2}}/>
+                    )}
+                  </div>
+                  <div style={{minWidth:70, ...numStyle, color:projColor}}>
+                    {projected.toLocaleString()}
+                    <div style={{...subStyle, color: projDelta>=0 ? '#10B981' : '#EF4444'}}>{projDelta>=0?'+':''}{projDelta.toLocaleString()}</div>
+                  </div>
+                  <div style={{minWidth:70, paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...numStyle, color:'#cbd5e1'}}>
+                    {r.goal.toLocaleString()}
                   </div>
                 </div>
               );

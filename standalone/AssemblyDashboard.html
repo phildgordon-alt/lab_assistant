@@ -640,17 +640,15 @@ function renderLive(){
       <div class="kpi-lbl">ASSEMBLED TODAY</div>
       ${dailyGoal > 0 ? `
       <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);">
-        <div style="font-family:var(--mono);font-size:10px;color:${projColor};font-weight:700;margin-bottom:6px;">PROJ EOD ${fmt(projectedToday)} <span style="color:${projDelta>=0?'#10B981':'#EF4444'};">(${projDelta >= 0 ? '+' : ''}${fmt(projDelta)})</span></div>
-        <div style="position:relative;width:100%;height:12px;background:#1f2937;border-radius:5px;overflow:visible;margin-bottom:6px;">
+        <div style="font-family:var(--mono);font-size:10px;color:#94a3b8;font-weight:600;margin-bottom:4px;letter-spacing:1px;">PROJ ${fmt(projectedToday)} · GOAL ${fmt(dailyGoal)}</div>
+        <div style="position:relative;width:100%;height:10px;background:#1f2937;border-radius:5px;overflow:visible;margin-bottom:4px;">
           <div style="position:absolute;inset:0;border-radius:5px;overflow:hidden;">
             <div style="width:${actualPct}%;height:100%;background:${actualColor};transition:width .8s ease;"></div>
           </div>
-          ${projTickPct !== actualPct ? `<div title="Projected ${fmt(projectedToday)}" style="position:absolute;left:calc(${projTickPct}% - 1px);top:-3px;width:2px;height:18px;background:${projColor};opacity:.9;border-radius:1px;"></div>` : ''}
+          <div title="Shift ${Math.max(0,Math.min(100,Math.round((shiftH/8.5)*100)))}% elapsed" style="position:absolute;left:calc(${Math.max(0,Math.min(100,Math.round((shiftH/8.5)*100)))}% - 0.5px);top:0;width:1px;height:10px;background:rgba(203,213,225,0.45);z-index:1;"></div>
+          ${Math.abs(projTickPct - actualPct) >= 3 ? `<div title="Projected ${fmt(projectedToday)}" style="position:absolute;left:calc(${projTickPct}% - 1px);top:-3px;width:2px;height:16px;background:${projColor};opacity:.9;border-radius:1px;z-index:2;"></div>` : ''}
         </div>
-        <div style="font-family:var(--mono);font-size:11px;display:flex;justify-content:space-between;">
-          <span style="color:#cbd5e1;font-weight:600;">GOAL ${fmt(dailyGoal)}</span>
-          <span style="color:${actualDelta >= 0 ? '#10B981' : '#EF4444'};font-weight:800;">${actualDelta >= 0 ? '+' : ''}${fmt(actualDelta)}</span>
-        </div>
+        <div style="font-family:var(--mono);font-size:13px;font-weight:800;color:${actualDelta >= 0 ? '#10B981' : '#EF4444'};">${actualDelta >= 0 ? '+' : ''}${fmt(actualDelta)}</div>
       </div>` : ''}
     </div>
     <div class="kpi">
@@ -886,23 +884,34 @@ function renderLeaderboard(){
   const actualDeltaLB = totalToday - goalLB;
   const projDeltaLB = projectedLB - goalLB;
   const fmtLB = n => Math.round(n || 0).toLocaleString();
+  // Leaderboard goal bar — full-width "hero" version of GoalBar grammar.
+  // Phil 2026-05-13: same three-peer grid as the SPA (ACTUAL · bar · PROJ ·
+  // GOAL), 22px numbers since the bar has the full strip width. Shift-time
+  // hash on track + projected tick + dropped Δ glyph (signed numbers in
+  // color carry the meaning).
+  const shiftElapsedPctLB = Math.max(0, Math.min(100, Math.round((shiftH / SHIFT_HOURS_LB) * 100)));
   const goalBarRow = goalLB > 0 ? `
     <div style="display:flex;align-items:center;gap:14px;padding:8px 14px;background:rgba(255,255,255,0.03);border-radius:8px;margin:6px 0;">
-      <div style="display:flex;flex-direction:column;align-items:flex-start;white-space:nowrap;min-width:130px;">
+      <div style="display:flex;flex-direction:column;align-items:flex-start;white-space:nowrap;min-width:120px;">
         <div style="font-family:var(--mono);font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:1.5px;">ACTUAL</div>
-        <div style="font-family:var(--mono);font-size:18px;font-weight:800;color:${actualColorLB};line-height:1.1;">${fmtLB(totalToday)}</div>
-        <div style="font-family:var(--mono);font-size:10px;color:${projColorLB};font-weight:600;margin-top:2px;">PROJ EOD ${fmtLB(projectedLB)}</div>
+        <div style="font-family:var(--mono);font-size:22px;font-weight:800;color:${actualColorLB};line-height:1.1;">${fmtLB(totalToday)}</div>
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;color:${actualDeltaLB >= 0 ? '#10B981' : '#EF4444'};margin-top:2px;">${actualDeltaLB >= 0 ? '+' : ''}${fmtLB(actualDeltaLB)}</div>
       </div>
       <div style="flex:1;position:relative;height:14px;background:#1f2937;border-radius:6px;overflow:visible;">
         <div style="position:absolute;inset:0;border-radius:6px;overflow:hidden;">
           <div style="width:${actualPctLB}%;height:100%;background:${actualColorLB};transition:width .8s ease;"></div>
         </div>
-        ${projTickPctLB !== actualPctLB ? `<div title="Projected ${fmtLB(projectedLB)}" style="position:absolute;left:calc(${projTickPctLB}% - 1px);top:-3px;width:2px;height:20px;background:${projColorLB};opacity:.9;border-radius:1px;"></div>` : ''}
+        <div title="Shift ${shiftElapsedPctLB}% elapsed" style="position:absolute;left:calc(${shiftElapsedPctLB}% - 0.5px);top:0;width:1px;height:14px;background:rgba(203,213,225,0.45);z-index:1;"></div>
+        ${Math.abs(projTickPctLB - actualPctLB) >= 3 ? `<div title="Projected ${fmtLB(projectedLB)}" style="position:absolute;left:calc(${projTickPctLB}% - 1px);top:-3px;width:2px;height:20px;background:${projColorLB};opacity:.9;border-radius:1px;z-index:2;"></div>` : ''}
       </div>
-      <div style="display:flex;flex-direction:column;align-items:flex-end;white-space:nowrap;min-width:130px;">
-        <div style="font-family:var(--mono);font-size:11px;color:#cbd5e1;font-weight:600;">GOAL ${fmtLB(goalLB)}</div>
-        <div style="font-family:var(--mono);font-size:14px;font-weight:800;color:${actualDeltaLB >= 0 ? '#10B981' : '#EF4444'};">${actualDeltaLB >= 0 ? '+' : ''}${fmtLB(actualDeltaLB)}</div>
-        <div style="font-family:var(--mono);font-size:10px;color:${projColorLB};font-weight:600;margin-top:2px;">PROJ Δ ${projDeltaLB >= 0 ? '+' : ''}${fmtLB(projDeltaLB)}</div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;white-space:nowrap;min-width:120px;">
+        <div style="font-family:var(--mono);font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:1.5px;">PROJ EOD</div>
+        <div style="font-family:var(--mono);font-size:22px;font-weight:800;color:${projColorLB};line-height:1.1;">${fmtLB(projectedLB)}</div>
+        <div style="font-family:var(--mono);font-size:11px;font-weight:700;color:${projDeltaLB >= 0 ? '#10B981' : '#EF4444'};margin-top:2px;">${projDeltaLB >= 0 ? '+' : ''}${fmtLB(projDeltaLB)}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;white-space:nowrap;min-width:110px;padding-left:10px;border-left:1px solid var(--border);">
+        <div style="font-family:var(--mono);font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:1.5px;">GOAL</div>
+        <div style="font-family:var(--mono);font-size:22px;font-weight:800;color:#cbd5e1;line-height:1.1;">${fmtLB(goalLB)}</div>
       </div>
     </div>` : '';
 

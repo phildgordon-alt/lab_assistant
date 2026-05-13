@@ -299,44 +299,65 @@ function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'ACTUAL', shiftSta
   const projPctRaw = dailyGoal > 0 ? projected / dailyGoal : 0;
   const actualPct = Math.min(100, Math.round(actualPctRaw * 100));
   const projTickPct = Math.min(100, Math.round(projPctRaw * 100));
+  // Shift-time hash — HID recommendation 2026-05-13. A 1px grey marker at
+  // shiftElapsedPct lets the eye distinguish "8am red" (5% fill, 12% hash:
+  // expected) from "3pm red" (5% fill, 88% hash: oh shit). Without this,
+  // every red bar looks identical and the early-shift signal is noise.
+  const shiftElapsedPct = Math.max(0, Math.min(100, Math.round((shiftH / shiftLenH) * 100)));
   const actualDelta = completedToday - dailyGoal;
   const projDelta = projected - dailyGoal;
   const colorFor = r => r >= 1.0 ? '#10B981' : r >= 0.85 ? '#F59E0B' : '#EF4444';
   const actualColor = colorFor(actualPctRaw);
   const projColor = colorFor(projPctRaw);
-  // Background tint follows the projected signal — that's the forward-looking
-  // "are we going to make it" indicator, which is the right cue for the whole
-  // bar's framing even if the big number is actual.
+  // Background tint follows the projected signal — forward-looking "are we
+  // going to make it" cue for the bar's framing.
   const bgTint = projPctRaw >= 1.0 ? 'rgba(16,185,129,0.04)' : projPctRaw >= 0.85 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.04)';
-  const showProjTick = projected !== completedToday && projTickPct !== actualPct;
+  // Collision-resistant tick: only render the projected marker when it's
+  // ≥3% away from the actual fill edge, otherwise the two lines visually
+  // merge.
+  const showProjTick = projected !== completedToday && Math.abs(projTickPct - actualPct) >= 3;
+  // Three-peer + one-bar grid (HID unification 2026-05-13): ACTUAL · bar ·
+  // PROJ · GOAL — each headline number 22px, dropped Δ glyph (signed
+  // numbers in color carry the meaning), GOAL gets a left-border divider
+  // to signal "fixed reference, the others move."
+  const cellLbl = { fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 };
+  const cellNum = { fontSize: 22, fontFamily: mono, fontWeight: 800, lineHeight: 1.1 };
+  const cellSub = { fontSize: 11, fontFamily: mono, fontWeight: 700, marginTop: 2 };
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 16px', background: bgTint, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 140 }}>
-        <div style={{ fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 }}>{label}</div>
-        <div style={{ fontSize: 22, fontFamily: mono, color: actualColor, fontWeight: 800, lineHeight: 1.1 }}>{fmt(completedToday)}</div>
-        <div style={{ fontSize: 10, fontFamily: mono, color: projColor, fontWeight: 600, marginTop: 2 }}>
-          PROJ EOD {fmt(projected)}
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '8px 14px', background: bgTint, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
+        <div style={cellLbl}>{label}</div>
+        <div style={{ ...cellNum, color: actualColor }}>{fmt(completedToday)}</div>
+        <div style={{ ...cellSub, color: actualDelta >= 0 ? '#10B981' : '#EF4444' }}>
+          {actualDelta >= 0 ? '+' : ''}{fmt(actualDelta)}
         </div>
       </div>
       <div style={{ flex: 1, position: 'relative', height: 14, background: T.bg, borderRadius: 6, overflow: 'visible' }}>
         <div style={{ position: 'absolute', inset: 0, borderRadius: 6, overflow: 'hidden' }}>
           <div style={{ width: `${actualPct}%`, height: '100%', background: actualColor, transition: 'width 0.8s ease, background 0.4s ease' }} />
         </div>
+        {/* Shift-time hash — 1px grey, behind the projected tick */}
+        <div
+          title={`Shift ${shiftElapsedPct}% elapsed`}
+          style={{ position: 'absolute', left: `calc(${shiftElapsedPct}% - 0.5px)`, top: 0, width: 1, height: 14, background: 'rgba(203,213,225,0.45)', zIndex: 1 }}
+        />
         {showProjTick && (
           <div
             title={`Projected ${fmt(projected)} (${projTickPct}%)`}
-            style={{ position: 'absolute', left: `calc(${projTickPct}% - 1px)`, top: -3, width: 2, height: 20, background: projColor, opacity: 0.9, borderRadius: 1 }}
+            style={{ position: 'absolute', left: `calc(${projTickPct}% - 1px)`, top: -3, width: 2, height: 20, background: projColor, opacity: 0.9, borderRadius: 1, zIndex: 2 }}
           />
         )}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 140 }}>
-        <div style={{ fontSize: 11, fontFamily: mono, color: '#cbd5e1', fontWeight: 600 }}>GOAL {fmt(dailyGoal)}</div>
-        <div style={{ fontSize: 16, fontFamily: mono, fontWeight: 800, color: actualDelta >= 0 ? '#10B981' : '#EF4444' }}>
-          {actualDelta >= 0 ? '+' : ''}{fmt(actualDelta)}
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 110 }}>
+        <div style={cellLbl}>PROJ EOD</div>
+        <div style={{ ...cellNum, color: projColor }}>{fmt(projected)}</div>
+        <div style={{ ...cellSub, color: projDelta >= 0 ? '#10B981' : '#EF4444' }}>
+          {projDelta >= 0 ? '+' : ''}{fmt(projDelta)}
         </div>
-        <div style={{ fontSize: 10, fontFamily: mono, color: projColor, fontWeight: 600, marginTop: 2 }}>
-          PROJ Δ {projDelta >= 0 ? '+' : ''}{fmt(projDelta)}
-        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 110, paddingLeft: 10, borderLeft: `1px solid ${T.border}` }}>
+        <div style={cellLbl}>GOAL</div>
+        <div style={{ ...cellNum, color: '#cbd5e1' }}>{fmt(dailyGoal)}</div>
       </div>
     </div>
   );
@@ -4442,6 +4463,27 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
   const [somData,setSomData]=useState({devices:[],conveyors:[],zones:[],allTimeZones:[],activeJobs:null,todayTotal:0,total:0,isLive:false,lastPoll:null});
+  // Surfacing target — Phil 2026-05-13: surfacing inherits the coating
+  // daily goal because everything surfaced goes into coating. Live counter
+  // uses the same persisted-event distinct-invoice exits pattern as the
+  // other depts so GoalBar and GoalHistory never disagree.
+  const [surfacingTarget,setSurfacingTarget]=useState({ dailyGoal: 0, completedToday: 0 });
+  useEffect(()=>{
+    if(ovenServerUrl==null) return;
+    let active=true;
+    const fetchTarget=async()=>{
+      try{
+        const res=await fetch(`${ovenServerUrl}/api/surfacing/target`);
+        if(res.ok && active){
+          const d=await res.json();
+          setSurfacingTarget({ dailyGoal: d.dailyGoal||0, completedToday: d.completedToday||0 });
+        }
+      }catch(e){ /* silent — GoalBar self-hides on goal=0 */ }
+    };
+    fetchTarget();
+    const iv=setInterval(fetchTarget,60000);
+    return()=>{ active=false; clearInterval(iv); };
+  },[ovenServerUrl]);
 
   // Fetch SOM machine + job data
   useEffect(()=>{
@@ -4529,6 +4571,8 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 
   return (
     <ProductionStageTab domain="surfacing" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
+      <GoalBar completedToday={surfacingTarget.completedToday} dailyGoal={surfacingTarget.dailyGoal} />
+      <GoalHistory serverUrl={ovenServerUrl} dept="surfacing" deptLabel="Surfacing" days={14} />
       {/* Stage Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
