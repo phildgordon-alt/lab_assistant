@@ -165,21 +165,30 @@ function buildDeptKpiTiles(dept, kpis, thresholds) {
   const fmtH = h => (h >= 24 ? `${(h / 24).toFixed(1)}d` : `${Math.round(h)}h`);
   const tiles = [];
 
-  // 1. Aging in Dept — count >1d, sub: max-age, color by max-age (HID)
+  // 1. Aging in Dept — count of jobs >threshold. Phil 2026-05-13:
+  // label clarified — primary number is JOB COUNT (e.g. 87 jobs), not
+  // days. Sub-line carries the max age in time units. Reading "AGING
+  // >1d  87" used to suggest "87 days"; "AGING JOBS >1d  87  oldest 4.2d"
+  // makes it unambiguous.
   const maxH = kpis.maxAgeHours || 0;
   const maxRatio = thresholds && thresholds.maxAgeRedHours
     ? maxH / thresholds.maxAgeRedHours
     : maxH / 120;
+  // Phil 2026-05-13 late: label leads with "JOBS" so the primary number
+  // is unambiguously a count, not days. "JOBS OVER 1d  87  oldest: 4.2d"
+  // — no confusion possible.
+  const agingThreshDays = Math.round((thresholds?.agingHours || 24) / 24);
   tiles.push({
-    label: `AGING >${Math.round((thresholds?.agingHours || 24) / 24)}D`,
+    label: `JOBS OVER ${agingThreshDays}d`,
     value: kpis.agingCount || 0,
-    sub: maxH > 0 ? `max: ${fmtH(maxH)}` : null,
+    sub: maxH > 0 ? `oldest: ${fmtH(maxH)}` : null,
     direction: 'INVERSE',
     valueRatio: maxRatio,
     accent: KPI_COLOR_BY_DIRECTION('INVERSE', maxRatio),
   });
 
-  // 2. Avg Dwell — INVERSE
+  // 2. Avg Dwell — INVERSE. Value is a time string (e.g. "8h" or
+  // "2.3d") so the unit is on the number itself — no confusion.
   const avg = kpis.avgDwellHours || 0;
   const avgRatio = thresholds && thresholds.avgDwellRedHours
     ? avg / thresholds.avgDwellRedHours
@@ -193,18 +202,25 @@ function buildDeptKpiTiles(dept, kpis, thresholds) {
     accent: KPI_COLOR_BY_DIRECTION('INVERSE', avgRatio),
   });
 
-  // 3. Breakage % — INVERSE
+  // 3. YIELD % — Phil 2026-05-13 late: prefer yield framing over
+  // breakage framing. "98% YIELD" reads as a goal achieved; "2% BREAKAGE"
+  // reads as a problem. Same math, friendlier polarity. Color by yield
+  // (PACE — higher = better): green ≥98%, amber 95-98%, red <95%.
+  // Sub-line carries the breakage event count + raw % for ops detail.
   const brk = kpis.breakagePct || 0;
-  const brkRatio = thresholds && thresholds.breakagePctRed
-    ? brk / thresholds.breakagePctRed
-    : brk / 5;
+  const yieldPct = 100 - brk;
+  // PACE: valueRatio = yieldPct / goal (98%). green at >=100% (yield>=98)
+  const yieldGoal = 100 - (thresholds?.breakagePctAmber ?? 2);  // 98%
+  const yieldRatio = yieldGoal > 0 ? yieldPct / yieldGoal : 1;
   tiles.push({
-    label: 'BREAKAGE %',
-    value: `${brk.toFixed(brk < 10 ? 1 : 0)}%`,
-    sub: kpis.breakageCount != null ? `${kpis.breakageCount} events` : null,
-    direction: 'INVERSE',
-    valueRatio: brkRatio,
-    accent: KPI_COLOR_BY_DIRECTION('INVERSE', brkRatio),
+    label: 'YIELD %',
+    value: `${yieldPct.toFixed(yieldPct < 100 ? 1 : 0)}%`,
+    sub: kpis.breakageCount != null
+      ? `${kpis.breakageCount} broken · ${brk.toFixed(brk < 10 ? 1 : 0)}%`
+      : `${brk.toFixed(brk < 10 ? 1 : 0)}% break`,
+    direction: 'PACE',
+    valueRatio: yieldRatio,
+    accent: KPI_COLOR_BY_DIRECTION('PACE', yieldRatio),
   });
 
   // 4. Throughput per hour — PACE (no real "goal" yet so show neutral)

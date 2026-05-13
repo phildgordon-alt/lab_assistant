@@ -82,6 +82,13 @@ function loadConfig(db, overrides) {
 // notes). Without it we'd over-count jobs already at later stages.
 // ─────────────────────────────────────────────────────────────────────
 
+// Phil 2026-05-13 late: 30-day age cap excludes data-debt zombies.
+// Older jobs without picks_history are almost always pre-2026-03-30
+// data (when picks_history capture went live) or genuinely abandoned
+// orders, not actionable picking backlog. Anything past 30 days is
+// data quality, not pace.
+const UNPICKED_AGE_CAP_DAYS = 30;
+
 function getUnpickedBacklog(db, limit) {
   const lim = limit ? `LIMIT ${parseInt(limit, 10)}` : '';
   return db.prepare(`
@@ -93,6 +100,8 @@ function getUnpickedBacklog(db, limit) {
     FROM jobs j
     WHERE j.status IN ('ACTIVE','Active')
       AND (j.entry_date IS NOT NULL OR j.first_seen_at IS NOT NULL)
+      AND COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10))
+          >= date('now','localtime','-${UNPICKED_AGE_CAP_DAYS} days')
       AND NOT EXISTS (
         SELECT 1 FROM picks_history ph WHERE ph.order_id = j.invoice
       )
@@ -111,6 +120,8 @@ function getUnpickedBacklogCount(db) {
     SELECT COUNT(*) AS n FROM jobs j
     WHERE j.status IN ('ACTIVE','Active')
       AND (j.entry_date IS NOT NULL OR j.first_seen_at IS NOT NULL)
+      AND COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10))
+          >= date('now','localtime','-${UNPICKED_AGE_CAP_DAYS} days')
       AND NOT EXISTS (SELECT 1 FROM picks_history ph WHERE ph.order_id = j.invoice)
       AND NOT EXISTS (
         SELECT 1 FROM job_events je
