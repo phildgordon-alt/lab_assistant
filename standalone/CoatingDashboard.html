@@ -61,6 +61,18 @@ body{display:flex;flex-direction:column;overflow:hidden;}
 
 /* KPI ROW */
 .kpi-row{display:grid;gap:10px;grid-template-columns:repeat(5,1fr);}
+
+/* Goal hero — Phil 2026-05-13: ACTUAL / GOAL with progress bar.
+   Mirrors ShippingDashboard.html hero pattern. */
+.goal-hero{display:grid;grid-template-columns:1fr auto 1fr;align-items:end;gap:18px;padding:18px 22px;background:#0F1218;border:1px solid var(--border);border-radius:12px;margin-bottom:14px;}
+.goal-hero .gh-cell{text-align:center;}
+.goal-hero .gh-val{font-family:var(--mono);font-size:60px;font-weight:800;line-height:1;letter-spacing:-1px;}
+.goal-hero .gh-lbl{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:1.5px;text-transform:uppercase;margin-top:6px;}
+.goal-hero .gh-slash{font-family:var(--mono);font-size:48px;color:var(--dimmer);align-self:center;}
+.goal-bar{grid-column:1/-1;height:14px;background:#1f2937;border-radius:7px;overflow:hidden;position:relative;margin-top:4px;}
+.goal-bar .gb-fill{height:100%;background:var(--green);transition:width .6s ease,background .3s ease;}
+.goal-bar .gb-tick{position:absolute;top:-3px;width:3px;height:20px;background:#94a3b8;}
+.goal-meta{grid-column:1/-1;display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--dim);}
 @media(max-width:1100px){.kpi-row{grid-template-columns:repeat(3,1fr);}}
 @media(max-width:700px){.kpi-row{grid-template-columns:repeat(2,1fr);}}
 .kpi{background:var(--card);border:1px solid var(--border);border-radius:12px;
@@ -404,8 +416,46 @@ function renderPipeline() {
   // Merge live oven timer data if available
   const liveTimers = (ovenData && ovenData.timers) ? ovenData.timers : {};
 
+  // Phil 2026-05-13: goal hero — COATED TODAY vs GOAL.
+  // /api/coating/intelligence returns completedToday + dailyGoal at
+  // top level. Total exits from coating today vs today's coating goal.
+  const completedToday = d.completedToday || 0;
+  const dailyGoal      = d.dailyGoal || 0;
+  const goalPct        = dailyGoal > 0 ? Math.min(120, (completedToday / dailyGoal) * 100) : 0;
+  const fillPct        = Math.min(100, goalPct);
+  const fillColor      = goalPct >= 100 ? 'var(--green)' : goalPct >= 85 ? 'var(--amber)' : 'var(--red)';
+  // Projected EOD from current shift rate (7am-3:30pm = 8.5h shift)
+  const shiftStart = new Date(); shiftStart.setHours(7,0,0,0);
+  const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
+  const rate = shiftH > 0 ? completedToday / shiftH : 0;
+  const projected = rate > 0 && shiftH < 8.5 ? Math.round(completedToday + rate * (8.5 - shiftH)) : completedToday;
+  const projPct = dailyGoal > 0 ? Math.min(100, (projected / dailyGoal) * 100) : 0;
+  let html = '';
+  if (dailyGoal > 0) {
+    html += `
+      <div class="goal-hero">
+        <div class="gh-cell">
+          <div class="gh-val" style="color:${fillColor}">${completedToday}</div>
+          <div class="gh-lbl">COATED TODAY</div>
+        </div>
+        <div class="gh-slash">/</div>
+        <div class="gh-cell">
+          <div class="gh-val" style="color:var(--amber)">${dailyGoal}</div>
+          <div class="gh-lbl">DAILY GOAL</div>
+        </div>
+        <div class="goal-bar">
+          <div class="gb-fill" style="width:${fillPct}%;background:${fillColor};"></div>
+          ${projected !== completedToday ? `<div class="gb-tick" style="left:calc(${projPct}% - 1.5px);background:${fillColor};opacity:0.8" title="Projected EOD: ${projected}"></div>` : ''}
+        </div>
+        <div class="goal-meta">
+          <span>${Math.round(goalPct)}% complete</span>
+          <span>Projected EOD: ${projected} (${projected - dailyGoal >= 0 ? '+' : ''}${projected - dailyGoal})</span>
+        </div>
+      </div>`;
+  }
+
   // KPI row
-  let html = '<div class="kpi-row">';
+  html += '<div class="kpi-row">';
   html += kpi(q.total || 0, 'QUEUE', 'Jobs in coating stage', 'var(--teal)');
   html += kpi(bySubStage.IN_COATER || 0, 'IN COATER', 'Currently coating', 'var(--blue)');
   html += kpi(ovens.racksInUse || 0, 'IN OVEN', 'racks running now', 'var(--amber)');
