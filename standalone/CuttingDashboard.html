@@ -410,11 +410,18 @@ function renderFloor(){
     </div>
   </div>`;
 
-  // Station cards from byStation
-  const stationNames = Object.keys(byStation).sort();
+  // Station cards from byStation — Phil 2026-05-13: now shows BOTH
+  // jobs currently in the station AND jobs that station has completed
+  // today. Sort by completedToday DESC so the busiest edgers float up.
+  const stationNames = Object.keys(byStation).sort((a, b) => {
+    const dt = (byStation[b].completedToday || 0) - (byStation[a].completedToday || 0);
+    if (dt !== 0) return dt;
+    return a.localeCompare(b);
+  });
   const stationCards = stationNames.map(name => {
     const stn = byStation[name];
     const count = stn.count || 0;
+    const done  = stn.completedToday || 0;
     const ops = stn.operators || [];
     const stnJobs = stn.jobs || [];
     const isActive = count > 0;
@@ -435,7 +442,8 @@ function renderFloor(){
       </div>
       <div style="margin:4px 0;">${opsHtml}</div>
       <div class="stn-stats">
-        <div class="stn-stat"><div class="stn-stat-val">${count}</div><div class="stn-stat-lbl">JOBS</div></div>
+        <div class="stn-stat"><div class="stn-stat-val">${count}</div><div class="stn-stat-lbl">IN STATION</div></div>
+        <div class="stn-stat"><div class="stn-stat-val" style="color:var(--green)">${done}</div><div class="stn-stat-lbl">DONE TODAY</div></div>
       </div>
     </div>`;
   }).join('');

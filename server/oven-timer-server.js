@@ -5377,15 +5377,41 @@ Respond with a structured batching plan in this format:
     // Cutting jobs: currently at CUTTING stage
     const cuttingJobs = allJobs.filter(j => j.stage === 'CUTTING');
 
-    // Break down by station
+    // Break down by station — currently-active jobs per station
     const byStation = {};
     for (const j of cuttingJobs) {
       const stn = j.station || 'UNKNOWN';
-      if (!byStation[stn]) byStation[stn] = { station: stn, count: 0, jobs: [], operators: new Set() };
+      if (!byStation[stn]) byStation[stn] = { station: stn, count: 0, completedToday: 0, jobs: [], operators: new Set() };
       byStation[stn].count++;
       byStation[stn].jobs.push(j.job_id);
       if (j.operator) byStation[stn].operators.add(j.operator);
     }
+
+    // Phil 2026-05-13 very late: per-station completed-today count for
+    // cutting (Edgers 1-7, CUT, INHSE FIN). Pulls today's distinct
+    // invoices per cutting-class station from job_events. Same pattern
+    // as the assembly endpoint's stationCompletions; restart-safe and
+    // PT-local. Adds completedToday to each station in byStation, and
+    // also creates rows for stations that have completions but no
+    // currently-active jobs.
+    try {
+      const cuttingStationRows = labDb.db.prepare(`
+        SELECT station, COUNT(DISTINCT invoice) AS n
+        FROM job_events
+        WHERE stage = 'CUTTING'
+          AND date(event_ts/1000, 'unixepoch', 'localtime') = date('now','localtime')
+          AND station IS NOT NULL
+          AND station != ''
+        GROUP BY station
+      `).all();
+      for (const row of cuttingStationRows) {
+        if (!byStation[row.station]) {
+          byStation[row.station] = { station: row.station, count: 0, completedToday: 0, jobs: [], operators: new Set() };
+        }
+        byStation[row.station].completedToday = row.n;
+      }
+    } catch (e) { console.error('[cutting/dashboard] per-station completedToday failed', e.message); }
+
     for (const s of Object.values(byStation)) s.operators = [...s.operators];
 
     // Today's cutting stats. completedToday uses the persisted job_events
