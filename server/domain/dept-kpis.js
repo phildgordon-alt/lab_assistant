@@ -132,6 +132,11 @@ function getCurrentDwellsForStage(db, stage) {
 // ─────────────────────────────────────────────────────────────────────
 
 function getPickingDwells(db) {
+  // Phil 2026-05-13 late: for the AGING tile (count of jobs over
+  // threshold + max age) we measure currently-unpicked queue wait
+  // time. 30-day age cap excludes zombie data debt — must match the
+  // cap in picking-target.js:getUnpickedBacklog (same-count-same-math
+  // -same-code rule).
   const rows = db.prepare(`
     SELECT j.invoice,
            COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10)) AS entry_ymd,
@@ -141,6 +146,8 @@ function getPickingDwells(db) {
     FROM jobs j
     WHERE j.status IN ('ACTIVE','Active')
       AND (j.entry_date IS NOT NULL OR j.first_seen_at IS NOT NULL)
+      AND COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10))
+          >= date('now','localtime','-30 days')
       AND NOT EXISTS (SELECT 1 FROM picks_history ph WHERE ph.order_id = j.invoice)
       AND NOT EXISTS (
         SELECT 1 FROM job_events je
@@ -149,6 +156,35 @@ function getPickingDwells(db) {
       )
   `).all();
   return rows.filter(r => Number.isFinite(r.dwell_hours) && r.dwell_hours >= 0);
+}
+
+// Phil 2026-05-13 late: "Dwell time should come from incoming jobs
+// and how long they sit in the queue before they get picked." This
+// is the BACKWARD-looking metric — for jobs that GOT picked recently,
+// what was the average time from arrival to pick. Operational pick
+// latency, capped at 30 days to filter stale entry_date data debt.
+function getPickingAvgPickLatencyHours(db) {
+  try {
+    const row = db.prepare(`
+      SELECT AVG(
+        (julianday(ph.completed_at)
+         - julianday(COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10)))) * 24
+      ) AS avg_hours,
+      COUNT(*) AS n
+      FROM picks_history ph
+      JOIN jobs j ON j.invoice = ph.order_id
+      WHERE ph.order_id IS NOT NULL
+        AND date(ph.completed_at, 'localtime') >= date('now','localtime','-7 days')
+        AND COALESCE(j.entry_date, j.first_seen_at) IS NOT NULL
+        AND (julianday(ph.completed_at)
+             - julianday(COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10))))
+            BETWEEN 0 AND 30
+    `).get();
+    return {
+      avgHours: row?.avg_hours || 0,
+      sampleSize: row?.n || 0,
+    };
+  } catch (_) { return { avgHours: 0, sampleSize: 0 }; }
 }
 
 function dwellsForDept(db, dept) {
@@ -466,6 +502,22 @@ function computeDeptKpis(db, dept, options) {
   const breakage = computeBreakageKpi(db, dept, ymd, exited);
   const throughputPerHour = computeThroughputPerHour(db, dept, cfg);
   const specific = deptSpecific(db, dept, ymd, dwells, breakage.breakageCount);
+
+  // Phil 2026-05-13 late: picking's "avg dwell" is operationally the
+  // average pick-latency — time from job arriving to job getting picked
+  // — measured over jobs picked in the last 7 days. Override the
+  // currently-waiting-queue avg with the historical-pick-latency avg.
+  // The currently-waiting cohort still drives Aging (count over
+  // threshold) + Max Age (oldest in queue) — same data, two metrics.
+  if (dept === 'picking') {
+    const latency = getPickingAvgPickLatencyHours(db);
+    aging.avgDwellHours = Math.round(latency.avgHours * 10) / 10;
+    // Surface sample size in deptSpecific so the tile sub-line can
+    // show "avg over N picked / 7d" if we wire it later.
+    if (specific && typeof specific === 'object') {
+      specific.pickLatencySampleSize = latency.sampleSize;
+    }
+  }
 
   return {
     dept,
