@@ -5181,12 +5181,17 @@ Respond with a structured batching plan in this format:
   // can never disagree.
   if (req.method==='GET' && url.pathname==='/api/surfacing/target') {
     try {
-      const { computeCoatingTarget } = require('./domain/coating-target');
+      // Phil 2026-05-13 evening: surfacing is the upstream master, NOT a
+      // mirror of coating's target. Previously this endpoint returned
+      // computeCoatingTarget().target (409 today) which made no sense for
+      // a stage that produces ~1,200 lenses/day. New shape mirrors
+      // /api/coating/intelligence's dailyGoal+completedToday contract.
+      const { computeSurfacingTarget } = require('./domain/surfacing-target');
       const { countSurfacingExitsToday } = require('./domain/daily-capture');
-      const t = computeCoatingTarget(labDb.db);
+      const t = computeSurfacingTarget(labDb.db);
       const { ymd: ymdToday } = labLocalParts(new Date());
       const completedToday = countSurfacingExitsToday(labDb.db, ymdToday);
-      return json(res, { dailyGoal: t?.target || 0, completedToday, source: 'coating-target' });
+      return json(res, { dailyGoal: t?.target || 0, completedToday, source: 'surfacing-target', target: t });
     } catch (e) {
       console.error('[/api/surfacing/target] failed:', e.message);
       return json(res, { error: e.message, dailyGoal: 0, completedToday: 0 }, 500);
@@ -5567,24 +5572,27 @@ Respond with a structured batching plan in this format:
           ORDER BY date DESC
         `).all(days);
       } else if (dept === 'surfacing') {
-        // Surfacing target inherits coating's (Phil 2026-05-13 — "everything
-        // surfaced goes into coating"), so JOIN coating targets not ship.
+        // Phil 2026-05-13 evening: surfacing has its own first-class
+        // target table now (daily_surfacing_targets, migration 013).
+        // Reads target + actual from one table — no cross-join to
+        // coating, no inherited number. surfaced_actual is captured
+        // via captureDailySurfacingTarget using the SAME count rule
+        // (countSurfacingExitsToday) that the dashboard live counter
+        // uses, so capture and display never disagree.
         rows = labDb.db.prepare(`
-          SELECT t.date,
-                 t.is_workday,
-                 t.total_target AS target,
-                 COALESCE(a.actual, 0) AS actual,
-                 (COALESCE(a.actual, 0) - t.total_target) AS variance,
-                 CASE WHEN t.total_target > 0
-                      THEN ROUND(((CAST(COALESCE(a.actual,0) AS REAL) - t.total_target) / t.total_target) * 10000) / 100
+          SELECT date,
+                 is_workday,
+                 total_target AS target,
+                 surfaced_actual AS actual,
+                 (surfaced_actual - total_target) AS variance,
+                 CASE WHEN total_target > 0
+                      THEN ROUND(((CAST(surfaced_actual AS REAL) - total_target) / total_target) * 10000) / 100
                       ELSE 0 END AS variancePct,
-                 t.rollover_in AS rolloverIn,
-                 (a.finalized_at IS NOT NULL) AS finalized
-          FROM daily_coating_targets t
-          LEFT JOIN daily_dept_actuals a
-                 ON a.date = t.date AND a.dept = 'surfacing'
-          WHERE t.date >= date('now','localtime','-' || ? || ' days')
-          ORDER BY t.date DESC
+                 rollover_in AS rolloverIn,
+                 (finalized_at IS NOT NULL) AS finalized
+          FROM daily_surfacing_targets
+          WHERE date >= date('now','localtime','-' || ? || ' days')
+          ORDER BY date DESC
         `).all(days);
       } else {
         // cutting + assembly — JOIN ship target to dept actual
@@ -9027,8 +9035,11 @@ setInterval(captureDailyShipTarget, 60 * 60 * 1000);
 // written to DB, not computed live on every request. Mirrors the shipping
 // schedule: boot+2min, then hourly. UPSERT — safe to repeat through the day.
 const dailyCapture = require('./domain/daily-capture');
-setTimeout(() => dailyCapture.captureDailyCoatingTarget(labDb.db), 2 * 60 * 1000 + 5000);
-setTimeout(() => dailyCapture.captureDailyDeptActuals(labDb.db), 2 * 60 * 1000 + 10000);
+setTimeout(() => dailyCapture.captureDailyCoatingTarget(labDb.db),    2 * 60 * 1000 + 5000);
+setTimeout(() => dailyCapture.captureDailySurfacingTarget(labDb.db),  2 * 60 * 1000 + 7500);
+setTimeout(() => dailyCapture.captureDailyDeptActuals(labDb.db),      2 * 60 * 1000 + 10000);
+// Hourly refresh for surfacing (same cadence as coating + ship)
+setInterval(() => dailyCapture.captureDailySurfacingTarget(labDb.db), 60 * 60 * 1000);
 setInterval(() => dailyCapture.captureDailyCoatingTarget(labDb.db), 60 * 60 * 1000);
 setInterval(() => dailyCapture.captureDailyDeptActuals(labDb.db), 60 * 60 * 1000);
 

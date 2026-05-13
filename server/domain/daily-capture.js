@@ -28,6 +28,7 @@
  */
 
 const { computeCoatingTarget, countCoatingExits } = require('./coating-target');
+const { computeSurfacingTarget } = require('./surfacing-target');
 
 /**
  * Helper — PT-local date parts. Mirrors the labLocalParts() pattern in
@@ -120,6 +121,75 @@ function captureDailyCoatingTarget(db) {
     }
   } catch (e) {
     console.error('[CoatingTarget] capture failed:', e.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Surfacing capture (Phil 2026-05-13: surfacing is the upstream master
+// throughput target; previously its endpoint returned coating's number)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function captureDailySurfacingTarget(db) {
+  try {
+    const { ymd, ptHour, ptDow } = ptLocalParts();
+    const isWorkday = ptDow >= 1 && ptDow <= 5 ? 1 : 0;
+
+    const target = computeSurfacingTarget(db);
+    // surfaced_actual matches countSurfacingExitsToday — "last SURFACING
+    // event today" — same source as captureDailyDeptActuals writes for
+    // daily_dept_actuals.dept='surfacing'. Single rule, no drift.
+    const surfacedActual = countSurfacingExitsToday(db, ymd);
+    const variance = surfacedActual - (target.target || 0);
+
+    const existing = db.prepare('SELECT date FROM daily_surfacing_targets WHERE date = ?').get(ymd);
+    if (existing) {
+      db.prepare(`
+        UPDATE daily_surfacing_targets
+        SET surfacing_wip = ?, intake_projection = ?, capacity_estimate = ?,
+            rollover_in = ?, total_target = ?, surfaced_actual = ?, variance = ?
+        WHERE date = ?
+      `).run(
+        target.surfacingWipCount || 0,
+        target.intakeProjection || 0,
+        target.capacityEstimate || 0,
+        target.rolloverIn || 0,
+        target.target || 0,
+        surfacedActual,
+        variance,
+        ymd
+      );
+    } else {
+      db.prepare(`
+        INSERT INTO daily_surfacing_targets
+        (date, is_workday, surfacing_wip, intake_projection, capacity_estimate,
+         rollover_in, total_target, surfaced_actual, variance, formula_version)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        ymd, isWorkday,
+        target.surfacingWipCount || 0,
+        target.intakeProjection || 0,
+        target.capacityEstimate || 0,
+        target.rolloverIn || 0,
+        target.target || 0,
+        surfacedActual,
+        variance,
+        target.formulaVersion || 1
+      );
+      console.log(`[SurfacingTarget] Captured ${ymd}: target=${target.target}, surfaced=${surfacedActual}`);
+    }
+
+    if (ptHour >= 23) {
+      const y = new Date(ymd + 'T12:00:00Z');
+      y.setUTCDate(y.getUTCDate() - 1);
+      const yYmd = y.toISOString().slice(0, 10);
+      db.prepare(`
+        UPDATE daily_surfacing_targets
+        SET finalized_at = datetime('now')
+        WHERE date = ? AND finalized_at IS NULL
+      `).run(yYmd);
+    }
+  } catch (e) {
+    console.error('[SurfacingTarget] capture failed:', e.message);
   }
 }
 
@@ -222,6 +292,7 @@ function captureDailyDeptActuals(db) {
 
 module.exports = {
   captureDailyCoatingTarget,
+  captureDailySurfacingTarget,
   captureDailyDeptActuals,
   countAssemblyToday,
   countCuttingExitsToday,
