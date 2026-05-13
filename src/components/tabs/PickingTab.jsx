@@ -19,7 +19,7 @@
 
 import { useState, useEffect } from 'react';
 import { T, mono } from '../../constants';
-import { GoalBar, GoalHistory, Card, SectionHeader, Pill } from '../shared';
+import { GoalBar, GoalHistory, Card, SectionHeader, Pill, DeptKpiStrip } from '../shared';
 
 export function PickingTab({ ovenServerUrl, settings }) {
   const [target, setTarget] = useState({ dailyGoal: 0, completedToday: 0, target: null });
@@ -115,6 +115,7 @@ export function PickingTab({ ovenServerUrl, settings }) {
   return (
     <div style={{ padding: '22px 28px', overflow: 'auto', height: 'calc(100vh - 160px)' }}>
       <GoalBar completedToday={target.completedToday} dailyGoal={target.dailyGoal} label="PICKED" />
+      <DeptKpiStrip dept="picking" serverUrl={ovenServerUrl} />
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>

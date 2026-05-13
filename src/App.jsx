@@ -9,7 +9,7 @@ import AnalyticsTab from "./components/tabs/AnalyticsTab";
 import ProductionAnalysisTab from "./components/tabs/ProductionAnalysisTab";
 import { PickingTab } from "./components/tabs/PickingTab";
 import LensScanner from "./components/LensScanner";
-import { StageHistory, GoalHistory, GoalBar } from "./components/shared";
+import { StageHistory, GoalHistory, GoalBar, DeptKpiStrip } from "./components/shared";
 
 // ── Error Boundary — catches render errors and shows fallback UI ───────────────
 class ErrorBoundary extends Component {
@@ -2290,6 +2290,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
         ))}
       </div>
       <GoalBar completedToday={intel?.completedToday || 0} dailyGoal={intel?.dailyGoal || 0} />
+      <DeptKpiStrip dept="coating" serverUrl={ovenServerUrl} />
       {subView==="intelligence"&&<CoatingIntelView intel={intel} error={intelError} lastFetch={lastFetch} serverUrl={ovenServerUrl} batchEdits={batchEdits} setBatchEdits={setBatchEdits}/>}
       {subView==="pipeline"&&<CoatingPipelineView serverUrl={ovenServerUrl} settings={settings}/>}
       {subView==="config"&&<CoatingConfigView config={coatingConfig} setConfig={setCoatingConfig}/>}
@@ -4499,6 +4500,7 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   return (
     <ProductionStageTab domain="surfacing" contextData={contextData} serverUrl={ovenServerUrl} settings={settings}>
       <GoalBar completedToday={surfacingTarget.completedToday} dailyGoal={surfacingTarget.dailyGoal} />
+      <DeptKpiStrip dept="surfacing" serverUrl={ovenServerUrl} />
       {/* Stage Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
@@ -4936,6 +4938,7 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
       </div>
 
       <GoalBar completedToday={cuttingTarget.completedToday} dailyGoal={cuttingTarget.dailyGoal} />
+      <DeptKpiStrip dept="cutting" serverUrl={ovenServerUrl} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
@@ -5171,6 +5174,7 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
           uses the shared component grammar with overage hatch, goal
           mark, projected tick, etc. */}
       <GoalBar completedToday={asmData?.completedToday || 0} dailyGoal={asmData?.dailyGoal || 0} label="ASSEMBLED" />
+      <DeptKpiStrip dept="assembly" serverUrl={ovenServerUrl} />
 
       {/* Stage Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
@@ -5721,6 +5725,7 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
       </div>
 
       <GoalBar completedToday={shipTarget.shippedToday} dailyGoal={shipTarget.daily} />
+      <DeptKpiStrip dept="shipping" serverUrl={ovenServerUrl} />
 
       {/* Search */}
       <div style={{ marginBottom: 16 }}>
