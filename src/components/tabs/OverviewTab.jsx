@@ -2033,11 +2033,14 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
       }
 
       case "department_goals":{
-        // Phil 2026-05-13: same three-peer grid as GoalBar (compact scale).
-        // 5 columns: DEPT · ACTUAL · bar · PROJ · GOAL. PROJ gets its own
-        // column (not a subline). All three numbers are 14px peers, each
-        // with a signed delta below in green/red. Bar fill = actual/goal;
-        // shift-time hash + projected tick overlay.
+        // Phil 2026-05-13: HID rewrite. Shared x-axis across all rows
+        // (Coating's 8 finally reads as tiny vs Shipping's 358 — per-row
+        // scaling collapsed comparability). Bars never cap; overage past
+        // the goal mark renders as a diagonal hatch segment so 466/409
+        // doesn't look identical to 999/409. ACTUAL is neutral slate
+        // (pace color stays on PROJ only — stops "green for blowing past
+        // a busted goal"). Axis tick scale above row 1 replaces the dead
+        // "VS GOAL" column header.
         const rows = [
           { key:'shipping',  label:'SHIPPING',  completed: deptGoals.shipping.completed,  goal: deptGoals.shipping.goal,  view:'shipping' },
           { key:'coating',   label:'COATING',   completed: deptGoals.coating.completed,   goal: deptGoals.coating.goal,   view:'coating' },
@@ -2052,54 +2055,95 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         const SHIFT_LEN = 8.5;
         const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
         const hoursRemaining = Math.max(0, SHIFT_LEN - shiftH);
-        const shiftElapsedPct = Math.max(0, Math.min(100, Math.round((shiftH / SHIFT_LEN) * 100)));
+        const shiftElapsedPct = Math.max(0, Math.min(100, (shiftH / SHIFT_LEN) * 100));
         const colorFor = rr => rr >= 1.0 ? '#10B981' : rr >= 0.85 ? '#F59E0B' : '#EF4444';
+        // Pre-compute projections + shared axis max across all rows.
+        const enriched = rows.map(r => {
+          const rate = shiftH > 0 ? r.completed / shiftH : 0;
+          const projected = rate > 0 ? Math.round(r.completed + rate * hoursRemaining) : r.completed;
+          return { ...r, projected };
+        });
+        const ceilToNice = (n) => {
+          if (!isFinite(n) || n <= 0) return 100;
+          const mag = Math.pow(10, Math.floor(Math.log10(n)));
+          const norm = n / mag;
+          const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+          return nice * mag;
+        };
+        const rawMax = Math.max(...enriched.flatMap(r => [r.goal, r.projected, r.completed]));
+        const axisMax = ceilToNice(rawMax * 1.05);
+        // 5-tick scale (0, 25%, 50%, 75%, 100% of axisMax) above row 1.
+        const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => Math.round(axisMax * p));
+        const fmtTick = n => n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : `${n}`;
         const hdrStyle = { fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1 };
+        const fillColor = '#475569'; // slate-600 neutral
         return (
-          <div style={{display:'flex', flexDirection:'column', gap:10, padding:'4px 0'}}>
-            {/* Header row */}
-            <div style={{display:'flex', alignItems:'center', gap:10, padding:'0 0 4px 0', borderBottom:`1px solid ${T.border}`, marginBottom:2}}>
+          <div style={{display:'flex', flexDirection:'column', gap:12, padding:'4px 0'}}>
+            {/* Header row with axis tick scale in the bar column */}
+            <div style={{display:'flex', alignItems:'flex-end', gap:10, padding:'0 0 6px 0', borderBottom:`1px solid ${T.border}`, marginBottom:2}}>
               <div style={{width:90, ...hdrStyle}}>DEPT</div>
-              <div style={{minWidth:70, textAlign:'right', ...hdrStyle}}>ACTUAL</div>
-              <div style={{flex:1, textAlign:'center', ...hdrStyle}}>VS GOAL</div>
-              <div style={{minWidth:70, textAlign:'right', ...hdrStyle}}>PROJ</div>
-              <div style={{minWidth:70, textAlign:'right', paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...hdrStyle}}>GOAL</div>
+              <div style={{minWidth:64, textAlign:'right', ...hdrStyle}}>ACTUAL</div>
+              <div style={{flex:1, position:'relative', height:12}}>
+                {ticks.map((t, i) => (
+                  <div key={i} style={{
+                    position:'absolute',
+                    left: i === 0 ? '0%' : i === ticks.length - 1 ? 'auto' : `${i * 25}%`,
+                    right: i === ticks.length - 1 ? '0%' : 'auto',
+                    transform: i === 0 ? 'none' : i === ticks.length - 1 ? 'none' : 'translateX(-50%)',
+                    bottom: 0,
+                    ...hdrStyle,
+                  }}>
+                    {fmtTick(t)}
+                  </div>
+                ))}
+              </div>
+              <div style={{minWidth:64, textAlign:'right', ...hdrStyle}}>PROJ</div>
+              <div style={{minWidth:64, textAlign:'right', paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...hdrStyle}}>GOAL</div>
             </div>
-            {rows.map(r => {
-              const rate = shiftH > 0 ? r.completed / shiftH : 0;
-              const projected = rate > 0 ? Math.round(r.completed + rate * hoursRemaining) : r.completed;
-              const actualPctRaw = r.goal > 0 ? r.completed / r.goal : 0;
-              const projPctRaw   = r.goal > 0 ? projected / r.goal : 0;
-              const actualPct = Math.min(100, Math.round(actualPctRaw * 100));
-              const projTickPct = Math.min(100, Math.round(projPctRaw * 100));
-              const actualColor = colorFor(actualPctRaw);
-              const projColor   = colorFor(projPctRaw);
-              const actualDelta = r.completed - r.goal;
-              const projDelta = projected - r.goal;
-              const showProjTick = projected !== r.completed && Math.abs(projTickPct - actualPct) >= 3;
+            {enriched.map(r => {
+              const goalPct   = axisMax > 0 ? (r.goal      / axisMax) * 100 : 0;
+              const actualPct = axisMax > 0 ? (r.completed / axisMax) * 100 : 0;
+              const projPct   = axisMax > 0 ? (r.projected / axisMax) * 100 : 0;
+              const projColor = colorFor(r.goal > 0 ? r.projected / r.goal : 0);
+              const projDelta = r.projected - r.goal;
+              const showProjTick = r.projected !== r.completed && Math.abs(projPct - actualPct) >= 3;
+              const overage = Math.max(0, actualPct - goalPct);
               const numStyle = { fontFamily:mono, fontSize:14, fontWeight:800, textAlign:'right', lineHeight:1.1 };
               const subStyle = { fontFamily:mono, fontSize:10, fontWeight:700, marginTop:1 };
               return (
-                <div key={r.key} onClick={()=>setView&&setView(r.view)} style={{display:'flex', alignItems:'center', gap:10, cursor:'pointer'}}>
+                <div key={r.key} onClick={()=>setView&&setView(r.view)} style={{display:'flex', alignItems:'center', gap:10, cursor:'pointer', minHeight:32}}>
                   <div style={{width:90, fontFamily:mono, fontSize:11, color:T.textMuted, fontWeight:700, letterSpacing:1}}>{r.label}</div>
-                  <div style={{minWidth:70, ...numStyle, color:actualColor}}>
+                  <div style={{minWidth:64, ...numStyle, color:'#cbd5e1'}}>
                     {r.completed.toLocaleString()}
-                    <div style={{...subStyle, color: actualDelta>=0 ? '#10B981' : '#EF4444'}}>{actualDelta>=0?'+':''}{actualDelta.toLocaleString()}</div>
                   </div>
-                  <div style={{flex:1, position:'relative', height:10, background:'#1f2937', borderRadius:4, overflow:'visible'}}>
+                  <div style={{flex:1, position:'relative', height:12, background:'#1f2937', borderRadius:4, overflow:'visible'}}>
                     <div style={{position:'absolute', inset:0, borderRadius:4, overflow:'hidden'}}>
-                      <div style={{width:`${actualPct}%`, height:'100%', background:actualColor, transition:'width 0.6s ease, background 0.4s ease'}}/>
+                      <div style={{position:'absolute', left:0, width:`${Math.min(actualPct, goalPct)}%`, height:'100%', background:fillColor, transition:'width 0.6s ease'}}/>
+                      {overage > 0 && (
+                        <div
+                          title={`Over goal by ${(r.completed - r.goal).toLocaleString()}`}
+                          style={{
+                            position:'absolute',
+                            left:`${goalPct}%`,
+                            width:`${overage}%`,
+                            height:'100%',
+                            background:`repeating-linear-gradient(135deg, ${projColor}66 0 4px, ${projColor}22 4px 8px)`,
+                            transition:'width 0.6s ease',
+                          }}
+                        />
+                      )}
                     </div>
-                    <div title={`Shift ${shiftElapsedPct}% elapsed`} style={{position:'absolute', left:`calc(${shiftElapsedPct}% - 0.5px)`, top:0, width:1, height:10, background:'rgba(203,213,225,0.45)', zIndex:1}}/>
+                    <div title={`Shift ${Math.round(shiftElapsedPct)}% elapsed`} style={{position:'absolute', left:`calc(${shiftElapsedPct}% - 0.5px)`, top:0, width:1, height:12, background:'rgba(203,213,225,0.45)', zIndex:1}}/>
+                    <div title={`Goal ${r.goal.toLocaleString()}`} style={{position:'absolute', left:`calc(${goalPct}% - 1px)`, top:-3, width:2, height:18, background:'#94a3b8', zIndex:2}}/>
                     {showProjTick && (
-                      <div title={`Projected ${projected.toLocaleString()}`} style={{position:'absolute', left:`calc(${projTickPct}% - 1px)`, top:-2, width:2, height:14, background:projColor, opacity:0.9, borderRadius:1, zIndex:2}}/>
+                      <div title={`Projected ${r.projected.toLocaleString()}`} style={{position:'absolute', left:`calc(${projPct}% - 1.5px)`, top:-4, width:3, height:20, background:projColor, borderRadius:1, zIndex:3}}/>
                     )}
                   </div>
-                  <div style={{minWidth:70, ...numStyle, color:projColor}}>
-                    {projected.toLocaleString()}
+                  <div style={{minWidth:64, ...numStyle, color:projColor}}>
+                    {r.projected.toLocaleString()}
                     <div style={{...subStyle, color: projDelta>=0 ? '#10B981' : '#EF4444'}}>{projDelta>=0?'+':''}{projDelta.toLocaleString()}</div>
                   </div>
-                  <div style={{minWidth:70, paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...numStyle, color:'#cbd5e1'}}>
+                  <div style={{minWidth:64, paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...numStyle, color:'#cbd5e1'}}>
                     {r.goal.toLocaleString()}
                   </div>
                 </div>
