@@ -2,6 +2,98 @@
 import { useState, useEffect } from 'react';
 import { T, mono } from '../constants';
 
+// ──────────────────────────────────────────────────────────────────────────
+// ceilToNice — round up to the next 1/2/5×10^n so shared axis ticks land
+// on readable numbers (e.g. 1547 → 1600, 466 → 500). Used by GoalBar.
+// ──────────────────────────────────────────────────────────────────────────
+export function ceilToNice(n) {
+  if (!isFinite(n) || n <= 0) return 100;
+  const mag = Math.pow(10, Math.floor(Math.log10(n)));
+  const norm = n / mag;
+  const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
+  return nice * mag;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// GoalBar — canonical goal-at-top-of-tab visual. Moved here from
+// App.jsx-inline on 2026-05-13 so dept tabs in src/components/tabs/ can
+// import cleanly (PickingTab was the first such tab).
+//
+// Phil 2026-05-13: actuals fill colored by actual/goal pace (green ≥100%,
+// amber ≥85%, red <85%). Overage past goal renders as diagonal hatch in
+// PROJ color. Bar never caps — axis max = ceilToNice(max(goal, projected,
+// actual) × 1.05). Goal mark 2px slate-400 with 3px overshoot. Projected
+// tick 3px in projColor with 4px overshoot. Shift-time hash 1px grey.
+//
+// Renders nothing when dailyGoal===0 so it self-hides until a formula ships.
+// ──────────────────────────────────────────────────────────────────────────
+export function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'ACTUAL', shiftStartHour = 7, shiftEndHour = 15.5 }) {
+  if (!dailyGoal) return null;
+  const fmt = n => Math.round(n || 0).toLocaleString();
+  const shiftStart = new Date(); shiftStart.setHours(shiftStartHour, 0, 0, 0);
+  const shiftLenH = shiftEndHour - shiftStartHour;
+  const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
+  const hoursRemaining = Math.max(0, shiftLenH - shiftH);
+  const rate = shiftH > 0 ? completedToday / shiftH : 0;
+  const projected = rate > 0 && shiftH > 0 ? Math.round(completedToday + rate * hoursRemaining) : completedToday;
+  const axisMax = ceilToNice(Math.max(dailyGoal, projected, completedToday) * 1.05);
+  const goalPct    = axisMax > 0 ? (dailyGoal     / axisMax) * 100 : 0;
+  const actualPct  = axisMax > 0 ? (completedToday / axisMax) * 100 : 0;
+  const projPct    = axisMax > 0 ? (projected     / axisMax) * 100 : 0;
+  const shiftElapsedPct = Math.max(0, Math.min(100, (shiftH / shiftLenH) * 100));
+  const projDelta = projected - dailyGoal;
+  const colorFor = r => r >= 1.0 ? '#10B981' : r >= 0.85 ? '#F59E0B' : '#EF4444';
+  const actualColor = colorFor(dailyGoal > 0 ? completedToday / dailyGoal : 0);
+  const projColor   = colorFor(dailyGoal > 0 ? projected / dailyGoal : 0);
+  const showProjTick = projected !== completedToday && Math.abs(projPct - actualPct) >= 3;
+  const overage = Math.max(0, actualPct - goalPct);
+  const cellLbl = { fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 };
+  const cellNum = { fontSize: 22, fontFamily: mono, fontWeight: 800, lineHeight: 1.1 };
+  const cellSub = { fontSize: 11, fontFamily: mono, fontWeight: 700, marginTop: 2 };
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
+        <div style={cellLbl}>{label}</div>
+        <div style={{ ...cellNum, color: actualColor }}>{fmt(completedToday)}</div>
+      </div>
+      <div style={{ flex: 1, position: 'relative', height: 16, background: T.bg, borderRadius: 6, overflow: 'visible' }}>
+        <div style={{ position: 'absolute', inset: 0, borderRadius: 6, overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', left: 0, width: `${Math.min(actualPct, goalPct)}%`, height: '100%', background: actualColor, transition: 'width 0.8s ease, background 0.4s ease' }} />
+          {overage > 0 && (
+            <div
+              title={`Over goal by ${fmt(completedToday - dailyGoal)}`}
+              style={{
+                position: 'absolute',
+                left: `${goalPct}%`,
+                width: `${overage}%`,
+                height: '100%',
+                background: `repeating-linear-gradient(135deg, ${projColor}88 0 4px, ${projColor}33 4px 8px)`,
+                transition: 'width 0.8s ease',
+              }}
+            />
+          )}
+        </div>
+        <div title={`Shift ${Math.round(shiftElapsedPct)}% elapsed`} style={{ position: 'absolute', left: `calc(${shiftElapsedPct}% - 0.5px)`, top: 0, width: 1, height: 16, background: 'rgba(203,213,225,0.45)', zIndex: 1 }} />
+        <div title={`Goal ${fmt(dailyGoal)}`} style={{ position: 'absolute', left: `calc(${goalPct}% - 1px)`, top: -3, width: 2, height: 22, background: '#94a3b8', zIndex: 2 }} />
+        {showProjTick && (
+          <div title={`Projected ${fmt(projected)}`} style={{ position: 'absolute', left: `calc(${projPct}% - 1.5px)`, top: -4, width: 3, height: 24, background: projColor, borderRadius: 1, zIndex: 3 }} />
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 110 }}>
+        <div style={cellLbl}>PROJ EOD</div>
+        <div style={{ ...cellNum, color: projColor }}>{fmt(projected)}</div>
+        <div style={{ ...cellSub, color: projDelta >= 0 ? '#10B981' : '#EF4444' }}>
+          {projDelta >= 0 ? '+' : ''}{fmt(projDelta)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 110, paddingLeft: 10, borderLeft: `1px solid ${T.border}` }}>
+        <div style={cellLbl}>GOAL</div>
+        <div style={{ ...cellNum, color: '#cbd5e1' }}>{fmt(dailyGoal)}</div>
+      </div>
+    </div>
+  );
+}
+
 export const SectionHeader = ({children,right})=>(
   <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
     <div style={{fontSize:13,color:T.textMuted,textTransform:"uppercase",letterSpacing:1.5,fontFamily:mono,fontWeight:600}}>{children}</div>

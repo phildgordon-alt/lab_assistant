@@ -8,7 +8,7 @@ import MaintenanceTab from "./components/tabs/MaintenanceTab";
 import AnalyticsTab from "./components/tabs/AnalyticsTab";
 import ProductionAnalysisTab from "./components/tabs/ProductionAnalysisTab";
 import LensScanner from "./components/LensScanner";
-import { StageHistory, GoalHistory } from "./components/shared";
+import { StageHistory, GoalHistory, GoalBar } from "./components/shared";
 
 // ── Error Boundary — catches render errors and shows fallback UI ───────────────
 class ErrorBoundary extends Component {
@@ -285,109 +285,9 @@ const sans = "'Outfit','DM Sans',system-ui,sans-serif";
 // shiftStartHour/shiftEndHour bound the projection rate. Defaults match the
 // lab's standard 7am→3:30pm shift. Task #29 will replace these with auto-
 // detected shift windows fetched from /api/shift-window.
-// ceilToNice: round up to the next 1/2/5×10^n so shared axis ticks land on
-// readable numbers (e.g. 1547 → 1600, 466 → 500).
-function ceilToNice(n) {
-  if (!isFinite(n) || n <= 0) return 100;
-  const mag = Math.pow(10, Math.floor(Math.log10(n)));
-  const norm = n / mag;
-  const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 5 ? 5 : 10;
-  return nice * mag;
-}
-
-function GoalBar({ completedToday = 0, dailyGoal = 0, label = 'ACTUAL', shiftStartHour = 7, shiftEndHour = 15.5 }) {
-  if (!dailyGoal) return null;
-  const mono = "'JetBrains Mono',monospace";
-  const fmt = n => Math.round(n || 0).toLocaleString();
-  const shiftStart = new Date(); shiftStart.setHours(shiftStartHour, 0, 0, 0);
-  const shiftLenH = shiftEndHour - shiftStartHour;
-  const shiftH = Math.max(0.5, (Date.now() - shiftStart.getTime()) / 3600000);
-  const hoursRemaining = Math.max(0, shiftLenH - shiftH);
-  const rate = shiftH > 0 ? completedToday / shiftH : 0;
-  const projected = rate > 0 && shiftH > 0 ? Math.round(completedToday + rate * hoursRemaining) : completedToday;
-  // Phil 2026-05-13: never cap the fill. When actual > goal we render an
-  // overage segment past the goal mark (hatched, reduced opacity). Axis max
-  // = ceilToNice(max(goal, projected, actual) × 1.05) so the bar geometry
-  // accommodates every value without clipping.
-  const axisMax = ceilToNice(Math.max(dailyGoal, projected, completedToday) * 1.05);
-  const goalPct    = axisMax > 0 ? (dailyGoal     / axisMax) * 100 : 0;
-  const actualPct  = axisMax > 0 ? (completedToday / axisMax) * 100 : 0;
-  const projPct    = axisMax > 0 ? (projected     / axisMax) * 100 : 0;
-  const shiftElapsedPct = Math.max(0, Math.min(100, (shiftH / shiftLenH) * 100));
-  const projDelta = projected - dailyGoal;
-  const colorFor = r => r >= 1.0 ? '#10B981' : r >= 0.85 ? '#F59E0B' : '#EF4444';
-  const actualPctOfGoal = dailyGoal > 0 ? completedToday / dailyGoal : 0;
-  const projPctOfGoal = dailyGoal > 0 ? projected / dailyGoal : 0;
-  const actualColor = colorFor(actualPctOfGoal);
-  const projColor = colorFor(projPctOfGoal);
-  // Collision-resistant tick: only render the projected marker when it's
-  // ≥3% (axis-relative) away from the actual fill edge.
-  const showProjTick = projected !== completedToday && Math.abs(projPct - actualPct) >= 3;
-  const overage = Math.max(0, actualPct - goalPct);
-  // Phil 2026-05-13 v2: green-for-good on the fill (was neutral slate in
-  // v1, which Phil reverted — "you want a green line for your actuals").
-  // Solid fill colored by actual/goal pace; overage hatch picks up the
-  // PROJ color so the forward-looking signal lives in the stripes.
-  const cellLbl = { fontSize: 9, fontFamily: mono, color: '#94a3b8', fontWeight: 700, letterSpacing: 1.5 };
-  const cellNum = { fontSize: 22, fontFamily: mono, fontWeight: 800, lineHeight: 1.1 };
-  const cellSub = { fontSize: 11, fontFamily: mono, fontWeight: 700, marginTop: 2 };
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '10px 14px', background: T.surface, border: `1px solid ${T.border}`, borderRadius: 10, marginBottom: 16 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', minWidth: 110 }}>
-        <div style={cellLbl}>{label}</div>
-        <div style={{ ...cellNum, color: actualColor }}>{fmt(completedToday)}</div>
-      </div>
-      <div style={{ flex: 1, position: 'relative', height: 16, background: T.bg, borderRadius: 6, overflow: 'visible' }}>
-        <div style={{ position: 'absolute', inset: 0, borderRadius: 6, overflow: 'hidden' }}>
-          {/* Solid fill up to min(actual, goal) — color by actual/goal pace */}
-          <div style={{ position: 'absolute', left: 0, width: `${Math.min(actualPct, goalPct)}%`, height: '100%', background: actualColor, transition: 'width 0.8s ease, background 0.4s ease' }} />
-          {/* Overage segment past goal — diagonal hatch in projColor at low opacity */}
-          {overage > 0 && (
-            <div
-              title={`Over goal by ${fmt(completedToday - dailyGoal)}`}
-              style={{
-                position: 'absolute',
-                left: `${goalPct}%`,
-                width: `${overage}%`,
-                height: '100%',
-                background: `repeating-linear-gradient(135deg, ${projColor}88 0 4px, ${projColor}33 4px 8px)`,
-                transition: 'width 0.8s ease',
-              }}
-            />
-          )}
-        </div>
-        {/* Shift-time hash — 1px grey, lowest z */}
-        <div
-          title={`Shift ${Math.round(shiftElapsedPct)}% elapsed`}
-          style={{ position: 'absolute', left: `calc(${shiftElapsedPct}% - 0.5px)`, top: 0, width: 1, height: 16, background: 'rgba(203,213,225,0.45)', zIndex: 1 }}
-        />
-        {/* Goal mark — 2px slate-400, 3px overshoot top/bottom */}
-        <div
-          title={`Goal ${fmt(dailyGoal)}`}
-          style={{ position: 'absolute', left: `calc(${goalPct}% - 1px)`, top: -3, width: 2, height: 22, background: '#94a3b8', zIndex: 2 }}
-        />
-        {/* Projected tick — 3px in projColor, 4px overshoot top/bottom */}
-        {showProjTick && (
-          <div
-            title={`Projected ${fmt(projected)}`}
-            style={{ position: 'absolute', left: `calc(${projPct}% - 1.5px)`, top: -4, width: 3, height: 24, background: projColor, borderRadius: 1, zIndex: 3 }}
-          />
-        )}
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 110 }}>
-        <div style={cellLbl}>PROJ EOD</div>
-        <div style={{ ...cellNum, color: projColor }}>{fmt(projected)}</div>
-        <div style={{ ...cellSub, color: projDelta >= 0 ? '#10B981' : '#EF4444' }}>
-          {projDelta >= 0 ? '+' : ''}{fmt(projDelta)}
-        </div>
-      </div>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', minWidth: 110, paddingLeft: 10, borderLeft: `1px solid ${T.border}` }}>
-        <div style={cellLbl}>GOAL</div>
-        <div style={{ ...cellNum, color: '#cbd5e1' }}>{fmt(dailyGoal)}</div>
-      </div>
-    </div>
-  );
-}
+// GoalBar + ceilToNice moved to src/components/shared.jsx on 2026-05-13
+// so dept tabs split into src/components/tabs/ can import cleanly.
+// Imported at top of file from "./components/shared".
 
 function fmtMins(n) {
   const m = Math.round(Number(n) || 0);
