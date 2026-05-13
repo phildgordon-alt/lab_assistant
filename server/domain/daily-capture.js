@@ -149,9 +149,11 @@ function countAssemblyToday(db, ymd) {
   return row?.n || 0;
 }
 
-// Surfacing exits today — mirror of countCuttingExitsToday with
-// stage='SURFACING'. Phil 2026-05-13: surfacing gets its own dept goal,
-// inheriting the coating target ("everything surfaced goes into coating").
+// Phil 2026-05-13: redefined as "last stage event today" (matches
+// countCoatingExits in coating-target.js). Old definition undercounted by
+// ~100× because it required the first post-stage event to be today; the
+// new definition matches "completed surfacing/cutting today" as spoken.
+// See countCoatingExits docstring for full rationale.
 function countSurfacingExitsToday(db, ymd) {
   const tomorrow = nextDayYMD(ymd);
   const row = db.prepare(`
@@ -160,19 +162,11 @@ function countSurfacingExitsToday(db, ymd) {
       FROM job_events
       WHERE stage = 'SURFACING'
       GROUP BY invoice
-    ),
-    exited AS (
-      SELECT je.invoice, MIN(je.event_ts) AS exit_ts
-      FROM job_events je
-      JOIN last_surfacing ls ON ls.invoice = je.invoice
-      WHERE je.stage NOT IN ('SURFACING','HOLD','CANCELED')
-        AND je.event_ts > ls.last_ts
-      GROUP BY je.invoice
     )
     SELECT COUNT(*) AS n
-    FROM exited
-    WHERE date(exit_ts/1000, 'unixepoch', 'localtime') >= ?
-      AND date(exit_ts/1000, 'unixepoch', 'localtime') <  ?
+    FROM last_surfacing
+    WHERE date(last_ts/1000, 'unixepoch', 'localtime') >= ?
+      AND date(last_ts/1000, 'unixepoch', 'localtime') <  ?
   `).get(ymd, tomorrow);
   return row?.n || 0;
 }
@@ -185,19 +179,11 @@ function countCuttingExitsToday(db, ymd) {
       FROM job_events
       WHERE stage = 'CUTTING'
       GROUP BY invoice
-    ),
-    exited AS (
-      SELECT je.invoice, MIN(je.event_ts) AS exit_ts
-      FROM job_events je
-      JOIN last_cutting lc ON lc.invoice = je.invoice
-      WHERE je.stage NOT IN ('CUTTING','HOLD','CANCELED')
-        AND je.event_ts > lc.last_ts
-      GROUP BY je.invoice
     )
     SELECT COUNT(*) AS n
-    FROM exited
-    WHERE date(exit_ts/1000, 'unixepoch', 'localtime') >= ?
-      AND date(exit_ts/1000, 'unixepoch', 'localtime') <  ?
+    FROM last_cutting
+    WHERE date(last_ts/1000, 'unixepoch', 'localtime') >= ?
+      AND date(last_ts/1000, 'unixepoch', 'localtime') <  ?
   `).get(ymd, tomorrow);
   return row?.n || 0;
 }

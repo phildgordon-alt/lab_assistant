@@ -98,9 +98,23 @@ function countCoatingEntries(db, sinceYMD, untilYMD) {
 }
 
 /**
- * Count distinct invoices that *exited* COATING within [sinceYMD, untilYMD).
- * Exit = the first job_events row after that invoice's last COATING event
- * whose stage is post-coating (not COATING/HOLD/CANCELED). PT-local boundary.
+ * Count distinct invoices whose LAST COATING event falls in [sinceYMD, untilYMD).
+ *
+ * Phil 2026-05-13: redefined from "first post-coating event today" → "last
+ * coating event today." The old definition counted only invoices that had
+ * never appeared downstream until today, which excluded most invoices that
+ * coated yesterday and shipped today (they coated again? no — the previous
+ * day's downstream event made today's shipping not count). 2026-05-13 prod
+ * diagnostic returned 8 with the old definition vs 882 underlying post-
+ * coating events from coated invoices same day. The new definition matches
+ * the spoken phrase "completed coating today" — the last time we touched
+ * the invoice on a coater was today. Includes mid-coating jobs (their last
+ * coating event is today, even though they haven't advanced yet) which is
+ * intentional: that's "today's coating activity."
+ *
+ * Function name kept (`countCoatingExits`) to avoid touching every caller;
+ * semantics changed under the hood. Same redefinition applied to
+ * countSurfacingExitsToday and countCuttingExitsToday in daily-capture.js.
  */
 function countCoatingExits(db, sinceYMD, untilYMD) {
   const row = db.prepare(`
@@ -109,19 +123,11 @@ function countCoatingExits(db, sinceYMD, untilYMD) {
       FROM job_events
       WHERE stage = 'COATING'
       GROUP BY invoice
-    ),
-    exited AS (
-      SELECT je.invoice, MIN(je.event_ts) AS exit_ts
-      FROM job_events je
-      JOIN last_coating lc ON lc.invoice = je.invoice
-      WHERE je.stage NOT IN ('COATING','HOLD','CANCELED')
-        AND je.event_ts > lc.last_ts
-      GROUP BY je.invoice
     )
     SELECT COUNT(*) AS n
-    FROM exited
-    WHERE date(exit_ts/1000, 'unixepoch', 'localtime') >= ?
-      AND date(exit_ts/1000, 'unixepoch', 'localtime') <  ?
+    FROM last_coating
+    WHERE date(last_ts/1000, 'unixepoch', 'localtime') >= ?
+      AND date(last_ts/1000, 'unixepoch', 'localtime') <  ?
   `).get(sinceYMD, untilYMD);
   return row?.n || 0;
 }
