@@ -815,6 +815,67 @@ function computeMaterialCategoryScenarioTotals(db, scenarioId) {
 // × (lead+safety) weeks. Falls back to lens_consumption_weekly avg if the
 // per-donor forecast is missing. Header still uses computeMaterialCategoryScenarioTotals
 // for lead/safety/ABC.
+// Phil 2026-05-14: shared row-quantity gating for both SV and Semi
+// stocking CSVs. Three rules in one place so they can't drift:
+//   1. Pair rounding — lenses come in pairs; round up to nearest even
+//   2. Minimum pairs threshold — qty below threshold = surfacing
+//      candidate, not stock order
+//   3. Long-tail decision — if the donor SKU's monthly volume falls
+//      below break-even (per long-tail-analysis.js), the row is a
+//      surfacing candidate regardless of computed qty
+//
+// Returns { qty, decision: 'STOCK'|'SURFACE_QTY'|'SURFACE_LONGTAIL',
+//          reason: string|null }
+// Caller emits a warning + skips the row when decision !== 'STOCK'.
+function applyStockingRules(rawQty, donorSku, longTailMap, minPairs) {
+  if (rawQty <= 0) return { qty: 0, decision: 'SURFACE_QTY', reason: 'zero-qty after projection' };
+
+  // 1. Round up to nearest even (pair). 1→2, 3→4, 5→6.
+  const evenQty = rawQty % 2 === 0 ? rawQty : rawQty + 1;
+
+  // 2. Minimum threshold. Default: 1 pair = 2 units.
+  const minQty = minPairs * 2;
+  if (evenQty < minQty) {
+    return { qty: evenQty, decision: 'SURFACE_QTY', reason: `qty ${evenQty} below min ${minQty}` };
+  }
+
+  // 3. Long-tail check. SURFACE decision from runAnalysis means
+  // monthly volume < break-even at current carry+surf costs.
+  const ltDecision = longTailMap && longTailMap.get(donorSku);
+  if (ltDecision === 'SURFACE') {
+    return { qty: evenQty, decision: 'SURFACE_LONGTAIL', reason: 'long-tail analyzer recommends surfacing' };
+  }
+
+  return { qty: evenQty, decision: 'STOCK', reason: null };
+}
+
+// Load all long-tail decisions once at the start of CSV generation.
+// runAnalysis scans every SKU — too heavy to call per-row. Cache the
+// result for the duration of this CSV build.
+function buildLongTailMap(db) {
+  try {
+    const { runAnalysis } = require('./long-tail-analysis');
+    const result = runAnalysis(db);
+    const map = new Map();
+    for (const r of result.skus || result.results || []) {
+      if (r.sku && r.decision) map.set(r.sku, r.decision);
+    }
+    return map;
+  } catch (e) {
+    console.warn(`[NPI] long-tail-analysis unavailable: ${e.message} — proceeding without long-tail gating`);
+    return null;
+  }
+}
+
+// Min-pairs threshold from lab_planning_config; default 1 pair (2 units).
+function loadMinStockPairs(db) {
+  try {
+    const row = db.prepare("SELECT value FROM lab_planning_config WHERE key = 'npi_min_stock_pairs'").get();
+    if (row && row.value) return Math.max(1, parseInt(row.value, 10) || 1);
+  } catch (_) { /* config table not yet present */ }
+  return 1;
+}
+
 function formatSvStockingCsv(db, scenarioId) {
   const totals = computeMaterialCategoryScenarioTotals(db, scenarioId);
   if (totals.error) return { error: totals.error };
@@ -884,6 +945,11 @@ function formatSvStockingCsv(db, scenarioId) {
 
   const warnings = [];
   const dataRows = [];
+  // Phil 2026-05-14: stocking-rule gates. Load once, apply per row.
+  const longTailMap = buildLongTailMap(db);
+  const minPairs = loadMinStockPairs(db);
+  let surfaceCandidates = 0;
+  let longTailRoutes = 0;
 
   for (const d of donors) {
     let forecast = d.projected_weekly;
@@ -910,10 +976,29 @@ function formatSvStockingCsv(db, scenarioId) {
       continue;
     }
 
+    // Pre-check long-tail at donor level so we can emit one summary
+    // warning per donor instead of N per-Rx-row warnings.
+    const donorLongTailDecision = longTailMap && longTailMap.get(d.sku);
+    if (donorLongTailDecision === 'SURFACE') {
+      warnings.push(`# NOTE: donor_sku ${d.sku} (${d.material_code}) routed to SURFACING by long-tail analyzer (volume below break-even) — skipped from stocking order`);
+      longTailRoutes++;
+      continue;
+    }
+
     for (const rx of hist) {
       const pctOfDonor = rx.sample_count / donorSamples;
       const weeklyForRow = forecast * pctOfDonor * ((d.adoption_pct || 50) / 100);
-      const qty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
+      const rawQty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
+      const ruled = applyStockingRules(rawQty, d.sku, longTailMap, minPairs);
+      if (ruled.decision !== 'STOCK') {
+        surfaceCandidates++;
+        // Per-row note only when below-min skips a row. Long-tail was
+        // handled at the donor level above.
+        if (ruled.decision === 'SURFACE_QTY') {
+          warnings.push(`# NOTE: donor_sku ${d.sku} sph=${rx.sph || 0} cyl=${rx.cyl || 0} add=${rx.add_pwr || 0} → ${ruled.reason} (surface instead of stock)`);
+        }
+        continue;
+      }
       dataRows.push({
         placeholder_sku: firstVariant,
         real_sku: phRealSku.get(firstVariant) || '',
@@ -924,9 +1009,17 @@ function formatSvStockingCsv(db, scenarioId) {
         add_pwr: rx.add_pwr || 0,
         sample_count: rx.sample_count,
         weeklyForRow,
-        qty,
+        qty: ruled.qty,
       });
     }
+  }
+
+  // Summary lines for the header so operator sees the gate impact at a glance.
+  if (longTailRoutes > 0) {
+    warnings.unshift(`# SUMMARY: ${longTailRoutes} donor_sku(s) routed to surfacing by long-tail analyzer`);
+  }
+  if (surfaceCandidates > 0) {
+    warnings.unshift(`# SUMMARY: ${surfaceCandidates} row(s) below min-stock threshold (${minPairs * 2} units) → surface instead`);
   }
 
   // Sort: material → donor_sku → sph → cyl → add
@@ -1072,6 +1165,13 @@ function formatSemiStockingCsv(db, scenarioId) {
 
   const warnings = [];
   const dataRows = [];
+  // Phil 2026-05-14: same stocking-rule gates as SV. Semi rows have
+  // no Rx split (one row per donor) so the per-donor long-tail check
+  // is also the per-row check.
+  const longTailMap = buildLongTailMap(db);
+  const minPairs = loadMinStockPairs(db);
+  let surfaceCandidates = 0;
+  let longTailRoutes = 0;
 
   for (const d of donors) {
     let forecast = d.projected_weekly;
@@ -1091,7 +1191,19 @@ function formatSemiStockingCsv(db, scenarioId) {
     }
 
     const weeklyForRow = forecast * ((d.adoption_pct || 50) / 100);
-    const qty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
+    const rawQty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
+    const ruled = applyStockingRules(rawQty, d.sku, longTailMap, minPairs);
+    if (ruled.decision !== 'STOCK') {
+      if (ruled.decision === 'SURFACE_LONGTAIL') {
+        warnings.push(`# NOTE: donor_sku ${d.sku} (${d.material_code}) routed to SURFACING by long-tail analyzer — skipped from stocking order`);
+        longTailRoutes++;
+      } else {
+        warnings.push(`# NOTE: donor_sku ${d.sku} (${d.material_code}) base_curve=${d.base_curve ?? 'UNKNOWN'} → ${ruled.reason} (surface instead of stock)`);
+        surfaceCandidates++;
+      }
+      continue;
+    }
+    const qty = ruled.qty;
     dataRows.push({
       placeholder_sku: firstVariant,
       real_sku: phRealSku.get(firstVariant) || '',
@@ -1116,6 +1228,14 @@ function formatSemiStockingCsv(db, scenarioId) {
   const orderQtyByMat = {};
   for (const r of dataRows) orderQtyByMat[r.material] = (orderQtyByMat[r.material] || 0) + r.qty;
   const grandSum = dataRows.reduce((s, r) => s + r.qty, 0);
+
+  // Phil 2026-05-14: gate-impact summary at top of warnings (semi).
+  if (longTailRoutes > 0) {
+    warnings.unshift(`# SUMMARY: ${longTailRoutes} donor_sku(s) routed to surfacing by long-tail analyzer`);
+  }
+  if (surfaceCandidates > 0) {
+    warnings.unshift(`# SUMMARY: ${surfaceCandidates} row(s) below min-stock threshold (${minPairs * 2} units) → surface instead`);
+  }
 
   const seenMats = new Set(donors.map(d => d.material_code));
   const missingMats = selectedSemiMaterials.filter(m => !seenMats.has(m));
