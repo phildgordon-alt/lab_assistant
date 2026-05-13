@@ -5090,7 +5090,9 @@ Respond with a structured batching plan in this format:
     return json(res, {
       jobs: enrichedAssembly,
       assemblyWip: assemblyJobs.length,
-      completedToday: passFailToday.pass + passFailToday.fail,
+      // Phil 2026-05-13: "passed at assembly today" = PASS only, not pass+fail.
+      // History writer countAssemblyToday is aligned on the same definition.
+      completedToday: passFailToday.pass,
       passFailToday,
       byStation,
       stationCompletions,
@@ -5174,6 +5176,25 @@ Respond with a structured batching plan in this format:
   // ══════════════════════════════════════════════════════════════
   // ── COATING DASHBOARD ──────────────────────────────────────
   // ══════════════════════════════════════════════════════════════
+  // Surfacing target (Phil 2026-05-13). Goal inherits coating's target —
+  // "everything surfaced goes into coating" — so the two depts hold the
+  // same number. completedToday uses the same persisted-event distinct-
+  // invoice exits pattern as the other depts so GoalBar and GoalHistory
+  // can never disagree.
+  if (req.method==='GET' && url.pathname==='/api/surfacing/target') {
+    try {
+      const { computeCoatingTarget } = require('./domain/coating-target');
+      const { countSurfacingExitsToday } = require('./domain/daily-capture');
+      const t = computeCoatingTarget(labDb.db);
+      const { ymd: ymdToday } = labLocalParts(new Date());
+      const completedToday = countSurfacingExitsToday(labDb.db, ymdToday);
+      return json(res, { dailyGoal: t?.target || 0, completedToday, source: 'coating-target' });
+    } catch (e) {
+      console.error('[/api/surfacing/target] failed:', e.message);
+      return json(res, { error: e.message, dailyGoal: 0, completedToday: 0 }, 500);
+    }
+  }
+
   if (req.method==='GET' && url.pathname==='/api/coating/dashboard') {
     const allJobs = dviTrace.getJobs();
     const now = Date.now();
@@ -5188,10 +5209,13 @@ Respond with a structured batching plan in this format:
     // Jobs actively in a coater (CCL, CCP)
     const activeJobs = coatingJobs.filter(j => /CCL|CCP/i.test(j.station));
 
-    // Today's coating stats from events ring buffer (avoids N+1 getJobHistory)
+    // Today's coating stats. completedToday uses the persisted job_events
+    // distinct-invoice exits (PT-local, restart-safe) — same number the
+    // GoalHistory shows — to avoid live/history mismatch (Phil 2026-05-13).
+    // byCoater + operatorStats stay event-level from the ring buffer
+    // because those are "machine activity" not "did today's target hit."
     const coatingStationRe = /CCL|CCP/i;
     const operatorStats = buildOperatorStats(dviTrace, coatingStationRe);
-    let completedToday = 0;
     const byCoater = {};
     for (const evt of dviTrace.getRecentEvents(50000)) {
       if (evt.timestamp < todayMs) continue;
@@ -5199,9 +5223,15 @@ Respond with a structured batching plan in this format:
         if (!byCoater[evt.station]) byCoater[evt.station] = { station: evt.station, count: 0, jobs: [] };
         byCoater[evt.station].count++;
         byCoater[evt.station].jobs.push(evt.jobId);
-        completedToday++;
       }
     }
+    let completedToday = 0;
+    try {
+      const { countCoatingExits } = require('./domain/coating-target');
+      const { ymd: ymdToday } = labLocalParts(new Date());
+      const tomorrowYMD = (() => { const d = new Date(ymdToday + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); })();
+      completedToday = countCoatingExits(labDb.db, ymdToday, tomorrowYMD);
+    } catch (e) { console.error('[coating/dashboard] countCoatingExits failed', e.message); }
 
     // Group by coating type from XML
     const byCoatingType = {};
@@ -5263,14 +5293,19 @@ Respond with a structured batching plan in this format:
     }
     for (const s of Object.values(byStation)) s.operators = [...s.operators];
 
-    // Today's cutting stats from events ring buffer
+    // Today's cutting stats. completedToday uses the persisted job_events
+    // distinct-invoice exits (PT-local, restart-safe) — same number the
+    // GoalHistory shows — to fix the live/history mismatch Phil flagged
+    // 2026-05-13. The ring buffer was counting EVERY cutting event
+    // (double-counting re-traces) and used server-local midnight.
     const cuttingStationRe = /EDGER|CUT|INHSE FIN/i;
     const operatorStats = buildOperatorStats(dviTrace, cuttingStationRe);
     let completedToday = 0;
-    for (const evt of dviTrace.getRecentEvents(50000)) {
-      if (evt.timestamp < todayMs) continue;
-      if (cuttingStationRe.test(evt.station) && !/LCU/i.test(evt.station)) completedToday++;
-    }
+    try {
+      const { countCuttingExitsToday } = require('./domain/daily-capture');
+      const { ymd: ymdToday } = labLocalParts(new Date());
+      completedToday = countCuttingExitsToday(labDb.db, ymdToday);
+    } catch (e) { console.error('[cutting/dashboard] countCuttingExitsToday failed', e.message); }
 
     // Upstream pipeline
     const surfacingJobs = allJobs.filter(j => j.stage === 'SURFACING');
@@ -5504,7 +5539,7 @@ Respond with a structured batching plan in this format:
   //   cutting  → daily_ship_targets (target) ⨯ daily_dept_actuals (actual)
   //   assembly → daily_ship_targets (target) ⨯ daily_dept_actuals (actual)
   // ══════════════════════════════════════════════════════════════
-  if (req.method==='GET' && /^\/api\/(shipping|coating|cutting|assembly)\/goal-history$/.test(url.pathname)) {
+  if (req.method==='GET' && /^\/api\/(shipping|coating|cutting|assembly|surfacing)\/goal-history$/.test(url.pathname)) {
     const dept = url.pathname.split('/')[2];
     const days = Math.max(1, Math.min(90, parseInt(url.searchParams.get('days') || '14', 10)));
     try {
@@ -5532,6 +5567,26 @@ Respond with a structured batching plan in this format:
           FROM daily_coating_targets
           WHERE date >= date('now','localtime','-' || ? || ' days')
           ORDER BY date DESC
+        `).all(days);
+      } else if (dept === 'surfacing') {
+        // Surfacing target inherits coating's (Phil 2026-05-13 — "everything
+        // surfaced goes into coating"), so JOIN coating targets not ship.
+        rows = labDb.db.prepare(`
+          SELECT t.date,
+                 t.is_workday,
+                 t.total_target AS target,
+                 COALESCE(a.actual, 0) AS actual,
+                 (COALESCE(a.actual, 0) - t.total_target) AS variance,
+                 CASE WHEN t.total_target > 0
+                      THEN ROUND(((CAST(COALESCE(a.actual,0) AS REAL) - t.total_target) / t.total_target) * 10000) / 100
+                      ELSE 0 END AS variancePct,
+                 t.rollover_in AS rolloverIn,
+                 (a.finalized_at IS NOT NULL) AS finalized
+          FROM daily_coating_targets t
+          LEFT JOIN daily_dept_actuals a
+                 ON a.date = t.date AND a.dept = 'surfacing'
+          WHERE t.date >= date('now','localtime','-' || ? || ' days')
+          ORDER BY t.date DESC
         `).all(days);
       } else {
         // cutting + assembly — JOIN ship target to dept actual

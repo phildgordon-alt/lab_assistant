@@ -135,13 +135,45 @@ function captureDailyCoatingTarget(db) {
  * Matches the count rule already used by /api/assembly/jobs.
  */
 
+// Phil 2026-05-13: "passed at assembly today." Assembly actual = distinct
+// invoices with an 'ASSEMBLY PASS' station event today. Previously this
+// counted any 'ASSEMBLY #%' station touch — that's broader (includes WIP
+// at an assembly station) than "passed." Align on Phil's definition.
 function countAssemblyToday(db, ymd) {
   const row = db.prepare(`
     SELECT COUNT(DISTINCT invoice) AS n
     FROM job_events
-    WHERE station LIKE 'ASSEMBLY #%'
+    WHERE station = 'ASSEMBLY PASS'
       AND date(event_ts/1000, 'unixepoch', 'localtime') = ?
   `).get(ymd);
+  return row?.n || 0;
+}
+
+// Surfacing exits today — mirror of countCuttingExitsToday with
+// stage='SURFACING'. Phil 2026-05-13: surfacing gets its own dept goal,
+// inheriting the coating target ("everything surfaced goes into coating").
+function countSurfacingExitsToday(db, ymd) {
+  const tomorrow = nextDayYMD(ymd);
+  const row = db.prepare(`
+    WITH last_surfacing AS (
+      SELECT invoice, MAX(event_ts) AS last_ts
+      FROM job_events
+      WHERE stage = 'SURFACING'
+      GROUP BY invoice
+    ),
+    exited AS (
+      SELECT je.invoice, MIN(je.event_ts) AS exit_ts
+      FROM job_events je
+      JOIN last_surfacing ls ON ls.invoice = je.invoice
+      WHERE je.stage NOT IN ('SURFACING','HOLD','CANCELED')
+        AND je.event_ts > ls.last_ts
+      GROUP BY je.invoice
+    )
+    SELECT COUNT(*) AS n
+    FROM exited
+    WHERE date(exit_ts/1000, 'unixepoch', 'localtime') >= ?
+      AND date(exit_ts/1000, 'unixepoch', 'localtime') <  ?
+  `).get(ymd, tomorrow);
   return row?.n || 0;
 }
 
@@ -175,6 +207,7 @@ function captureDailyDeptActuals(db) {
     const { ymd, ptHour } = ptLocalParts();
     const assemblyActual = countAssemblyToday(db, ymd);
     const cuttingActual = countCuttingExitsToday(db, ymd);
+    const surfacingActual = countSurfacingExitsToday(db, ymd);
 
     const upsert = db.prepare(`
       INSERT INTO daily_dept_actuals (date, dept, actual)
@@ -184,6 +217,7 @@ function captureDailyDeptActuals(db) {
     `);
     upsert.run(ymd, 'assembly', assemblyActual);
     upsert.run(ymd, 'cutting', cuttingActual);
+    upsert.run(ymd, 'surfacing', surfacingActual);
 
     if (ptHour >= 23) {
       const y = new Date(ymd + 'T12:00:00Z');
@@ -205,4 +239,5 @@ module.exports = {
   captureDailyDeptActuals,
   countAssemblyToday,
   countCuttingExitsToday,
+  countSurfacingExitsToday,
 };
