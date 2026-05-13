@@ -5608,6 +5608,44 @@ Respond with a structured batching plan in this format:
           ORDER BY t.date DESC
         `).all(dept, days);
       }
+      // Phil 2026-05-13: overlay today's row with live counter so GoalBar
+      // and GoalHistory never disagree. Captured daily_dept_actuals only
+      // updates hourly via captureDailyDeptActuals; GoalBar reads live
+      // job_events. Without this overlay, the today row in GoalHistory
+      // lags GoalBar by up to an hour.
+      try {
+        const { ymd: todayYMD } = labLocalParts(new Date());
+        const todayRow = rows.find(r => r.date === todayYMD);
+        if (todayRow) {
+          let liveActual = null;
+          if (dept === 'shipping') {
+            liveActual = getShippedCounts().today;
+          } else if (dept === 'coating') {
+            const { countCoatingExits } = require('./domain/coating-target');
+            const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
+            const { ymd: tomorrowYMD } = labLocalParts(tomorrow);
+            liveActual = countCoatingExits(labDb.db, todayYMD, tomorrowYMD);
+          } else if (dept === 'surfacing') {
+            const { countSurfacingExitsToday } = require('./domain/daily-capture');
+            liveActual = countSurfacingExitsToday(labDb.db, todayYMD);
+          } else if (dept === 'cutting') {
+            const { countCuttingExitsToday } = require('./domain/daily-capture');
+            liveActual = countCuttingExitsToday(labDb.db, todayYMD);
+          } else if (dept === 'assembly') {
+            const { countAssemblyToday } = require('./domain/daily-capture');
+            liveActual = countAssemblyToday(labDb.db, todayYMD);
+          }
+          if (liveActual != null && liveActual !== todayRow.actual) {
+            todayRow.actual = liveActual;
+            todayRow.variance = liveActual - todayRow.target;
+            todayRow.variancePct = todayRow.target > 0
+              ? Math.round(((liveActual - todayRow.target) / todayRow.target) * 10000) / 100
+              : 0;
+          }
+        }
+      } catch (overlayErr) {
+        console.warn(`[/api/${dept}/goal-history] live overlay failed:`, overlayErr.message);
+      }
       return json(res, { dept, days, history: rows });
     } catch (e) {
       console.error(`[/api/${dept}/goal-history] failed:`, e.message);
