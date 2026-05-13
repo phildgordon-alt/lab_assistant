@@ -741,6 +741,7 @@ function getDonorSkusForScenario(db, scenarioId, lensTypeClass) {
         t.material_code        AS material_code,
         t.adoption_pct         AS adoption_pct,
         p.base_curve           AS base_curve,
+        p.diameter             AS diameter,
         p.sample_job_count     AS sample_job_count,
         lis.projected_weekly   AS projected_weekly,
         lis.computed_at        AS computed_at
@@ -762,6 +763,7 @@ function getDonorSkusForScenario(db, scenarioId, lensTypeClass) {
         t.material_code        AS material_code,
         t.adoption_pct         AS adoption_pct,
         p.base_curve           AS base_curve,
+        p.diameter             AS diameter,
         p.sample_job_count     AS sample_job_count,
         NULL                   AS projected_weekly,
         NULL                   AS computed_at
@@ -876,6 +878,24 @@ function loadMinStockPairs(db) {
   return 1;
 }
 
+// Phil 2026-05-14: lens-yield multiplier. Lab on average consumes
+// MORE lenses than the final shipped count (breakage, rework, QC
+// rejects). If we use 1.1 lenses per "needed" lens, we must order
+// 10% more than projection. Multiplier is applied to weekly_for_row
+// before the weeks_multiplier and pair rounding. Tunable via
+// lab_planning_config key `npi_lens_yield_multiplier`. Default 1.0
+// (no adjustment).
+function loadLensYieldMultiplier(db) {
+  try {
+    const row = db.prepare("SELECT value FROM lab_planning_config WHERE key = 'npi_lens_yield_multiplier'").get();
+    if (row && row.value) {
+      const v = parseFloat(row.value);
+      if (Number.isFinite(v) && v >= 1.0 && v <= 2.0) return v;
+    }
+  } catch (_) { /* config table not yet present */ }
+  return 1.0;
+}
+
 function formatSvStockingCsv(db, scenarioId) {
   const totals = computeMaterialCategoryScenarioTotals(db, scenarioId);
   if (totals.error) return { error: totals.error };
@@ -945,14 +965,17 @@ function formatSvStockingCsv(db, scenarioId) {
 
   const warnings = [];
   const dataRows = [];
+  const surfacingRows = [];     // Phil 2026-05-14: rows gated out to surfacing
   // Phil 2026-05-14: stocking-rule gates. Load once, apply per row.
   const longTailMap = buildLongTailMap(db);
   const minPairs = loadMinStockPairs(db);
+  const yieldMultiplier = loadLensYieldMultiplier(db);   // 1.0 default
   let surfaceCandidates = 0;
   let longTailRoutes = 0;
 
   for (const d of donors) {
     let forecast = d.projected_weekly;
+    let forecastSource = 'demand-sensing';
     if (forecast === null || forecast === undefined || forecast === 0) {
       const fb = fallbackAvgStmt.get(d.sku);
       const fbAvg = fb && fb.avg != null ? fb.avg : 0;
@@ -961,6 +984,7 @@ function formatSvStockingCsv(db, scenarioId) {
         continue;
       }
       forecast = fbAvg;
+      forecastSource = 'flat-12mo-avg';
       warnings.push(`# WARNING: donor_sku ${d.sku} has no demand-sensing projection — fell back to flat 12mo average`);
     }
 
@@ -982,35 +1006,68 @@ function formatSvStockingCsv(db, scenarioId) {
     if (donorLongTailDecision === 'SURFACE') {
       warnings.push(`# NOTE: donor_sku ${d.sku} (${d.material_code}) routed to SURFACING by long-tail analyzer (volume below break-even) — skipped from stocking order`);
       longTailRoutes++;
+      // Still emit Rx rows in the surfacing list so the floor knows what to expect
+      for (const rx of hist) {
+        const pctOfDonor = rx.sample_count / donorSamples;
+        const weeklyForRow = forecast * pctOfDonor * ((d.adoption_pct || 50) / 100);
+        surfacingRows.push({
+          placeholder_sku: firstVariant, real_sku: phRealSku.get(firstVariant) || '',
+          donor_sku: d.sku, material: d.material_code,
+          sph: rx.sph || 0, cyl: rx.cyl || 0, add_pwr: rx.add_pwr || 0,
+          sample_count: rx.sample_count,
+          donor_forecast_weekly: forecast, forecastSource,
+          adoption_pct: d.adoption_pct || 50, pct_of_donor: pctOfDonor,
+          weekly_for_row: weeklyForRow, weeks_multiplier: totals.weeksMultiplier,
+          raw_qty: Math.ceil(weeklyForRow * totals.weeksMultiplier),
+          qty: Math.ceil(weeklyForRow * totals.weeksMultiplier),
+          surface_reason: 'SURFACE_LONGTAIL',
+          reason_detail: 'long-tail analyzer recommends surfacing',
+        });
+      }
       continue;
     }
 
     for (const rx of hist) {
       const pctOfDonor = rx.sample_count / donorSamples;
-      const weeklyForRow = forecast * pctOfDonor * ((d.adoption_pct || 50) / 100);
+      // Formula (Phil 2026-05-14):
+      //   weekly_for_row = forecast × adoption% × pct_of_donor × yield_multiplier
+      //   raw_qty        = ceil(weekly_for_row × weeks_multiplier)
+      //   qty            = pair-rounded raw_qty
+      const weeklyForRow = forecast * pctOfDonor * ((d.adoption_pct || 50) / 100) * yieldMultiplier;
       const rawQty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
       const ruled = applyStockingRules(rawQty, d.sku, longTailMap, minPairs);
-      if (ruled.decision !== 'STOCK') {
-        surfaceCandidates++;
-        // Per-row note only when below-min skips a row. Long-tail was
-        // handled at the donor level above.
-        if (ruled.decision === 'SURFACE_QTY') {
-          warnings.push(`# NOTE: donor_sku ${d.sku} sph=${rx.sph || 0} cyl=${rx.cyl || 0} add=${rx.add_pwr || 0} → ${ruled.reason} (surface instead of stock)`);
-        }
-        continue;
-      }
-      dataRows.push({
+      // Math-trace fields populated on the row for the surfacing-list
+      // CSV (and for in-chat verification when Phil asks).
+      const rowBase = {
         placeholder_sku: firstVariant,
         real_sku: phRealSku.get(firstVariant) || '',
         donor_sku: d.sku,
         material: d.material_code,
+        base_curve: d.base_curve,
+        diameter: d.diameter,
         sph: rx.sph || 0,
         cyl: rx.cyl || 0,
         add_pwr: rx.add_pwr || 0,
         sample_count: rx.sample_count,
+        donor_forecast_weekly: Math.round(forecast * 100) / 100,
+        forecastSource,
+        adoption_pct: d.adoption_pct || 50,
+        pct_of_donor: Math.round(pctOfDonor * 10000) / 10000,
+        weekly_for_row: Math.round(weeklyForRow * 100) / 100,
+        weeks_multiplier: totals.weeksMultiplier,
+        raw_qty: rawQty,
         weeklyForRow,
         qty: ruled.qty,
-      });
+      };
+      if (ruled.decision !== 'STOCK') {
+        surfaceCandidates++;
+        if (ruled.decision === 'SURFACE_QTY') {
+          warnings.push(`# NOTE: donor_sku ${d.sku} sph=${rx.sph || 0} cyl=${rx.cyl || 0} add=${rx.add_pwr || 0} → ${ruled.reason} (surface instead of stock)`);
+        }
+        surfacingRows.push({ ...rowBase, surface_reason: ruled.decision, reason_detail: ruled.reason });
+        continue;
+      }
+      dataRows.push(rowBase);
     }
   }
 
@@ -1115,13 +1172,18 @@ function formatSvStockingCsv(db, scenarioId) {
   }
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  lines.push(['placeholder_sku','real_sku','donor_sku','material','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
+  // Phil 2026-05-14: stocking CSV now includes base_curve + diameter
+  // from the donor SKU so the supplier can fulfill the exact spec.
+  // Without these the supplier doesn't know which lens to manufacture.
+  lines.push(['placeholder_sku','real_sku','donor_sku','material','base_curve','diameter','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
   for (const r of dataRows) {
     lines.push([
       csvEsc(r.placeholder_sku),
       csvEsc(r.real_sku),
       csvEsc(r.donor_sku),
       csvEsc(r.material),
+      r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
+      r.diameter != null ? r.diameter : 'UNKNOWN',
       (r.sph || 0).toFixed(2),
       (r.cyl || 0).toFixed(2),
       (r.add_pwr || 0).toFixed(2),
@@ -1132,7 +1194,78 @@ function formatSvStockingCsv(db, scenarioId) {
   }
   lines.push('');
   lines.push(`# Grand total SV: ${grandSum} lenses`);
-  return { csv: lines.join('\n'), warnings: exportWarnings, totals };
+  return { csv: lines.join('\n'), warnings: exportWarnings, totals, surfacingRows };
+}
+
+// Phil 2026-05-14: surfacing-list CSV — itemized list of Rx
+// combinations that the stocking engine gated OUT to surfacing.
+// Same math-trace columns as the stocking CSV plus surface_reason
+// (SURFACE_LONGTAIL / SURFACE_QTY). Phil's floor uses this list to
+// know what Rx combos to expect at the surfacing line for the 1.74
+// NPI (and any future material-category scenarios).
+function formatSurfacingListCsv(surfacingRows, totals, kind) {
+  const lines = [];
+  const safeName = totals && totals.scenario && totals.scenario.name ? totals.scenario.name : '';
+  lines.push(`# NPI ${kind} SURFACING LIST — ${csvEsc(safeName)}`);
+  lines.push(`# These Rx combinations were routed to SURFACING by the engine —`);
+  lines.push(`# do not order stock. Surface in-house when an Rx comes in.`);
+  lines.push(`# Reason codes:`);
+  lines.push(`#   SURFACE_LONGTAIL — donor SKU volume below break-even`);
+  lines.push(`#   SURFACE_QTY      — projected qty below min-stock threshold`);
+  lines.push(`# Generated: ${new Date().toISOString()}`);
+  lines.push('');
+  if (kind === 'SV') {
+    lines.push([
+      'placeholder_sku','real_sku','donor_sku','material','base_curve','diameter',
+      'sph','cyl','add','sample_count',
+      'donor_forecast_weekly','forecast_source','adoption_pct','pct_of_donor',
+      'weekly_for_row','weeks_multiplier','raw_qty','surface_reason','reason_detail'
+    ].join(','));
+    for (const r of surfacingRows) {
+      lines.push([
+        csvEsc(r.placeholder_sku), csvEsc(r.real_sku),
+        csvEsc(r.donor_sku), csvEsc(r.material),
+        r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
+        r.diameter != null ? r.diameter : 'UNKNOWN',
+        (r.sph || 0).toFixed(2), (r.cyl || 0).toFixed(2), (r.add_pwr || 0).toFixed(2),
+        r.sample_count,
+        (r.donor_forecast_weekly ?? 0).toFixed(2),
+        csvEsc(r.forecastSource || ''),
+        r.adoption_pct ?? 50,
+        (r.pct_of_donor ?? 0).toFixed(4),
+        (r.weekly_for_row ?? r.weeklyForRow ?? 0).toFixed(2),
+        r.weeks_multiplier ?? '',
+        r.raw_qty ?? r.qty ?? 0,
+        csvEsc(r.surface_reason || ''),
+        csvEsc(r.reason_detail || ''),
+      ].join(','));
+    }
+  } else {
+    lines.push([
+      'placeholder_sku','real_sku','donor_sku','material','base_curve','diameter',
+      'donor_forecast_weekly','forecast_source','adoption_pct',
+      'weekly_for_row','weeks_multiplier','raw_qty','surface_reason','reason_detail'
+    ].join(','));
+    for (const r of surfacingRows) {
+      lines.push([
+        csvEsc(r.placeholder_sku), csvEsc(r.real_sku),
+        csvEsc(r.donor_sku), csvEsc(r.material),
+        r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
+        r.diameter != null ? r.diameter : 'UNKNOWN',
+        (r.donor_forecast_weekly ?? 0).toFixed(2),
+        csvEsc(r.forecastSource || ''),
+        r.adoption_pct ?? 50,
+        (r.weekly_for_row ?? r.weeklyForRow ?? 0).toFixed(2),
+        r.weeks_multiplier ?? '',
+        r.raw_qty ?? r.qty ?? 0,
+        csvEsc(r.surface_reason || ''),
+        csvEsc(r.reason_detail || ''),
+      ].join(','));
+    }
+  }
+  lines.push('');
+  lines.push(`# Total surfacing rows: ${surfacingRows.length}`);
+  return lines.join('\n');
 }
 
 // Semi stocking CSV — one row per donor SKU. base_curve comes from
@@ -1165,16 +1298,19 @@ function formatSemiStockingCsv(db, scenarioId) {
 
   const warnings = [];
   const dataRows = [];
+  const surfacingRows = [];     // Phil 2026-05-14: rows gated to surfacing
   // Phil 2026-05-14: same stocking-rule gates as SV. Semi rows have
   // no Rx split (one row per donor) so the per-donor long-tail check
   // is also the per-row check.
   const longTailMap = buildLongTailMap(db);
   const minPairs = loadMinStockPairs(db);
+  const yieldMultiplier = loadLensYieldMultiplier(db);
   let surfaceCandidates = 0;
   let longTailRoutes = 0;
 
   for (const d of donors) {
     let forecast = d.projected_weekly;
+    let forecastSource = 'demand-sensing';
     if (forecast === null || forecast === undefined || forecast === 0) {
       const fb = fallbackAvgStmt.get(d.sku);
       const fbAvg = fb && fb.avg != null ? fb.avg : 0;
@@ -1183,6 +1319,7 @@ function formatSemiStockingCsv(db, scenarioId) {
         continue;
       }
       forecast = fbAvg;
+      forecastSource = 'flat-12mo-avg';
       warnings.push(`# WARNING: donor_sku ${d.sku} has no demand-sensing projection — fell back to flat 12mo average`);
     }
 
@@ -1190,9 +1327,21 @@ function formatSemiStockingCsv(db, scenarioId) {
       warnings.push(`# WARNING: donor_sku ${d.sku} has UNKNOWN base_curve`);
     }
 
-    const weeklyForRow = forecast * ((d.adoption_pct || 50) / 100);
+    // Formula (Phil 2026-05-14):
+    //   weekly_for_row = forecast × adoption% × yield_multiplier
+    //   raw_qty        = ceil(weekly_for_row × weeks_multiplier)
+    //   qty            = pair-rounded raw_qty
+    const weeklyForRow = forecast * ((d.adoption_pct || 50) / 100) * yieldMultiplier;
     const rawQty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
     const ruled = applyStockingRules(rawQty, d.sku, longTailMap, minPairs);
+    const mathTrace = {
+      donor_forecast_weekly: Math.round(forecast * 100) / 100,
+      forecastSource,
+      adoption_pct: d.adoption_pct || 50,
+      weekly_for_row: Math.round(weeklyForRow * 100) / 100,
+      weeks_multiplier: totals.weeksMultiplier,
+      raw_qty: rawQty,
+    };
     if (ruled.decision !== 'STOCK') {
       if (ruled.decision === 'SURFACE_LONGTAIL') {
         warnings.push(`# NOTE: donor_sku ${d.sku} (${d.material_code}) routed to SURFACING by long-tail analyzer — skipped from stocking order`);
@@ -1201,6 +1350,13 @@ function formatSemiStockingCsv(db, scenarioId) {
         warnings.push(`# NOTE: donor_sku ${d.sku} (${d.material_code}) base_curve=${d.base_curve ?? 'UNKNOWN'} → ${ruled.reason} (surface instead of stock)`);
         surfaceCandidates++;
       }
+      surfacingRows.push({
+        placeholder_sku: firstVariant, real_sku: phRealSku.get(firstVariant) || '',
+        donor_sku: d.sku, material: d.material_code,
+        base_curve: d.base_curve, diameter: d.diameter,
+        ...mathTrace, qty: ruled.qty,
+        surface_reason: ruled.decision, reason_detail: ruled.reason,
+      });
       continue;
     }
     const qty = ruled.qty;
@@ -1210,7 +1366,9 @@ function formatSemiStockingCsv(db, scenarioId) {
       donor_sku: d.sku,
       material: d.material_code,
       base_curve: d.base_curve,
+      diameter: d.diameter,
       sample_count: d.sample_job_count || 0,
+      ...mathTrace,
       weeklyForRow,
       qty,
     });
@@ -1290,7 +1448,9 @@ function formatSemiStockingCsv(db, scenarioId) {
   lines.push(`# Note: base_curve=UNKNOWN means the SKU has no known BC in lens_sku_properties.`);
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  lines.push(['placeholder_sku','real_sku','donor_sku','material','base_curve','sample_count','weekly_projection','initial_order_qty'].join(','));
+  // Phil 2026-05-14: Semi stocking CSV — base_curve already here,
+  // diameter added (donor BC + DIA both required for supplier spec).
+  lines.push(['placeholder_sku','real_sku','donor_sku','material','base_curve','diameter','sample_count','weekly_projection','initial_order_qty'].join(','));
   for (const r of dataRows) {
     lines.push([
       csvEsc(r.placeholder_sku),
@@ -1298,6 +1458,7 @@ function formatSemiStockingCsv(db, scenarioId) {
       csvEsc(r.donor_sku),
       csvEsc(r.material),
       r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
+      r.diameter != null ? r.diameter : 'UNKNOWN',
       r.sample_count,
       r.weeklyForRow.toFixed(2),
       r.qty,
@@ -1305,7 +1466,14 @@ function formatSemiStockingCsv(db, scenarioId) {
   }
   lines.push('');
   lines.push(`# Grand total Semi: ${grandSum} pucks`);
-  return { csv: lines.join('\n'), warnings: exportWarnings, totals };
+  return { csv: lines.join('\n'), warnings: exportWarnings, totals, surfacingRows };
 }
 
-module.exports = { createScenario, updateScenario, deleteScenario, getScenarios, getScenario, computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows, formatRxListCsv, getCannibalizationVariance, computeMaterialCategoryScenarioTotals, formatSvStockingCsv, formatSemiStockingCsv };
+module.exports = {
+  createScenario, updateScenario, deleteScenario, getScenarios, getScenario,
+  computeCannibalization, getActiveAdjustments, expandScenarioToPerJobRows,
+  formatRxListCsv, getCannibalizationVariance,
+  computeMaterialCategoryScenarioTotals,
+  formatSvStockingCsv, formatSemiStockingCsv,
+  formatSurfacingListCsv,
+};
