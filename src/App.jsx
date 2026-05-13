@@ -135,9 +135,16 @@ const COATING_COLORS = {
 
 const BATCH_STATES = { running: "RUNNING", hold: "HOLD", waiting: "WAITING", complete: "COMPLETE", idle: "IDLE", loading: "LOADING" };
 
-// ── API Key helper — checks settings first, then env variable ────────────────
+// ── API Key helper — settings only, NEVER env var ──────────────────────────
+// SECURITY 2026-05-13: previously this fell back to `import.meta.env.VITE_ANTHROPIC_API_KEY`.
+// Vite inlines VITE_*-prefixed env vars into the compiled bundle at build
+// time, which leaked the production API key to every browser that loaded the
+// SPA. The fallback is removed entirely; the only legitimate path is for a
+// user to enter their own key in the Settings UI (stored in localStorage).
+// Backend AI calls must go through the gateway or server-side direct paths,
+// never use a browser-supplied key.
 const getAnthropicApiKey = (settings) => {
-  return settings?.anthropicApiKey || import.meta.env.VITE_ANTHROPIC_API_KEY || '';
+  return settings?.anthropicApiKey || '';
 };
 
 // ── Gateway helper — calls MCP gateway or falls back to direct Anthropic ─────
