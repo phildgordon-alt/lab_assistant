@@ -2075,14 +2075,25 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
         // 5-tick scale (0, 25%, 50%, 75%, 100% of axisMax) above row 1.
         const ticks = [0, 0.25, 0.5, 0.75, 1].map(p => Math.round(axisMax * p));
         const fmtTick = n => n >= 1000 ? `${(n / 1000).toFixed(n % 1000 === 0 ? 0 : 1)}k` : `${n}`;
-        const hdrStyle = { fontFamily:mono, fontSize:9, color:T.textDim, fontWeight:600, letterSpacing:1 };
+        // HID 2026-05-13: legend tokens inline in column headers (not a
+        // separate strip). Each header gets a slate-400 swatch matching
+        // the visual shape it labels — solid fill (ACTUAL), 3px vertical
+        // (PROJ), 2px vertical (GOAL). Slate-neutral so the legend isn't
+        // confused with row state. Overage hatch needs no swatch — same
+        // hue as fill, just textured, eye reads "more, past the line."
+        const hdrStyle = { fontFamily:mono, fontSize:11, color:T.textDim, fontWeight:700, letterSpacing:1.2 };
+        const swatchSolid = { display:'inline-block', width:10, height:6, background:'#94a3b8', borderRadius:1, marginRight:5, verticalAlign:'middle' };
+        const swatchProj  = { display:'inline-block', width:3,  height:11, background:'#94a3b8', borderRadius:1, marginRight:5, verticalAlign:'middle' };
+        const swatchGoal  = { display:'inline-block', width:2,  height:11, background:'#94a3b8', marginRight:5, verticalAlign:'middle' };
         return (
           <div style={{display:'flex', flexDirection:'column', gap:12, padding:'4px 0'}}>
             {/* Header row with axis tick scale in the bar column */}
             <div style={{display:'flex', alignItems:'flex-end', gap:10, padding:'0 0 6px 0', borderBottom:`1px solid ${T.border}`, marginBottom:2}}>
               <div style={{width:90, ...hdrStyle}}>DEPT</div>
-              <div style={{minWidth:64, textAlign:'right', ...hdrStyle}}>ACTUAL</div>
-              <div style={{flex:1, position:'relative', height:12}}>
+              <div style={{minWidth:64, textAlign:'right', ...hdrStyle}}>
+                <span style={swatchSolid}/>ACTUAL
+              </div>
+              <div style={{flex:1, position:'relative', height:14}}>
                 {ticks.map((t, i) => (
                   <div key={i} style={{
                     position:'absolute',
@@ -2090,14 +2101,18 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
                     right: i === ticks.length - 1 ? '0%' : 'auto',
                     transform: i === 0 ? 'none' : i === ticks.length - 1 ? 'none' : 'translateX(-50%)',
                     bottom: 0,
-                    ...hdrStyle,
+                    fontFamily:mono, fontSize:10, color:T.textDim, fontWeight:600,
                   }}>
                     {fmtTick(t)}
                   </div>
                 ))}
               </div>
-              <div style={{minWidth:64, textAlign:'right', ...hdrStyle}}>PROJ</div>
-              <div style={{minWidth:64, textAlign:'right', paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...hdrStyle}}>GOAL</div>
+              <div style={{minWidth:64, textAlign:'right', ...hdrStyle}}>
+                <span style={swatchProj}/>PROJ
+              </div>
+              <div style={{minWidth:64, textAlign:'right', paddingLeft:8, borderLeft:`1px solid ${T.border}`, ...hdrStyle}}>
+                <span style={swatchGoal}/>GOAL
+              </div>
             </div>
             {enriched.map(r => {
               const goalPct   = axisMax > 0 ? (r.goal      / axisMax) * 100 : 0;
