@@ -9,42 +9,17 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 // uncaughtException → recursed → 316 GB log file → disk full). Every write
 // is wrapped, file is size-capped at 10 MB with one rotation, identical
 // messages within 1s are dropped (kills tight error loops at the source).
-//
-// Phil 2026-05-14: hardened against THE SAME EPIPE cascade that just caused
-// 3,253 launchd restarts. The 2026-04-30 fix wrapped writes in try/catch,
-// but stream.write() is async — EPIPE arrives later on the stream's 'error'
-// event. No listener → bubbles to uncaughtException → re-enters this handler
-// → writes stderr again → loops forever. Real fix: listen for 'error' on
-// stdout/stderr, latch a broken flag, and STOP writing to that stream once
-// it's confirmed dead. The file write keeps working. See plan:
-// cheeky-wandering-hollerith.md.
 const logFile = path.join(__dirname, '..', 'data', 'server-errors.log');
 const LOG_MAX_BYTES = 10 * 1024 * 1024;
 let _lastErrMsg = '';
 let _lastErrAt = 0;
-let _stdoutBroken = false;
-let _stderrBroken = false;
-
-// Consume EPIPE at the source — without these listeners, stream errors bubble
-// to uncaughtException and trigger handler recursion. Once broken, latch the
-// flag so we don't keep trying.
-process.stdout.on('error', (e) => {
-  if (e && (e.code === 'EPIPE' || e.code === 'EBADF')) _stdoutBroken = true;
-});
-process.stderr.on('error', (e) => {
-  if (e && (e.code === 'EPIPE' || e.code === 'EBADF')) _stderrBroken = true;
-});
 
 function safeLogError(msg) {
   const now = Date.now();
   if (msg === _lastErrMsg && now - _lastErrAt < 1000) return;
   _lastErrMsg = msg;
   _lastErrAt = now;
-  if (!_stderrBroken) {
-    try { process.stderr.write(msg); } catch (e) {
-      if (e && (e.code === 'EPIPE' || e.code === 'EBADF')) _stderrBroken = true;
-    }
-  }
+  try { process.stderr.write(msg); } catch {}
   try {
     let size = 0;
     try { size = fs.statSync(logFile).size; } catch {}
@@ -56,18 +31,9 @@ function safeLogError(msg) {
 }
 
 process.on('uncaughtException', (err) => {
-  // EPIPE on stdout/stderr is now consumed by the listeners above. If one
-  // sneaks through (e.g. before listeners attached), drop it — logging it
-  // is what caused the original cascade.
-  if (err && (err.code === 'EPIPE' || err.code === 'EBADF')) {
-    if (err.message && err.message.includes('stdout')) _stdoutBroken = true;
-    if (err.message && err.message.includes('stderr')) _stderrBroken = true;
-    return;
-  }
   safeLogError(`[${new Date().toISOString()}] UNCAUGHT: ${err?.message || err}\n${err?.stack || ''}\n\n`);
 });
 process.on('unhandledRejection', (reason) => {
-  if (reason && (reason.code === 'EPIPE' || reason.code === 'EBADF')) return;
   safeLogError(`[${new Date().toISOString()}] UNHANDLED REJECTION: ${reason?.message || reason}\n${reason?.stack || ''}\n\n`);
 });
 
