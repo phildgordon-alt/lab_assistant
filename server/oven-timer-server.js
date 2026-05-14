@@ -593,6 +593,38 @@ function labDateFromMs(ms) {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+// Phil 2026-05-14: TRUE days-in-lab. Was previously computed from
+// `firstSeen` (the timestamp dvi-trace.js's tail loop FIRST saw the job
+// in trace events). Every server restart resets `firstSeen` for jobs not
+// in the trace yet, so a job that's actually been in lab for 72 days
+// shows 0.1 days. Fix: prefer DVI XML entryDate (true lab entry per the
+// supplier's record), fall back to firstSeen only if XML hasn't been
+// indexed yet. Returns days as a number rounded to 0.1.
+function daysInLabFor(jobOrEntryDateIso, fallbackFirstSeenMs) {
+  // Caller may pass either:
+  //   (1) an ISO YYYY-MM-DD entry date string from xml or jobs row, OR
+  //   (2) a trace job object with firstSeen attached (legacy)
+  let entryIso = null;
+  if (typeof jobOrEntryDateIso === 'string') entryIso = jobOrEntryDateIso;
+  else if (jobOrEntryDateIso && typeof jobOrEntryDateIso === 'object') {
+    // Try common shapes used in the codebase
+    entryIso = jobOrEntryDateIso.entryDate
+      ? dviEntryDateToIso(jobOrEntryDateIso.entryDate) || jobOrEntryDateIso.entryDate
+      : jobOrEntryDateIso.entry_date || null;
+    if (!fallbackFirstSeenMs) fallbackFirstSeenMs = jobOrEntryDateIso.firstSeen;
+  }
+  if (entryIso && /^\d{4}-\d{2}-\d{2}$/.test(entryIso)) {
+    const ms = Date.parse(entryIso + 'T00:00:00');
+    if (Number.isFinite(ms) && ms > 0) {
+      return Math.max(0, Math.round((Date.now() - ms) / 86400000 * 10) / 10);
+    }
+  }
+  if (fallbackFirstSeenMs) {
+    return Math.max(0, Math.round((Date.now() - fallbackFirstSeenMs) / 86400000 * 10) / 10);
+  }
+  return 0;
+}
+
 // Lab-local PT date + hour (0-23) + day-of-week (0=Sun .. 6=Sat) for a Date.
 // Use this everywhere a "today / yesterday / weekday" check needs to be PT-correct.
 // Server clock can be UTC or any TZ; this guarantees the same answer either way.
@@ -621,7 +653,7 @@ function enrichJob(j, xmlIndex) {
     invoice: j.job_id,
     reference: xml?.reference || null, // Shopify order ID
     rxNumber: xml?.rxNum || null,
-    daysInLab: j.daysInLab || (j.firstSeen ? Math.max(0, (Date.now() - j.firstSeen) / 86400000) : 0),
+    daysInLab: daysInLabFor(xml, j.firstSeen),
     coating: xml?.coating || xml?.coatR || '',
     coatType: xml?.coatType || null,
     rush: xml?.rush || 'N',
@@ -1760,7 +1792,9 @@ const server = http.createServer(async (req, res) => {
         rush: j.rush || false,
         firstSeen: j.firstSeen, lastSeen: j.lastSeen,
         minutesInStage: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : 0,
-        daysInLab: j.firstSeen ? Math.round((now - j.firstSeen) / 86400000 * 10) / 10 : 0,
+        // Phil 2026-05-14: prefer DVI entryDate (true lab entry) over
+        // firstSeen (trace tail timestamp, resets on restart).
+        daysInLab: daysInLabFor(xml, j.firstSeen),
       };
       if (pipeline[j.stage]) pipeline[j.stage].push(enriched);
       else if (!pipeline.OTHER) pipeline.OTHER = [enriched]; else pipeline.OTHER.push(enriched);
@@ -2174,7 +2208,7 @@ const server = http.createServer(async (req, res) => {
           eyeSize: xml.eyeSize || '?',
           rush: j.rush || false,
           minutesInStage: j.lastSeen ? Math.round((now - j.lastSeen) / 60000) : 0,
-          daysInLab: j.firstSeen ? Math.round((now - j.firstSeen) / 86400000 * 10) / 10 : 0,
+          daysInLab: daysInLabFor(xml, j.firstSeen),
         };
         if (j.stage === 'COATING') coatingQueue.push(enriched);
         else if (j.stage === 'SURFACING') surfacingJobs.push(enriched);
