@@ -219,14 +219,19 @@ function rolloverFrom(db, today) {
  * historical pace OR actual pipeline pressure. No double-count.
  */
 function getUpstreamCoatingDemand(db) {
-  // Count semi-finished jobs at upstream stages that will need coating.
-  // Excludes jobs already at COATING (those are in coatingWipCount).
+  // Phil 2026-05-14: previously filtered `lens_type IN ('P','B')` on the
+  // assumption DVI tagged semi-finished jobs with those codes — but real
+  // DVI data stores `lens_type` as coating recipe codes ('AR', 'BLUE_CUT',
+  // etc.), so the filter returned 0 every time and the v2 max() was dead
+  // code. Symptom: coating goal stuck at ~400 every day regardless of
+  // pipeline pressure. Fix: drop the lens_type filter — being in
+  // SURFACING/BLOCKING/PICKING already implies the job will hit coating.
+  // (SV jobs don't sit at SURFACING; the modal stage routing handles them.)
   try {
     const row = db.prepare(`
       SELECT COUNT(*) AS n FROM jobs
       WHERE status IN ('ACTIVE','Active')
         AND current_stage IN ('SURFACING','BLOCKING','PICKING')
-        AND lens_type IN ('P','B')
     `).get();
     return row?.n || 0;
   } catch (_) { return 0; }
@@ -274,7 +279,7 @@ function computeCoatingTarget(db, options) {
     target,
     gap,
 
-    formulaVersion: 2,
+    formulaVersion: 3,
     config: {
       coating_intake_window_days: cfg.coating_intake_window_days,
       coating_rollover_layers:    cfg.coating_rollover_layers,

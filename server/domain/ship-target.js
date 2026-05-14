@@ -240,6 +240,9 @@ function rolloverFrom(db, today) {
     weekly.push({ date: r.date, target: r.total_target, shipped: r.shipped_actual, miss });
   }
   return {
+    // Raw uncapped net miss this week so far. Caller applies the cap.
+    rolloverRaw: Math.max(0, netMiss),
+    // Backwards-compatible alias — same value, caller may cap.
     rolloverIn: Math.max(0, netMiss),
     fromDate: weekly.length ? weekly[weekly.length - 1].date : null,
     weekly,
@@ -297,8 +300,16 @@ function computeShipTarget(db, options) {
   const intakeProjection = isWorkday(today) ? intakeRate(db, today, cfg.intake_window_days) : 0;
   const capacityEstimate = capacityRate(db, today, cfg.capacity_window_days);
 
-  const { rolloverIn, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
+  const { rolloverRaw, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
   const slaRolloverIn = slaFloorRolloverFrom(db, today);
+
+  // Phil 2026-05-14: rollover CAP. Without this, two missed days dump
+  // full debt onto day 3 → unreachable target (2532 on 5/14 was 1442
+  // intake + 1169 raw rollover from Mon/Tue misses → demoralizing).
+  // Capped at 1 day's intake. Debt beyond that decays out of the week
+  // rather than haunting Thursday/Friday.
+  const rolloverIn = Math.min(rolloverRaw, intakeProjection);
+  const rolloverCapped = rolloverRaw - rolloverIn;
 
   // Drain component (Phil 2026-05-08): distribute excess WIP over
   // remaining workdays this week so Friday naturally peaks.
@@ -345,6 +356,8 @@ function computeShipTarget(db, options) {
     intakeProjection,
     capacityEstimate,
     rolloverIn,
+    rolloverRaw,
+    rolloverCapped,
     rolloverFromDate,
     weeklyRollover,
     slaFloorCohort,
@@ -361,7 +374,7 @@ function computeShipTarget(db, options) {
     gap,
 
     // Provenance / tunability
-    formulaVersion: 2,
+    formulaVersion: 3,
     config: {
       aging_exponent:       cfg.aging_exponent,
       intake_window_days:   cfg.intake_window_days,
