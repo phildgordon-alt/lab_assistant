@@ -176,10 +176,29 @@ function rolloverFrom(db, today) {
     weekly.push({ date: r.date, target: r.total_target, surfaced: r.surfaced_actual, miss });
   }
   return {
+    rolloverRaw: Math.max(0, netMiss),
     rolloverIn: Math.max(0, netMiss),
     fromDate: weekly.length ? weekly[weekly.length - 1].date : null,
     weekly,
   };
+}
+
+// Phil 2026-05-14: upstream demand signal — jobs sitting at PICKING right
+// now that will flow into surfacing. Without this signal, target = 14-day
+// rolling intake avg which is unresponsive to actual pipeline pressure
+// (symptom: surfacing target stuck at ~432 while actuals hit 869). Mirror
+// of coating-target.js getUpstreamCoatingDemand. Filter on stage only —
+// lens_type filter doesn't work because DVI stores recipe codes; the
+// stage routing already excludes finished SV jobs from PICKING.
+function getUpstreamSurfacingDemand(db) {
+  try {
+    const row = db.prepare(`
+      SELECT COUNT(*) AS n FROM jobs
+      WHERE status IN ('ACTIVE','Active')
+        AND current_stage = 'PICKING'
+    `).get();
+    return row?.n || 0;
+  } catch (_) { return 0; }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -203,9 +222,25 @@ function computeSurfacingTarget(db, options) {
     : 0;
   const capacityEstimate = capacityRate(db, today, cfg.surfacing_intake_window_days);
 
-  const { rolloverIn, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
+  const { rolloverRaw, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
 
-  const target = isWorkday(today) ? intakeProjection + rolloverIn : 0;
+  // Phil 2026-05-14: rollover CAP — same logic as ship-target.js. Without
+  // this, two missed days dump full debt onto day 3, producing an
+  // unreachable target.
+  const rolloverIn = Math.min(rolloverRaw, intakeProjection);
+  const rolloverCapped = rolloverRaw - rolloverIn;
+
+  // Phil 2026-05-14: upstream demand signal so the target reflects actual
+  // pipeline pressure (jobs at PICKING that will flow into surfacing) and
+  // not just the 14-day rolling avg. For backfill replay, skip the live
+  // query (the historical wipSnapshot already encodes upstream state).
+  const upstreamDemand = (options && options.wipSnapshot) ? 0 : getUpstreamSurfacingDemand(db);
+
+  // Match coating-target.js v2 shape: max(intakeProjection, upstreamDemand) + rolloverIn
+  const operationalTarget = isWorkday(today)
+    ? Math.max(intakeProjection, upstreamDemand) + rolloverIn
+    : 0;
+  const target = operationalTarget;
   const gap    = target - capacityEstimate;
 
   return {
@@ -215,16 +250,20 @@ function computeSurfacingTarget(db, options) {
     surfacingWipCount: wip.length,
 
     intakeProjection,
+    upstreamDemand,
     capacityEstimate,
     rolloverIn,
+    rolloverRaw,
+    rolloverCapped,
     rolloverFromDate,
     weeklyRollover,
     workdaysRemainingThisWeek: workdaysRemainingThisWeek(today),
 
+    operationalTarget,
     target,
     gap,
 
-    formulaVersion: 1,
+    formulaVersion: 2,
     config: {
       surfacing_intake_window_days: cfg.surfacing_intake_window_days,
       surfacing_rollover_layers:    cfg.surfacing_rollover_layers,
