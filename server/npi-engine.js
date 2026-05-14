@@ -733,6 +733,20 @@ function getDonorSkusForScenario(db, scenarioId, lensTypeClass) {
   const modalClause = lensTypeClass === 'SV'
     ? `p.lens_type_modal IN ('S','C')`
     : `p.lens_type_modal = 'P'`;
+  // Phil 2026-05-13: SV donor diameter is the trailing integer in
+  // lens_inventory_status.description (e.g. "BLY SV CLR YO 65" → 65) —
+  // matches Power Pick Materialbase.Info3 ("SO 75" → 75). For semi pucks
+  // diameter comes from lens_sku_properties (seeded). COALESCE picks
+  // whichever source has it.
+  const diameterExpr = `
+    COALESCE(
+      p.diameter,
+      CAST(
+        substr(lis.description, length(rtrim(lis.description, '0123456789')) + 1)
+        AS INTEGER
+      )
+    )
+  `;
   // lens_inventory_status may not exist on first boot — try/catch guards the JOIN.
   try {
     return db.prepare(`
@@ -741,7 +755,7 @@ function getDonorSkusForScenario(db, scenarioId, lensTypeClass) {
         t.material_code        AS material_code,
         t.adoption_pct         AS adoption_pct,
         p.base_curve           AS base_curve,
-        p.diameter             AS diameter,
+        ${diameterExpr}        AS diameter,
         p.sample_job_count     AS sample_job_count,
         lis.projected_weekly   AS projected_weekly,
         lis.computed_at        AS computed_at
@@ -1259,17 +1273,19 @@ function formatSvStockingCsv(db, scenarioId) {
   }
   lines.push(`# Generated: ${new Date().toISOString()}`);
   lines.push('');
-  // Phil 2026-05-14: stocking CSV now includes base_curve + diameter
-  // from the donor SKU so the supplier can fulfill the exact spec.
-  // Without these the supplier doesn't know which lens to manufacture.
-  lines.push(['placeholder_sku','real_sku','donor_sku','material','base_curve','diameter','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
+  // Phil 2026-05-14 (rev 2026-05-13): SV stocking CSV — `base_curve` removed.
+  // Pair does not track BC per SV finished SKU anywhere (Power Pick / DVI /
+  // Lens_Planning xlsx all confirmed empty). Supplier picks BC at grind time
+  // from the Rx using their own conversion. See [[sv-no-base-curve]].
+  // `diameter` is kept — populated from lens_inventory_status.description
+  // trailing number (e.g. "BLY SV CLR YO 65" → 65).
+  lines.push(['placeholder_sku','real_sku','donor_sku','material','diameter','sph','cyl','add','sample_count','weekly_projection','initial_order_qty'].join(','));
   for (const r of dataRows) {
     lines.push([
       csvEsc(r.placeholder_sku),
       csvEsc(r.real_sku),
       csvEsc(r.donor_sku),
       csvEsc(r.material),
-      r.base_curve != null ? r.base_curve.toFixed(2) : 'UNKNOWN',
       r.diameter != null ? r.diameter : 'UNKNOWN',
       (r.sph || 0).toFixed(2),
       (r.cyl || 0).toFixed(2),

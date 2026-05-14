@@ -151,6 +151,7 @@ db.exec(`
   -- ones the new formatters read (sku, projected_weekly, computed_at).
   CREATE TABLE lens_inventory_status (
     sku              TEXT PRIMARY KEY,
+    description      TEXT,
     projected_weekly REAL DEFAULT 0,
     computed_at      TEXT
   );
@@ -387,9 +388,9 @@ test('S1: header has new column order; donor row encodes sph=-1.75,cyl=-0.50,add
   const csv = out.csv;
   const headerLine = csv.split('\n').find(l => l.startsWith('placeholder_sku,'));
   assert.ok(headerLine, 'data column header present');
-  // Phil 2026-05-14: header now includes base_curve + diameter
-  // (between material and sph) so the supplier gets the full spec.
-  assert.ok(headerLine.startsWith('placeholder_sku,real_sku,donor_sku,material,base_curve,diameter,sph,cyl,add,sample_count,weekly_projection,initial_order_qty'),
+  // Phil 2026-05-13: SV header — base_curve dropped (not tracked anywhere
+  // for SV; see [[sv-no-base-curve]] memory). Diameter now at col 4.
+  assert.ok(headerLine.startsWith('placeholder_sku,real_sku,donor_sku,material,diameter,sph,cyl,add,sample_count,weekly_projection,initial_order_qty'),
     `header order: ${headerLine}`);
   const idxHeader = csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
@@ -397,13 +398,12 @@ test('S1: header has new column order; donor row encodes sph=-1.75,cyl=-0.50,add
   const firstData = tail[0].split(',');
   assert.equal(firstData[2], 'H67-STD-S1', `donor_sku=H67-STD-S1, got ${firstData[2]}`);
   assert.equal(firstData[3], 'H67', `material=H67, got ${firstData[3]}`);
-  // Cols 4 (base_curve) and 5 (diameter) come from lens_sku_properties — test
-  // fixture inserts NULL for both, so they emit 'UNKNOWN'.
-  assert.equal(firstData[4], 'UNKNOWN', `base_curve=UNKNOWN, got ${firstData[4]}`);
-  assert.equal(firstData[5], 'UNKNOWN', `diameter=UNKNOWN, got ${firstData[5]}`);
-  assert.equal(firstData[6], '-1.75', `sph=-1.75, got ${firstData[6]}`);
-  assert.equal(firstData[7], '-0.50', `cyl=-0.50, got ${firstData[7]}`);
-  assert.equal(firstData[8], '0.00', `add=0.00, got ${firstData[8]}`);
+  // Col 4 = diameter (UNKNOWN when fixture has neither lsp.diameter nor
+  // a parseable description). Cols 5/6/7 = sph/cyl/add.
+  assert.equal(firstData[4], 'UNKNOWN', `diameter=UNKNOWN, got ${firstData[4]}`);
+  assert.equal(firstData[5], '-1.75', `sph=-1.75, got ${firstData[5]}`);
+  assert.equal(firstData[6], '-0.50', `cyl=-0.50, got ${firstData[6]}`);
+  assert.equal(firstData[7], '0.00', `add=0.00, got ${firstData[7]}`);
   for (const row of tail) {
     const cells = row.split(',');
     assert.ok(cells[0] && cells[0].length > 0, `placeholder_sku non-empty: row "${row}"`);
@@ -458,13 +458,13 @@ test('S3: NULL cyl + NULL add → plano row preserved (cyl=0.00, add=0.00) under
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
   assert.ok(tail.length >= 1, 'plano row present');
   const cells = tail[0].split(',');
-  // Phil 2026-05-14: columns shifted by 2 (base_curve, diameter inserted)
-  assert.equal(cells[6], '-2.00', `sph=-2.00, got ${cells[6]}`);
-  assert.equal(cells[7], '0.00', `cyl=0.00 for NULL input, got ${cells[7]}`);
-  assert.equal(cells[8], '0.00', `add=0.00 for NULL input, got ${cells[8]}`);
+  // Phil 2026-05-13: BC dropped, only diameter at col 4 — sph/cyl/add at 5/6/7
+  assert.equal(cells[5], '-2.00', `sph=-2.00, got ${cells[5]}`);
+  assert.equal(cells[6], '0.00', `cyl=0.00 for NULL input, got ${cells[6]}`);
+  assert.equal(cells[7], '0.00', `add=0.00 for NULL input, got ${cells[7]}`);
 });
 
-test('S4: rx_r_sphere=-175 (int×100 encoding) decodes to sph=-1.75 at column index 6', () => {
+test('S4: rx_r_sphere=-175 (int×100 encoding) decodes to sph=-1.75 at column index 5', () => {
   const id = npiEngine.createScenario(db, { name: 'SV S4 decode', source_type: 'material_category', adoption_pct: 50 });
   db.prepare(`INSERT INTO npi_scenario_material_targets (scenario_id, material_code, lens_type_class, adoption_pct) VALUES (?, ?, ?, ?)`)
     .run(id, 'S4-MAT', 'SV', 50);
@@ -480,8 +480,8 @@ test('S4: rx_r_sphere=-175 (int×100 encoding) decodes to sph=-1.75 at column in
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
   assert.ok(tail.length >= 1);
   const cells = tail[0].split(',');
-  // Phil 2026-05-14: sph moved to col 6 (base_curve+diameter inserted at 4,5)
-  assert.equal(cells[6], '-1.75', `sph=-1.75, got ${cells[6]}`);
+  // Phil 2026-05-13: sph at col 5 (BC dropped, diameter at col 4)
+  assert.equal(cells[5], '-1.75', `sph=-1.75, got ${cells[5]}`);
 });
 
 test('S5: two donors in same material, distinct Rx histograms → distinct rows per (donor × Rx)', () => {
@@ -512,10 +512,10 @@ test('S5: two donors in same material, distinct Rx histograms → distinct rows 
   const donorBSrows = tail.filter(r => r.split(',')[2] === 'S5-DONOR-B');
   assert.ok(donorASrows.length >= 1, `at least one row for S5-DONOR-A, got ${donorASrows.length}`);
   assert.ok(donorBSrows.length >= 1, `at least one row for S5-DONOR-B, got ${donorBSrows.length}`);
-  // Phil 2026-05-14: weekly_projection moved to col 10 (was 8) after
-  // base_curve + diameter were inserted at 4/5.
-  const aWeekly = Number(donorASrows[0].split(',')[10]);
-  const bWeekly = Number(donorBSrows[0].split(',')[10]);
+  // Phil 2026-05-13: BC dropped, diameter at col 4, sph/cyl/add at 5/6/7,
+  // sample_count at 8, weekly_projection at 9.
+  const aWeekly = Number(donorASrows[0].split(',')[9]);
+  const bWeekly = Number(donorBSrows[0].split(',')[9]);
   // adoption_pct=50 → 10*0.5=5.0 for A, 4*0.5=2.0 for B (single Rx each → pctOfDonor=1.0)
   assert.ok(Math.abs(aWeekly - 5.0) < 0.05, `A weekly_projection ~5.0, got ${aWeekly}`);
   assert.ok(Math.abs(bWeekly - 2.0) < 0.05, `B weekly_projection ~2.0, got ${bWeekly}`);
@@ -591,8 +591,8 @@ test('S8: per-donor sum of weekly_projection ≈ donor.projected_weekly × adopt
   const idxHeader = out.csv.split('\n').findIndex(l => l.startsWith('placeholder_sku,'));
   const tail = out.csv.split('\n').slice(idxHeader + 1).filter(l => l && !l.startsWith('#'));
   const s8Rows = tail.filter(r => r.split(',')[2] === 'S8-DONOR');
-  // Phil 2026-05-14: weekly_projection moved to col 10 (was 8) after BC+DIA inserted.
-  const sumWeekly = s8Rows.reduce((s, r) => s + Number(r.split(',')[10]), 0);
+  // Phil 2026-05-13: BC dropped — weekly_projection now at col 9.
+  const sumWeekly = s8Rows.reduce((s, r) => s + Number(r.split(',')[9]), 0);
   const expected = 12.0 * 60 / 100; // 7.2
   assert.ok(Math.abs(sumWeekly - expected) < 0.05,
     `sum weekly_projection ${sumWeekly.toFixed(3)} ≈ ${expected} (within 0.05)`);
