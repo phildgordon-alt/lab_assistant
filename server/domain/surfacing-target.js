@@ -183,19 +183,19 @@ function rolloverFrom(db, today) {
   };
 }
 
-// Phil 2026-05-14: upstream demand signal — jobs sitting at PICKING right
-// now that will flow into surfacing. Without this signal, target = 14-day
-// rolling intake avg which is unresponsive to actual pipeline pressure
-// (symptom: surfacing target stuck at ~432 while actuals hit 869). Mirror
-// of coating-target.js getUpstreamCoatingDemand. Filter on stage only —
-// lens_type filter doesn't work because DVI stores recipe codes; the
-// stage routing already excludes finished SV jobs from PICKING.
+// Phil 2026-05-14: count ALL surf jobs that haven't yet exited the
+// surfacing pipeline — every active job at PICKING, SURFACING, or
+// BLOCKING needs surfacing work today/this week. Including SURFACING
+// and BLOCKING captures the current WIP in surfacing benches.
+// Stage routing already excludes finished SV jobs from PICKING/SURFACING,
+// so we don't need a lens_type filter (DVI stores recipe codes there
+// anyway, not P/B markers).
 function getUpstreamSurfacingDemand(db) {
   try {
     const row = db.prepare(`
       SELECT COUNT(*) AS n FROM jobs
       WHERE status IN ('ACTIVE','Active')
-        AND current_stage = 'PICKING'
+        AND current_stage IN ('PICKING','SURFACING','BLOCKING')
     `).get();
     return row?.n || 0;
   } catch (_) { return 0; }
