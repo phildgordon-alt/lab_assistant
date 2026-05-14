@@ -829,25 +829,52 @@ function computeMaterialCategoryScenarioTotals(db, scenarioId) {
 // Returns { qty, decision: 'STOCK'|'SURFACE_QTY'|'SURFACE_LONGTAIL',
 //          reason: string|null }
 // Caller emits a warning + skips the row when decision !== 'STOCK'.
-function applyStockingRules(rawQty, donorSku, longTailMap, minPairs) {
+// Phil 2026-05-13: When `options.tieredFloors` + an Rx context (sph/cyl) are
+// provided, below-floor rows are BUMPED UP to the tier floor — they stay in
+// the stocking order with extra safety qty. The legacy flat-min path
+// (no options) still routes below-min rows to SURFACE_QTY for backwards
+// compat with semi pucks and any caller that doesn't opt in.
+//
+// Rationale: stocking is cheaper than surfacing in this lab
+// ([[stocking-cheaper-than-surfacing]]), so the right move for hard Rxs
+// with thin signal is "carry a few extra pairs," not "pay the surfacing
+// premium every time someone orders one."
+function applyStockingRules(rawQty, donorSku, longTailMap, minPairs, options) {
   if (rawQty <= 0) return { qty: 0, decision: 'SURFACE_QTY', reason: 'zero-qty after projection' };
 
   // 1. Round up to nearest even (pair). 1→2, 3→4, 5→6.
   const evenQty = rawQty % 2 === 0 ? rawQty : rawQty + 1;
 
-  // 2. Minimum threshold. Default: 1 pair = 2 units.
+  const useTiered = !!(options && options.tieredFloors
+    && (options.sph !== undefined || options.cyl !== undefined));
+
+  if (useTiered) {
+    // Tiered path: long-tail still wins (whole-donor uneconomic), but
+    // below-floor rows BUMP UP to the tier floor.
+    const ltDecision = longTailMap && longTailMap.get(donorSku);
+    if (ltDecision === 'SURFACE') {
+      return { qty: evenQty, decision: 'SURFACE_LONGTAIL', reason: 'long-tail analyzer recommends surfacing' };
+    }
+    const tier = classifyRxTier(options.sph, options.cyl);
+    const tierMinPairs = options.tieredFloors[tier] || minPairs;
+    const tierMinQty = tierMinPairs * 2;
+    if (evenQty < tierMinQty) {
+      return { qty: tierMinQty, decision: 'STOCK', reason: null,
+               tier, bumpedToFloor: true, originalQty: evenQty };
+    }
+    return { qty: evenQty, decision: 'STOCK', reason: null, tier };
+  }
+
+  // Legacy flat-min path: below-min routes to surfacing (kept for semi
+  // pucks and any caller that hasn't opted into tiered floors).
   const minQty = minPairs * 2;
   if (evenQty < minQty) {
     return { qty: evenQty, decision: 'SURFACE_QTY', reason: `qty ${evenQty} below min ${minQty}` };
   }
-
-  // 3. Long-tail check. SURFACE decision from runAnalysis means
-  // monthly volume < break-even at current carry+surf costs.
   const ltDecision = longTailMap && longTailMap.get(donorSku);
   if (ltDecision === 'SURFACE') {
     return { qty: evenQty, decision: 'SURFACE_LONGTAIL', reason: 'long-tail analyzer recommends surfacing' };
   }
-
   return { qty: evenQty, decision: 'STOCK', reason: null };
 }
 
@@ -876,6 +903,40 @@ function loadMinStockPairs(db) {
     if (row && row.value) return Math.max(1, parseInt(row.value, 10) || 1);
   } catch (_) { /* config table not yet present */ }
   return 1;
+}
+
+// Phil 2026-05-13: Rx-tier classification for tiered stocking floors.
+// Mirrors the xlsx review model:
+//   Simple   = |sph| ≤ 3 AND |cyl| ≤ 1   (lab can backfill in a shift)
+//   Hard     = |sph| > 5 OR  |cyl| > 2   (slow surface backfill — bigger buffer)
+//   Moderate = everything between
+// Hard Rxs surface slowly, so a bigger stock buffer for them is cheaper than
+// the surfacing alternative (per [[stocking-cheaper-than-surfacing]]).
+function classifyRxTier(sph, cyl) {
+  const a = Math.abs(sph || 0);
+  const c = Math.abs(cyl || 0);
+  if (a <= 3 && c <= 1) return 'simple';
+  if (a > 5  || c > 2)  return 'hard';
+  return 'moderate';
+}
+
+// Per-tier min-pair floors. Defaults match xlsx review (2/4/6 lenses).
+// Override via lab_planning_config keys: npi_min_pairs_{simple,moderate,hard}.
+function loadTieredFloors(db) {
+  const out = { simple: 1, moderate: 2, hard: 3 };
+  try {
+    const rows = db.prepare(
+      "SELECT key, value FROM lab_planning_config WHERE key IN ('npi_min_pairs_simple','npi_min_pairs_moderate','npi_min_pairs_hard')"
+    ).all();
+    for (const r of rows) {
+      const v = parseInt(r.value, 10);
+      if (!Number.isFinite(v) || v < 1) continue;
+      if (r.key === 'npi_min_pairs_simple')   out.simple   = v;
+      if (r.key === 'npi_min_pairs_moderate') out.moderate = v;
+      if (r.key === 'npi_min_pairs_hard')     out.hard     = v;
+    }
+  } catch (_) { /* config table not yet present */ }
+  return out;
 }
 
 // Phil 2026-05-14: lens-yield multiplier. Lab on average consumes
@@ -969,9 +1030,12 @@ function formatSvStockingCsv(db, scenarioId) {
   // Phil 2026-05-14: stocking-rule gates. Load once, apply per row.
   const longTailMap = buildLongTailMap(db);
   const minPairs = loadMinStockPairs(db);
+  const tieredFloors = loadTieredFloors(db);             // {simple,moderate,hard} pairs
   const yieldMultiplier = loadLensYieldMultiplier(db);   // 1.0 default
   let surfaceCandidates = 0;
   let longTailRoutes = 0;
+  const tierBumpCounts = { simple: 0, moderate: 0, hard: 0 };
+  const tierBumpUnits  = { simple: 0, moderate: 0, hard: 0 };
 
   for (const d of donors) {
     let forecast = d.projected_weekly;
@@ -1032,10 +1096,14 @@ function formatSvStockingCsv(db, scenarioId) {
       // Formula (Phil 2026-05-14):
       //   weekly_for_row = forecast × adoption% × pct_of_donor × yield_multiplier
       //   raw_qty        = ceil(weekly_for_row × weeks_multiplier)
-      //   qty            = pair-rounded raw_qty
+      //   qty            = pair-rounded raw_qty (or bumped to tier floor)
       const weeklyForRow = forecast * pctOfDonor * ((d.adoption_pct || 50) / 100) * yieldMultiplier;
       const rawQty = Math.ceil(weeklyForRow * totals.weeksMultiplier);
-      const ruled = applyStockingRules(rawQty, d.sku, longTailMap, minPairs);
+      const ruled = applyStockingRules(rawQty, d.sku, longTailMap, minPairs, {
+        tieredFloors,
+        sph: rx.sph || 0,
+        cyl: rx.cyl || 0,
+      });
       // Math-trace fields populated on the row for the surfacing-list
       // CSV (and for in-chat verification when Phil asks).
       const rowBase = {
@@ -1058,6 +1126,9 @@ function formatSvStockingCsv(db, scenarioId) {
         raw_qty: rawQty,
         weeklyForRow,
         qty: ruled.qty,
+        tier: ruled.tier || classifyRxTier(rx.sph || 0, rx.cyl || 0),
+        bumped_to_floor: ruled.bumpedToFloor ? 1 : 0,
+        original_qty: ruled.originalQty != null ? ruled.originalQty : rawQty,
       };
       if (ruled.decision !== 'STOCK') {
         surfaceCandidates++;
@@ -1066,6 +1137,11 @@ function formatSvStockingCsv(db, scenarioId) {
         }
         surfacingRows.push({ ...rowBase, surface_reason: ruled.decision, reason_detail: ruled.reason });
         continue;
+      }
+      if (ruled.bumpedToFloor) {
+        const t = ruled.tier;
+        tierBumpCounts[t]++;
+        tierBumpUnits[t] += (ruled.qty - (ruled.originalQty || 0));
       }
       dataRows.push(rowBase);
     }
@@ -1077,6 +1153,17 @@ function formatSvStockingCsv(db, scenarioId) {
   }
   if (surfaceCandidates > 0) {
     warnings.unshift(`# SUMMARY: ${surfaceCandidates} row(s) below min-stock threshold (${minPairs * 2} units) → surface instead`);
+  }
+  const totalBumps = tierBumpCounts.simple + tierBumpCounts.moderate + tierBumpCounts.hard;
+  const totalBumpUnits = tierBumpUnits.simple + tierBumpUnits.moderate + tierBumpUnits.hard;
+  if (totalBumps > 0) {
+    warnings.unshift(
+      `# SUMMARY: ${totalBumps} row(s) bumped to tier floor (+${totalBumpUnits} lenses) ` +
+      `[simple=${tierBumpCounts.simple}/+${tierBumpUnits.simple}, ` +
+      `moderate=${tierBumpCounts.moderate}/+${tierBumpUnits.moderate}, ` +
+      `hard=${tierBumpCounts.hard}/+${tierBumpUnits.hard}] ` +
+      `floors=simple:${tieredFloors.simple}pr,moderate:${tieredFloors.moderate}pr,hard:${tieredFloors.hard}pr`
+    );
   }
 
   // Sort: material → donor_sku → sph → cyl → add
@@ -1476,4 +1563,7 @@ module.exports = {
   computeMaterialCategoryScenarioTotals,
   formatSvStockingCsv, formatSemiStockingCsv,
   formatSurfacingListCsv,
+  // Stocking-rule helpers (exported for tests + ad-hoc tooling)
+  applyStockingRules, classifyRxTier, loadTieredFloors,
+  loadMinStockPairs, loadLensYieldMultiplier,
 };
