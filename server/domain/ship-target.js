@@ -329,8 +329,14 @@ function computeShipTarget(db, options) {
     ? Math.round(Math.max(prioritySum, drainShare) + rolloverIn)
     : 0;
 
+  // Phil 2026-05-14: slaFloor CAP, same logic as rolloverIn cap. The lab
+  // can't physically ship more than one day's intake regardless of how
+  // many jobs are overdue. Without the cap, if 1500+ jobs are past SLA,
+  // slaFloor dominates the max() and the target becomes unreachable
+  // (defeats the rollover cap). slaFloorRaw exposed for visibility.
+  const slaFloorRaw = slaFloorCohort + slaRolloverIn;
   const slaFloor = isWorkday(today)
-    ? slaFloorCohort + slaRolloverIn
+    ? Math.min(slaFloorRaw, intakeProjection)
     : 0;
 
   // Intake floor: never plan to ship LESS than the incoming rate,
@@ -362,6 +368,7 @@ function computeShipTarget(db, options) {
     weeklyRollover,
     slaFloorCohort,
     slaFloorRolloverIn: slaRolloverIn,
+    slaFloorRaw,
     intakeFloor,
     wipExcess,
     workdaysRemainingThisWeek: remaining,
