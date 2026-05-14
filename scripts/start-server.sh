@@ -11,6 +11,17 @@
 #   The watchdog runs at launchd load (RunAtLoad true) so it fires before this script
 #   on a fresh boot; the 30s window covers any race on kickstart.
 
+# Phil 2026-05-14: launchd's default PATH is /usr/bin:/bin only — `mount` lives
+# in /sbin. Without this export every iteration of the wait loop below printed
+# "mount: command not found", which generated 2.6 GB of launchd stderr noise
+# and masked real crash signatures. See plan: cheeky-wandering-hollerith.md.
+export PATH="/sbin:/usr/sbin:/usr/bin:/bin:/opt/homebrew/bin:${PATH}"
+
+# Phil 2026-05-14: raise FD limit. Default under launchd is often 256, which is
+# too low for 9 concurrent polling adapters + WebSocket + Express + SQLite. FD
+# exhaustion presents as silent failures or hangs, not crashes.
+ulimit -n 8192
+
 MOUNT_DST="/Users/Shared/lab_assistant/data/dvi/visdir"
 TRACE_DIR="${MOUNT_DST}/TRACE"
 WAIT_MAX=30

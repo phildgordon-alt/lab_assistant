@@ -23,6 +23,22 @@ if (!fs.existsSync(DATA_DIR)) {
 // Initialize database
 const db = new Database(DB_FILE);
 db.pragma('journal_mode = WAL'); // Better performance for concurrent reads
+db.pragma('busy_timeout = 5000'); // Wait up to 5s on lock contention before throwing
+db.pragma('wal_autocheckpoint = 1000'); // Default but explicit — checkpoint at 1000 pages
+
+// Phil 2026-05-14: periodic WAL checkpoint. Without this, the WAL file grows
+// unbounded (47 MB observed on dev; likely larger on prod) when long-running
+// read transactions block the auto-checkpoint. A bloated WAL hangs the event
+// loop during checkpoint attempts and shows up as "server unresponsive" even
+// though node is alive. PASSIVE never blocks readers; safe to run anywhere.
+// See plan: cheeky-wandering-hollerith.md.
+setInterval(() => {
+  try {
+    db.pragma('wal_checkpoint(PASSIVE)');
+  } catch (e) {
+    console.error('[db] wal_checkpoint failed:', e.message);
+  }
+}, 5 * 60 * 1000).unref(); // unref so it doesn't keep the process alive on shutdown
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VERSIONED MIGRATIONS — server/migrations/NNN_*.sql
