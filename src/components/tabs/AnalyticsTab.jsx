@@ -82,12 +82,96 @@ const KPICard = ({label,value,sub,trend,accent})=>(
   </div>
 );
 
+// ── Dept Rates Card ───────────────────────────────────────────────────────────
+// Empirical velocity by dept: today rate/hr vs 7d/30d avg + dwell.
+// Designed for at-a-glance trend reading: numerics tabular-aligned, sparkline
+// for 14d shape, color = today vs 30d (green ≥, amber within 15% under, red >15% under).
+// Wire to /api/analytics/dept-rates when endpoint ships. Renders a stub placeholder
+// row per dept until then so the layout slot is reserved and visually consistent.
+const DEPT_ORDER = ["PICKING","SURFACING","COATING","CUTTING","ASSEMBLY","SHIPPING"];
+function DeptRatesCard({ovenServerUrl, range}){
+  const [rates,setRates]=useState(null);
+  const [err,setErr]=useState(false);
+  useEffect(()=>{
+    if(ovenServerUrl==null) return;
+    let alive=true;
+    const go=async()=>{
+      try{
+        const r=await fetch(`${ovenServerUrl}/api/analytics/dept-rates`,{signal:AbortSignal.timeout(5000)});
+        if(!r.ok){if(alive)setErr(true);return;}
+        const d=await r.json(); if(alive){setRates(d); setErr(false);}
+      }catch{if(alive)setErr(true);}
+    };
+    go(); const iv=setInterval(go,30000); return()=>{alive=false;clearInterval(iv);};
+  },[ovenServerUrl]);
+
+  const rows = DEPT_ORDER.map(dept=>{
+    const r = rates?.depts?.[dept] || {};
+    return {
+      dept,
+      today: r.todayRatePerHr ?? null,
+      avg7:  r.avg7dRatePerHr ?? null,
+      avg30: r.avg30dRatePerHr ?? null,
+      dwell: r.avgDwellHrs ?? null,
+      spark: r.last14d || [],
+    };
+  });
+
+  return (
+    <Card>
+      <SectionHeader right={
+        <span style={{fontFamily:mono,fontSize:9,color:T.textDim}}>
+          {err?"endpoint offline":rates?`updated ${new Date(rates.updatedAt||Date.now()).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}`:"loading"}
+        </span>
+      }>Dept Velocity</SectionHeader>
+      <div style={{fontFamily:mono,fontSize:11}}>
+        <div style={{display:"grid",gridTemplateColumns:"90px 70px 70px 70px 60px 1fr",gap:10,padding:"6px 8px",color:T.textDim,fontSize:9,borderBottom:`1px solid ${T.border}`,letterSpacing:1}}>
+          <span>DEPT</span>
+          <span style={{textAlign:"right"}}>NOW/HR</span>
+          <span style={{textAlign:"right"}}>7D AVG</span>
+          <span style={{textAlign:"right"}}>30D AVG</span>
+          <span style={{textAlign:"right"}}>DWELL</span>
+          <span style={{textAlign:"right"}}>14D TREND</span>
+        </div>
+        {rows.map(r=>{
+          const dColor = STAGE_COLORS[r.dept] || T.textDim;
+          // Trend color: today vs 30d baseline. Null-safe.
+          let tColor = T.textDim;
+          if(r.today!=null && r.avg30!=null && r.avg30>0){
+            const ratio = r.today/r.avg30;
+            tColor = ratio >= 1 ? T.green : ratio >= 0.85 ? T.amber : T.red;
+          }
+          const fmt=(v,suf="")=> v==null?"—":`${v}${suf}`;
+          return(
+            <div key={r.dept} style={{display:"grid",gridTemplateColumns:"90px 70px 70px 70px 60px 1fr",gap:10,padding:"7px 8px",alignItems:"center",borderBottom:`1px solid ${T.border}33`}}>
+              <span style={{display:"flex",alignItems:"center",gap:6}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:dColor,flexShrink:0}}/>
+                <span style={{color:T.text,fontWeight:700,fontSize:11}}>{r.dept}</span>
+              </span>
+              <span style={{textAlign:"right",color:tColor,fontWeight:800,fontSize:13}}>{fmt(r.today)}</span>
+              <span style={{textAlign:"right",color:T.textMuted}}>{fmt(r.avg7)}</span>
+              <span style={{textAlign:"right",color:T.textMuted}}>{fmt(r.avg30)}</span>
+              <span style={{textAlign:"right",color:r.dwell>24?T.red:r.dwell>8?T.amber:T.textDim}}>{fmt(r.dwell,"h")}</span>
+              <span style={{minHeight:18,display:"block"}}>
+                {r.spark&&r.spark.length>1 ? <Spark values={r.spark} color={tColor} h={18}/> : <span style={{color:T.textDim,fontSize:9,float:"right"}}>—</span>}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginTop:8,letterSpacing:1}}>
+        rate = jobs/hr exiting dept · dwell = avg hrs in dept before exit · color = today vs 30d
+      </div>
+    </Card>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // AnalyticsTab Component — Real Data
 // ══════════════════════════════════════════════════════════════════════════════
 export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,settings}){
   const [sub,setSub]=useState("overview");
-  const [range,setRange]=useState("30d");
+  const [range,setRange]=useState("today");
   const [ovenRuns,setOvenRuns]=useState([]);
   const [ovenStats,setOvenStats]=useState(null);
   const [ovenOk,setOvenOk]=useState(false);
@@ -100,7 +184,7 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
   },[settings?.equipment]);
 
   // Fetch real analytics from DVI trace
-  const daysMap={"7d":7,"30d":30,"90d":90,"all":365};
+  const daysMap={"today":1,"7d":7,"30d":30,"90d":90,"all":365};
   useEffect(()=>{
     if (ovenServerUrl == null) return;
     setAnalyticsLoading(true);
@@ -195,7 +279,7 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
       ))}
       <div style={{marginLeft:"auto",display:"flex",gap:5,alignItems:"center"}}>
         <span style={{fontSize:9,color:T.textDim,fontFamily:mono,letterSpacing:1}}>RANGE</span>
-        {["7d","30d","90d","all"].map(r=>(
+        {["today","7d","30d","90d","all"].map(r=>(
           <button key={r} onClick={()=>setRange(r)} style={{padding:"5px 10px",borderRadius:5,fontSize:10,fontFamily:mono,fontWeight:700,cursor:"pointer",
             background:range===r?T.amberDark:"transparent",border:`1px solid ${range===r?T.amber:T.border}`,color:range===r?T.amber:T.textDim}}>
             {r==="all"?"All":r}
@@ -215,26 +299,29 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
       {/* ══ OVERVIEW ══ */}
       {sub==="overview"&&(
         <div style={{display:"flex",flexDirection:"column",gap:20}}>
-          {/* KPI strip */}
-          <div style={{display:"flex",gap:14,flexWrap:"wrap"}}>
+          {/* HERO: Shipped vs Active WIP — matches Shipping Dashboard hero pattern */}
+          <div style={{display:"grid",gridTemplateColumns:"1.4fr 1fr 1fr 1fr 1fr",gap:14,alignItems:"stretch"}}>
+            {/* Hero: Shipped (range) — dominant glyph, ~2x supporting KPIs */}
+            <div style={{background:`radial-gradient(ellipse at center, ${T.green}10 0%, transparent 70%), ${T.card}`,border:`2px solid ${T.green}`,borderRadius:14,padding:"22px 26px",display:"flex",flexDirection:"column",justifyContent:"center"}}>
+              <div style={{fontSize:10,color:T.textMuted,letterSpacing:2,fontFamily:mono,fontWeight:700}}>SHIPPED · {range.toUpperCase()}</div>
+              <div style={{fontSize:56,fontWeight:800,color:T.green,fontFamily:mono,lineHeight:1.05,marginTop:4,textShadow:`0 0 40px ${T.green}40`}}>{totShipped.toLocaleString()}</div>
+              <div style={{fontSize:11,color:T.textMuted,fontFamily:mono,marginTop:6}}>
+                {range==="today" ? `${incoming} incoming · ${totBreakage} breakage` : `avg ${daily.length?Math.round(totShipped/daily.length):0}/day · ${totBreakage} breakage`}
+              </div>
+            </div>
             <KPICard label="Active WIP"      value={totalActive}                sub="jobs in lab now"        accent={T.blue}/>
             <KPICard label="Incoming"         value={incoming}                   sub="INHSE FIN + SF"         accent={T.cyan}/>
-            <KPICard label={`Shipped (${range})`} value={totShipped.toLocaleString()} sub={`avg ${daily.length?Math.round(totShipped/daily.length):0}/day`} accent={T.green}/>
-            <KPICard label="Avg Cycle Time"   value={`${cycleTime.avg||0}d`}    sub={`median ${cycleTime.median||0}d, P90 ${cycleTime.p90||0}d`} accent={T.amber}/>
-            <KPICard label="Breakage"         value={totBreakage}               sub={`${range} period`}       accent={T.red}/>
+            <KPICard label="Avg Cycle"        value={`${cycleTime.avg||0}d`}    sub={`P90 ${cycleTime.p90||0}d`} accent={T.amber}/>
             <KPICard label="Oven Runs"        value={of_.length}                sub={ovenOk?"from timer app":"no server"} accent={T.orange}/>
           </div>
 
-          {/* Daily volume + WIP by stage side-by-side */}
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:20}}>
-            <Card>
-              <SectionHeader right={<span style={{fontFamily:mono,fontSize:9,color:T.textDim}}>blue=incoming, green=shipped</span>}>Daily Throughput</SectionHeader>
-              <BarChart data={daily.slice(-14).map(d=>({...d,label:d.date.slice(5),color:T.blue}))} labelKey="label" valueKey="incoming" colorKey="color" color2Key="shipped" height={52}/>
-              <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:T.textDim,fontFamily:mono,marginTop:6}}>
-                <span>Avg {avgIncoming} incoming/day</span>
-                <span>Peak {Math.max(...daily.map(d=>d.incoming),0)}/day</span>
-              </div>
-            </Card>
+          {/* Dept Rates + WIP by stage side-by-side
+              Dept rates is the new empirical-velocity surface (Phil 2026-05-15):
+              today's rate/hr, 7d avg, 30d avg, dwell — across all 6 depts.
+              Wire to /api/analytics/dept-rates when endpoint lands.
+              Until then renders an empty-state stub so the layout slot is reserved. */}
+          <div style={{display:"grid",gridTemplateColumns:"1.2fr 1fr",gap:20}}>
+            <DeptRatesCard ovenServerUrl={ovenServerUrl} range={range}/>
 
             <Card>
               <SectionHeader>WIP by Stage</SectionHeader>
@@ -262,23 +349,43 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
             </Card>
           </div>
 
-          {/* Daily throughput grid */}
+          {/* Daily Incoming Volume \u2014 compact list (Phil 2026-05-15)
+              Hidden when range='today' \u2014 single row offers nothing the hero/KPI strip doesn't already say */}
+          {range!=="today" && (
           <Card>
-            <SectionHeader right={<span style={{fontFamily:mono,fontSize:9,color:T.textDim}}>jobs incoming per day</span>}>Daily Incoming Volume</SectionHeader>
-            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:10}}>
-              {daily.slice(-14).map((d,i)=>(
-                <div key={i} style={{textAlign:"center",padding:"10px 6px",background:T.bg,borderRadius:8,border:`1px solid ${d.incoming>0?T.border:"transparent"}`}}>
-                  <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginBottom:4}}>{d.date.slice(5)}</div>
-                  <div style={{fontSize:20,fontWeight:800,color:d.incoming>0?T.cyan:T.textDim,fontFamily:mono,lineHeight:1}}>
-                    {d.incoming>0?d.incoming.toLocaleString():"\u2014"}
-                  </div>
-                  <div style={{fontSize:9,color:T.green,fontFamily:mono,marginTop:2}}>{d.shipped} shipped</div>
-                </div>
-              ))}
+            <SectionHeader right={<span style={{fontFamily:mono,fontSize:9,color:T.textDim}}>last 14 days</span>}>Daily Incoming Volume</SectionHeader>
+            <div style={{fontFamily:mono,fontSize:12}}>
+              <div style={{display:"grid",gridTemplateColumns:"90px 1fr 90px 90px",gap:12,padding:"6px 8px",color:T.textDim,fontSize:10,borderBottom:`1px solid ${T.border}`,letterSpacing:1}}>
+                <span>DATE</span>
+                <span>INCOMING</span>
+                <span style={{textAlign:"right"}}>SHIPPED</span>
+                <span style={{textAlign:"right"}}>BREAKAGE</span>
+              </div>
+              {(()=>{
+                const last14 = daily.slice(-14);
+                const max = Math.max(...last14.map(x=>x.incoming||0), 1);
+                return last14.slice().reverse().map((d,i)=>{
+                  const pct = (d.incoming||0)/max*100;
+                  return(
+                    <div key={i} style={{display:"grid",gridTemplateColumns:"90px 1fr 90px 90px",gap:12,padding:"6px 8px",alignItems:"center",borderBottom:`1px solid ${T.border}33`}}>
+                      <span style={{color:T.textDim}}>{d.date.slice(5)}</span>
+                      <div style={{display:"flex",alignItems:"center",gap:8}}>
+                        <span style={{color:d.incoming>0?T.cyan:T.textDim,fontWeight:700,minWidth:50}}>{d.incoming>0?d.incoming.toLocaleString():"\u2014"}</span>
+                        <div style={{flex:1,height:4,background:`${T.border}66`,borderRadius:2,overflow:"hidden"}}>
+                          <div style={{height:"100%",width:`${pct}%`,background:T.cyan}}/>
+                        </div>
+                      </div>
+                      <span style={{textAlign:"right",color:d.shipped>0?T.green:T.textDim,fontWeight:700}}>{d.shipped||0}</span>
+                      <span style={{textAlign:"right",color:d.breakage>0?T.red:T.textDim}}>{d.breakage||0}</span>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </Card>
+          )}
 
-          {/* Shipping Target vs Actual */}
+          {/* Shipping Target vs Actual — always shows; for range=today shows just today's row + summary */}
           {shipPerf && shipPerf.days && shipPerf.days.length > 0 && (
             <Card>
               <SectionHeader right={
@@ -286,24 +393,31 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
                   {shipPerf.summary?.onTarget||0}/{shipPerf.summary?.workdays||0} on target ({shipPerf.summary?.onTargetPct||0}%) · avg variance {(shipPerf.summary?.avgVariance>=0?'+':'')}{shipPerf.summary?.avgVariance||0}
                 </span>
               }>Shipping Target vs Actual</SectionHeader>
-              <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:10}}>
-                {shipPerf.days.slice(0,14).reverse().map((d,i)=>{
+              <div style={{fontFamily:mono,fontSize:12}}>
+                <div style={{display:"grid",gridTemplateColumns:"90px 90px 90px 90px 90px",gap:12,padding:"6px 8px",color:T.textDim,fontSize:10,borderBottom:`1px solid ${T.border}`,letterSpacing:1}}>
+                  <span>DATE</span>
+                  <span style={{textAlign:"right"}}>SHIPPED</span>
+                  <span style={{textAlign:"right"}}>TARGET</span>
+                  <span style={{textAlign:"right"}}>VARIANCE</span>
+                  <span style={{textAlign:"right"}}>%</span>
+                </div>
+                {shipPerf.days.slice(0,14).map((d,i)=>{
                   const variance=d.variance||0, pct=d.variance_pct||0;
                   const isWeekend=!d.is_workday;
+                  // Threshold tightened 2026-05-15: -5% was too generous for shop-floor
+                  // semantics — being 5% short of target is a miss, not "green". Now:
+                  // green = at-or-over target, amber = within 10% short, red = >10% short.
                   const color=!d.is_workday||d.total_target===0 ? T.textDim
-                    : pct >= -5 ? T.green
-                    : pct >= -20 ? T.amber
+                    : pct >= 0 ? T.green
+                    : pct >= -10 ? T.amber
                     : T.red;
                   return(
-                    <div key={i} style={{textAlign:"center",padding:"10px 6px",background:T.bg,borderRadius:8,border:`1px solid ${isWeekend?"transparent":T.border}`,opacity:isWeekend?0.5:1}}>
-                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginBottom:4}}>{d.date.slice(5)}</div>
-                      <div style={{fontSize:18,fontWeight:800,color:color,fontFamily:mono,lineHeight:1}}>
-                        {d.shipped_actual||0}
-                      </div>
-                      <div style={{fontSize:9,color:T.textDim,fontFamily:mono,marginTop:2}}>/ {d.total_target||0}</div>
-                      <div style={{fontSize:9,color:color,fontFamily:mono,marginTop:2,fontWeight:700}}>
-                        {d.total_target>0 ? `${pct>=0?'+':''}${Math.round(pct)}%` : (isWeekend?'—':'—')}
-                      </div>
+                    <div key={i} style={{display:"grid",gridTemplateColumns:"90px 90px 90px 90px 90px",gap:12,padding:"6px 8px",alignItems:"center",borderBottom:`1px solid ${T.border}33`,opacity:isWeekend?0.45:1}}>
+                      <span style={{color:T.textDim}}>{d.date.slice(5)}</span>
+                      <span style={{textAlign:"right",color:color,fontWeight:700}}>{d.shipped_actual||0}</span>
+                      <span style={{textAlign:"right",color:T.textDim}}>{d.total_target||0}</span>
+                      <span style={{textAlign:"right",color:color,fontWeight:700}}>{d.total_target>0?(variance>=0?'+':'')+variance:'—'}</span>
+                      <span style={{textAlign:"right",color:color,fontWeight:700}}>{d.total_target>0?(pct>=0?'+':'')+Math.round(pct)+'%':'—'}</span>
                     </div>
                   );
                 })}
