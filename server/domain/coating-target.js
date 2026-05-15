@@ -238,6 +238,10 @@ function getCoatingUpstreamSignals(db, today) {
   const { workdaysBetween } = require('./ship-target');
 
   try {
+    // Phil 2026-05-15: jobs MUST be picked-or-WIP. Exclude INCOMING and
+    // AT_KARDEX (haven't been picked into the system yet — can't be
+    // promised as today's coating capacity). Per Phil: "If it's not in
+    // the WIP or picked, it's impossible to invent."
     const upstream = db.prepare(`
       SELECT invoice, current_stage, entry_date, lens_type,
              lens_pick_r, lens_pick_l, lens_opc_r, lens_opc_l
@@ -247,25 +251,36 @@ function getCoatingUpstreamSignals(db, today) {
     `).all();
 
     const hoursLeft = dwellEst.computeHoursLeftInWorkday(db);
-    let realisticArrivals = 0;
+    // Phil 2026-05-15: throughput-based cap. Coating can't process more
+    // than (lenses-per-hour × hoursLeft) regardless of how many jobs are
+    // queued upstream. Pull throughput from SOM (or fallback default).
+    const throughputPerHr = dwellEst.getCategoryThroughputPerHour(db, 'coating');
+    const physicallyProcessableToday = Math.floor(throughputPerHr * hoursLeft);
+
+    let queuedSurf = 0;
     let agingOverride = 0;
-    let surfUpstreamTotal = 0;
 
     for (const j of upstream) {
       const tier = classifyJobRow(j);
       if (tier !== 'SURF' && tier !== 'UNKNOWN') continue; // SV won't hit coating
-      surfUpstreamTotal++;
-      const remaining = dwellEst.estimateRemainingDwellHours(db, j.current_stage, 'COATING');
-      if (remaining <= hoursLeft) realisticArrivals++;
-      // Aging override
+      queuedSurf++;
       const slaWd = SLA_WORKDAYS[tier === 'UNKNOWN' ? 'UNKNOWN' : 'SURF'] || SLA_WORKDAYS.UNKNOWN;
       const days = j.entry_date ? workdaysBetween(j.entry_date, today) : 0;
       if (days >= slaWd) agingOverride++;
     }
 
-    return { realisticArrivals, agingOverride, surfUpstreamTotal, hoursLeft };
+    // Realistic arrivals = min(jobs queued upstream, what we can physically
+    // process today). Beyond that, additional queue is tomorrow's problem.
+    const realisticArrivals = Math.min(queuedSurf, physicallyProcessableToday);
+
+    return {
+      realisticArrivals, agingOverride,
+      surfUpstreamTotal: queuedSurf,
+      hoursLeft, throughputPerHr,
+      physicallyProcessableToday,
+    };
   } catch (e) {
-    return { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, error: e.message };
+    return { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, throughputPerHr: 0, physicallyProcessableToday: 0, error: e.message };
   }
 }
 
@@ -286,9 +301,9 @@ function computeCoatingTarget(db, options) {
   const rolloverIn = Math.min(rolloverRaw, intakeProjection);
   const rolloverCapped = rolloverRaw - rolloverIn;
 
-  // v4: replace upstreamDemand with three separate signals
+  // v4: throughput-aware signals
   const upstream = (options && options.wipSnapshot)
-    ? { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0 }
+    ? { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, throughputPerHr: 0, physicallyProcessableToday: 0 }
     : getCoatingUpstreamSignals(db, today);
 
   // operationalTarget = whichever is largest of:
@@ -309,10 +324,12 @@ function computeCoatingTarget(db, options) {
     coatingWipCount: wip.length,
 
     intakeProjection,
-    realisticArrivals:  upstream.realisticArrivals,
-    agingOverride:      upstream.agingOverride,
-    surfUpstreamTotal:  upstream.surfUpstreamTotal,
-    hoursLeftInWorkday: upstream.hoursLeft,
+    realisticArrivals:           upstream.realisticArrivals,
+    agingOverride:               upstream.agingOverride,
+    surfUpstreamTotal:           upstream.surfUpstreamTotal,
+    hoursLeftInWorkday:          upstream.hoursLeft,
+    throughputPerHourSom:        upstream.throughputPerHr,
+    physicallyProcessableToday:  upstream.physicallyProcessableToday,
     capacityEstimate,
     rolloverIn,
     rolloverRaw,

@@ -117,6 +117,30 @@ let alerts = [];
 //          last_update }
 let machineSummaries = [];
 let machineSummariesLastUpdated = null;
+
+// Phil 2026-05-15: per-category lenses-per-hour cache, refreshed each poll.
+// Used by coating/surfacing/cutting target formulas to compute
+// realistic-arrivals = throughput × hoursLeft. Sync-readable so the target
+// formulas (which are sync) can call into it without awaits.
+//
+// Categories map SOM machine TypeDescr (3-letter codes) to lab depts:
+//   surfacing: SBK Blocker, SPO Polisher, SDB De-blocker, SGE Generator
+//   coating:   SCO Coater
+//   cutting:   SED Edger
+// Assembly is operator-driven (no SOM machine) — falls back to recent
+// daily_dept_actuals avg when the formula needs it.
+let categoryThroughputPerHour = {
+  surfacing: 0,
+  coating:   0,
+  cutting:   0,
+  computedAt: null,
+  windowHours: 1,
+};
+const SOM_CATEGORY_TYPES = {
+  surfacing: ['SBK','SPO','SDB','SGE'],
+  coating:   ['SCO'],
+  cutting:   ['SED'],
+};
 let toolAlerts = []; // One alert per machine where roll-up status !== 'healthy'
 let lastSlackAlertByMachine = {}; // key=`${device}:${category}` → 24h rate-limit
 
@@ -422,6 +446,43 @@ function rollupMachineStatus(worstToolState, worstPolishState) {
   if (states.includes('critical')) return 'critical';
   if (states.includes('warning') || states.includes('heads_up')) return 'warning';
   return 'healthy';
+}
+
+// Phil 2026-05-15: poll per-category throughput from view_som_oee for the
+// last 1 hour. Sums Lenses across all DeviceTypes mapping to each lab dept
+// category. Cached in module-scope categoryThroughputPerHour, sync-readable
+// via getCategoryThroughputPerHour(). Used by target formulas.
+async function pollCategoryThroughput() {
+  if (!connection) return false;
+  try {
+    const [rows] = await connection.query(`
+      SELECT DeviceType,
+             SUM(Lenses) AS lenses_last_hour
+      FROM view_som_oee
+      WHERE TimeUnit = 'H'
+        AND Time > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+      GROUP BY DeviceType
+    `);
+    const totals = { surfacing: 0, coating: 0, cutting: 0 };
+    for (const r of rows) {
+      const t = r.DeviceType;
+      const n = Number(r.lenses_last_hour) || 0;
+      for (const [cat, types] of Object.entries(SOM_CATEGORY_TYPES)) {
+        if (types.includes(t)) totals[cat] += n;
+      }
+    }
+    categoryThroughputPerHour = {
+      surfacing:   totals.surfacing,
+      coating:     totals.coating,
+      cutting:     totals.cutting,
+      computedAt:  new Date().toISOString(),
+      windowHours: 1,
+    };
+    return true;
+  } catch (e) {
+    console.warn('[SOM] pollCategoryThroughput error:', e.message);
+    return false;
+  }
 }
 
 async function pollMachineSummaries() {
@@ -809,6 +870,8 @@ async function poll() {
 
     // Per-machine aggregated summary (single query — replaces pollTools)
     await pollMachineSummaries();
+    // Phil 2026-05-15: per-category throughput for target formulas
+    await pollCategoryThroughput();
 
     lastSuccessfulPoll = lastPoll;
     isLive = true;
@@ -1073,6 +1136,23 @@ module.exports = {
    * Machine summary for HID — one entry per machine with rolled-up status dot.
    * Matches the per-machine aggregation contract (HID spec).
    */
+  /**
+   * Phil 2026-05-15: sync per-category lenses-per-hour cache. Sourced
+   * from view_som_oee TimeUnit='H' over the last 1 hour, refreshed on
+   * each SOM poll (~30s). Used by coating/surfacing/cutting target
+   * formulas as the empirical throughput cap on realistic-arrivals.
+   *
+   * Returns:
+   *   { surfacing: lensesPerHour, coating: ..., cutting: ...,
+   *     computedAt: ISO string, windowHours: 1 }
+   *
+   * If never polled (SOM not connected): all categories return 0.
+   * Callers should handle 0 as "no data" → fall back to a config default.
+   */
+  getCategoryThroughputPerHour() {
+    return { ...categoryThroughputPerHour };
+  },
+
   getMachineSummary() {
     const machines = machineSummaries.map(m => {
       const type = hidMachineType(m.category);

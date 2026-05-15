@@ -198,6 +198,7 @@ function getSurfacingUpstreamSignals(db, today) {
   const { workdaysBetween } = require('./ship-target');
 
   try {
+    // Phil 2026-05-15: picked-or-WIP only — exclude INCOMING/AT_KARDEX.
     const upstream = db.prepare(`
       SELECT invoice, current_stage, entry_date, lens_type,
              lens_pick_r, lens_pick_l, lens_opc_r, lens_opc_l
@@ -207,30 +208,31 @@ function getSurfacingUpstreamSignals(db, today) {
     `).all();
 
     const hoursLeft = dwellEst.computeHoursLeftInWorkday(db);
-    let realisticArrivals = 0;
+    const throughputPerHr = dwellEst.getCategoryThroughputPerHour(db, 'surfacing');
+    const physicallyProcessableToday = Math.floor(throughputPerHr * hoursLeft);
+
+    let queuedSurf = 0;
     let agingOverride = 0;
-    let surfUpstreamTotal = 0;
 
     for (const j of upstream) {
       const tier = classifyJobRow(j);
       if (tier !== 'SURF' && tier !== 'UNKNOWN') continue;
-      surfUpstreamTotal++;
-      // For surfacing: jobs already at SURFACING/BLOCKING are "in flight"
-      // and count toward today's processing; jobs at PICKING need to arrive.
-      if (j.current_stage === 'SURFACING' || j.current_stage === 'BLOCKING') {
-        realisticArrivals++;
-      } else {
-        const remaining = dwellEst.estimateRemainingDwellHours(db, j.current_stage, 'SURFACING');
-        if (remaining <= hoursLeft) realisticArrivals++;
-      }
+      queuedSurf++;
       const slaWd = SLA_WORKDAYS[tier === 'UNKNOWN' ? 'UNKNOWN' : 'SURF'] || SLA_WORKDAYS.UNKNOWN;
       const days = j.entry_date ? workdaysBetween(j.entry_date, today) : 0;
       if (days >= slaWd) agingOverride++;
     }
 
-    return { realisticArrivals, agingOverride, surfUpstreamTotal, hoursLeft };
+    const realisticArrivals = Math.min(queuedSurf, physicallyProcessableToday);
+
+    return {
+      realisticArrivals, agingOverride,
+      surfUpstreamTotal: queuedSurf,
+      hoursLeft, throughputPerHr,
+      physicallyProcessableToday,
+    };
   } catch (e) {
-    return { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, error: e.message };
+    return { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, throughputPerHr: 0, physicallyProcessableToday: 0, error: e.message };
   }
 }
 
@@ -263,9 +265,9 @@ function computeSurfacingTarget(db, options) {
   const rolloverIn = Math.min(rolloverRaw, intakeProjection);
   const rolloverCapped = rolloverRaw - rolloverIn;
 
-  // v3: flow-time-aware signals — see getSurfacingUpstreamSignals comment.
+  // v3: throughput-capped signals — see getSurfacingUpstreamSignals.
   const upstream = (options && options.wipSnapshot)
-    ? { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0 }
+    ? { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, throughputPerHr: 0, physicallyProcessableToday: 0 }
     : getSurfacingUpstreamSignals(db, today);
 
   const operationalTarget = isWorkday(today)
@@ -281,10 +283,12 @@ function computeSurfacingTarget(db, options) {
     surfacingWipCount: wip.length,
 
     intakeProjection,
-    realisticArrivals:  upstream.realisticArrivals,
-    agingOverride:      upstream.agingOverride,
-    surfUpstreamTotal:  upstream.surfUpstreamTotal,
-    hoursLeftInWorkday: upstream.hoursLeft,
+    realisticArrivals:           upstream.realisticArrivals,
+    agingOverride:               upstream.agingOverride,
+    surfUpstreamTotal:           upstream.surfUpstreamTotal,
+    hoursLeftInWorkday:          upstream.hoursLeft,
+    throughputPerHourSom:        upstream.throughputPerHr,
+    physicallyProcessableToday:  upstream.physicallyProcessableToday,
     capacityEstimate,
     rolloverIn,
     rolloverRaw,

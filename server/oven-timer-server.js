@@ -5145,13 +5145,15 @@ Respond with a structured batching plan in this format:
       };
     });
 
-    // Daily goal — same v2 ship target. Lab assembles whatever it
-    // ships, so the same number serves as the assembly goal too.
+    // Phil 2026-05-15: assembly has its own demand (cut completions +
+    // asmWip), capacity-bounded by assembly throughput. No longer reuses
+    // the lab-wide ship target. See assembly-target.js.
     let dailyGoal = 0;
+    let assemblyTargetDetail = null;
     try {
-      const { computeShipTarget } = require('./domain/ship-target');
-      const t = computeShipTarget(labDb.db);
-      dailyGoal = t.target || 0;
+      const { computeAssemblyTarget } = require('./domain/assembly-target');
+      assemblyTargetDetail = computeAssemblyTarget(labDb.db);
+      dailyGoal = assemblyTargetDetail.target || 0;
     } catch (e) { console.error('[api/assembly/jobs] target compute failed', e.message); }
 
     return json(res, {
@@ -5167,6 +5169,7 @@ Respond with a structured batching plan in this format:
       stationOperators,
       shippedToday: getShippedCounts().today,
       dailyGoal,
+      target: assemblyTargetDetail,
       incomingToday: allJobs.filter(j => j.stage === 'INCOMING' && j.lastSeen >= todayMs).length,
       totalWip: allJobs.filter(j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED').length,
       source: 'dvi-trace',
@@ -5502,13 +5505,14 @@ Respond with a structured batching plan in this format:
 
     const enriched = cuttingJobs.map(j => enrichJob(j, dviJobIndex));
 
-    // Cutting daily target — Phil 2026-05-11: everything that ships passes
-    // through cutting, so cutting volume = shipping volume. Reuse the
-    // ship-target formula directly rather than maintain a second pipeline.
+    // Phil 2026-05-15: cutting has its own demand (SV-at-PICKING +
+    // SURF-from-coating + cutWip), capacity-bounded by cutting throughput.
+    // Previously reused ship-target which over-stated the goal because it
+    // ignored upstream feasibility. See cutting-target.js.
     let target = null;
     try {
-      const { computeShipTarget } = require('./domain/ship-target');
-      target = computeShipTarget(labDb.db);
+      const { computeCuttingTarget } = require('./domain/cutting-target');
+      target = computeCuttingTarget(labDb.db);
     } catch (e) { console.error('[cutting/dashboard] target compute failed', e.message); }
 
     return json(res, {

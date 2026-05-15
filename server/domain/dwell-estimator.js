@@ -237,13 +237,44 @@ function _readConfig(db, key, defaultVal) {
   return defaultVal;
 }
 
+// Phil 2026-05-15: SOM-driven throughput. Real lenses-per-hour through
+// each lab category, sourced from SOM `view_som_oee` and cached in the
+// SOM adapter. Used by target formulas to cap "realistic arrivals today"
+// at what the line can physically process.
+//
+// Defaults (used when SOM not connected or no data yet) — Phil's domain
+// estimates: surfacing line ~150 lenses/hr, coating ~100, cutting ~140,
+// assembly ~130. Tunable via lab_planning_config keys
+// `throughput_default_<category>`.
+const FALLBACK_THROUGHPUT_PER_HOUR = {
+  surfacing: 150,
+  coating:   100,
+  cutting:   140,
+  assembly:  130,
+};
+
+function getCategoryThroughputPerHour(db, category) {
+  // First try live SOM data
+  try {
+    const som = require('../som-adapter');
+    const cache = som.getCategoryThroughputPerHour && som.getCategoryThroughputPerHour();
+    if (cache && cache[category] && cache[category] > 0) {
+      return cache[category];
+    }
+  } catch (_) { /* SOM module unavailable on dev */ }
+  // Fall back to config-tunable default
+  return _readConfig(db, `throughput_default_${category}`, FALLBACK_THROUGHPUT_PER_HOUR[category] || 100);
+}
+
 module.exports = {
   recomputeStageDwells,
   getStageP50Hours,
   estimateRemainingDwellHours,
   computeHoursLeftInWorkday,
+  getCategoryThroughputPerHour,
   collectStageDwells,
   percentilesSorted,
   STAGES_FLOW,
   FALLBACK_DWELL_HOURS,
+  FALLBACK_THROUGHPUT_PER_HOUR,
 };
