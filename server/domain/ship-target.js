@@ -345,8 +345,39 @@ function computeShipTarget(db, options) {
   // arriving — we still need to maintain throughput.
   const intakeFloor = isWorkday(today) ? intakeProjection : 0;
 
-  const target = Math.max(operationalTarget, slaFloor, intakeFloor);
-  const gap    = target - capacityEstimate;
+  const uncappedTarget = Math.max(operationalTarget, slaFloor, intakeFloor);
+
+  // Phil 2026-05-15: cascade cap. Shipping cannot exceed what assembly
+  // physically produces today + the buffer of jobs already at SHIPPING
+  // (assembled in prior shifts, ready to go). Without this cap, ship
+  // target balloons to "what we'd LIKE to ship" instead of "what we
+  // physically CAN ship." See cutting-target / assembly-target which
+  // already cascade through coating + cutting throughput respectively.
+  let assemblyProjectedToday = 0;
+  let readyToShipWip = 0;
+  let cascadeCap = null;
+  if (!(options && options.wipSnapshot)) {
+    try {
+      const { computeAssemblyTarget } = require('./assembly-target');
+      const at = computeAssemblyTarget(db, options);
+      assemblyProjectedToday = at.realisticArrivals || 0;
+    } catch (_) { /* assembly module unavailable on dev or first boot */ }
+    try {
+      readyToShipWip = db.prepare(`
+        SELECT COUNT(*) AS n FROM jobs
+        WHERE status IN ('ACTIVE','Active') AND current_stage = 'SHIPPING'
+      `).get()?.n || 0;
+    } catch (_) { readyToShipWip = 0; }
+    cascadeCap = assemblyProjectedToday + readyToShipWip;
+  }
+
+  // Apply the cap only if we got a real assembly projection > 0; otherwise
+  // a brief boot window where assembly-target hasn't loaded shouldn't zero
+  // out shipping.
+  const target = (cascadeCap != null && cascadeCap > 0)
+    ? Math.min(uncappedTarget, cascadeCap)
+    : uncappedTarget;
+  const gap = target - capacityEstimate;
 
   return {
     date: today,
@@ -377,11 +408,15 @@ function computeShipTarget(db, options) {
     // Outputs
     operationalTarget,
     slaFloor,
+    uncappedTarget,
+    cascadeCap,
+    assemblyProjectedToday,
+    readyToShipWip,
     target,
     gap,
 
     // Provenance / tunability
-    formulaVersion: 3,
+    formulaVersion: 4,
     config: {
       aging_exponent:       cfg.aging_exponent,
       intake_window_days:   cfg.intake_window_days,
