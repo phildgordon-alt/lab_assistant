@@ -164,13 +164,18 @@ const STAGES_FLOW = [
   'SHIPPING',
 ];
 
+// Phil 2026-05-15 correction: BLOCKING is the auto-blocker step INSIDE
+// the surfacing line — ~10 min, not dip+oven. Dip-coat + oven are part
+// of COATING dept (post-surfacing prep before the actual coat). So:
+//   - SURFACING + BLOCKING together ≈ Phil's "surfacing line" (1–4h total)
+//   - COATING includes dip-coat (1.5–2h) + oven (3h) + actual coat (~1h) ≈ 5h
 const FALLBACK_DWELL_HOURS = {
   INCOMING:  1,
   AT_KARDEX: 0.5,
   PICKING:   1,
-  SURFACING: 2.5,           // Phil: 1-4h
-  BLOCKING:  4.5,           // dip coat 1.5-2h + oven 3h folded in
-  COATING:   2,
+  SURFACING: 2,             // surface line minus blocking (~1-4h total split)
+  BLOCKING:  0.17,          // ~10 min auto-blocker
+  COATING:   5,             // dip-coat 1.5-2h + oven 3h + actual coat
   CUTTING:   1,
   ASSEMBLY:  1,
   QC:        0.5,
