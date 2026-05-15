@@ -89,12 +89,14 @@ function loadConfig(db, overrides) {
 // data quality, not pace.
 const UNPICKED_AGE_CAP_DAYS = 30;
 
-// Phil 2026-05-15: simplified to "anything in DVI queues" per Phil's
-// directive. Old inverse-match (no picks_history AND no downstream
-// events) was fragile — required entry_date populated, missed jobs
-// where picks_history sync was lagging, returned 0 even when the
-// header KPI showed 163 backlog. Direct stage-based match is what
-// Phil expects: jobs at INCOMING/AT_KARDEX/NEL/PICKING are "unpicked."
+// Phil 2026-05-15: list and count INTENTIONALLY use different queries.
+//   getUnpickedBacklog (list)       — "anything in DVI queues"
+//                                     (what operators want to see)
+//   getUnpickedBacklogCount (goal) — "actionable, last 30d, not yet
+//                                     downstream" (what the picking
+//                                     target formula consumes)
+// Phil asked only for the list to reflect DVI queues; the goal stays
+// on the conservative formula so today's target doesn't balloon.
 const UNPICKED_STAGES = "('INCOMING','AT_KARDEX','NEL','PICKING')";
 
 function getUnpickedBacklog(db, limit) {
@@ -115,10 +117,20 @@ function getUnpickedBacklog(db, limit) {
 }
 
 function getUnpickedBacklogCount(db) {
+  // ORIGINAL formula — drives picking goal. Conservative (excludes
+  // stale data-debt zombies, requires no downstream-stage events).
   const row = db.prepare(`
     SELECT COUNT(*) AS n FROM jobs j
     WHERE j.status IN ('ACTIVE','Active')
-      AND j.current_stage IN ${UNPICKED_STAGES}
+      AND (j.entry_date IS NOT NULL OR j.first_seen_at IS NOT NULL)
+      AND COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10))
+          >= date('now','localtime','-${UNPICKED_AGE_CAP_DAYS} days')
+      AND NOT EXISTS (SELECT 1 FROM picks_history ph WHERE ph.order_id = j.invoice)
+      AND NOT EXISTS (
+        SELECT 1 FROM job_events je
+        WHERE je.invoice = j.invoice
+          AND je.stage IN ('SURFACING','CUTTING','COATING','ASSEMBLY','SHIPPING')
+      )
   `).get();
   return row?.n || 0;
 }
