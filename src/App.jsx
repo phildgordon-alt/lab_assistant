@@ -4686,22 +4686,41 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
                 <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' }}>{catLabel} ({devs.length})</div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
                   {devs.map(d => {
-                    const ledColor = d.led?.status === 'error' ? T.red : d.led?.status === 'warning' ? T.amber : d.led?.green ? T.green : T.textDim;
+                    // Phil 2026-05-15: traffic-light status. Primary signal is
+                    // d.severity (always populated by SOM adapter); d.led?.status
+                    // was unreliable (often empty when LED string not sent).
+                    // Critical = red blink, warning = amber blink, ok = green,
+                    // info = blue, unknown/offline = gray. Staleness tracked via
+                    // somData.lastPoll (>2min stale = grey override + dim).
+                    const sev = d.severity || (d.led?.status === 'error' ? 'critical' : d.led?.status === 'warning' ? 'warning' : d.led?.green ? 'ok' : 'unknown');
+                    const isStale = somData.lastPoll && (Date.now() - new Date(somData.lastPoll).getTime() > 120000);
+                    const ledColor = isStale ? T.textDim
+                      : sev === 'critical' ? T.red
+                      : sev === 'warning' ? T.amber
+                      : sev === 'ok' ? T.green
+                      : sev === 'info' ? T.blue
+                      : T.textDim;
+                    const blink = !isStale && (sev === 'critical' || sev === 'warning');
                     return (
-                      <div key={d.id} style={{ background: T.bg, border: `1px solid ${ledColor}30`, borderRadius: 8, padding: '10px 14px' }}>
+                      <div key={d.id} style={{ background: T.bg, border: `1px solid ${ledColor}30`, borderRadius: 8, padding: '10px 14px', opacity: isStale ? 0.55 : 1 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div style={{ width: 8, height: 8, borderRadius: '50%', background: ledColor, boxShadow: `0 0 6px ${ledColor}60` }} />
+                            <div style={{
+                              width: 10, height: 10, borderRadius: '50%', background: ledColor,
+                              boxShadow: `0 0 8px ${ledColor}80`,
+                              animation: blink ? 'somBlink 1s ease-in-out infinite' : undefined,
+                            }} />
                             <span style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: mono }}>{d.name}</span>
                           </div>
                           <span style={{ fontSize: 10, color: ledColor, fontWeight: 600, fontFamily: mono }}>{d.statusLabel || d.status}</span>
                         </div>
                         <div style={{ fontSize: 10, color: T.textMuted, fontFamily: mono, marginBottom: 4 }}>{d.typeDescription || d.model}</div>
-                        {d.event && <div style={{ fontSize: 9, color: d.led?.status === 'error' ? T.red : T.textDim, fontFamily: mono, marginBottom: 4, lineHeight: 1.4 }}>{d.event}</div>}
+                        {d.event && <div style={{ fontSize: 9, color: sev === 'critical' ? T.red : T.textDim, fontFamily: mono, marginBottom: 4, lineHeight: 1.4 }}>{d.event}</div>}
                         <div style={{ display: 'flex', gap: 12, fontSize: 9, color: T.textDim, fontFamily: mono }}>
                           {d.cycleTime && <span>Cycle: {d.cycleTime}s</span>}
                           {d.counts?.count1 > 0 && <span>Count: {d.counts.count1.toLocaleString()}</span>}
                           {d.lastOrder && d.lastOrder.trim() && <span>Last: #{d.lastOrder.trim()}</span>}
+                          {isStale && <span style={{ color: T.amber }}>STALE</span>}
                         </div>
                       </div>
                     );
@@ -12223,7 +12242,7 @@ function CorporateViewer({trays,batches,events,settings}){
           </div>
         )}
       </div>
-      <style>{`*{box-sizing:border-box;margin:0;padding:0;}::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:${T.bg};}::-webkit-scrollbar-thumb{background:${T.border};border-radius:3px;}input::placeholder{color:${T.textDim};}input:focus{border-color:${T.blue}!important;}@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}`}</style>
+      <style>{`*{box-sizing:border-box;margin:0;padding:0;}::-webkit-scrollbar{width:5px;}::-webkit-scrollbar-track{background:${T.bg};}::-webkit-scrollbar-thumb{background:${T.border};border-radius:3px;}input::placeholder{color:${T.textDim};}input:focus{border-color:${T.blue}!important;}@keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}@keyframes somBlink{0%,100%{opacity:1;}50%{opacity:0.35;}}`}</style>
     </div>
   );
 }
