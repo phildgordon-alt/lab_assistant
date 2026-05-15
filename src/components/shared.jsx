@@ -483,6 +483,8 @@ export function GoalHistory({ serverUrl, dept, deptLabel, days = 14 }) {
               <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>TARGET</th>
               <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>ACTUAL</th>
               <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>Δ</th>
+              <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>RATE/HR</th>
+              <th style={{ padding: '8px 10px', textAlign: 'right', color: T.textDim, fontWeight: 600, fontSize: 10, letterSpacing: 1 }}>%</th>
             </tr>
           </thead>
           <tbody>
@@ -523,6 +525,12 @@ export function GoalHistory({ serverUrl, dept, deptLabel, days = 14 }) {
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', color: variance >= 0 ? '#10B981' : '#EF4444', fontWeight: 700 }}>
                     {variance >= 0 ? '+' : ''}{variance.toLocaleString()}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', color: T.textMuted }}>
+                    {r.ratePerHour != null ? r.ratePerHour.toFixed(1) : '—'}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', color: r.rateVsGoalPct >= 100 ? '#10B981' : r.rateVsGoalPct >= 85 ? '#F59E0B' : r.rateVsGoalPct != null ? '#EF4444' : T.textDim, fontWeight: 700 }}>
+                    {r.rateVsGoalPct != null ? `${Math.round(r.rateVsGoalPct)}%` : '—'}
                   </td>
                 </tr>
               );
