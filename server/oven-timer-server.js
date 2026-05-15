@@ -5351,7 +5351,20 @@ Respond with a structured batching plan in this format:
       const { getUnpickedBacklog } = require('./domain/picking-target');
       const limit = Math.min(500, parseInt(url.searchParams.get('limit') || '50', 10));
       const rows = getUnpickedBacklog(labDb.db, limit);
-      return json(res, { count: rows.length, jobs: rows });
+      // Phil 2026-05-15: per-queue breakdown card above the WIP QUEUE table.
+      // Counts SAME pre-pick stages used by getUnpickedBacklog so the card
+      // and table never disagree on totals.
+      let byStage = { INCOMING: 0, AT_KARDEX: 0, NEL: 0, PICKING: 0 };
+      try {
+        const stageRows = labDb.db.prepare(`
+          SELECT current_stage, COUNT(*) AS n FROM jobs
+          WHERE status IN ('ACTIVE','Active')
+            AND current_stage IN ('INCOMING','AT_KARDEX','NEL','PICKING')
+          GROUP BY current_stage
+        `).all();
+        for (const r of stageRows) byStage[r.current_stage] = r.n || 0;
+      } catch (_) { /* ignore */ }
+      return json(res, { count: rows.length, jobs: rows, byStage });
     } catch (e) {
       console.error('[/api/picking/unpicked] failed:', e.message);
       return json(res, { error: e.message, jobs: [] }, 500);

@@ -24,7 +24,7 @@ import { GoalBar, GoalHistory, Card, SectionHeader, Pill, DeptKpiStrip } from '.
 export function PickingTab({ ovenServerUrl, settings }) {
   const [target, setTarget] = useState({ dailyGoal: 0, completedToday: 0, target: null });
   const [whPicks, setWhPicks] = useState({ WH1: 0, WH2: 0, WH3: 0, invoiceCount: 0 });
-  const [unpicked, setUnpicked] = useState({ count: 0, jobs: [] });
+  const [unpicked, setUnpicked] = useState({ count: 0, jobs: [], byStage: {} });
   const [search, setSearch] = useState('');
 
   // Poll /api/picking/target every 60s
@@ -78,7 +78,7 @@ export function PickingTab({ ovenServerUrl, settings }) {
         const r = await fetch(`${ovenServerUrl}/api/picking/unpicked?limit=100`);
         if (r.ok && active) {
           const d = await r.json();
-          setUnpicked({ count: d.count || 0, jobs: d.jobs || [] });
+          setUnpicked({ count: d.count || 0, jobs: d.jobs || [], byStage: d.byStage || {} });
         }
       } catch (_) {}
     };
@@ -173,6 +173,29 @@ export function PickingTab({ ovenServerUrl, settings }) {
           style={{ width: '100%', maxWidth: 400, padding: '10px 14px', background: T.card, border: `1px solid ${T.border}`, borderRadius: 8, color: T.text, fontSize: 13, fontFamily: mono }}
         />
       </div>
+
+      {/* Phil 2026-05-15: DVI queue breakdown card — show counts at each
+          pre-pick stage so operator sees where unpicked jobs are sitting. */}
+      <Card style={{ marginBottom: 20 }}>
+        <SectionHeader>DVI Queues</SectionHeader>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          {[
+            { key: 'INCOMING',  label: 'Incoming',  accent: '#3B82F6' },
+            { key: 'AT_KARDEX', label: 'At Kardex', accent: '#F59E0B' },
+            { key: 'NEL',       label: 'NE Lens',   accent: '#A855F7' },
+            { key: 'PICKING',   label: 'Picking',   accent: '#10B981' },
+          ].map(q => {
+            const n = unpicked.byStage?.[q.key] || 0;
+            return (
+              <div key={q.key} style={{ background: T.bg, border: `1px solid ${T.border}`, borderLeft: `4px solid ${q.accent}`, borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, letterSpacing: 1, textTransform: 'uppercase' }}>{q.label}</div>
+                <div style={{ fontSize: 28, fontWeight: 800, color: n > 0 ? T.text : T.textDim, fontFamily: mono, lineHeight: 1.1, marginTop: 4 }}>{n.toLocaleString()}</div>
+                <div style={{ fontSize: 10, color: T.textDim, fontFamily: mono, marginTop: 2 }}>jobs in queue</div>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
 
       {/* Unpicked WIP Queue */}
       <Card style={{ marginBottom: 20 }}>
