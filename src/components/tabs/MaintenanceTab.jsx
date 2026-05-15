@@ -67,15 +67,15 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
   const stockLabel = isOutOfStock ? 'OUT OF STOCK' : isLowStock ? 'LOW STOCK' : 'IN STOCK';
   return (
     <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, background: T.surface, borderLeft: `1px solid ${T.border}`, zIndex: 1000, display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px #00000040' }}>
-      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ flex: 1 }}>
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{item.sku || item.name || title}</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
             <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4, background: `${stockColor}20`, color: stockColor, fontFamily: mono }}>{stockLabel}</span>
             {item.qty !== undefined && <span style={{ fontSize: 13, fontWeight: 700, color: T.text, fontFamily: mono }}>{item.qty} units</span>}
           </div>
         </div>
-        <button onClick={onClose} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, cursor: 'pointer', fontSize: 12 }}>✕ Close</button>
+        <button onClick={onClose} aria-label="Close" style={{ background: T.red, border: 'none', borderRadius: 8, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer', fontSize: 18, fontWeight: 800, lineHeight: 1, flexShrink: 0 }}>✕</button>
       </div>
       <div style={{ flex: 1, overflowY: 'auto', padding: 20 }}>
         {renderSection('Identification', identFields)}
@@ -85,6 +85,10 @@ function InventoryDetailPanel({ item, onClose, title = "Item Details" }) {
           <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>All Fields</div>
           {Object.entries(item).map(([k, v]) => renderField(k, v))}
         </div>
+      </div>
+      {/* Fixed bottom close button — always visible */}
+      <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+        <button onClick={onClose} style={{ width: '100%', background: T.red, border: 'none', borderRadius: 8, padding: '10px 0', color: '#fff', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: mono }}>✕ CLOSE</button>
       </div>
     </div>
   );

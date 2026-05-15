@@ -4172,12 +4172,12 @@ function JobDetailPanel({ job, onClose }) {
   return (
     <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, background: T.surface, borderLeft: `1px solid ${T.border}`, zIndex: 1000, display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px #00000040' }}>
       {/* Header */}
-      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div>
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{job.invoice || job.job_id || 'Job Details'}</div>
           <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono }}>{job.frameName || job.station || ''}</div>
         </div>
-        <button onClick={onClose} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, cursor: 'pointer', fontSize: 12 }}>✕ Close</button>
+        <button onClick={onClose} aria-label="Close" style={{ background: T.red, border: 'none', borderRadius: 8, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer', fontSize: 18, fontWeight: 800, lineHeight: 1, flexShrink: 0 }}>✕</button>
       </div>
 
       {/* Content */}
@@ -4206,6 +4206,11 @@ function JobDetailPanel({ job, onClose }) {
           <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>All Fields</div>
           {Object.entries(job).filter(([k]) => !['breakageItems'].includes(k)).map(([k, v]) => renderField(k, v))}
         </div>
+      </div>
+
+      {/* Fixed bottom close button — always visible */}
+      <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+        <button onClick={onClose} style={{ width: '100%', background: T.red, border: 'none', borderRadius: 8, padding: '10px 0', color: '#fff', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: mono }}>✕ CLOSE</button>
       </div>
     </div>
   );
@@ -4344,12 +4349,12 @@ export function InventoryDetailPanel({ item, onClose, title = "Item Details" }) 
   return (
     <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 420, background: T.surface, borderLeft: `1px solid ${T.border}`, zIndex: 1000, display: 'flex', flexDirection: 'column', boxShadow: '-4px 0 24px #00000040' }}>
       {/* Header */}
-      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ flex: 1 }}>
+      <div style={{ padding: '16px 20px', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 800, color: T.text }}>{item.sku || item.name || title}</div>
           <div style={{ fontSize: 11, color: T.textMuted, fontFamily: mono, marginTop: 2 }}>{item.name?.slice(0, 50) || item.description?.slice(0, 50) || ''}</div>
         </div>
-        <button onClick={onClose} style={{ background: T.card, border: `1px solid ${T.border}`, borderRadius: 6, padding: '6px 12px', color: T.textMuted, cursor: 'pointer', fontSize: 12 }}>✕ Close</button>
+        <button onClick={onClose} aria-label="Close" style={{ background: T.red, border: 'none', borderRadius: 8, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', cursor: 'pointer', fontSize: 18, fontWeight: 800, lineHeight: 1, flexShrink: 0 }}>✕</button>
       </div>
 
       {/* Stock Status Banner */}
@@ -4378,6 +4383,11 @@ export function InventoryDetailPanel({ item, onClose, title = "Item Details" }) 
           <div style={{ fontSize: 10, fontWeight: 700, color: T.textDim, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8, fontFamily: mono }}>All Fields</div>
           {Object.entries(item).map(([k, v]) => renderField(k, v))}
         </div>
+      </div>
+
+      {/* Fixed bottom close button — always visible */}
+      <div style={{ padding: '12px 20px', borderTop: `1px solid ${T.border}`, flexShrink: 0 }}>
+        <button onClick={onClose} style={{ width: '100%', background: T.red, border: 'none', borderRadius: 8, padding: '10px 0', color: '#fff', fontSize: 13, fontWeight: 800, cursor: 'pointer', fontFamily: mono }}>✕ CLOSE</button>
       </div>
     </div>
   );
@@ -11241,6 +11251,7 @@ function UWBPositionView({trays,selectedTray,setSelectedTray}){
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
               <div style={{fontSize:18,fontWeight:800,color:T.text,fontFamily:mono}}>{sel.id}</div>
               {sel.rush&&<span style={{fontSize:9,fontWeight:800,color:T.red,background:`${T.red}20`,padding:"2px 8px",borderRadius:4,fontFamily:mono}}>RUSH</span>}
+              <button onClick={()=>setSelectedTray(null)} aria-label="Close" style={{marginLeft:"auto",background:T.red,border:"none",borderRadius:6,padding:"4px 10px",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:mono}}>✕ Close</button>
             </div>
             {[
               ["Zone", LAB_ZONES[selPos.zone]?.label||selPos.zone, TRAY_STATES[sel.state].color],
@@ -11698,7 +11709,10 @@ function TrayFleetTab({trays,setTrays}){
           <div>
             {sel?(
               <Card style={{borderTop:`3px solid ${TRAY_STATES[sel.state].color}`,position:"sticky",top:80}}>
-                <SectionHeader>{sel.id} Details</SectionHeader>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+                  <SectionHeader>{sel.id} Details</SectionHeader>
+                  <button onClick={()=>setSelectedTray(null)} aria-label="Close" style={{background:T.red,border:"none",borderRadius:6,padding:"4px 10px",color:"#fff",cursor:"pointer",fontSize:11,fontWeight:800,fontFamily:mono}}>✕ Close</button>
+                </div>
 
                 {/* Battery prominent display */}
                 <div style={{display:"flex",alignItems:"center",gap:14,padding:"14px",background:T.bg,borderRadius:8,marginBottom:14,border:`1px solid ${T.border}`}}>
