@@ -92,18 +92,21 @@ const DEPT_ORDER = ["PICKING","SURFACING","COATING","CUTTING","ASSEMBLY","SHIPPI
 function DeptRatesCard({ovenServerUrl, range}){
   const [rates,setRates]=useState(null);
   const [err,setErr]=useState(false);
+  // Phil 2026-05-15: range determines longDays so the AVG column reflects
+  // the period the user picked. Also added range to deps so it refetches.
+  const rangeLongDays = {today:1, "7d":7, "30d":30, "90d":90, all:365}[range] || 30;
   useEffect(()=>{
     if(ovenServerUrl==null) return;
     let alive=true;
     const go=async()=>{
       try{
-        const r=await fetch(`${ovenServerUrl}/api/analytics/dept-rates`,{signal:AbortSignal.timeout(5000)});
+        const r=await fetch(`${ovenServerUrl}/api/analytics/dept-rates?longDays=${rangeLongDays}&shortDays=7`,{signal:AbortSignal.timeout(5000)});
         if(!r.ok){if(alive)setErr(true);return;}
         const d=await r.json(); if(alive){setRates(d); setErr(false);}
       }catch{if(alive)setErr(true);}
     };
     go(); const iv=setInterval(go,30000); return()=>{alive=false;clearInterval(iv);};
-  },[ovenServerUrl]);
+  },[ovenServerUrl, rangeLongDays]);
 
   // Phil 2026-05-15: endpoint returns depts as array with lowercase dept
   // names, nested today/avgShort/avgLong/dwell. Convert to lookup map.
@@ -140,7 +143,7 @@ function DeptRatesCard({ovenServerUrl, range}){
           <span>DEPT</span>
           <span style={{textAlign:"right"}}>NOW/HR</span>
           <span style={{textAlign:"right"}}>7D AVG</span>
-          <span style={{textAlign:"right"}}>30D AVG</span>
+          <span style={{textAlign:"right"}}>{rangeLongDays>=365?"ALL AVG":`${rangeLongDays}D AVG`}</span>
           <span style={{textAlign:"right"}}>DWELL</span>
           <span style={{textAlign:"right"}}>14D TREND</span>
         </div>
