@@ -1941,6 +1941,22 @@ const server = http.createServer(async (req, res) => {
         });
       }
     }
+    // Phil 2026-05-15: dedupe by displayed (ovenId, rackIndex). Multiple
+    // tablets sending heartbeats with slightly different keys for the
+    // same physical rack (one uses ovenId='5', another ovenName='Oven 5')
+    // produced ghost entries on the dashboard. Keep the entry with the
+    // longer elapsed time (most-recently-active source).
+    const _byPhysicalRack = new Map();
+    for (const r of runningRacks) {
+      const key = `${r.ovenId}::${r.rackIndex}`;
+      const prev = _byPhysicalRack.get(key);
+      if (!prev || (r.elapsed || 0) > (prev.elapsed || 0)) {
+        _byPhysicalRack.set(key, r);
+      }
+    }
+    runningRacks.length = 0;
+    for (const r of _byPhysicalRack.values()) runningRacks.push(r);
+
     // No mock data — if no OvenTimer heartbeat, ovens show empty (real state)
     const racksInUse = runningRacks.length;
     const racksAvailable = TOTAL_RACKS - racksInUse;
@@ -6190,6 +6206,114 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Analytics: per-department rate/hr + avg dwell aggregates ──
+  // Phil 2026-05-15: Analytics overview needs rate-per-hour and avg dwell
+  // for every dept, with averages over 7d/30d for empirical analysis.
+  // Reads from the rate columns added in migration 020.
+  if (req.method==='GET' && url.pathname==='/api/analytics/dept-rates') {
+    try {
+      const longDays = Math.max(1, Math.min(90, parseInt(url.searchParams.get('longDays') || '30', 10)));
+      const shortDays = Math.max(1, Math.min(longDays, parseInt(url.searchParams.get('shortDays') || '7', 10)));
+
+      const depts = [
+        { dept: 'shipping',  table: 'daily_ship_targets',      actualCol: 'shipped_actual'   },
+        { dept: 'coating',   table: 'daily_coating_targets',   actualCol: 'coated_actual'    },
+        { dept: 'surfacing', table: 'daily_surfacing_targets', actualCol: 'surfaced_actual'  },
+        { dept: 'picking',   table: 'daily_picking_targets',   actualCol: 'picked_actual'    },
+      ];
+
+      const today = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Los_Angeles' });
+      const out = [];
+      for (const d of depts) {
+        try {
+          const todayRow = labDb.db.prepare(
+            `SELECT rate_per_hour AS ratePerHour, rate_vs_goal_pct AS rateVsGoalPct,
+                    total_target AS target, ${d.actualCol} AS actual
+             FROM ${d.table} WHERE date = ?`
+          ).get(today);
+          const avgFor = (n) => labDb.db.prepare(
+            `SELECT AVG(rate_per_hour) AS avgRate, AVG(rate_vs_goal_pct) AS avgRatePct,
+                    COUNT(rate_per_hour) AS samples
+             FROM ${d.table}
+             WHERE date >= date('now','localtime','-' || ? || ' days')
+               AND date < date('now','localtime')
+               AND is_workday = 1
+               AND rate_per_hour IS NOT NULL`
+          ).get(n);
+          out.push({
+            dept: d.dept,
+            today: {
+              ratePerHour: todayRow?.ratePerHour ?? null,
+              rateVsGoalPct: todayRow?.rateVsGoalPct ?? null,
+              target: todayRow?.target ?? null,
+              actual: todayRow?.actual ?? null,
+            },
+            avgShort: { ratePerHour: avgFor(shortDays).avgRate, rateVsGoalPct: avgFor(shortDays).avgRatePct, samples: avgFor(shortDays).samples, days: shortDays },
+            avgLong:  { ratePerHour: avgFor(longDays).avgRate,  rateVsGoalPct: avgFor(longDays).avgRatePct,  samples: avgFor(longDays).samples,  days: longDays },
+          });
+        } catch (e) { out.push({ dept: d.dept, error: e.message }); }
+      }
+
+      // Cutting + assembly from daily_dept_actuals (no separate target table)
+      for (const dept of ['cutting','assembly']) {
+        try {
+          const todayRow = labDb.db.prepare(
+            `SELECT rate_per_hour AS ratePerHour, rate_vs_goal_pct AS rateVsGoalPct,
+                    target, actual
+             FROM daily_dept_actuals WHERE date = ? AND dept = ?`
+          ).get(today, dept);
+          const avgFor = (n) => labDb.db.prepare(
+            `SELECT AVG(rate_per_hour) AS avgRate, AVG(rate_vs_goal_pct) AS avgRatePct,
+                    COUNT(rate_per_hour) AS samples
+             FROM daily_dept_actuals
+             WHERE date >= date('now','localtime','-' || ? || ' days')
+               AND date < date('now','localtime')
+               AND dept = ?
+               AND rate_per_hour IS NOT NULL`
+          ).get(n, dept);
+          out.push({
+            dept,
+            today: {
+              ratePerHour: todayRow?.ratePerHour ?? null,
+              rateVsGoalPct: todayRow?.rateVsGoalPct ?? null,
+              target: todayRow?.target ?? null,
+              actual: todayRow?.actual ?? null,
+            },
+            avgShort: { ratePerHour: avgFor(shortDays).avgRate, rateVsGoalPct: avgFor(shortDays).avgRatePct, samples: avgFor(shortDays).samples, days: shortDays },
+            avgLong:  { ratePerHour: avgFor(longDays).avgRate,  rateVsGoalPct: avgFor(longDays).avgRatePct,  samples: avgFor(longDays).samples,  days: longDays },
+          });
+        } catch (e) { out.push({ dept, error: e.message }); }
+      }
+
+      // Average dwell per dept — from dept-kpis live; no historical table for dwell
+      // exists yet. This is today's value across the 6 depts.
+      const { computeDeptKpis } = require('./domain/dept-kpis');
+      const dwells = {};
+      for (const dept of ['picking','surfacing','coating','cutting','assembly','shipping']) {
+        try {
+          const k = computeDeptKpis(labDb.db, dept);
+          dwells[dept] = {
+            avgDwellHours: k.kpis.avgDwellHours,
+            maxAgeHours: k.kpis.maxAgeHours,
+            agingCount: k.kpis.agingCount,
+          };
+        } catch (e) { dwells[dept] = { error: e.message }; }
+      }
+      // Merge dwell into each row
+      for (const row of out) {
+        row.dwell = dwells[row.dept] || null;
+      }
+
+      return json(res, {
+        depts: out,
+        timestamp: new Date().toISOString(),
+        note: 'rate_per_hour = actualToday / hoursIntoShift. Averages exclude weekends/non-workdays.',
+      });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
   // ── Analytics: daily throughput from DVI trace ─────────────────
   if (req.method==='GET' && url.pathname==='/api/analytics/throughput') {
     const days = parseInt(url.searchParams.get('days') || '30');
@@ -6213,15 +6337,35 @@ Respond with a structured batching plan in this format:
         byDay[entryKey].incoming++;
         byDay[entryKey].total++;
       }
-      if (j.status === 'SHIPPED' && j.lastSeen) {
-        const shipKey = new Date(j.lastSeen).toISOString().slice(0, 10);
-        if (byDay[shipKey]) byDay[shipKey].shipped++;
-      }
       if (j.hasBreakage) {
         const brkKey = new Date(j.lastSeen || j.firstSeen).toISOString().slice(0, 10);
         if (byDay[brkKey]) byDay[brkKey].breakage++;
       }
     }
+
+    // Phil 2026-05-15: shipped count fix — dviTrace.getJobs() filters out
+    // SHIPPED status (active-WIP only), so the previous loop never matched
+    // any j.status==='SHIPPED'. Pull from dvi_shipped_jobs table (SHIPLOG
+    // XML ground truth) — same source the shipping/dashboard endpoint uses.
+    try {
+      const shippedRows = labDb.db.prepare(`
+        SELECT ship_date AS date, COUNT(*) AS n
+        FROM dvi_shipped_jobs
+        WHERE ship_date IS NOT NULL AND ship_date != ''
+          AND ship_date >= date('now','localtime','-' || ? || ' days')
+        GROUP BY ship_date
+      `).all(days);
+      for (const r of shippedRows) {
+        // ship_date is MM/DD/YY — convert to YYYY-MM-DD to match byDay keys
+        const parts = String(r.date).split('/');
+        let key = r.date;
+        if (parts.length === 3) {
+          const [mm, dd, yy] = parts;
+          key = `20${yy}-${mm.padStart(2,'0')}-${dd.padStart(2,'0')}`;
+        }
+        if (byDay[key]) byDay[key].shipped = r.n;
+      }
+    } catch (_) { /* dvi_shipped_jobs table may not exist on dev */ }
 
     // Helper: is job still active WIP?
     const isWip = j => j.stage !== 'SHIPPING' && j.stage !== 'CANCELED' && j.status !== 'SHIPPED';
