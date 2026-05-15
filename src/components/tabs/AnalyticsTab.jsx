@@ -349,9 +349,8 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
             </Card>
           </div>
 
-          {/* Daily Incoming Volume \u2014 compact list (Phil 2026-05-15)
-              Hidden when range='today' \u2014 single row offers nothing the hero/KPI strip doesn't already say */}
-          {range!=="today" && (
+          {/* Daily Incoming Volume \u2014 compact list (Phil 2026-05-15).
+              Always shows \u2014 Phil wants the list visible regardless of range. */}
           <Card>
             <SectionHeader right={<span style={{fontFamily:mono,fontSize:9,color:T.textDim}}>last 14 days</span>}>Daily Incoming Volume</SectionHeader>
             <div style={{fontFamily:mono,fontSize:12}}>
@@ -383,7 +382,6 @@ export default function AnalyticsTab({batches,trays,dviJobs=[],ovenServerUrl,set
               })()}
             </div>
           </Card>
-          )}
 
           {/* Shipping Target vs Actual — always shows; for range=today shows just today's row + summary */}
           {shipPerf && shipPerf.days && shipPerf.days.length > 0 && (
