@@ -105,14 +105,25 @@ function DeptRatesCard({ovenServerUrl, range}){
     go(); const iv=setInterval(go,30000); return()=>{alive=false;clearInterval(iv);};
   },[ovenServerUrl]);
 
+  // Phil 2026-05-15: endpoint returns depts as array with lowercase dept
+  // names, nested today/avgShort/avgLong/dwell. Convert to lookup map.
+  const deptMap = {};
+  if (Array.isArray(rates?.depts)) {
+    for (const d of rates.depts) deptMap[String(d.dept || '').toUpperCase()] = d;
+  }
   const rows = DEPT_ORDER.map(dept=>{
-    const r = rates?.depts?.[dept] || {};
+    const r = deptMap[dept] || {};
+    const t = r.today || {};
+    const s = r.avgShort || {};
+    const l = r.avgLong  || {};
+    const dw = r.dwell || {};
+    const round1 = (v) => v == null ? null : Math.round(v * 10) / 10;
     return {
       dept,
-      today: r.todayRatePerHr ?? null,
-      avg7:  r.avg7dRatePerHr ?? null,
-      avg30: r.avg30dRatePerHr ?? null,
-      dwell: r.avgDwellHrs ?? null,
+      today: round1(t.ratePerHour),
+      avg7:  round1(s.ratePerHour),
+      avg30: round1(l.ratePerHour),
+      dwell: round1(dw.avgDwellHours),
       spark: r.last14d || [],
     };
   });
