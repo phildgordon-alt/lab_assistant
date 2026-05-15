@@ -58,6 +58,28 @@ function nextDayYMD(ymd) {
   return d.toISOString().slice(0, 10);
 }
 
+// Phil 2026-05-15: rate metrics for historical analysis.
+//   rate_per_hour   = actual / shift_hours_elapsed (shift starts 5 AM PT,
+//                     min 1h to avoid div-by-zero / over-inflation early)
+//   rate_vs_goal_pct = (actual / target) × 100, capped at 999 (so a target=0
+//                     day doesn't return Infinity that breaks downstream)
+function computeRateMetrics(actual, target) {
+  const ptHour = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(new Date()),
+    10
+  );
+  const ptMin = parseInt(
+    new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', minute: 'numeric' }).format(new Date()),
+    10
+  ) || 0;
+  const elapsed = Math.max(1, ptHour + ptMin/60 - 5);
+  const ratePerHour = Math.round(((actual || 0) / elapsed) * 10) / 10;
+  const ratePct = (target && target > 0)
+    ? Math.min(999, Math.round(((actual || 0) / target) * 1000) / 10)
+    : 0;
+  return { ratePerHour, ratePct };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Coating capture
 // ─────────────────────────────────────────────────────────────────────────────
@@ -71,13 +93,15 @@ function captureDailyCoatingTarget(db) {
     const target = computeCoatingTarget(db);
     const coatedActual = countCoatingExits(db, ymd, tomorrow);
     const variance = coatedActual - (target.target || 0);
+    const { ratePerHour, ratePct } = computeRateMetrics(coatedActual, target.target);
 
     const existing = db.prepare('SELECT date FROM daily_coating_targets WHERE date = ?').get(ymd);
     if (existing) {
       db.prepare(`
         UPDATE daily_coating_targets
         SET coating_wip = ?, intake_projection = ?, capacity_estimate = ?,
-            rollover_in = ?, total_target = ?, coated_actual = ?, variance = ?
+            rollover_in = ?, total_target = ?, coated_actual = ?, variance = ?,
+            rate_per_hour = ?, rate_vs_goal_pct = ?
         WHERE date = ?
       `).run(
         target.coatingWipCount || 0,
@@ -87,14 +111,16 @@ function captureDailyCoatingTarget(db) {
         target.target || 0,
         coatedActual,
         variance,
+        ratePerHour, ratePct,
         ymd
       );
     } else {
       db.prepare(`
         INSERT INTO daily_coating_targets
         (date, is_workday, coating_wip, intake_projection, capacity_estimate,
-         rollover_in, total_target, coated_actual, variance, formula_version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         rollover_in, total_target, coated_actual, variance, formula_version,
+         rate_per_hour, rate_vs_goal_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         ymd, isWorkday,
         target.coatingWipCount || 0,
@@ -104,9 +130,10 @@ function captureDailyCoatingTarget(db) {
         target.target || 0,
         coatedActual,
         variance,
-        target.formulaVersion || 1
+        target.formulaVersion || 1,
+        ratePerHour, ratePct
       );
-      console.log(`[CoatingTarget] Captured ${ymd}: target=${target.target}, coated=${coatedActual}`);
+      console.log(`[CoatingTarget] Captured ${ymd}: target=${target.target}, coated=${coatedActual}, rate=${ratePerHour}/hr (${ratePct}%)`);
     }
 
     if (ptHour >= 23) {
@@ -142,13 +169,15 @@ function captureDailySurfacingTarget(db) {
     // daily_dept_actuals.dept='surfacing'. Single rule, no drift.
     const surfacedActual = countSurfacingExitsToday(db, ymd);
     const variance = surfacedActual - (target.target || 0);
+    const { ratePerHour, ratePct } = computeRateMetrics(surfacedActual, target.target);
 
     const existing = db.prepare('SELECT date FROM daily_surfacing_targets WHERE date = ?').get(ymd);
     if (existing) {
       db.prepare(`
         UPDATE daily_surfacing_targets
         SET surfacing_wip = ?, intake_projection = ?, capacity_estimate = ?,
-            rollover_in = ?, total_target = ?, surfaced_actual = ?, variance = ?
+            rollover_in = ?, total_target = ?, surfaced_actual = ?, variance = ?,
+            rate_per_hour = ?, rate_vs_goal_pct = ?
         WHERE date = ?
       `).run(
         target.surfacingWipCount || 0,
@@ -158,14 +187,16 @@ function captureDailySurfacingTarget(db) {
         target.target || 0,
         surfacedActual,
         variance,
+        ratePerHour, ratePct,
         ymd
       );
     } else {
       db.prepare(`
         INSERT INTO daily_surfacing_targets
         (date, is_workday, surfacing_wip, intake_projection, capacity_estimate,
-         rollover_in, total_target, surfaced_actual, variance, formula_version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         rollover_in, total_target, surfaced_actual, variance, formula_version,
+         rate_per_hour, rate_vs_goal_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         ymd, isWorkday,
         target.surfacingWipCount || 0,
@@ -175,9 +206,10 @@ function captureDailySurfacingTarget(db) {
         target.target || 0,
         surfacedActual,
         variance,
-        target.formulaVersion || 1
+        target.formulaVersion || 1,
+        ratePerHour, ratePct
       );
-      console.log(`[SurfacingTarget] Captured ${ymd}: target=${target.target}, surfaced=${surfacedActual}`);
+      console.log(`[SurfacingTarget] Captured ${ymd}: target=${target.target}, surfaced=${surfacedActual}, rate=${ratePerHour}/hr (${ratePct}%)`);
     }
 
     if (ptHour >= 23) {
@@ -213,13 +245,15 @@ function captureDailyPickingTarget(db) {
     const target = computePickingTarget(db);
     const pickedActual = countPickingExitsToday(db, ymd);
     const variance = pickedActual - (target.target || 0);
+    const { ratePerHour, ratePct } = computeRateMetrics(pickedActual, target.target);
 
     const existing = db.prepare('SELECT date FROM daily_picking_targets WHERE date = ?').get(ymd);
     if (existing) {
       db.prepare(`
         UPDATE daily_picking_targets
         SET unpicked_backlog = ?, intake_projection = ?, capacity_estimate = ?,
-            rollover_in = ?, total_target = ?, picked_actual = ?, variance = ?
+            rollover_in = ?, total_target = ?, picked_actual = ?, variance = ?,
+            rate_per_hour = ?, rate_vs_goal_pct = ?
         WHERE date = ?
       `).run(
         target.unpickedBacklog || 0,
@@ -229,14 +263,16 @@ function captureDailyPickingTarget(db) {
         target.target || 0,
         pickedActual,
         variance,
+        ratePerHour, ratePct,
         ymd
       );
     } else {
       db.prepare(`
         INSERT INTO daily_picking_targets
         (date, is_workday, unpicked_backlog, intake_projection, capacity_estimate,
-         rollover_in, total_target, picked_actual, variance, formula_version)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         rollover_in, total_target, picked_actual, variance, formula_version,
+         rate_per_hour, rate_vs_goal_pct)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         ymd, isWorkday,
         target.unpickedBacklog || 0,
@@ -246,9 +282,10 @@ function captureDailyPickingTarget(db) {
         target.target || 0,
         pickedActual,
         variance,
-        target.formulaVersion || 1
+        target.formulaVersion || 1,
+        ratePerHour, ratePct
       );
-      console.log(`[PickingTarget] Captured ${ymd}: target=${target.target} (backlog=${target.unpickedBacklog} + intake=${target.intakeProjection}), picked=${pickedActual}`);
+      console.log(`[PickingTarget] Captured ${ymd}: target=${target.target}, picked=${pickedActual}, rate=${ratePerHour}/hr (${ratePct}%)`);
     }
 
     if (ptHour >= 23) {
@@ -338,15 +375,29 @@ function captureDailyDeptActuals(db) {
     const cuttingActual = countCuttingExitsToday(db, ymd);
     const surfacingActual = countSurfacingExitsToday(db, ymd);
 
+    // Phil 2026-05-15: cutting + assembly now have their own target
+    // computations. Persist target + rate metrics so history captures
+    // velocity vs goal alongside other depts.
+    let cuttingTarget = 0, assemblyTarget = 0;
+    try { cuttingTarget = require('./cutting-target').computeCuttingTarget(db).target || 0; } catch (_) {}
+    try { assemblyTarget = require('./assembly-target').computeAssemblyTarget(db).target || 0; } catch (_) {}
+
+    const cuttingRate  = computeRateMetrics(cuttingActual,  cuttingTarget);
+    const assemblyRate = computeRateMetrics(assemblyActual, assemblyTarget);
+
     const upsert = db.prepare(`
-      INSERT INTO daily_dept_actuals (date, dept, actual)
-      VALUES (?, ?, ?)
-      ON CONFLICT(date, dept) DO UPDATE SET actual = excluded.actual,
-                                            captured_at = datetime('now')
+      INSERT INTO daily_dept_actuals (date, dept, actual, target, rate_per_hour, rate_vs_goal_pct)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(date, dept) DO UPDATE SET
+        actual           = excluded.actual,
+        target           = excluded.target,
+        rate_per_hour    = excluded.rate_per_hour,
+        rate_vs_goal_pct = excluded.rate_vs_goal_pct,
+        captured_at      = datetime('now')
     `);
-    upsert.run(ymd, 'assembly', assemblyActual);
-    upsert.run(ymd, 'cutting', cuttingActual);
-    upsert.run(ymd, 'surfacing', surfacingActual);
+    upsert.run(ymd, 'assembly',  assemblyActual,  assemblyTarget,         assemblyRate.ratePerHour, assemblyRate.ratePct);
+    upsert.run(ymd, 'cutting',   cuttingActual,   cuttingTarget,          cuttingRate.ratePerHour,  cuttingRate.ratePct);
+    upsert.run(ymd, 'surfacing', surfacingActual, null,                   null,                     null);
 
     if (ptHour >= 23) {
       const y = new Date(ymd + 'T12:00:00Z');

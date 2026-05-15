@@ -5747,7 +5747,9 @@ Respond with a structured batching plan in this format:
                         kpi_breakage_pct AS kpiBreakagePct,
                         kpi_breakage_count AS kpiBreakageCount,
                         kpi_throughput_per_hour AS kpiThroughputPerHour,
-                        kpi_dept_specific AS kpiDeptSpecific`;
+                        kpi_dept_specific AS kpiDeptSpecific,
+                        rate_per_hour AS ratePerHour,
+                        rate_vs_goal_pct AS rateVsGoalPct`;
       let rows;
       if (dept === 'shipping') {
         rows = labDb.db.prepare(`
@@ -9244,11 +9246,15 @@ function captureDailyShipTarget() {
     const shipped = getShippedCounts().today;
     const variance = shipped - totalTarget;
     const variancePct = totalTarget > 0 ? Math.round((variance / totalTarget) * 10000) / 100 : 0;
+    // Phil 2026-05-15: rate metrics for empirical analysis
+    const _ptHourNow = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hour12: false }).format(new Date()), 10) || 0;
+    const _ptMinNow  = parseInt(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', minute: 'numeric' }).format(new Date()), 10) || 0;
+    const _shiftElapsed = Math.max(1, _ptHourNow + _ptMinNow/60 - 5);
+    const ratePerHour = Math.round((shipped / _shiftElapsed) * 10) / 10;
+    const ratePct = totalTarget > 0 ? Math.min(999, Math.round((shipped / totalTarget) * 1000) / 10) : 0;
 
     const existing = labDb.db.prepare('SELECT date FROM daily_ship_targets WHERE date = ?').get(date);
     if (existing) {
-      // Mid-day refresh — update everything that can move within a day.
-      // The targets themselves drift as WIP changes; signals refresh too.
       labDb.db.prepare(`
         UPDATE daily_ship_targets
         SET sv_wip = ?, surf_wip = ?, unknown_wip = ?,
@@ -9257,6 +9263,7 @@ function captureDailyShipTarget() {
             aged_wip = ?, fresh_wip = ?,
             priority_weighted = ?, intake_projection = ?, capacity_estimate = ?,
             rollover_in = ?, operational_target = ?, sla_floor = ?, gap = ?,
+            rate_per_hour = ?, rate_vs_goal_pct = ?,
             formula_version = 2
         WHERE date = ?
       `).run(
@@ -9266,6 +9273,7 @@ function captureDailyShipTarget() {
         result.agedWip, result.freshWip,
         result.priorityWeightedWip, result.intakeProjection, result.capacityEstimate,
         result.rolloverIn, result.operationalTarget, result.slaFloor, result.gap,
+        ratePerHour, ratePct,
         date
       );
     } else {
@@ -9278,6 +9286,7 @@ function captureDailyShipTarget() {
          aged_wip, fresh_wip,
          priority_weighted, intake_projection, capacity_estimate,
          rollover_in, operational_target, sla_floor, gap,
+         rate_per_hour, rate_vs_goal_pct,
          formula_version)
         VALUES (?, ?,
                 ?, ?, ?,
@@ -9286,6 +9295,7 @@ function captureDailyShipTarget() {
                 ?, ?,
                 ?, ?, ?,
                 ?, ?, ?, ?,
+                ?, ?,
                 2)
       `).run(
         date, isWorkday,
@@ -9294,9 +9304,10 @@ function captureDailyShipTarget() {
         totalTarget, shipped, variance, variancePct,
         result.agedWip, result.freshWip,
         result.priorityWeightedWip, result.intakeProjection, result.capacityEstimate,
-        result.rolloverIn, result.operationalTarget, result.slaFloor, result.gap
+        result.rolloverIn, result.operationalTarget, result.slaFloor, result.gap,
+        ratePerHour, ratePct
       );
-      console.log(`[ShipTarget] Captured ${date} v2: target=${totalTarget} (op=${result.operationalTarget} slaFloor=${result.slaFloor} intakeFloor=${result.intakeFloor}), shipped=${shipped}`);
+      console.log(`[ShipTarget] Captured ${date}: target=${totalTarget}, shipped=${shipped}, rate=${ratePerHour}/hr (${ratePct}%)`);
     }
 
     // At 11 PM or later (PT), mark yesterday as finalized if not already.

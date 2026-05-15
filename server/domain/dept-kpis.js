@@ -254,6 +254,26 @@ function computeBreakageKpi(db, dept, ymd, exitedTodayCount) {
 // aggressively on dev with sparse data.
 // ─────────────────────────────────────────────────────────────────────
 
+// Phil 2026-05-15: shift-elapsed rate. "exitedToday / hoursElapsedInShift"
+// — always populated, never zeros out during a quiet hour. Used as the
+// PRIMARY rate-per-hour metric on every dept tile so operators see a
+// meaningful number every time. Window-based throughput remains as a
+// secondary signal (kpis.throughputPerHourWindow).
+//
+// Lab shift starts 5 AM PT. If before 5 AM, use 1 hour of elapsed (don't
+// divide by zero / over-inflate early-morning rates).
+function computeShiftElapsedRate(exitedToday) {
+  const now = new Date();
+  const ptParts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles', hour: 'numeric', minute: 'numeric', hour12: false
+  }).formatToParts(now);
+  const get = (t) => parseInt(ptParts.find(p => p.type === t)?.value, 10) || 0;
+  const hourPT = get('hour');
+  const minPT = get('minute');
+  const elapsed = Math.max(1, hourPT + minPT/60 - 5); // shift starts 5 AM
+  return Math.round((exitedToday / elapsed) * 10) / 10;
+}
+
 function computeThroughputPerHour(db, dept, cfg) {
   if (dept === 'picking') {
     // Picking throughput = distinct invoices picked in window from picks_history
@@ -532,7 +552,10 @@ function computeDeptKpis(db, dept, options) {
   const aging = computeAgingKpis(dwells, cfg);
   const exited = exitedTodayCount(db, dept, ymd);
   const breakage = computeBreakageKpi(db, dept, ymd, exited);
-  const throughputPerHour = computeThroughputPerHour(db, dept, cfg);
+  // Phil 2026-05-15: primary rate = shift-elapsed (always meaningful).
+  // Keep the rolling-window value as a secondary diagnostic.
+  const throughputPerHourWindow = computeThroughputPerHour(db, dept, cfg);
+  const throughputPerHour = computeShiftElapsedRate(exited);
   const specific = deptSpecific(db, dept, ymd, dwells, breakage.breakageCount);
 
   // Phil 2026-05-13 late: picking's "avg dwell" is operationally the
