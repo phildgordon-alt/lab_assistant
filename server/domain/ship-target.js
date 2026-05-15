@@ -347,19 +347,25 @@ function computeShipTarget(db, options) {
 
   const uncappedTarget = Math.max(operationalTarget, slaFloor, intakeFloor);
 
-  // Phil 2026-05-15: cascade cap. Shipping cannot exceed what assembly
-  // physically produces today + the buffer of jobs already at SHIPPING
-  // (assembled in prior shifts, ready to go). Without this cap, ship
-  // target balloons to "what we'd LIKE to ship" instead of "what we
-  // physically CAN ship." See cutting-target / assembly-target which
-  // already cascade through coating + cutting throughput respectively.
+  // Phil 2026-05-15: shipping is EXPLICITLY TIED to assembly. The lab
+  // ships everything it assembles + the buffer of jobs already at SHIPPING
+  // from prior shifts. Shipping shift runs longer than assembly so
+  // it clears the day's assembly output + ready queue.
+  //
+  //   shipping target = assemblyTarget + readyToShipWip
+  //
+  // Don't take min() with uncappedTarget — under-shipping today just
+  // pushes work to tomorrow. Don't take max() either — physically can't
+  // ship more than has been assembled.
+  let assemblyTargetToday = 0;
   let assemblyProjectedToday = 0;
   let readyToShipWip = 0;
-  let cascadeCap = null;
+  let cascadeTarget = null;
   if (!(options && options.wipSnapshot)) {
     try {
       const { computeAssemblyTarget } = require('./assembly-target');
       const at = computeAssemblyTarget(db, options);
+      assemblyTargetToday    = at.target            || 0;
       assemblyProjectedToday = at.realisticArrivals || 0;
     } catch (_) { /* assembly module unavailable on dev or first boot */ }
     try {
@@ -368,14 +374,14 @@ function computeShipTarget(db, options) {
         WHERE status IN ('ACTIVE','Active') AND current_stage = 'SHIPPING'
       `).get()?.n || 0;
     } catch (_) { readyToShipWip = 0; }
-    cascadeCap = assemblyProjectedToday + readyToShipWip;
+    cascadeTarget = assemblyTargetToday + readyToShipWip;
   }
 
-  // Apply the cap only if we got a real assembly projection > 0; otherwise
-  // a brief boot window where assembly-target hasn't loaded shouldn't zero
-  // out shipping.
-  const target = (cascadeCap != null && cascadeCap > 0)
-    ? Math.min(uncappedTarget, cascadeCap)
+  // Use the cascade target directly when assembly loaded > 0. If assembly
+  // failed to load (cascadeTarget null), fall back to uncappedTarget so
+  // shipping never zeros out gratuitously during a brief boot window.
+  const target = (cascadeTarget != null && cascadeTarget > 0)
+    ? cascadeTarget
     : uncappedTarget;
   const gap = target - capacityEstimate;
 
@@ -409,14 +415,15 @@ function computeShipTarget(db, options) {
     operationalTarget,
     slaFloor,
     uncappedTarget,
-    cascadeCap,
+    cascadeTarget,
+    assemblyTargetToday,
     assemblyProjectedToday,
     readyToShipWip,
     target,
     gap,
 
     // Provenance / tunability
-    formulaVersion: 4,
+    formulaVersion: 5,
     config: {
       aging_exponent:       cfg.aging_exponent,
       intake_window_days:   cfg.intake_window_days,
