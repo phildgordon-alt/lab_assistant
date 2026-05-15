@@ -89,27 +89,26 @@ function loadConfig(db, overrides) {
 // data quality, not pace.
 const UNPICKED_AGE_CAP_DAYS = 30;
 
+// Phil 2026-05-15: simplified to "anything in DVI queues" per Phil's
+// directive. Old inverse-match (no picks_history AND no downstream
+// events) was fragile — required entry_date populated, missed jobs
+// where picks_history sync was lagging, returned 0 even when the
+// header KPI showed 163 backlog. Direct stage-based match is what
+// Phil expects: jobs at INCOMING/AT_KARDEX/NEL/PICKING are "unpicked."
+const UNPICKED_STAGES = "('INCOMING','AT_KARDEX','NEL','PICKING')";
+
 function getUnpickedBacklog(db, limit) {
   const lim = limit ? `LIMIT ${parseInt(limit, 10)}` : '';
   return db.prepare(`
     SELECT j.invoice,
            j.lens_type,
+           j.current_stage,
            COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10)) AS entry_ymd,
            j.rush,
            j.frame_name
     FROM jobs j
     WHERE j.status IN ('ACTIVE','Active')
-      AND (j.entry_date IS NOT NULL OR j.first_seen_at IS NOT NULL)
-      AND COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10))
-          >= date('now','localtime','-${UNPICKED_AGE_CAP_DAYS} days')
-      AND NOT EXISTS (
-        SELECT 1 FROM picks_history ph WHERE ph.order_id = j.invoice
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM job_events je
-        WHERE je.invoice = j.invoice
-          AND je.stage IN ('SURFACING','CUTTING','COATING','ASSEMBLY','SHIPPING')
-      )
+      AND j.current_stage IN ${UNPICKED_STAGES}
     ORDER BY entry_ymd ASC, j.invoice ASC
     ${lim}
   `).all();
@@ -119,15 +118,7 @@ function getUnpickedBacklogCount(db) {
   const row = db.prepare(`
     SELECT COUNT(*) AS n FROM jobs j
     WHERE j.status IN ('ACTIVE','Active')
-      AND (j.entry_date IS NOT NULL OR j.first_seen_at IS NOT NULL)
-      AND COALESCE(j.entry_date, substr(j.first_seen_at, 1, 10))
-          >= date('now','localtime','-${UNPICKED_AGE_CAP_DAYS} days')
-      AND NOT EXISTS (SELECT 1 FROM picks_history ph WHERE ph.order_id = j.invoice)
-      AND NOT EXISTS (
-        SELECT 1 FROM job_events je
-        WHERE je.invoice = j.invoice
-          AND je.stage IN ('SURFACING','CUTTING','COATING','ASSEMBLY','SHIPPING')
-      )
+      AND j.current_stage IN ${UNPICKED_STAGES}
   `).get();
   return row?.n || 0;
 }
