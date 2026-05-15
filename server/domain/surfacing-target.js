@@ -183,22 +183,55 @@ function rolloverFrom(db, today) {
   };
 }
 
-// Phil 2026-05-14: count ALL surf jobs that haven't yet exited the
-// surfacing pipeline — every active job at PICKING, SURFACING, or
-// BLOCKING needs surfacing work today/this week. Including SURFACING
-// and BLOCKING captures the current WIP in surfacing benches.
-// Stage routing already excludes finished SV jobs from PICKING/SURFACING,
-// so we don't need a lens_type filter (DVI stores recipe codes there
-// anyway, not P/B markers).
-function getUpstreamSurfacingDemand(db) {
+// Phil 2026-05-14 v3: flow-time-aware upstream signals for surfacing.
+// Mirrors coating-target.js v4. Three counts:
+//   1. realisticArrivals — SURF jobs at PICKING that can reach SURFACING
+//      today given empirical p50 dwell. PICKING typically <1h so most
+//      will arrive same-day.
+//   2. agingOverride — SURF jobs upstream of (or at) surfacing already
+//      past SLA. Must surface today regardless.
+//   3. surfacingWip — already at SURFACING/BLOCKING. They're in flight.
+// SV jobs excluded — they don't need surfacing.
+function getSurfacingUpstreamSignals(db, today) {
+  const dwellEst = require('./dwell-estimator');
+  const { classifyJobRow, SLA_WORKDAYS } = require('./lens-classifier');
+  const { workdaysBetween } = require('./ship-target');
+
   try {
-    const row = db.prepare(`
-      SELECT COUNT(*) AS n FROM jobs
+    const upstream = db.prepare(`
+      SELECT invoice, current_stage, entry_date, lens_type,
+             lens_pick_r, lens_pick_l, lens_opc_r, lens_opc_l
+      FROM jobs
       WHERE status IN ('ACTIVE','Active')
         AND current_stage IN ('PICKING','SURFACING','BLOCKING')
-    `).get();
-    return row?.n || 0;
-  } catch (_) { return 0; }
+    `).all();
+
+    const hoursLeft = dwellEst.computeHoursLeftInWorkday(db);
+    let realisticArrivals = 0;
+    let agingOverride = 0;
+    let surfUpstreamTotal = 0;
+
+    for (const j of upstream) {
+      const tier = classifyJobRow(j);
+      if (tier !== 'SURF' && tier !== 'UNKNOWN') continue;
+      surfUpstreamTotal++;
+      // For surfacing: jobs already at SURFACING/BLOCKING are "in flight"
+      // and count toward today's processing; jobs at PICKING need to arrive.
+      if (j.current_stage === 'SURFACING' || j.current_stage === 'BLOCKING') {
+        realisticArrivals++;
+      } else {
+        const remaining = dwellEst.estimateRemainingDwellHours(db, j.current_stage, 'SURFACING');
+        if (remaining <= hoursLeft) realisticArrivals++;
+      }
+      const slaWd = SLA_WORKDAYS[tier === 'UNKNOWN' ? 'UNKNOWN' : 'SURF'] || SLA_WORKDAYS.UNKNOWN;
+      const days = j.entry_date ? workdaysBetween(j.entry_date, today) : 0;
+      if (days >= slaWd) agingOverride++;
+    }
+
+    return { realisticArrivals, agingOverride, surfUpstreamTotal, hoursLeft };
+  } catch (e) {
+    return { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, error: e.message };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -230,15 +263,13 @@ function computeSurfacingTarget(db, options) {
   const rolloverIn = Math.min(rolloverRaw, intakeProjection);
   const rolloverCapped = rolloverRaw - rolloverIn;
 
-  // Phil 2026-05-14: upstream demand signal so the target reflects actual
-  // pipeline pressure (jobs at PICKING that will flow into surfacing) and
-  // not just the 14-day rolling avg. For backfill replay, skip the live
-  // query (the historical wipSnapshot already encodes upstream state).
-  const upstreamDemand = (options && options.wipSnapshot) ? 0 : getUpstreamSurfacingDemand(db);
+  // v3: flow-time-aware signals — see getSurfacingUpstreamSignals comment.
+  const upstream = (options && options.wipSnapshot)
+    ? { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0 }
+    : getSurfacingUpstreamSignals(db, today);
 
-  // Match coating-target.js v2 shape: max(intakeProjection, upstreamDemand) + rolloverIn
   const operationalTarget = isWorkday(today)
-    ? Math.max(intakeProjection, upstreamDemand) + rolloverIn
+    ? Math.max(intakeProjection, upstream.realisticArrivals, upstream.agingOverride) + rolloverIn
     : 0;
   const target = operationalTarget;
   const gap    = target - capacityEstimate;
@@ -250,7 +281,10 @@ function computeSurfacingTarget(db, options) {
     surfacingWipCount: wip.length,
 
     intakeProjection,
-    upstreamDemand,
+    realisticArrivals:  upstream.realisticArrivals,
+    agingOverride:      upstream.agingOverride,
+    surfUpstreamTotal:  upstream.surfUpstreamTotal,
+    hoursLeftInWorkday: upstream.hoursLeft,
     capacityEstimate,
     rolloverIn,
     rolloverRaw,
@@ -263,7 +297,7 @@ function computeSurfacingTarget(db, options) {
     target,
     gap,
 
-    formulaVersion: 2,
+    formulaVersion: 3,
     config: {
       surfacing_intake_window_days: cfg.surfacing_intake_window_days,
       surfacing_rollover_layers:    cfg.surfacing_rollover_layers,

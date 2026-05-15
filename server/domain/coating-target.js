@@ -218,24 +218,55 @@ function rolloverFrom(db, today) {
  * Take the max so the formula reflects whichever signal is bigger:
  * historical pace OR actual pipeline pressure. No double-count.
  */
-function getUpstreamCoatingDemand(db) {
-  // Phil 2026-05-14: count ALL surf jobs that haven't yet exited the
-  // coating pipeline — every active job at PICKING, SURFACING, BLOCKING,
-  // or COATING needs coating work today/this week. Earlier narrow query
-  // (PICKING+SURFACING+BLOCKING only, with dead lens_type filter) was
-  // why coating goal stuck at ~400 while actuals hit 1026. Including
-  // COATING itself captures the WIP currently in the coater queue.
-  // The stage routing already excludes finished SV jobs from these
-  // stages, so we don't need a lens_type filter (DVI stores recipe
-  // codes there anyway, not P/B markers).
+// Phil 2026-05-14: v4 — flow-time-aware upstream demand. Replaces the
+// "count all upstream jobs" naïve query (v3) with three separate counts
+// the formula combines below:
+//
+//   1. realisticArrivals: SURF jobs upstream whose remaining p50 dwell
+//      hours fits within hoursLeftInWorkday — physically can reach
+//      coating today.
+//   2. agingOverride: SURF jobs at upstream stages already past their
+//      SLA (per lens-classifier.SLA_WORKDAYS). Must coat today regardless
+//      of process time.
+//   3. coatingWipCount: SURF jobs already AT coating.
+//
+// SV jobs are excluded — coating dept doesn't process them (they go
+// pick → cut → asm → ship). See plan: cheeky-wandering-hollerith.md.
+function getCoatingUpstreamSignals(db, today) {
+  const dwellEst = require('./dwell-estimator');
+  const { classifyJobRow, SLA_WORKDAYS } = require('./lens-classifier');
+  const { workdaysBetween } = require('./ship-target');
+
   try {
-    const row = db.prepare(`
-      SELECT COUNT(*) AS n FROM jobs
+    const upstream = db.prepare(`
+      SELECT invoice, current_stage, entry_date, lens_type,
+             lens_pick_r, lens_pick_l, lens_opc_r, lens_opc_l
+      FROM jobs
       WHERE status IN ('ACTIVE','Active')
-        AND current_stage IN ('PICKING','SURFACING','BLOCKING','COATING')
-    `).get();
-    return row?.n || 0;
-  } catch (_) { return 0; }
+        AND current_stage IN ('PICKING','SURFACING','BLOCKING')
+    `).all();
+
+    const hoursLeft = dwellEst.computeHoursLeftInWorkday(db);
+    let realisticArrivals = 0;
+    let agingOverride = 0;
+    let surfUpstreamTotal = 0;
+
+    for (const j of upstream) {
+      const tier = classifyJobRow(j);
+      if (tier !== 'SURF' && tier !== 'UNKNOWN') continue; // SV won't hit coating
+      surfUpstreamTotal++;
+      const remaining = dwellEst.estimateRemainingDwellHours(db, j.current_stage, 'COATING');
+      if (remaining <= hoursLeft) realisticArrivals++;
+      // Aging override
+      const slaWd = SLA_WORKDAYS[tier === 'UNKNOWN' ? 'UNKNOWN' : 'SURF'] || SLA_WORKDAYS.UNKNOWN;
+      const days = j.entry_date ? workdaysBetween(j.entry_date, today) : 0;
+      if (days >= slaWd) agingOverride++;
+    }
+
+    return { realisticArrivals, agingOverride, surfUpstreamTotal, hoursLeft };
+  } catch (e) {
+    return { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0, error: e.message };
+  }
 }
 
 function computeCoatingTarget(db, options) {
@@ -249,15 +280,24 @@ function computeCoatingTarget(db, options) {
     : 0;
   const capacityEstimate = capacityRate(db, today, cfg.coating_intake_window_days);
 
-  const { rolloverIn, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
+  const { rolloverIn: rolloverRaw, fromDate: rolloverFromDate, weekly: weeklyRollover } = rolloverFrom(db, today);
+  // Phil 2026-05-14: cap rollover at intake (same as ship-target). Without
+  // this, a weeklong miss compounds into an unreachable single-day target.
+  const rolloverIn = Math.min(rolloverRaw, intakeProjection);
+  const rolloverCapped = rolloverRaw - rolloverIn;
 
-  // Phil 2026-05-14: upstream demand from semi-finished pipeline.
-  // For backfill replay: caller's wipSnapshot already accounts for the
-  // historical state, so skip live upstream query when snapshot is set.
-  const upstreamDemand = (options && options.wipSnapshot) ? 0 : getUpstreamCoatingDemand(db);
+  // v4: replace upstreamDemand with three separate signals
+  const upstream = (options && options.wipSnapshot)
+    ? { realisticArrivals: 0, agingOverride: 0, surfUpstreamTotal: 0, hoursLeft: 0 }
+    : getCoatingUpstreamSignals(db, today);
 
+  // operationalTarget = whichever is largest of:
+  //   (a) historical 14d intake rate (don't fall behind average pace)
+  //   (b) realistic arrivals + currently-at-coating WIP (today's actual feasible work)
+  //   (c) aging override (overdue SURF jobs that MUST coat today)
+  // ... plus capped rollover.
   const operationalTarget = isWorkday(today)
-    ? Math.max(intakeProjection, upstreamDemand) + rolloverIn
+    ? Math.max(intakeProjection, upstream.realisticArrivals + wip.length, upstream.agingOverride) + rolloverIn
     : 0;
   const target = operationalTarget;
   const gap    = target - capacityEstimate;
@@ -269,9 +309,14 @@ function computeCoatingTarget(db, options) {
     coatingWipCount: wip.length,
 
     intakeProjection,
-    upstreamDemand,
+    realisticArrivals:  upstream.realisticArrivals,
+    agingOverride:      upstream.agingOverride,
+    surfUpstreamTotal:  upstream.surfUpstreamTotal,
+    hoursLeftInWorkday: upstream.hoursLeft,
     capacityEstimate,
     rolloverIn,
+    rolloverRaw,
+    rolloverCapped,
     rolloverFromDate,
     weeklyRollover,
     workdaysRemainingThisWeek: workdaysRemainingThisWeek(today),
@@ -280,7 +325,7 @@ function computeCoatingTarget(db, options) {
     target,
     gap,
 
-    formulaVersion: 3,
+    formulaVersion: 4,
     config: {
       coating_intake_window_days: cfg.coating_intake_window_days,
       coating_rollover_layers:    cfg.coating_rollover_layers,

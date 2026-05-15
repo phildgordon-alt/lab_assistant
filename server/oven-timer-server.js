@@ -6147,6 +6147,43 @@ Respond with a structured batching plan in this format:
     }
   }
 
+  // ── Analytics: empirical stage dwell times (powers coating/surfacing v4 formulas)
+  if (req.method==='GET' && url.pathname==='/api/analytics/stage-dwells') {
+    try {
+      const window = parseInt(url.searchParams.get('window_days') || '14', 10);
+      const refresh = url.searchParams.get('refresh') === '1';
+      if (refresh) {
+        const { recomputeStageDwells } = require('./domain/dwell-estimator');
+        recomputeStageDwells(labDb.db, window);
+      }
+      const rows = labDb.db.prepare(`
+        SELECT stage, sample_count, p50_minutes, p90_minutes, computed_at
+        FROM stage_dwell_stats
+        WHERE window_days = ?
+        ORDER BY stage
+      `).all(window);
+      const stages = rows.map(r => ({
+        stage: r.stage,
+        sampleCount: r.sample_count,
+        p50Hours: r.p50_minutes != null ? Math.round(r.p50_minutes / 6) / 10 : null,
+        p90Hours: r.p90_minutes != null ? Math.round(r.p90_minutes / 6) / 10 : null,
+        p50Minutes: r.p50_minutes,
+        p90Minutes: r.p90_minutes,
+        computedAt: r.computed_at ? new Date(r.computed_at).toISOString() : null,
+      }));
+      const { computeHoursLeftInWorkday, FALLBACK_DWELL_HOURS } = require('./domain/dwell-estimator');
+      return json(res, {
+        windowDays: window,
+        stages,
+        hoursLeftInWorkday: computeHoursLeftInWorkday(labDb.db),
+        fallbackDwellHours: FALLBACK_DWELL_HOURS,
+        note: 'Used by coating-target v4 + surfacing-target v3. ?refresh=1 to recompute synchronously.',
+      });
+    } catch (e) {
+      return json(res, { error: e.message }, 500);
+    }
+  }
+
   // ── Analytics: daily throughput from DVI trace ─────────────────
   if (req.method==='GET' && url.pathname==='/api/analytics/throughput') {
     const days = parseInt(url.searchParams.get('days') || '30');
@@ -9295,6 +9332,22 @@ setInterval(() => dailyCapture.captureDailyCoatingTarget(labDb.db),   60 * 60 * 
 setInterval(() => dailyCapture.captureDailyDeptActuals(labDb.db),     60 * 60 * 1000);
 setInterval(() => dailyCapture.captureDailyPickingTarget(labDb.db),   60 * 60 * 1000);
 setInterval(() => dailyCapture.captureDailyDeptKpis(labDb.db),        60 * 60 * 1000);
+
+// Phil 2026-05-14: empirical stage dwell-time refresh — powers the
+// flow-time-aware coating-target v4 + surfacing-target v3 formulas.
+// First run on boot (after migrations applied), then hourly.
+setTimeout(() => {
+  try {
+    const { recomputeStageDwells } = require('./domain/dwell-estimator');
+    const r = recomputeStageDwells(labDb.db);
+    console.log(`[dwell-estimator] initial: ${r.stagesWritten} stages, ${r.totalSamples} samples`);
+  } catch (e) { console.error('[dwell-estimator] initial run failed:', e.message); }
+}, 30 * 1000);  // 30s post-boot — let migrations finish
+setInterval(() => {
+  try {
+    require('./domain/dwell-estimator').recomputeStageDwells(labDb.db);
+  } catch (e) { console.error('[dwell-estimator] hourly refresh failed:', e.message); }
+}, 60 * 60 * 1000);
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n🌡  Lab_Assistant Server`);
