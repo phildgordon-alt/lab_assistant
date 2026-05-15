@@ -4702,7 +4702,26 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
                     // Critical = red blink, warning = amber blink, ok = green,
                     // info = blue, unknown/offline = gray. Staleness tracked via
                     // somData.lastPoll (>2min stale = grey override + dim).
-                    const sev = d.severity || (d.led?.status === 'error' ? 'critical' : d.led?.status === 'warning' ? 'warning' : d.led?.green ? 'ok' : 'unknown');
+                    // Phil 2026-05-15: many machine status codes (SPOL/SDBA/
+                    // CNEW/SLCU/STAC/etc) aren't in the SOM adapter's
+                    // DEVICE_STATUS map, so severity comes back 'unknown'.
+                    // But these are normal machine modes — "Waiting for trays"
+                    // = healthy + idle. Infer severity from event/statusLabel
+                    // text when severity is missing/unknown.
+                    const inferSeverityFromText = () => {
+                      const txt = `${d.event || ''} ${d.statusLabel || ''} ${d.status || ''}`.toLowerCase();
+                      if (/error|fail|fault|jam|critical|abort/.test(txt)) return 'critical';
+                      if (/block|reset|backflow|backup|timeout|warning|stop/.test(txt)) return 'warning';
+                      if (/wait|idle|ready|running|active|engaged|process|new|polish|deblock|fining|cleaning|tray/.test(txt)) return 'ok';
+                      return 'unknown';
+                    };
+                    let sev = d.severity;
+                    if (!sev || sev === 'unknown') {
+                      sev = (d.led?.status === 'error') ? 'critical'
+                          : (d.led?.status === 'warning') ? 'warning'
+                          : d.led?.green ? 'ok'
+                          : inferSeverityFromText();
+                    }
                     const isStale = somData.lastPoll && (Date.now() - new Date(somData.lastPoll).getTime() > 120000);
                     const ledColor = isStale ? T.textDim
                       : sev === 'critical' ? T.red
