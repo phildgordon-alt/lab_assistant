@@ -24,7 +24,8 @@
 
 const dwellEst = require('./dwell-estimator');
 const { classifyJobRow, SLA_WORKDAYS } = require('./lens-classifier');
-const { workdaysBetween, isWorkday, priorWorkday } = require('./ship-target');
+// Phil 2026-05-16: aging = calendar days (calendarDaysBetween), not workdays.
+const { workdaysBetween, calendarDaysBetween, isWorkday, priorWorkday } = require('./ship-target');
 const { computeCuttingTarget } = require('./cutting-target');
 
 function loadConfig(db, overrides) {
@@ -70,7 +71,7 @@ function getAssemblySignals(db, today) {
 
       const slaWd = SLA_WORKDAYS[tier === 'UNKNOWN' ? 'UNKNOWN' : tier]
         || SLA_WORKDAYS.UNKNOWN;
-      const days = j.entry_date ? workdaysBetween(j.entry_date, today) : 0;
+      const days = j.entry_date ? calendarDaysBetween(j.entry_date, today) : 0;
       if (days >= slaWd) agingOverride++;
     }
 

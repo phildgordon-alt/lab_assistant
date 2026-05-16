@@ -102,6 +102,19 @@ function isWorkday(ymd) {
   return dow !== 0 && dow !== 6;
 }
 
+// Phil 2026-05-16: SLA aging counts CALENDAR days, not workdays. A job
+// entered Thursday is 4 days old on Monday — not 2. The customer's
+// clock doesn't pause on weekends. Use this anywhere aging / SLA
+// breach / "days in lab" is computed. workdaysBetween is for forward
+// planning (work-per-shift), never for backward aging.
+function calendarDaysBetween(entryYMD, todayYMD) {
+  if (!entryYMD || !todayYMD) return 0;
+  const start = new Date(entryYMD + 'T12:00:00Z');
+  const end   = new Date(todayYMD + 'T12:00:00Z');
+  if (end <= start) return 0;
+  return Math.floor((end - start) / 86400000);
+}
+
 function priorWorkday(ymd) {
   const d = new Date(ymd + 'T12:00:00Z');
   do { d.setUTCDate(d.getUTCDate() - 1); } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
@@ -286,7 +299,8 @@ function computeShipTarget(db, options) {
     else unknownWip++;
 
     const sla = SLA_WORKDAYS[tier];
-    const days = workdaysBetween(j.entry_ymd, today);
+    // Phil 2026-05-16: aging = calendar days, not workdays.
+    const days = calendarDaysBetween(j.entry_ymd, today);
     // Bounded sigmoid + capped overdue boost. Each job contributes
     // 0 → ~2.0 to the priority sum. See header comment for rationale.
     const sigmoid = 1 / (1 + Math.exp((sla - days) * cfg.aging_exponent));
@@ -439,6 +453,7 @@ module.exports = {
   // Helpers exported for the test suite + scenario tooling
   classify,
   workdaysBetween,
+  calendarDaysBetween,
   workdaysRemainingThisWeek,
   isWorkday,
   priorWorkday,

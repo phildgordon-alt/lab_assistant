@@ -230,7 +230,8 @@ function rolloverFrom(db, today) {
 function getCoatingUpstreamSignals(db, today) {
   const dwellEst = require('./dwell-estimator');
   const { classifyJobRow, SLA_WORKDAYS } = require('./lens-classifier');
-  const { workdaysBetween } = require('./ship-target');
+  // Phil 2026-05-16: aging = calendar days, not workdays.
+  const { calendarDaysBetween } = require('./ship-target');
 
   try {
     // Phil 2026-05-15: jobs MUST be picked-or-WIP. Exclude INCOMING and
@@ -260,7 +261,7 @@ function getCoatingUpstreamSignals(db, today) {
       if (tier !== 'SURF' && tier !== 'UNKNOWN') continue; // SV won't hit coating
       queuedSurf++;
       const slaWd = SLA_WORKDAYS[tier === 'UNKNOWN' ? 'UNKNOWN' : 'SURF'] || SLA_WORKDAYS.UNKNOWN;
-      const days = j.entry_date ? workdaysBetween(j.entry_date, today) : 0;
+      const days = j.entry_date ? calendarDaysBetween(j.entry_date, today) : 0;
       if (days >= slaWd) agingOverride++;
     }
 

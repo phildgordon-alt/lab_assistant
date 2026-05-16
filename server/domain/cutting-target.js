@@ -32,7 +32,8 @@
 
 const dwellEst = require('./dwell-estimator');
 const { classifyJobRow, SLA_WORKDAYS } = require('./lens-classifier');
-const { workdaysBetween, isWorkday, workdaysRemainingThisWeek, priorWorkday } = require('./ship-target');
+// Phil 2026-05-16: aging = calendar days (calendarDaysBetween), not workdays.
+const { workdaysBetween, calendarDaysBetween, isWorkday, workdaysRemainingThisWeek, priorWorkday } = require('./ship-target');
 
 function loadConfig(db, overrides) {
   const defaults = {
@@ -105,7 +106,7 @@ function getCuttingPipelineSignals(db, today) {
 
       const slaWd = SLA_WORKDAYS[tier === 'UNKNOWN' ? 'UNKNOWN' : tier]
         || SLA_WORKDAYS.UNKNOWN;
-      const days = j.entry_date ? workdaysBetween(j.entry_date, today) : 0;
+      const days = j.entry_date ? calendarDaysBetween(j.entry_date, today) : 0;
       if (days >= slaWd) agingOverride++;
     }
 
