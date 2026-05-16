@@ -3513,7 +3513,19 @@ function upsertJobFromTrace(j) {
         rush: j.rush || null,
         reference: j.reference || null,
         rx_number: j.rxNumber || null,
-        entry_date: j.entryDate || null,
+        // Phil 2026-05-16: trace-only rows were landing with NULL anchors
+        // because the patch builder dropped these fields. Contract rules
+        // (jobs-contract.js): first_seen_at = first-non-null-wins (only
+        // seeded once by trace); last_event_at + event_count = last-non-
+        // null-wins. dvi-trace.js:728-748 already passes these in.
+        first_seen_at: j.firstSeenAt || null,
+        last_event_at: j.lastEventAt || null,
+        event_count: (typeof j.eventCount === 'number') ? j.eventCount : null,
+        events_json: j.eventsJson || null,
+        // entry_date fallback: derive from trace's firstSeenAt date when
+        // XML hasn't supplied one yet. XML still wins on later arrival
+        // because contract priority is xml-shiplog > xml-classification > trace.
+        entry_date: j.entryDate || (j.firstSeenAt ? j.firstSeenAt.slice(0, 10) : null),
         entry_time: j.entryTime || null,
         department: j.department || null,
         job_type: j.jobType || null,
