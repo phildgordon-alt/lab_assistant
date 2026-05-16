@@ -924,23 +924,23 @@ class DviTraceWatcher extends EventEmitter {
     if (this._useLocal) {
       const filename = remotePath.split('\\').pop();
       const fullPath = path.join(this._localPath, filename);
-      try {
-        const data = execFileSync('/bin/cat', [fullPath], {
+      return new Promise((resolve, reject) => {
+        execFile('/bin/cat', [fullPath], {
           timeout: 10000,
           maxBuffer: 5 * 1024 * 1024,
           encoding: 'buffer',
+        }, (err, stdout) => {
+          if (err) {
+            if (err.killed) return reject(new Error(`ETIMEDOUT: cat ${filename} killed after 10s (SMB mount hung)`));
+            if (this._isBenignMissingFileError(err)) {
+              this._warnMissingFileOncePerHour(filename);
+              return resolve(null);
+            }
+            return reject(err);
+          }
+          resolve(stdout);
         });
-        return Promise.resolve(data);
-      } catch (err) {
-        if (err.killed) {
-          return Promise.reject(new Error(`ETIMEDOUT: cat ${filename} killed after 10s (SMB mount hung)`));
-        }
-        if (this._isBenignMissingFileError(err)) {
-          this._warnMissingFileOncePerHour(filename);
-          return Promise.resolve(null);
-        }
-        return Promise.reject(err);
-      }
+      });
     }
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
