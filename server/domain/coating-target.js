@@ -98,36 +98,31 @@ function countCoatingEntries(db, sinceYMD, untilYMD) {
 }
 
 /**
- * Count distinct invoices whose LAST COATING event falls in [sinceYMD, untilYMD).
+ * Count distinct invoices that REACHED the RECEIVED COAT station within
+ * [sinceYMD, untilYMD) — i.e., physically completed coating today.
  *
- * Phil 2026-05-13: redefined from "first post-coating event today" → "last
- * coating event today." The old definition counted only invoices that had
- * never appeared downstream until today, which excluded most invoices that
- * coated yesterday and shipped today (they coated again? no — the previous
- * day's downstream event made today's shipping not count). 2026-05-13 prod
- * diagnostic returned 8 with the old definition vs 882 underlying post-
- * coating events from coated invoices same day. The new definition matches
- * the spoken phrase "completed coating today" — the last time we touched
- * the invoice on a coater was today. Includes mid-coating jobs (their last
- * coating event is today, even though they haven't advanced yet) which is
- * intentional: that's "today's coating activity."
+ * Phil 2026-05-15: redefined to match DVI's authoritative "RECEIVED COAT"
+ * counter. Previous definition ("last COATING-stage event today") counted
+ * jobs at SENT TO COAT (queue waiting to coat) as completed → over-counted
+ * by ~158/day (321 vs DVI's 163 today). After the 2026-05-15 station
+ * mapping correction, RECEIVED COAT events route to stage=CUTTING, so the
+ * old `WHERE stage='COATING'` query doesn't catch them at all.
  *
- * Function name kept (`countCoatingExits`) to avoid touching every caller;
- * semantics changed under the hood. Same redefinition applied to
- * countSurfacingExitsToday and countCuttingExitsToday in daily-capture.js.
+ * New definition: invoices touching station='RECEIVED COAT' today =
+ * "left coating, queued for cutting" = real completion event. Matches
+ * DVI exactly (verified prod query: ours=163, DVI screen=163).
+ *
+ * Function name kept to avoid breaking callers; semantics changed under
+ * the hood. countSurfacingExitsToday + countCuttingExitsToday in
+ * daily-capture.js may need similar treatment if they show same gap.
  */
 function countCoatingExits(db, sinceYMD, untilYMD) {
   const row = db.prepare(`
-    WITH last_coating AS (
-      SELECT invoice, MAX(event_ts) AS last_ts
-      FROM job_events
-      WHERE stage = 'COATING'
-      GROUP BY invoice
-    )
-    SELECT COUNT(*) AS n
-    FROM last_coating
-    WHERE date(last_ts/1000, 'unixepoch', 'localtime') >= ?
-      AND date(last_ts/1000, 'unixepoch', 'localtime') <  ?
+    SELECT COUNT(DISTINCT invoice) AS n
+    FROM job_events
+    WHERE station = 'RECEIVED COAT'
+      AND date(event_ts/1000, 'unixepoch', 'localtime') >= ?
+      AND date(event_ts/1000, 'unixepoch', 'localtime') <  ?
   `).get(sinceYMD, untilYMD);
   return row?.n || 0;
 }
