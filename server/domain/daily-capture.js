@@ -329,42 +329,45 @@ function countAssemblyToday(db, ymd) {
   return row?.n || 0;
 }
 
-// Phil 2026-05-13: redefined as "last stage event today" (matches
-// countCoatingExits in coating-target.js). Old definition undercounted by
-// ~100× because it required the first post-stage event to be today; the
-// new definition matches "completed surfacing/cutting today" as spoken.
-// See countCoatingExits docstring for full rationale.
+// Phil 2026-05-15: per-dept exit signals match how the lab actually
+// scans handoffs (annotated by Phil during coating-actual gap diagnosis).
+//
+//   Surfacing exit  = invoice scanned into coating  → station = 'SENT TO COAT'
+//   Coating exit    = invoice scanned into cutting  → station = 'RECEIVED COAT'
+//                     (handled by countCoatingExits in coating-target.js)
+//   Cutting exit    = no dedicated scan; the only signal is the FIRST
+//                     ASSEMBLY-stage event for the invoice today
+//   Assembly exit   = countAssemblyToday — station = 'ASSEMBLY PASS'
+//
+// Old "last stage event today" definitions were too lenient (counted
+// in-progress jobs + queue entries as exits); these handoff-event
+// definitions match DVI's authoritative counters.
 function countSurfacingExitsToday(db, ymd) {
-  const tomorrow = nextDayYMD(ymd);
   const row = db.prepare(`
-    WITH last_surfacing AS (
-      SELECT invoice, MAX(event_ts) AS last_ts
-      FROM job_events
-      WHERE stage = 'SURFACING'
-      GROUP BY invoice
-    )
-    SELECT COUNT(*) AS n
-    FROM last_surfacing
-    WHERE date(last_ts/1000, 'unixepoch', 'localtime') >= ?
-      AND date(last_ts/1000, 'unixepoch', 'localtime') <  ?
-  `).get(ymd, tomorrow);
+    SELECT COUNT(DISTINCT invoice) AS n
+    FROM job_events
+    WHERE station = 'SENT TO COAT'
+      AND date(event_ts/1000, 'unixepoch', 'localtime') = ?
+  `).get(ymd);
   return row?.n || 0;
 }
 
 function countCuttingExitsToday(db, ymd) {
-  const tomorrow = nextDayYMD(ymd);
+  // Cutting → assembly has no scan event. Detect "exited cutting today"
+  // as: distinct invoices whose FIRST assembly-stage event is today.
+  // (Using FIRST not LAST so a job that bounced through multiple assembly
+  // stations counts once, on the day it first arrived at assembly.)
   const row = db.prepare(`
-    WITH last_cutting AS (
-      SELECT invoice, MAX(event_ts) AS last_ts
+    WITH first_assembly AS (
+      SELECT invoice, MIN(event_ts) AS first_ts
       FROM job_events
-      WHERE stage = 'CUTTING'
+      WHERE stage = 'ASSEMBLY'
       GROUP BY invoice
     )
     SELECT COUNT(*) AS n
-    FROM last_cutting
-    WHERE date(last_ts/1000, 'unixepoch', 'localtime') >= ?
-      AND date(last_ts/1000, 'unixepoch', 'localtime') <  ?
-  `).get(ymd, tomorrow);
+    FROM first_assembly
+    WHERE date(first_ts/1000, 'unixepoch', 'localtime') = ?
+  `).get(ymd);
   return row?.n || 0;
 }
 
