@@ -159,7 +159,17 @@ function stationToStage(station) {
   if (s.includes('NE LENS') || s.includes('NEL') || s.includes('NOT ENOUGH') || s.includes('NE FRMS') || s.includes('KRDX FAIL')) return 'NEL';
   if (s.includes('KARDEX') || s.includes('MAN2KARDX')) return 'AT_KARDEX';
   if (s.includes('DIGITAL CALC') || s.includes('GENERATOR') || s.includes('AUTO BLKER') || s.includes('POLISH') || s.includes('FINE') || s.includes('MANBLKER') || s.includes('CBOB - INHSE SF') || s.includes('CBOB - DIG')) return 'SURFACING';
-  if (s.includes('CCL') || s.includes('CCP') || s.includes('COAT') || s.includes('SENT TO COAT') || s.includes('LCU')) return 'COATING';
+  // Phil 2026-05-15 correction: CCL = laser marker, CCP = polisher, LCU =
+  // lens cleaning unit — ALL surfacing-line stations, NOT coating. Previously
+  // all routed to COATING which overstated coating WIP + actuals by ~300
+  // jobs/day and understated surfacing.
+  if (s.includes('CCL') || s.includes('CCP') || s.includes('LCU')) return 'SURFACING';
+  // RECEIVED COAT = jobs that LEFT coating and are heading to cutting queue.
+  // Map to CUTTING (the next stage). Matches DVI's "Received Coat" counter
+  // semantics (= jobs that completed coating today).
+  if (s.includes('RECEIVED COAT')) return 'CUTTING';
+  // Actual coating stations: SENT TO COAT (in coating room) + bare "COAT" stations.
+  if (s.includes('SENT TO COAT') || s.includes('COAT')) return 'COATING';
   if (s.includes('EDGER') || s.includes('CUT') || s.includes('INHSE FIN')) return 'CUTTING';
   if (s === 'ASSEMBLY PASS') return 'SHIPPING';
   if (s === 'ASSEMBLY FAIL') return 'HOLD';
