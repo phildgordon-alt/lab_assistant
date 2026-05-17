@@ -38,6 +38,238 @@ function yesterdayStr() {
   return d.toISOString().slice(0, 10);
 }
 
+// ─── DEMO MODE — pinned-date mocks ────────────────────────────────────────────
+// Mirrors the demo-mode conventions used throughout App.jsx (buildDemoDviJobs,
+// DEMO_BREAKAGE, etc.): DEMO- prefixed identifiers, pinned MOCK_NOW so the
+// chart values don't drift across renders, deterministic PRNG so re-renders
+// produce identical output, age distribution + operator names + invoice IDs
+// matched to the existing DEMO_BREAKAGE roster (cutting/coating biased).
+const DEMO_MOCK_NOW = new Date('2026-05-17T10:00:00').getTime();
+const DEMO_TODAY_STR = '2026-05-17';
+
+// Operators referenced in the rest of demo mode (DEMO_BREAKAGE uses A–D;
+// expand to F for richer operator-distribution variety in this tab).
+const DEMO_OPERATORS = [
+  'DEMO Operator A', 'DEMO Operator B', 'DEMO Operator C',
+  'DEMO Operator D', 'DEMO Operator E', 'DEMO Operator F',
+];
+
+// Stage→hour throughput shape used by /api/flow/production-analysis.
+// Throughput cadence: ramps 5AM, peaks 9-11AM and 1-3PM, dips lunch, tails 5PM+.
+// Numbers tuned so daily totals land near: PICKING ~95, INCOMING ~110, SURFACING ~170,
+// COATING ~165, CUTTING ~155, ASSEMBLY ~150, SHIPPING ~84 (matches DEMO_SHIPPED_STATS.today).
+// COATING is set as the demo bottleneck (downstream of SURFACING, lower rate).
+const DEMO_PA_STAGES = ['PICKING', 'INCOMING', 'SURFACING', 'COATING', 'CUTTING', 'ASSEMBLY', 'SHIPPING'];
+const DEMO_SHIFT_HOURS = Array.from({ length: 18 }, (_, i) => i + 5); // 5..22
+
+// Per-hour curve weights (sum normalized inside builder). Roughly:
+// 5a low, ramp through 9a, peak mid-morning, lunch dip, afternoon push, taper.
+function demoHourCurve() {
+  return [0.5, 0.8, 1.1, 1.4, 1.7, 1.5, 1.1, 0.9, 1.2, 1.5, 1.6, 1.3, 1.0, 0.7, 0.5, 0.4, 0.25, 0.15];
+}
+
+function buildDemoThroughputDay(dailyTotalsTarget, seed = 1) {
+  // Deterministic PRNG so a given (day, stage) combo always renders the same.
+  let s = seed;
+  const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  const curve = demoHourCurve();
+  const sumCurve = curve.reduce((a, b) => a + b, 0);
+  const throughput = {};
+  for (const stage of DEMO_PA_STAGES) {
+    const target = dailyTotalsTarget[stage] || 0;
+    // Distribute target across shift hours weighted by curve, jitter +/-15%.
+    const raw = curve.map(w => (target * w) / sumCurve);
+    const jittered = raw.map(v => Math.max(0, Math.round(v * (0.85 + rand() * 0.30))));
+    // Re-balance so the sum matches target exactly (push delta into peak hour).
+    const sum = jittered.reduce((a, b) => a + b, 0);
+    const delta = target - sum;
+    if (jittered.length && delta !== 0) {
+      const peakIdx = jittered.indexOf(Math.max(...jittered));
+      jittered[peakIdx] = Math.max(0, jittered[peakIdx] + delta);
+    }
+    throughput[stage] = DEMO_SHIFT_HOURS.map((h, i) => ({
+      hour: h, count: jittered[i] || 0,
+      // Operators-per-hour scales roughly with workload (1-4 per stage per hour).
+      operators: jittered[i] > 0 ? Math.min(4, 1 + Math.floor(jittered[i] / 8)) : 0,
+    }));
+  }
+  return throughput;
+}
+
+// Daily totals for "today" — tuned to feel like a normal Friday: ~150-200/day
+// shipped is the day-end target, but at 10 AM (MOCK_NOW) the day is ~30% in,
+// so SHIPPING shows ~84 (matches DEMO_SHIPPED_STATS.today in App.jsx). Other
+// stages show the day's accumulated entries — higher because jobs flow through
+// multiple stages.
+const DEMO_PA_TODAY_TOTALS = {
+  PICKING: 95, INCOMING: 110, SURFACING: 172, COATING: 158,
+  CUTTING: 155, ASSEMBLY: 148, SHIPPING: 84,
+};
+// "Yesterday" — full day, hits 150-200 shipped (closer to typical EOD).
+const DEMO_PA_YESTERDAY_TOTALS = {
+  PICKING: 188, INCOMING: 195, SURFACING: 210, COATING: 184,
+  CUTTING: 192, ASSEMBLY: 178, SHIPPING: 168,
+};
+
+function buildDemoProductionAnalysis(date, compareDate) {
+  // For "today" date use the in-progress totals; any other date gets the
+  // full-day yesterday-style totals (with a small day-of-week multiplier).
+  const isToday = date === DEMO_TODAY_STR;
+  const dayDate = new Date(date + 'T00:00:00');
+  const dow = isNaN(dayDate.getTime()) ? 5 : dayDate.getDay(); // 0=Sun..6=Sat
+  // Mon-Thu strong, Fri solid, Sat half, Sun ~0.
+  const dowMult = dow === 0 ? 0.0 : dow === 6 ? 0.45 : dow === 5 ? 0.92 : 1.0;
+  const baseTotals = isToday ? DEMO_PA_TODAY_TOTALS : DEMO_PA_YESTERDAY_TOTALS;
+  const dailyTotals = {};
+  for (const stage of DEMO_PA_STAGES) {
+    dailyTotals[stage] = Math.round((baseTotals[stage] || 0) * dowMult);
+  }
+  // Stable seed from date so every render of the same date produces identical bars.
+  const dateSeed = date.split('-').reduce((acc, n) => acc * 31 + parseInt(n || '0', 10), 7);
+  const throughput = buildDemoThroughputDay(dailyTotals, dateSeed || 7);
+
+  // Operators by stage by hour — same shape as live endpoint.
+  const operators = {};
+  for (const stage of DEMO_PA_STAGES) {
+    operators[stage] = throughput[stage].map(e => ({ hour: e.hour, count: e.operators }));
+  }
+
+  // Picks feed rate (picks_history rows, normalized x3 the "PICKING" jobs count).
+  const picks = throughput.PICKING.map(e => ({
+    hour: e.hour, count: e.count * 3, qty: e.count * 3 * 2,
+  }));
+  const shipped = throughput.SHIPPING.map(e => ({ hour: e.hour, count: e.count }));
+
+  // Bottleneck — COATING is intentionally low vs SURFACING in DEMO_PA_TODAY_TOTALS
+  // (172 vs 158 = ~9 vs ~9.6/hr over an 18h window). Force a clear bottleneck
+  // signal so the demo shows the alert + VSM pulse the way it does in prod.
+  const activeHours = throughput.PICKING.filter(e => e.count > 0).length || 1;
+  const coatingRate = Math.round((dailyTotals.COATING / activeHours) * 10) / 10;
+  const surfacingRate = Math.round((dailyTotals.SURFACING / activeHours) * 10) / 10;
+  const bottleneck = dailyTotals.COATING > 0 && coatingRate < surfacingRate ? {
+    stage: 'COATING',
+    avgRate: coatingRate,
+    upstreamStage: 'SURFACING',
+    upstreamRate: surfacingRate,
+    gap: Math.round((surfacingRate - coatingRate) * 10) / 10,
+    reason: `COATING throughput (${coatingRate}/hr) below upstream surfacing (${surfacingRate}/hr)`,
+  } : null;
+
+  // Compare-day payload (only if requested).
+  let compareData = null;
+  let compareDailyTotals = null;
+  if (compareDate) {
+    const cmp = buildDemoProductionAnalysis(compareDate, null);
+    compareData = cmp.throughput;
+    compareDailyTotals = cmp.dailyTotals;
+  }
+
+  return {
+    date,
+    compareTo: compareDate || null,
+    hours: DEMO_SHIFT_HOURS,
+    throughput,
+    compareData,
+    dailyTotals,
+    compareDailyTotals,
+    operators,
+    picks,
+    shipped,
+    hko: isToday ? 12 : Math.round(15 * dowMult),
+    bottleneck,
+  };
+}
+
+// 14-day history for the bottom table. Matches /api/flow/production-history shape:
+// [{ date, label, totals: {STAGE: n}, hko, bottleneck: {stage, avgRate} | null }]
+// Skips Sundays (mirrors the live endpoint's `if (dow === 0) continue;`).
+function buildDemoProductionHistory() {
+  const days = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(DEMO_MOCK_NOW - i * 86400000);
+    if (d.getDay() === 0) continue;
+    const dateStr = d.toISOString().slice(0, 10);
+    const pa = buildDemoProductionAnalysis(dateStr, null);
+    const wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+    const label = i === 0 ? wd : `${wd} ${d.getMonth() + 1}/${d.getDate()}`;
+    days.push({
+      date: dateStr,
+      label,
+      totals: pa.dailyTotals,
+      hko: pa.hko,
+      bottleneck: pa.bottleneck ? { stage: pa.bottleneck.stage, avgRate: pa.bottleneck.avgRate } : null,
+    });
+  }
+  return days;
+}
+
+// Flow snapshot for the Value Stream Map. Matches getSnapshot() shape:
+// { ts, stages: [{ stage_id, current_count, status }], ... }.
+// VSM consumer in the tab uppercase-maps by `s.id`, so emit both id + stage_id.
+function buildDemoFlowSnapshot() {
+  const WIP = {
+    PICKING: 18, INCOMING: 22, SURFACING: 41, COATING: 38,
+    CUTTING: 27, ASSEMBLY: 19, SHIPPING: 8,
+  };
+  return {
+    ts: new Date(DEMO_MOCK_NOW).toISOString(),
+    stages: DEMO_PA_STAGES.map(key => ({
+      id: key, stage_id: key.toLowerCase(),
+      current_count: WIP[key] || 0,
+      status: key === 'COATING' ? 'warn' : 'ok',
+    })),
+    ovenETAs: [], rates: {}, machineStatus: {}, slaPacing: {},
+    stockConstraints: [], recommendations: [], putList: null,
+  };
+}
+
+// SOM lens-per-hour mock (24h rolling, previous-day-4PM to date-3PM, matches
+// the live endpoint's window). Series names use the SOM Control Center labels
+// the live endpoint emits (Blocker, Generator, Coater, etc.) so MACHINE_COLORS
+// picks up the right colors without any wiring change.
+function buildDemoSomLensPerHour(date) {
+  const prev = new Date(date + 'T00:00:00');
+  prev.setDate(prev.getDate() - 1);
+  const prevStr = prev.toISOString().slice(0, 10);
+  const hours = [];
+  for (let h = 16; h < 24; h++) hours.push(`${prevStr} ${String(h).padStart(2, '0')}:00:00`);
+  for (let h = 0; h < 16; h++) hours.push(`${date} ${String(h).padStart(2, '0')}:00:00`);
+  // Per-machine hourly lens output curves (lenses, not jobs). Realistic-ish
+  // numbers from prod observation: blockers/generators in the 20-50 range,
+  // coaters batch-y (spikes), edgers steady 15-30.
+  const profiles = [
+    { name: 'Blocker',   base: 28, peak: 1.6, jitter: 0.2 },
+    { name: 'Generator', base: 32, peak: 1.7, jitter: 0.25 },
+    { name: 'Polisher',  base: 26, peak: 1.5, jitter: 0.2 },
+    { name: 'Coater',    base: 38, peak: 2.0, jitter: 0.35 }, // batchier
+    { name: 'Edger',     base: 22, peak: 1.4, jitter: 0.2 },
+    { name: 'De blocker',base: 24, peak: 1.4, jitter: 0.2 },
+  ];
+  let s = 4242;
+  const rand = () => { s = (s * 9301 + 49297) % 233280; return s / 233280; };
+  const series = profiles.map(p => {
+    const data = hours.map((hStr, idx) => {
+      // Map the rolling 24h window onto a daylight curve: hours after 16 build,
+      // overnight (0-5) low, morning ramp (5-11) peak, afternoon slight dip.
+      const h = parseInt(hStr.slice(11, 13), 10);
+      let curve;
+      if (h >= 16 && h < 19) curve = 1.2;       // late afternoon push
+      else if (h >= 19 && h < 22) curve = 0.7;  // evening
+      else if (h >= 22 || h < 5) curve = 0.1;   // overnight (skeleton)
+      else if (h >= 5 && h < 8) curve = 0.8;    // morning ramp
+      else if (h >= 8 && h < 12) curve = p.peak; // peak
+      else curve = 1.1;                          // afternoon
+      const val = Math.round(p.base * curve * (1 - p.jitter + rand() * 2 * p.jitter));
+      return { hour: hStr, lenses: Math.max(0, val) };
+    });
+    return { name: p.name, data };
+  });
+  return {
+    series, hours, isLive: false,
+    lastPoll: new Date(DEMO_MOCK_NOW).toISOString(),
+  };
+}
+
 const MACHINE_COLORS = {
   'Blocker': '#3B82F6',
   'FSE': '#06B6D4',   // Freeform Surface Edger
@@ -50,15 +282,16 @@ const MACHINE_COLORS = {
   'TSA': '#A78BFA',   // Tray Scanner
 };
 
-function MachineChart({ serverUrl, date }) {
+function MachineChart({ serverUrl, date, isDemo }) {
   const [somData, setSomData] = useState(null);
   useEffect(() => {
+    if (isDemo) { setSomData(buildDemoSomLensPerHour(date)); return; }
     if (serverUrl == null) return;
     fetch(`${serverUrl}/api/som/lens-per-hour?date=${date}`)
       .then(r => r.ok ? r.json() : null)
       .then(d => setSomData(d))
       .catch(() => setSomData(null));
-  }, [serverUrl, date]);
+  }, [serverUrl, date, isDemo]);
 
   if (!somData || !somData.series || somData.series.length === 0) return null;
 
@@ -123,10 +356,18 @@ function MachineChart({ serverUrl, date }) {
 
 export default function ProductionAnalysisTab({ serverUrl, settings }) {
   const base = serverUrl || ``;
+  const isDemo = settings?.demoMode || false;
 
-  const [date, setDate] = useState(todayStr());
+  // In demo mode default to the pinned DEMO_TODAY_STR so the "in-progress today"
+  // totals + bottleneck render even when real calendar time has moved past
+  // 2026-05-17. Real builds keep the original behavior (real today/yesterday).
+  const demoYesterdayStr = (() => {
+    const d = new Date(DEMO_MOCK_NOW); d.setDate(d.getDate() - 1);
+    return d.toISOString().slice(0, 10);
+  })();
+  const [date, setDate] = useState(isDemo ? DEMO_TODAY_STR : todayStr());
   const [compareOn, setCompareOn] = useState(false);
-  const [compareDate, setCompareDate] = useState(yesterdayStr());
+  const [compareDate, setCompareDate] = useState(isDemo ? demoYesterdayStr : yesterdayStr());
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -136,33 +377,41 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
 
   // Fetch history (once on mount)
   useEffect(() => {
+    if (isDemo) { setHistory(buildDemoProductionHistory()); return; }
     fetch(`${base}/api/flow/production-history?days=14`)
       .then(r => r.ok ? r.json() : [])
       .then(d => setHistory(Array.isArray(d) ? d : []))
       .catch(() => setHistory([]));
-  }, [base]);
+  }, [base, isDemo]);
 
   // Fetch flow snapshot for VSM
   const fetchSnapshot = useCallback(() => {
+    if (isDemo) { setFlowSnapshot(buildDemoFlowSnapshot()); return; }
     fetch(`${base}/api/flow/snapshot`)
       .then(r => r.ok ? r.json() : null)
       .then(d => setFlowSnapshot(d))
       .catch(() => setFlowSnapshot(null));
-  }, [base]);
+  }, [base, isDemo]);
 
   useEffect(() => { fetchSnapshot(); }, [fetchSnapshot]);
 
-  // Auto-refresh snapshot every 60s if viewing today
+  // Auto-refresh snapshot every 60s if viewing today (skip in demo — pinned data)
   useEffect(() => {
+    if (isDemo) return;
     if (date !== todayStr()) return;
     const iv = setInterval(fetchSnapshot, 60000);
     return () => clearInterval(iv);
-  }, [date, fetchSnapshot]);
+  }, [date, fetchSnapshot, isDemo]);
 
   // Fetch data
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
+    if (isDemo) {
+      setData(buildDemoProductionAnalysis(date, compareOn ? compareDate : null));
+      setLoading(false);
+      return;
+    }
     try {
       let url = `${base}/api/flow/production-analysis?date=${date}`;
       if (compareOn && compareDate) url += `&compare=${compareDate}`;
@@ -175,16 +424,17 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
       setData(null);
     }
     setLoading(false);
-  }, [base, date, compareOn, compareDate]);
+  }, [base, date, compareOn, compareDate, isDemo]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Auto-refresh every 2 minutes if viewing today
+  // Auto-refresh every 2 minutes if viewing today (skip in demo — pinned data)
   useEffect(() => {
+    if (isDemo) return;
     if (date !== todayStr()) return;
     const iv = setInterval(fetchData, 120000);
     return () => clearInterval(iv);
-  }, [date, fetchData]);
+  }, [date, fetchData, isDemo]);
 
   const hours = data?.hours || [];
   const throughput = data?.throughput || {};
@@ -660,7 +910,7 @@ export default function ProductionAnalysisTab({ serverUrl, settings }) {
       )}
 
       {/* ═══ F. MACHINE THROUGHPUT (SOM) ═══ */}
-      <MachineChart serverUrl={serverUrl} date={date} />
+      <MachineChart serverUrl={serverUrl} date={date} isDemo={isDemo} />
 
       {/* ═══ G. DAILY COMPARISON TABLE ═══ */}
       {compareOn && compareDailyTotals && Object.keys(compareDailyTotals).length > 0 && (
