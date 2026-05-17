@@ -66,6 +66,37 @@ const Card = ({children,style,onClick})=>(
   <div onClick={onClick} style={{background:T.card,border:`1px solid ${T.border}`,borderRadius:10,padding:16,cursor:onClick?"pointer":"default",transition:"border-color 0.2s",...style}}>{children}</div>
 );
 
+// Demo Mode banner — only rendered when settings.demoMode is on.
+// Returns null when off so live mode pays zero rendering cost.
+// Bright amber + red border accent so operators see at a glance the
+// numbers on screen are synthetic, not live lab data.
+const DemoModeBanner = ({isDemo})=>{
+  if(!isDemo) return null;
+  return (
+    <div style={{
+      background:T.amber,
+      color:"#1a1300",
+      border:`2px solid ${T.red}`,
+      borderRadius:10,
+      padding:"12px 18px",
+      fontFamily:mono,
+      fontSize:13,
+      fontWeight:800,
+      letterSpacing:1.2,
+      textTransform:"uppercase",
+      display:"flex",
+      alignItems:"center",
+      justifyContent:"center",
+      gap:12,
+      boxShadow:`0 0 0 1px ${T.amber}, 0 2px 8px ${T.amber}40`,
+    }}>
+      <span style={{fontSize:18}}>⚠</span>
+      <span>DEMO MODE — Mock data, not live lab data</span>
+      <span style={{fontSize:18}}>⚠</span>
+    </div>
+  );
+};
+
 // ── Gateway helper ─────────────────────────────────────────────
 const callGateway = async (settings, question, { onChunk, agent, userId = 'web-user', context } = {}) => {
   const gatewayUrl = settings?.gatewayUrl || ``;
@@ -177,7 +208,7 @@ function useElapsed(startedAt, running) {
 }
 
 // ── Slack Integration Hook ─────────────────────────────────────
-function useSlackConfig(onIncoming, setMessages){
+function useSlackConfig(onIncoming, setMessages, isDemo){
   const KEY="la_slack_v2";
   const DEFAULTS={
     proxyUrl:`/api/slack/messages?channel=C0AJH9LG96D`,
@@ -212,6 +243,15 @@ function useSlackConfig(onIncoming, setMessages){
   },[cfg]);
 
   useEffect(()=>{
+    // Demo mode: short-circuit the live fetch entirely and seed the feed
+    // with MOCK_SLACK_MESSAGES (hot-job escalation + normal floor chatter).
+    // Marks proxyConnected:false so the "Not connected" pill renders truthfully
+    // — no fake green dot pretending Slack is live in a demo.
+    if(isDemo){
+      if(setMessages) setMessages(MOCK_SLACK_MESSAGES);
+      setProxyConnected(false);
+      return;
+    }
     if(!cfg.proxyUrl)return;
     const poll=async()=>{
       try{
@@ -268,7 +308,7 @@ function useSlackConfig(onIncoming, setMessages){
     poll();
     const iv=setInterval(poll,12000);
     return()=>clearInterval(iv);
-  },[cfg.proxyUrl,cfg.channelId,onIncoming,setMessages]);
+  },[cfg.proxyUrl,cfg.channelId,onIncoming,setMessages,isDemo]);
 
   return{cfg,save,post,status,proxyConnected};
 }
@@ -814,8 +854,230 @@ function OverviewAICard({trays,batches,settings}){
   );
 }
 
+// ── Demo Mode Mock Data ───────────────────────────────────────
+// When settings.demoMode is on (toggled from SettingsTab), every fetch in this
+// tab short-circuits and returns these constants instead of hitting the backend.
+// Numbers reflect a mid-morning shift in a lab running ~700 jobs/day.
+//
+// All identifiers rendered to the screen carry a "DEMO-" prefix so operators
+// cannot mistake demo data for live data. Timestamps are pinned to a fixed
+// date (2026-05-17 10:00 local) so they don't drift looking plausibly real.
+// Numeric KPIs (counts, qty, pct) stay realistic for layout but are not
+// real-shaped enough to be mistaken for the live feed once the banner is up.
+const MOCK_PINNED_TS = new Date('2026-05-17T10:00:00').toISOString();
+const MOCK_PINNED_MS = new Date('2026-05-17T10:00:00').getTime();
+const MOCK_DEPT_GOALS = {
+  picking:   { completed: 612, goal: 700 },
+  surfacing: { completed: 438, goal: 700 },
+  coating:   { completed: 387, goal: 700 },
+  cutting:   { completed: 354, goal: 700 },
+  assembly:  { completed: 401, goal: 700 },
+  shipping:  { completed: 289, goal: 700 },
+};
+
+const MOCK_INVENTORY = {
+  materials: [
+    { sku: "DEMO-PLY-AR-156-75", name: "DEMO Poly 1.56 AR 75mm",      qty: 412, threshold: 200, coating: "AR" },
+    { sku: "DEMO-PLY-AR-156-70", name: "DEMO Poly 1.56 AR 70mm",      qty: 318, threshold: 200, coating: "AR" },
+    { sku: "DEMO-PLY-BC-156-75", name: "DEMO Poly 1.56 Blue Cut 75mm",qty: 184, threshold: 150, coating: "BLUE_CUT" },
+    { sku: "DEMO-PLY-BC-156-70", name: "DEMO Poly 1.56 Blue Cut 70mm",qty:  92, threshold: 150, coating: "BLUE_CUT" },
+    { sku: "DEMO-H67-AR-167-75", name: "DEMO Hi-Index 1.67 AR 75mm",  qty: 246, threshold: 100, coating: "AR" },
+    { sku: "DEMO-H67-BC-167-75", name: "DEMO Hi-Index 1.67 BC 75mm",  qty:  58, threshold: 100, coating: "BLUE_CUT" },
+    { sku: "DEMO-CR39-HC-150-70",name: "DEMO CR39 1.50 Hard Coat 70mm",qty: 524, threshold: 250, coating: "HARD_COAT" },
+    { sku: "DEMO-PLY-TR-156-75", name: "DEMO Poly 1.56 Transitions",  qty: 137, threshold:  80, coating: "TRANSITIONS" },
+    { sku: "DEMO-PLY-PL-156-75", name: "DEMO Poly 1.56 Polarized",    qty:  74, threshold:  60, coating: "POLARIZED" },
+    { sku: "DEMO-PLY-MR-156-75", name: "DEMO Poly 1.56 Mirror Silver",qty:  31, threshold:  40, coating: "MIRROR" },
+  ],
+  alerts: [
+    { sku: "DEMO-PLY-MR-156-75", name: "DEMO Poly 1.56 Mirror Silver",qty: 31, threshold: 40, level: "LOW",      coating: "MIRROR" },
+    { sku: "DEMO-H67-BC-167-75", name: "DEMO Hi-Index 1.67 BC 75mm",  qty: 58, threshold:100, level: "HIGH",     coating: "BLUE_CUT" },
+    { sku: "DEMO-PLY-BC-156-70", name: "DEMO Poly 1.56 Blue Cut 70mm",qty: 92, threshold:150, level: "HIGH",     coating: "BLUE_CUT" },
+  ],
+  status: "ok",
+  lastSync: MOCK_PINNED_TS,
+  alertCount: 3,
+};
+
+const MOCK_MAINTENANCE = {
+  stats: { openTaskCount: 7, pmCompliance: 94, equipmentUptime: 97.2, criticalCount: 1, completedThisMonth: 42, lastSync: MOCK_PINNED_TS, status: "ok" },
+  openTasks: [
+    { id: "DEMO-4012", title: "DEMO EB9 #1 — quarterly coating chamber clean",            asset: "DEMO EB9 #1",      priority: "Medium", dueDate: "2026-05-22", status: "open" },
+    { id: "DEMO-4019", title: "DEMO Satis 1200 — generator coolant top-up",                asset: "DEMO Satis 1200",  priority: "Low",    dueDate: "2026-05-28", status: "open" },
+    { id: "DEMO-4023", title: "DEMO Kardex VLM-1 — annual gantry alignment",               asset: "DEMO Kardex VLM-1",priority: "Medium", dueDate: "2026-06-04", status: "open" },
+    { id: "DEMO-4031", title: "DEMO Opticoat S — dip tank fluid replacement",              asset: "DEMO Opticoat S",  priority: "High",   dueDate: "2026-05-19", status: "open" },
+    { id: "DEMO-4038", title: "DEMO Oven #4 — heating element resistance check",           asset: "DEMO Oven #4",     priority: "High",   dueDate: "2026-05-20", status: "open" },
+    { id: "DEMO-4044", title: "DEMO Edger #2 — belt tension + diamond wheel inspection",   asset: "DEMO Edger #2",    priority: "Medium", dueDate: "2026-05-25", status: "open" },
+    { id: "DEMO-4051", title: "DEMO DBA-3 — surface block calibration",                    asset: "DEMO DBA-3",       priority: "Low",    dueDate: "2026-06-08", status: "open" },
+  ],
+  criticalTasks: [
+    { id: "DEMO-4031", title: "DEMO Opticoat S — dip tank fluid replacement", asset: "DEMO Opticoat S", priority: "High", dueDate: "2026-05-19", status: "open" },
+  ],
+  status: "ok",
+  lastSync: MOCK_PINNED_TS,
+};
+
+const MOCK_PUTWALL = {
+  WH1: {
+    positions: Array.from({length:75},(_,i)=>({position:`P${String(i+1).padStart(2,'0')}`,trayId:i<48?`DEMO-T${1000+i}`:null,orderId:i<48?`DEMO-${420000+i}`:null})),
+    activeCount: 48, totalOrders: 53, putWallCount: 48, laptopCount: 3, manualCount: 2,
+  },
+  WH2: {
+    positions: Array.from({length:75},(_,i)=>({position:`P${String(i+1).padStart(2,'0')}`,trayId:i<41?`DEMO-T${2000+i}`:null,orderId:i<41?`DEMO-${421000+i}`:null})),
+    activeCount: 41, totalOrders: 46, putWallCount: 41, laptopCount: 4, manualCount: 1,
+  },
+  status: "ok",
+  lastSync: MOCK_PINNED_TS,
+};
+const MOCK_PICK_STATS = { WH1: 387, WH2: 312 };
+const MOCK_PUT_STATS  = { WH1: 364, WH2: 298 };
+const MOCK_HOURLY_PICKS = (() => {
+  const wh1 = {}, wh2 = {};
+  // Realistic morning ramp 6am-11am, lull noon, afternoon ramp
+  const profile = { 6:18, 7:42, 8:58, 9:71, 10:64, 11:53, 12:22, 13:38, 14:45 };
+  Object.entries(profile).forEach(([h,v])=>{ wh1[h]=v; wh2[h]=Math.round(v*0.82); });
+  return { WH1: wh1, WH2: wh2 };
+})();
+const MOCK_PP_LAST_PICK_AT = new Date(MOCK_PINNED_MS - 4*60*1000).toISOString();
+const MOCK_PP_LAST_PUT_AT  = new Date(MOCK_PINNED_MS - 2*60*1000).toISOString();
+
+const MOCK_COATING_INTEL = {
+  intel: {
+    coaters: [
+      { id: "DEMO-EB9001", name: "DEMO EB9 #1",  status: "running", lensCapacity: 80 },
+      { id: "DEMO-EB9002", name: "DEMO EB9 #2",  status: "running", lensCapacity: 80 },
+      { id: "DEMO-E1400",  name: "DEMO E1400",   status: "idle",    lensCapacity: 60 },
+    ],
+    queue: { total: 154, byType: { AR: 88, "Blue Cut": 34, "Hard Coat": 18, Transitions: 9, Mirror: 5 } },
+    ovens: {
+      racksRunning: [
+        { ovenId: "DEMO Oven 1", rackLabel: "R3", rackIndex: 3, coating: "AR",        remainingMin: 14, elapsed: 1560, target: 2400 },
+        { ovenId: "DEMO Oven 2", rackLabel: "R1", rackIndex: 1, coating: "AR",        remainingMin: 7,  elapsed: 1980, target: 2400 },
+        { ovenId: "DEMO Oven 3", rackLabel: "R5", rackIndex: 5, coating: "Blue Cut",  remainingMin: 22, elapsed:  720, target: 2400 },
+        { ovenId: "DEMO Oven 5", rackLabel: "R2", rackIndex: 2, coating: "Hard Coat", remainingMin: 4,  elapsed: 2160, target: 2400 },
+      ],
+      racksAvailable: 38,
+      layout: Array.from({length:6},(_,o)=>({
+        ovenId: `DEMO Oven ${o+1}`,
+        racks: Array.from({length:7},(_,r)=>{
+          const running = (o===0&&r===2)||(o===1&&r===0)||(o===2&&r===4)||(o===4&&r===1);
+          const hasJobs = !running && ((o+r)%3===0);
+          return {
+            rackLabel: `R${r+1}`, rackIndex: r+1,
+            state: running ? "running" : "idle",
+            jobs: hasJobs ? [{job:"x"},{job:"y"},{job:"z"}] : [],
+            coating: running ? (r%2===0?"AR":"Blue Cut") : null,
+            remainingMin: running ? [14,7,22,4][[0,1,2,4].indexOf(o)] || 10 : 0,
+            elapsed: running ? 1560 : 0,
+            target: 2400,
+          };
+        }),
+      })),
+    },
+    recommendation: {
+      coaterPlan: [
+        { id: "DEMO-EB9001", name: "DEMO EB9 #1", fillPct: 100, fill: 80, orders: 18 },
+        { id: "DEMO-EB9002", name: "DEMO EB9 #2", fillPct: 100, fill: 80, orders: 16 },
+        { id: "DEMO-E1400",  name: "DEMO E1400",  fillPct: 68,  fill: 41, orders: 9 },
+      ],
+    },
+  },
+  ovenRuns: [
+    { id: "DEMO-8821", ovenId: "DEMO Oven 1", rackLabel: "R3", coating: "AR",       startedAt: MOCK_PINNED_MS-1560000, durationSec: 1560 },
+    { id: "DEMO-8820", ovenId: "DEMO Oven 4", rackLabel: "R6", coating: "AR",       startedAt: MOCK_PINNED_MS-3120000, durationSec: 2400 },
+    { id: "DEMO-8819", ovenId: "DEMO Oven 2", rackLabel: "R4", coating: "Blue Cut", startedAt: MOCK_PINNED_MS-3300000, durationSec: 2400 },
+  ],
+  coaterRuns: [
+    { coaterId: "DEMO-EB9001", name: "DEMO EB9 #1", coating: "AR",       lensCount: 80, orderCount: 18, fillPct: 100, elapsedSec: 540,  remainingSec: 1260, targetSec: 1800 },
+    { coaterId: "DEMO-EB9002", name: "DEMO EB9 #2", coating: "Blue Cut", lensCount: 76, orderCount: 16, fillPct:  95, elapsedSec: 1140, remainingSec: 660,  targetSec: 1800 },
+  ],
+};
+
+const MOCK_SOM_ORDERS = {
+  zones: [
+    { departmentId: "pick",  departmentName: "Picking",   zone: "pick", count: 142 },
+    { departmentId: "surf",  departmentName: "Surfacing", zone: "surf", count:  88 },
+    { departmentId: "coat",  departmentName: "Coating",   zone: "coat", count: 154 },
+    { departmentId: "cut",   departmentName: "Cutting",   zone: "cut",  count:  62 },
+    { departmentId: "asm",   departmentName: "Assembly",  zone: "asm",  count:  47 },
+    { departmentId: "qc",    departmentName: "QC",        zone: "qc",   count:  19 },
+    { departmentId: "ship",  departmentName: "Shipping",  zone: "ship", count:  34 },
+  ],
+  devices: { coating: 3, surfacing: 4, edging: 3, blocking: 2, conveyor: 6, control: 2 },
+  deviceList: [
+    { id: "DEMO-EB9001",    name: "DEMO EB9 #1",        category: "coating",   displayLabel: "DEMO EB9 #1",        status: "running" },
+    { id: "DEMO-EB9002",    name: "DEMO EB9 #2",        category: "coating",   displayLabel: "DEMO EB9 #2",        status: "running" },
+    { id: "DEMO-E1400",     name: "DEMO E1400",         category: "coating",   displayLabel: "DEMO E1400",         status: "idle" },
+    { id: "DEMO-SATIS1",    name: "DEMO Satis 1200",    category: "surfacing", displayLabel: "DEMO Satis 1200",    status: "running" },
+    { id: "DEMO-SATIS1B",   name: "DEMO Satis 1200-B",  category: "surfacing", displayLabel: "DEMO Satis 1200-B",  status: "running" },
+    { id: "DEMO-OPTICOAT",  name: "DEMO Opticoat S",    category: "surfacing", displayLabel: "DEMO Opticoat S",    status: "idle" },
+    { id: "DEMO-DBA3",      name: "DEMO DBA-3",         category: "blocking",  displayLabel: "DEMO DBA-3",         status: "running" },
+    { id: "DEMO-EDGER1",    name: "DEMO Edger #1",      category: "edging",    displayLabel: "DEMO Edger #1",      status: "running" },
+    { id: "DEMO-EDGER2",    name: "DEMO Edger #2",      category: "edging",    displayLabel: "DEMO Edger #2",      status: "idle" },
+  ],
+  allTimeZones: [
+    { departmentId: "pick", departmentName: "Picking",   zone: "pick", jobs: 184217 },
+    { departmentId: "surf", departmentName: "Surfacing", zone: "surf", jobs: 167842 },
+    { departmentId: "coat", departmentName: "Coating",   zone: "coat", jobs: 158904 },
+    { departmentId: "cut",  departmentName: "Cutting",   zone: "cut",  jobs: 152111 },
+    { departmentId: "asm",  departmentName: "Assembly",  zone: "asm",  jobs: 148332 },
+    { departmentId: "ship", departmentName: "Shipping",  zone: "ship", jobs: 144589 },
+  ],
+  activeJobs: { count: 546, rush: 23, byPriority: { rush: 23, standard: 523 } },
+  total: 184217,
+  todayTotal: 712,
+  isLive: true,
+  lastPoll: MOCK_PINNED_TS,
+  lastSuccessfulPoll: MOCK_PINNED_TS,
+  connectionError: null,
+  status: "ok",
+};
+
+// Mock Slack feed for demo mode. Shape matches what the slack_feed card
+// renders (see useSlackConfig setMessages call) — {id, from, text, time:Date,
+// priority, source}. The first message is a hot/rush escalation tied to a
+// real DEMO- invoice that buildDemoDviJobs() always produces at the COATING
+// stage (CCL-1 station), so an operator clicking through the dept tabs will
+// actually find the referenced job. Remaining messages mimic typical floor
+// chatter for visual density.
+const MOCK_SLACK_MESSAGES = [
+  {
+    id: 'DEMO-SLACK-001',
+    from: 'DEMO Sales Team',
+    text: '🚨 HOT JOB — DEMO-446380 needs to ship today, customer escalation. Patient asking for status hourly. Push to front of queue please.',
+    time: new Date(MOCK_PINNED_MS - 18*60*1000), // 18 min ago
+    priority: 'high',
+    source: 'slack',
+  },
+  {
+    id: 'DEMO-SLACK-002',
+    from: 'DEMO Floor Lead',
+    text: 'Coater #2 back online — running AR queue now. Should clear the backlog within the hour.',
+    time: new Date(MOCK_PINNED_MS - 42*60*1000), // 42 min ago
+    priority: 'normal',
+    source: 'slack',
+  },
+  {
+    id: 'DEMO-SLACK-003',
+    from: 'DEMO QC',
+    text: 'Heads up: seeing a couple of edge chips on the 1.67 hi-index batch from this morning. Pulling samples for review.',
+    time: new Date(MOCK_PINNED_MS - 95*60*1000), // 1h35m ago
+    priority: 'normal',
+    source: 'slack',
+  },
+  {
+    id: 'DEMO-SLACK-004',
+    from: 'DEMO Surfacing',
+    text: 'Generator-1 finished PM — all good, back in production.',
+    time: new Date(MOCK_PINNED_MS - 140*60*1000), // 2h20m ago
+    priority: 'normal',
+    source: 'slack',
+  },
+];
+
 // ── Main OverviewTab Component ────────────────────────────────
 export default function OverviewTab({trays,putWall,batches,events,messages:initMessages,onSendMessage,onBatchControl,settings,breakage=[],dviJobs=[],wipJobs=[],shippedStats={},assemblyStats={},incomingToday=0,setView}){
+  const isDemo = settings?.demoMode || false;
+
   const coaterMachines=useMemo(()=>{
     const coaters=settings?.equipment?.filter(e=>e.categoryId==='coaters')||[];
     return coaters.length>0 ? coaters.map(e=>e.name) : MACHINES;
@@ -836,6 +1098,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     assembly:{completed:0,goal:0}, shipping:{completed:0,goal:0},
   });
   useEffect(()=>{
+    if(isDemo){setDeptGoals(MOCK_DEPT_GOALS);return;}
     let alive=true;
     // Phil 2026-05-13 evening: one slow endpoint must NEVER block the
     // other 5 from rendering. Hardened from Promise.all → Promise.allSettled
@@ -875,7 +1138,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     fetchAll();
     const iv=setInterval(fetchAll,60000);
     return()=>{alive=false;clearInterval(iv);};
-  },[]);
+  },[isDemo]);
 
   const [msgInput,setMsgInput]=useState("");
   const [messages,setMessages]=useState(initMessages||[]);
@@ -902,6 +1165,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
 
   const [inventory,setInventory]=useState({materials:[],alerts:[],status:"pending",lastSync:null});
   useEffect(()=>{
+    if(isDemo){setInventory(MOCK_INVENTORY);return;}
     const fetchInventory=async()=>{
       try{
         const [invRes,alertRes]=await Promise.all([
@@ -924,10 +1188,11 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     fetchInventory();
     const iv=setInterval(fetchInventory,60000);
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   const [maintenanceData,setMaintenanceData]=useState({stats:{},openTasks:[],criticalTasks:[],status:"pending"});
   useEffect(()=>{
+    if(isDemo){setMaintenanceData(MOCK_MAINTENANCE);return;}
     const fetchMaintenance=async()=>{
       try{
         const [statsRes,tasksRes]=await Promise.all([
@@ -950,7 +1215,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     fetchMaintenance();
     const iv=setInterval(fetchMaintenance,60000);
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   // Live Put Wall data from ItemPath
   const [putWallData,setPutWallData]=useState({WH1:{positions:[],activeCount:0},WH2:{positions:[],activeCount:0},status:"pending",lastSync:null});
@@ -965,6 +1230,15 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   const [ppLastPickAt,setPpLastPickAt]=useState(null);
   const [ppLastPutAt,setPpLastPutAt]=useState(null);
   useEffect(()=>{
+    if(isDemo){
+      setPutWallData(MOCK_PUTWALL);
+      setPickStats(MOCK_PICK_STATS);
+      setPutStats(MOCK_PUT_STATS);
+      setHourlyPicks(MOCK_HOURLY_PICKS);
+      setPpLastPickAt(MOCK_PP_LAST_PICK_AT);
+      setPpLastPutAt(MOCK_PP_LAST_PUT_AT);
+      return;
+    }
     const fetchPutWall=async()=>{
       try{
         const [pwRes,dailyRes,ppPicksRes,ppPutsRes]=await Promise.all([
@@ -1006,12 +1280,13 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     fetchPutWall();
     const iv=setInterval(fetchPutWall,15000);
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   // Coating intelligence data (real coater/oven state)
   const [coatingIntel,setCoatingIntel]=useState(null);
   const coatingFetchedAt=useRef(0);
   useEffect(()=>{
+    if(isDemo){setCoatingIntel(MOCK_COATING_INTEL);coatingFetchedAt.current=Date.now();return;}
     const fetchCoating=async()=>{
       try{
         const [intelRes,ovenRes,coaterRes]=await Promise.all([
@@ -1035,7 +1310,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     fetchCoating();
     const iv=setInterval(fetchCoating,15000);
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   // 1-second tick for live timer countdown between fetches
   const [timerTick,setTimerTick]=useState(0);
@@ -1047,6 +1322,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
   // SOM data for fleet_dept card - persists data when offline
   const [somOrders,setSomOrders]=useState({zones:[],devices:{},deviceList:[],allTimeZones:[],total:0,todayTotal:0,isLive:false,lastPoll:null,lastSuccessfulPoll:null,status:"pending"});
   useEffect(()=>{
+    if(isDemo){setSomOrders(MOCK_SOM_ORDERS);return;}
     const fetchSomData=async()=>{
       try{
         // Fetch orders, devices, and active jobs in parallel
@@ -1110,7 +1386,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     fetchSomData();
     const iv=setInterval(fetchSomData,30000); // Poll every 30s to match SOM adapter
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   useEffect(()=>{ try{localStorage.setItem(STORAGE_KEY,JSON.stringify(cards));}catch{} },[cards]);
 
@@ -1130,7 +1406,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
     setMessages(prev=>[msg,...prev].slice(0,50));
   },[onSendMessage]);
 
-  const slack=useSlackConfig(handleIncoming, setMessages);
+  const slack=useSlackConfig(handleIncoming, setMessages, isDemo);
   const activeTrays=trays.filter(t=>t.state!=="IDLE").length;
   const rushCount=trays.filter(t=>t.rush).length;
   const coatingWIP=trays.filter(t=>["COATING_STAGED","COATING_IN_PROCESS"].includes(t.state)).length;
@@ -2303,6 +2579,7 @@ export default function OverviewTab({trays,putWall,batches,events,messages:initM
 
   return(
     <div style={{display:"flex",flexDirection:"column",gap:20}} onDragEnd={handleDragEnd}>
+      <DemoModeBanner isDemo={isDemo} />
       <div style={{display:"flex",justifyContent:"flex-end",gap:10,alignItems:"center"}}>
         <span style={{fontSize:10,color:T.textDim,fontFamily:mono}}>{cards.length} CARDS · DRAG TO REORDER</span>
         <button onClick={()=>setShowCardPicker(true)}

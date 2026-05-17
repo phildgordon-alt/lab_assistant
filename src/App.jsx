@@ -2231,6 +2231,7 @@ function PutWallTab({putWall,setPutWall,events,wipJobs=[]}){
 const COATING_CONFIG_DEFAULTS={rackSize:36,ovenCount:6,racksPerOven:7,ovenRunHours:3,eb9Capacity:114,e14Capacity:274,runNowPct:75,runPartialPct:50,waitWindowMin:30};
 
 function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenServerUrl,settings}){
+  const isDemo=settings?.demoMode||false;
   const [subView,setSubView]=useState("intelligence");
   const [intel,setIntel]=useState(null);
   const [intelError,setIntelError]=useState(null);
@@ -2245,6 +2246,48 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
   useEffect(()=>{
     const base=ovenServerUrl||``;
     let active=true;
+    if(isDemo){
+      // Pinned demo intel — DEMO- prefixed identifiers, goal-bar fields populated
+      // (target ~250 jobs/day for coating). Shape matches /api/coating/intelligence
+      // consumers in CoatingTab body + CoatingIntelView.
+      const MOCK_NOW=new Date('2026-05-17T10:00:00').getTime();
+      setIntel({
+        completedToday:178,
+        dailyGoal:250,
+        target:250,
+        current:178,
+        rateVsGoal:0.71,
+        coaters:[
+          {id:"DEMO-EB9001",name:"DEMO EB9 #1",status:"running",lensCapacity:80},
+          {id:"DEMO-EB9002",name:"DEMO EB9 #2",status:"running",lensCapacity:80},
+          {id:"DEMO-E1400", name:"DEMO E1400", status:"idle",   lensCapacity:60},
+        ],
+        queue:{total:154,byType:{AR:88,"Blue Cut":34,"Hard Coat":18,Transitions:9,Mirror:5}},
+        ovens:{
+          racksRunning:[
+            {ovenId:"DEMO Oven 1",rackLabel:"R3",rackIndex:3,coating:"AR",       remainingMin:14,elapsed:1560,target:2400},
+            {ovenId:"DEMO Oven 2",rackLabel:"R1",rackIndex:1,coating:"AR",       remainingMin:7, elapsed:1980,target:2400},
+            {ovenId:"DEMO Oven 3",rackLabel:"R5",rackIndex:5,coating:"Blue Cut", remainingMin:22,elapsed:720, target:2400},
+            {ovenId:"DEMO Oven 5",rackLabel:"R2",rackIndex:2,coating:"Hard Coat",remainingMin:4, elapsed:2160,target:2400},
+          ],
+          racksAvailable:38,
+        },
+        recommendation:{
+          coaterPlan:[
+            {id:"DEMO-EB9001",name:"DEMO EB9 #1",fillPct:100,fill:80,orders:18},
+            {id:"DEMO-EB9002",name:"DEMO EB9 #2",fillPct:100,fill:80,orders:16},
+            {id:"DEMO-E1400", name:"DEMO E1400", fillPct:68, fill:41,orders:9},
+          ],
+          batchSuggestions:[
+            {coatingType:"AR",      material:"PLY",jobCount:18,lensCount:36,rushCount:1,fillPct:82,ready:true, suggestedCoater:"DEMO EB9 #1"},
+            {coatingType:"Blue Cut",material:"H67",jobCount:8, lensCount:16,rushCount:0,fillPct:45,ready:false,suggestedCoater:"DEMO E1400"},
+          ],
+        },
+      });
+      setIntelError(null);
+      setLastFetch(MOCK_NOW);
+      return;
+    }
     const poll=async()=>{
       try{
         const params=new URLSearchParams();
@@ -2258,7 +2301,7 @@ function CoatingTab({batches,trays,dviJobs=[],inspections,onBatchControl,ovenSer
     poll();
     const iv=setInterval(poll,30000);
     return()=>{active=false;clearInterval(iv);};
-  },[ovenServerUrl,coatingConfig]);
+  },[ovenServerUrl,coatingConfig,isDemo]);
 
   // Save batch edits to localStorage
   useEffect(()=>{localStorage.setItem("la_coating_batches",JSON.stringify(batchEdits));},[batchEdits]);
@@ -4398,6 +4441,7 @@ export function InventoryDetailPanel({ item, onClose, title = "Item Details" }) 
 // ══════════════════════════════════════════════════════════════
 function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const isDemo = settings?.demoMode || false;
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
   const [somData,setSomData]=useState({devices:[],conveyors:[],zones:[],allTimeZones:[],activeJobs:null,todayTotal:0,total:0,isLive:false,lastPoll:null});
@@ -4407,6 +4451,11 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   // other depts so GoalBar and GoalHistory never disagree.
   const [surfacingTarget,setSurfacingTarget]=useState({ dailyGoal: 0, completedToday: 0 });
   useEffect(()=>{
+    if(isDemo){
+      // Pinned demo target — surfacing daily goal ~180 jobs/day per spec.
+      setSurfacingTarget({ dailyGoal: 180, completedToday: 124 });
+      return;
+    }
     if(ovenServerUrl==null) return;
     let active=true;
     const fetchTarget=async()=>{
@@ -4421,10 +4470,56 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
     fetchTarget();
     const iv=setInterval(fetchTarget,60000);
     return()=>{ active=false; clearInterval(iv); };
-  },[ovenServerUrl]);
+  },[ovenServerUrl,isDemo]);
 
   // Fetch SOM machine + job data
   useEffect(()=>{
+    if(isDemo){
+      // Pinned demo SOM payload — DEMO- prefixed machines/jobs, lastPoll
+      // pinned so STALE indicator doesn't flip on. Shape mirrors the live
+      // /api/som/{devices,conveyors,orders} + /api/jobs/active combination.
+      const MOCK_NOW=new Date('2026-05-17T10:00:00').getTime();
+      const MOCK_ISO=new Date(MOCK_NOW).toISOString();
+      setSomData({
+        devices:[
+          {id:"DEMO-DBA3",   name:"DEMO DBA-3",      category:"blocking",   status:"running",statusLabel:"Running", severity:"ok",     event:"Tray(s) in process",         cycleTime:42,counts:{count1:128},lastOrder:"DEMO-407428",typeDescription:"Auto Blocker",  led:{status:"ok",green:true}},
+          {id:"DEMO-SAT1",   name:"DEMO Satis 1200", category:"generators", status:"running",statusLabel:"Running", severity:"ok",     event:"Tray(s) in process",         cycleTime:55,counts:{count1:96}, lastOrder:"DEMO-407429",typeDescription:"Generator",      led:{status:"ok",green:true}},
+          {id:"DEMO-SAT2",   name:"DEMO Satis 1200-B",category:"generators",status:"running",statusLabel:"Waiting",severity:"ok",     event:"Waiting for trays",          cycleTime:58,counts:{count1:88}, lastOrder:"DEMO-407430",typeDescription:"Generator",      led:{status:"ok",green:true}},
+          {id:"DEMO-POL1",   name:"DEMO Polisher #1",category:"polishing",  status:"running",statusLabel:"Running", severity:"warning",event:"Maintenance interval reached",cycleTime:48,counts:{count1:110},lastOrder:"DEMO-407431",typeDescription:"Polisher",       led:{status:"warning"}},
+          {id:"DEMO-DEB1",   name:"DEMO Deblocker",  category:"deblocking", status:"running",statusLabel:"Running", severity:"ok",     event:"Tray(s) in process",         cycleTime:30,counts:{count1:142},lastOrder:"DEMO-407432",typeDescription:"Deblocker",      led:{status:"ok",green:true}},
+          {id:"DEMO-FIN1",   name:"DEMO Fining #1",  category:"fining",     status:"idle",   statusLabel:"Idle",    severity:"ok",     event:"Waiting for trays",          cycleTime:0, counts:{count1:64}, lastOrder:"DEMO-407425",typeDescription:"Fining",         led:{status:"ok",green:true}},
+          {id:"DEMO-CLN1",   name:"DEMO Cleaner",    category:"cleaning",   status:"running",statusLabel:"Running", severity:"ok",     event:"Tray(s) in process",         cycleTime:25,counts:{count1:118},lastOrder:"DEMO-407433",typeDescription:"Cleaner",        led:{status:"ok",green:true}},
+        ],
+        conveyors:[
+          {id:"DEMO-CV1",position:"DEMO Conveyor A",status:1,statusLabel:"Running",event:"OK"},
+          {id:"DEMO-CV2",position:"DEMO Conveyor B",status:1,statusLabel:"Running",event:"OK"},
+        ],
+        zones:[
+          {departmentId:"surf",name:"Surfacing",zone:"surfacing",count:124},
+          {departmentId:"coat",name:"Coating",  zone:"coating",  count:96},
+          {departmentId:"ship",name:"Shipping", zone:"ship",     count:88},
+        ],
+        allTimeZones:[
+          {departmentId:"surf",name:"Surfacing",zone:"surfacing",jobs:167842},
+          {departmentId:"coat",name:"Coating",  zone:"coating",  jobs:158904},
+          {departmentId:"ship",name:"Shipping", zone:"ship",     jobs:144589},
+        ],
+        activeJobs:{
+          total:546,
+          matchRate:512,
+          byZone:{
+            surfacing:{zone:"surfacing",deptName:"Surfacing",jobs:Array.from({length:45},(_,i)=>({job_id:`DEMO-${407500+i}`,invoice:`DEMO-INV-${407500+i}`,dvi:{coating:["AR","BC","HC","TR"][i%4]}}))},
+            coating:  {zone:"coating",  deptName:"Coating",  jobs:Array.from({length:68},(_,i)=>({job_id:`DEMO-${407600+i}`,invoice:`DEMO-INV-${407600+i}`,dvi:{coating:["AR","BC","HC","MR"][i%4]}}))},
+            ship:     {zone:"ship",     deptName:"Shipping", jobs:Array.from({length:34},(_,i)=>({job_id:`DEMO-${407700+i}`,invoice:`DEMO-INV-${407700+i}`,dvi:{coating:"AR"}}))},
+          },
+        },
+        todayTotal:712,
+        total:184217,
+        isLive:true,
+        lastPoll:MOCK_ISO,
+      });
+      return;
+    }
     const fetchSom=async()=>{
       try{
         const [devRes,convRes,ordRes,activeRes]=await Promise.all([
@@ -4455,7 +4550,7 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
     fetchSom();
     const iv=setInterval(fetchSom,30000);
     return()=>clearInterval(iv);
-  },[ovenServerUrl]);
+  },[ovenServerUrl,isDemo]);
 
   // Surfacing-related SOM categories
   const surfCategories = ['blocking','generators','polishing','deblocking','fining','cleaning'];
@@ -4881,6 +4976,7 @@ function SurfacingTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const isDemo = settings?.demoMode || false;
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
   const [somDevices,setSomDevices]=useState([]);
@@ -4891,6 +4987,18 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
 
   // Fetch SOM cutting machines
   useEffect(()=>{
+    if(isDemo){
+      // Pinned demo SOM devices — DEMO- prefixed cutters (EDGER/LCU class).
+      // Shape mirrors /api/som/devices response items consumed by
+      // cutterDevices filter + machine cards below.
+      setSomDevices([
+        {id:"DEMO-EDG1",name:"DEMO Edger #1",category:"cutters",status:"running",statusLabel:"Cutting",event:"Tray(s) in process",cycleTime:38,counts:{count1:142},lastOrder:"DEMO-447128",typeDescription:"Auto Edger",led:{status:"ok",green:true}},
+        {id:"DEMO-EDG2",name:"DEMO Edger #2",category:"cutters",status:"running",statusLabel:"Cutting",event:"Tray(s) in process",cycleTime:41,counts:{count1:128},lastOrder:"DEMO-447131",typeDescription:"Auto Edger",led:{status:"ok",green:true}},
+        {id:"DEMO-LCU1",name:"DEMO LCU-1",category:"cutters",status:"running",statusLabel:"Running",event:"Tray(s) in process",cycleTime:35,counts:{count1:96},lastOrder:"DEMO-447134",typeDescription:"Lens Cut Unit",led:{status:"ok",green:true}},
+        {id:"DEMO-LCU2",name:"DEMO LCU-2",category:"cutters",status:"idle",statusLabel:"Idle",event:"Waiting for trays",cycleTime:0,counts:{count1:74},lastOrder:"DEMO-447120",typeDescription:"Lens Cut Unit",led:{status:"ok",green:true}},
+      ]);
+      return;
+    }
     const fetchSom=async()=>{
       try{
         const res=await fetch(`${ovenServerUrl}/api/som/devices`);
@@ -4900,10 +5008,15 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
     fetchSom();
     const iv=setInterval(fetchSom,30000);
     return()=>clearInterval(iv);
-  },[ovenServerUrl]);
+  },[ovenServerUrl,isDemo]);
 
   // Poll cutting dashboard for goal + completed
   useEffect(()=>{
+    if(isDemo){
+      // Pinned demo cutting target — ~220/day goal, ~157 done (71%).
+      setCuttingTarget({ dailyGoal: 220, completedToday: 157 });
+      return;
+    }
     const fetchTarget=async()=>{
       try{
         const res=await fetch(`${ovenServerUrl}/api/cutting/dashboard`);
@@ -4916,7 +5029,7 @@ function CuttingTab({ trays, dviJobs=[], breakage, ovenServerUrl, settings }) {
     fetchTarget();
     const iv=setInterval(fetchTarget,60000);
     return()=>clearInterval(iv);
-  },[ovenServerUrl]);
+  },[ovenServerUrl,isDemo]);
 
   const cutterDevices = somDevices.filter(d=>d.category==='cutters');
 
@@ -5113,6 +5226,7 @@ const ASM_STATIONS = [
 
 function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const isDemo = settings?.demoMode || false;
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
   const [asmData,setAsmData]=useState(null);
@@ -5126,6 +5240,61 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 
   // Fetch assembly leaderboard data + operator config
   useEffect(()=>{
+    if(isDemo){
+      // Pinned demo assembly payload — DEMO- prefixed operators / stations.
+      // Shape mirrors /api/assembly/{jobs,config,history}:
+      //  - completedToday + dailyGoal → GoalBar (target ~210/day, ~138 done = 66%)
+      //  - passFailToday → header tiles
+      //  - stationCompletions (DVI label → count) → Station Assignments card
+      //  - stationOperators (DVI label → initials) → leaderboard fallback
+      //  - operatorStats (initials → {jobs}) → leaderboard merge
+      //  - byStation → "Station Completions Today" strip
+      //  - assignments/operatorMap on cfg → pre-populate local UI state
+      //  - history rows → "Assembly History" table
+      const MOCK_NOW=new Date('2026-05-17T10:00:00').getTime();
+      setAsmData({
+        completedToday:138,
+        dailyGoal:210,
+        passFailToday:{pass:132,fail:6},
+        stationCompletions:{
+          "ASSEMBLY #1":22,"ASSEMBLY #2":18,"ASSEMBLY #3":15,"ASSEMBLY #4":17,
+          "ASSEMBLY #5":14,"ASSEMBLY #6":12,"ASSEMBLY #7":11,"ASSEMBLY #8":9,
+          "ASSEMBLY #9":8,"ASSEMBLY #10":6,"ASSEMBLY #11":4,"ASSEMBLY #12":2,
+        },
+        stationOperators:{
+          "ASSEMBLY #1":"DA","ASSEMBLY #2":"DB","ASSEMBLY #3":"DC","ASSEMBLY #4":"DD",
+          "ASSEMBLY #5":"DE","ASSEMBLY #6":"DF","ASSEMBLY #7":"DG","ASSEMBLY #8":"DH",
+        },
+        operatorStats:{
+          DA:{jobs:22},DB:{jobs:18},DC:{jobs:15},DD:{jobs:17},
+          DE:{jobs:14},DF:{jobs:12},DG:{jobs:11},DH:{jobs:9},
+        },
+        byStation:Object.fromEntries(Array.from({length:12},(_,i)=>{
+          const cnt=[22,18,15,17,14,12,11,9,8,6,4,2][i];
+          return [`ASSEMBLY #${i+1}`,{station:`ASSEMBLY #${i+1}`,completedToday:cnt}];
+        })),
+      });
+      setAsmConfig({assignments:{},operatorMap:{}});
+      setAsmHistory(Array.from({length:14},(_,i)=>{
+        const d=new Date(MOCK_NOW-i*86400000);
+        const ymd=d.toISOString().slice(0,10);
+        const base=180+((i*17)%50);
+        return{
+          date:ymd,
+          jobs:base,
+          events:base+Math.round(base*0.04),
+          operators:6+(i%4),
+          byOperator:{
+            "DEMO Operator A":Math.round(base*0.22),
+            "DEMO Operator B":Math.round(base*0.18),
+            "DEMO Operator C":Math.round(base*0.15),
+            "DEMO Operator D":Math.round(base*0.13),
+            "DEMO Operator E":Math.round(base*0.11),
+          },
+        };
+      }));
+      return;
+    }
     const fetchAsm=async()=>{
       try{
         const [jobsRes, cfgRes, histRes] = await Promise.all([
@@ -5150,7 +5319,7 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
     fetchAsm();
     const iv=setInterval(fetchAsm,30000);
     return()=>clearInterval(iv);
-  },[ovenServerUrl]);
+  },[ovenServerUrl,isDemo]);
 
   // Save assignments to server
   const saveAssignments = async (newAssign, newOpMap) => {
@@ -5158,6 +5327,8 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
     const m = newOpMap || localOpMap;
     setLocalAssignments(a);
     setLocalOpMap(m);
+    // Demo mode never writes to the live config endpoint — local state only.
+    if(isDemo) return;
     try {
       await fetch(`${ovenServerUrl}/api/assembly/config`, {
         method: 'POST',
@@ -5573,10 +5744,43 @@ function AssemblyTab({ trays, dviJobs=[], ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 function IncomingTab({ ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const isDemo = settings?.demoMode || false;
   const [data, setData] = useState(null);
   const [days, setDays] = useState(30);
 
+  // ─── DEMO MODE MOCK ─────────────────────────────────────────────
+  // Pinned-date mock for settings.demoMode=true. Mirrors the
+  // /api/dvi/incoming response shape: { days:[{date,count}], total,
+  // avg, dayCount, today, todayCount, source }. Realistic mid-week
+  // incoming for a lab averaging ~700/day with weekend dips. No live
+  // identifiers exposed (this endpoint returns aggregates only).
+  const MOCK_NOW = new Date('2026-05-17T10:00:00').getTime();
+  const MOCK_TODAY_YMD = '2026-05-17';
+  const buildIncomingMock = (n) => {
+    const arr = [];
+    for (let i = 0; i < n; i++) {
+      const d = new Date(MOCK_NOW - i * 86400000);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const ymd = `${y}-${m}-${dd}`;
+      const dow = d.getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      // Deterministic pseudo-variation so the chart looks alive but is fixed.
+      const seed = (i * 37 + 11) % 100;
+      const base = isWeekend ? 90 : 700;
+      const variance = isWeekend ? 40 : 180;
+      const count = i === 0 ? 612 : Math.max(0, base + (seed - 50) * (variance / 100) | 0);
+      arr.push({ date: ymd, count });
+    }
+    const total = arr.reduce((s, r) => s + r.count, 0);
+    const avg = arr.length > 0 ? Math.round(total / arr.length) : 0;
+    const todayCount = arr.find(r => r.date === MOCK_TODAY_YMD)?.count ?? arr[0].count;
+    return { days: arr, total, avg, dayCount: arr.length, today: MOCK_TODAY_YMD, todayCount, source: 'demo' };
+  };
+
   useEffect(() => {
+    if (isDemo) { setData(buildIncomingMock(days)); return; }
     if (ovenServerUrl == null) return;
     const go = async () => {
       try {
@@ -5587,7 +5791,7 @@ function IncomingTab({ ovenServerUrl, settings }) {
     go();
     const iv = setInterval(go, 60000);
     return () => clearInterval(iv);
-  }, [ovenServerUrl, days]);
+  }, [ovenServerUrl, days, isDemo]);
 
   const daysList = data?.days || [];
   const maxCount = Math.max(1, ...daysList.map(d => d.count));
@@ -5679,6 +5883,7 @@ function IncomingTab({ ovenServerUrl, settings }) {
 // ══════════════════════════════════════════════════════════════
 function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const isDemo = settings?.demoMode || false;
   const [selectedJob, setSelectedJob] = useState(null);
   const [search,setSearch]=useState('');
   const [shippedHistory,setShippedHistory]=useState([]);
@@ -5687,6 +5892,42 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
   const [todayShippedJobs,setTodayShippedJobs]=useState([]);
   const [shipTarget,setShipTarget]=useState({ daily: 0, shippedToday: 0 });
   useEffect(()=>{
+    if(isDemo){
+      // Pinned demo shipping payload — DEMO- prefixed shipped jobs, target
+      // ~200/day, 142 done today (71%). Mirrors:
+      //  - /api/shipping/dashboard → { target:{daily}, shippedToday } for GoalBar
+      //  - /api/shipping/detail?date=… → { jobs:[...] } for "Shipped Today" table
+      //  - /api/shipping/history?days=14 → { history:[{date,shipped}] }
+      const MOCK_NOW=new Date('2026-05-17T10:00:00').getTime();
+      setShipTarget({ daily: 200, shippedToday: 142 });
+      setTodayShippedJobs(Array.from({length:24},(_,i)=>{
+        const id=`DEMO-${String(447800+i).padStart(6,'0')}`;
+        const tsIso=new Date(MOCK_NOW-(24-i)*15*60000).toISOString();
+        return{
+          job_id:id,
+          invoice:id,
+          station:'SH CONVEY',
+          stage:'SHIPPING',
+          status:'SHIPPED',
+          date:tsIso.slice(0,10),
+          entryDate:tsIso,
+          coating:['AR','Blue Cut','Hard Coat','Transitions'][i%4],
+          rush:i===3||i===17?'Y':'N',
+        };
+      }));
+      setShippedHistory(Array.from({length:14},(_,i)=>{
+        const d=new Date(MOCK_NOW-i*86400000);
+        const dow=d.getDay();
+        const isWeekend=dow===0||dow===6;
+        const base=isWeekend?40:180;
+        const variance=isWeekend?15:35;
+        return{
+          date:d.toISOString().slice(0,10),
+          shipped:base+((i*23)%variance),
+        };
+      }));
+      return;
+    }
     const fetchAll=async()=>{
       try{
         const today = new Date().toISOString().slice(0,10);
@@ -5703,7 +5944,7 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
     fetchAll();
     const iv=setInterval(fetchAll,60000);
     return()=>clearInterval(iv);
-  },[ovenServerUrl]);
+  },[ovenServerUrl,isDemo]);
 
   // Filter DVI jobs in shipping (SH CONVEY stations) - exclude already shipped jobs (they're in DB)
   const shippingJobs = useMemo(() => {
@@ -5871,6 +6112,7 @@ function ShippingTab({ trays, dviJobs=[], shippedStats={}, ovenServerUrl, settin
 // ══════════════════════════════════════════════════════════════
 function AgingJobsTab({ ovenServerUrl, settings }) {
   const mono = "'JetBrains Mono',monospace";
+  const isDemo = settings?.demoMode || false;
   const [data, setData] = useState(null);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -5893,22 +6135,188 @@ function AgingJobsTab({ ovenServerUrl, settings }) {
   useEffect(() => {
     if (subView !== 'lensType') return;
     if (lensTypeView === 'active') return;
-    if (ovenServerUrl == null) return;
     const days = lensTypeView === 'shipped7' ? 7 : lensTypeView === 'shipped30' ? 30 : 90;
+    if (isDemo) {
+      // Demo aggregates derived from the same buildDemoDviJobs() pool. We
+      // synthesize a "shipped" history per lens category by scaling the
+      // active-WIP per-category counts and projecting an age distribution
+      // (most shipped jobs cleared within 1–3 days; a small over-SLA tail).
+      // Deterministic — same window always returns the same numbers.
+      const demoAgg = (()=>{
+        // Daily-shipped rate per category (rough lab volume: ~150 SV/day,
+        // ~70 SURF/day, ~10 BIF/day, ~5 Unknown). Multiply by window days.
+        const perDay = { 'Single Vision': 150, 'Progressive': 60, 'Bifocal': 10, 'Unknown': 5 };
+        // Per-bucket SLA targets (SV=2d, others=3d) — matches slaTargetForLensType.
+        const slaFor = (label) => label === 'Single Vision' ? 2 : 3;
+        // Age distribution shipped: 50% <1d, 30% 1-2d, 12% 2-3d, 5% 3-5d, 2% 5-10d, 1% 10+d.
+        const dist = { d01:0.50, d12:0.30, d23:0.12, d35:0.05, d510:0.02, d10p:0.01 };
+        const rows = Object.entries(perDay).map(([label, rate]) => {
+          const count = rate * days;
+          const d01 = Math.round(count*dist.d01);
+          const d12 = Math.round(count*dist.d12);
+          const d23 = Math.round(count*dist.d23);
+          const d35 = Math.round(count*dist.d35);
+          const d510= Math.round(count*dist.d510);
+          const d10p= Math.round(count*dist.d10p);
+          // Approximate avg day using bucket midpoints: 0.5, 1.5, 2.5, 4, 7.5, 15.
+          const totalDays = d01*0.5 + d12*1.5 + d23*2.5 + d35*4 + d510*7.5 + d10p*15;
+          const sla = slaFor(label);
+          // Over-SLA: any bucket whose lower bound exceeds sla.
+          // SV (sla=2): d23+d35+d510+d10p. Others (sla=3): d35+d510+d10p.
+          const overSLA = sla === 2 ? (d23+d35+d510+d10p) : (d35+d510+d10p);
+          return {
+            label,
+            count,
+            pct: 0, // filled after total computed
+            avgDays: count > 0 ? Math.round((totalDays/count)*10)/10 : 0,
+            maxDays: d10p > 0 ? 15 : d510 > 0 ? 9 : d35 > 0 ? 4 : 2,
+            overSLA,
+            overSLAPct: count > 0 ? Math.round((overSLA/count)*1000)/10 : 0,
+            d01, d12, d23, d35, d510, d10p,
+          };
+        });
+        const total = rows.reduce((s,r)=>s+r.count, 0);
+        rows.forEach(r => { r.pct = total > 0 ? Math.round((r.count/total)*1000)/10 : 0; });
+        rows.sort((a,b) => b.count - a.count);
+        return { days, total, byLensTypeShipped: rows };
+      })();
+      setShippedData(demoAgg);
+      setShippedLoading(false);
+      return;
+    }
+    if (ovenServerUrl == null) return;
     setShippedLoading(true);
     fetch(`${ovenServerUrl}/api/aging/shipped-by-lens-type?days=${days}`)
       .then(r => r.json())
       .then(d => { setShippedData(d); setShippedLoading(false); })
       .catch(() => setShippedLoading(false));
-  }, [subView, lensTypeView, ovenServerUrl]);
+  }, [subView, lensTypeView, ovenServerUrl, isDemo]);
 
   useEffect(() => {
+    if (isDemo) {
+      // Build the full /api/aging/jobs response from the same buildDemoDviJobs()
+      // pool used everywhere else, so invoice IDs, age buckets, and lens-type
+      // distribution stay internally consistent with KPI Row, dept tabs, etc.
+      // Mirrors the live endpoint shape exactly (see oven-timer-server.js:3285-
+      // 3409) including singleVision/surfacing zoneCounts and byLensType.
+      const MOCK_NOW = new Date('2026-05-17T10:00:00').getTime();
+      const sourceJobs = buildDemoDviJobs();
+      // Match live behavior: SHIPPING stage excluded from aging (task #35).
+      // Also keep INCOMING in so totals match the WIP pool the user sees.
+      const wip = sourceJobs.filter(j => j.stage !== 'SHIPPING');
+      // Local copies of the server's classifier rules so the demo doesn't
+      // need a server roundtrip. Keep in sync with server/domain/lens-classifier.js
+      // and server/oven-timer-server.js:_computeAging.
+      const classifyLabel = (lt) => {
+        const t = String(lt||'').toUpperCase().trim();
+        if (t === 'S' || t === 'C') return 'Single Vision';
+        if (t === 'P' || t === 'B') return 'Surfacing';
+        return 'Unknown';
+      };
+      const mapCat = (lensType, lensStyle) => {
+        const code = String(lensType||'').toUpperCase();
+        const style = String(lensStyle||'').toUpperCase();
+        if (style === 'PLANO') return 'Plano';
+        if (code === 'P') return 'Progressive';
+        if (code === 'S' || code === 'C') return 'Single Vision';
+        if (code === 'B') return 'Bifocal';
+        return 'Unknown';
+      };
+      const computeAging = (lensType, daysInLab) => {
+        const jobType = classifyLabel(lensType);
+        const slaTarget = jobType === 'Single Vision' ? 2 : 3;
+        let zone = 'GREEN';
+        if (jobType === 'Surfacing' || jobType === 'Unknown') {
+          if (daysInLab >= 3) zone = 'CRITICAL';
+          else if (daysInLab >= 2) zone = 'RED';
+          else if (daysInLab >= 1) zone = 'YELLOW';
+        } else {
+          if (daysInLab >= 2) zone = 'CRITICAL';
+          else if (daysInLab >= 1.5) zone = 'RED';
+          else if (daysInLab >= 0.75) zone = 'YELLOW';
+        }
+        return { lensType, jobType, slaTarget, daysInLab, zone, overSLA: daysInLab >= slaTarget };
+      };
+      const jobs = wip.map(j => {
+        const aging = computeAging(j.lensType || '', j.daysInLab || 0);
+        const enteredMs = j.firstSeen || MOCK_NOW;
+        return {
+          job_id: j.invoice,
+          invoice: j.invoice,
+          stage: j.stage,
+          station: j.station,
+          coating: j.coating || '',
+          rush: j.rush || 'N',
+          lensStyle: j.lensStyle || '',
+          lensCategory: mapCat(j.lensType, j.lensStyle),
+          ...aging,
+          enteredAt: new Date(enteredMs).toISOString().slice(0, 10),
+        };
+      }).sort((a,b) => b.daysInLab - a.daysInLab);
+
+      const total = jobs.length;
+      const sv = jobs.filter(j => j.jobType === 'Single Vision');
+      const surf = jobs.filter(j => j.jobType === 'Surfacing');
+      const zoneCounts = (list) => ({
+        total: list.length,
+        green: list.filter(j => j.zone === 'GREEN').length,
+        yellow: list.filter(j => j.zone === 'YELLOW').length,
+        red: list.filter(j => j.zone === 'RED').length,
+        critical: list.filter(j => j.zone === 'CRITICAL').length,
+        overSLA: list.filter(j => j.overSLA).length,
+        avgDays: list.length > 0 ? Math.round(list.reduce((s,j)=>s+j.daysInLab,0)/list.length*10)/10 : 0,
+        outlierPct: list.length > 0 ? Math.round((list.filter(j=>j.daysInLab>=3).length/list.length)*1000)/10 : 0,
+      });
+      const green    = jobs.filter(j => j.zone === 'GREEN').length;
+      const yellow   = jobs.filter(j => j.zone === 'YELLOW').length;
+      const red      = jobs.filter(j => j.zone === 'RED').length;
+      const critical = jobs.filter(j => j.zone === 'CRITICAL').length;
+      const over5    = jobs.filter(j => j.daysInLab >= 5).length;
+      const over10   = jobs.filter(j => j.daysInLab >= 10).length;
+      const ratedJobs = sv.length + surf.length;
+      const ratedOver3 = sv.filter(j=>j.daysInLab>=3).length + surf.filter(j=>j.daysInLab>=3).length;
+      const outlierPct = ratedJobs > 0 ? Math.round((ratedOver3/ratedJobs)*1000)/10 : 0;
+      const avgDays = total > 0 ? Math.round(jobs.reduce((s,j)=>s+j.daysInLab,0)/total*10)/10 : 0;
+      // byLensType — same aggregation the live endpoint does.
+      const ltMap = new Map();
+      for (const j of jobs) {
+        const cat = j.lensCategory || 'Unknown';
+        let g = ltMap.get(cat);
+        if (!g) { g = { label: cat, count:0, totalDays:0, green:0, yellow:0, red:0, critical:0, over5:0, over10:0, overSLA:0 }; ltMap.set(cat, g); }
+        g.count++;
+        g.totalDays += j.daysInLab;
+        const z = (j.zone||'').toLowerCase();
+        if (z==='green'||z==='yellow'||z==='red'||z==='critical') g[z]++;
+        if (j.daysInLab >= 5) g.over5++;
+        if (j.daysInLab >= 10) g.over10++;
+        if (j.overSLA) g.overSLA++;
+      }
+      const byLensType = Array.from(ltMap.values()).map(g => ({
+        label: g.label,
+        count: g.count,
+        pct: total > 0 ? Math.round((g.count/total)*1000)/10 : 0,
+        avgDays: g.count > 0 ? Math.round((g.totalDays/g.count)*10)/10 : 0,
+        green: g.green, yellow: g.yellow, red: g.red, critical: g.critical,
+        over5: g.over5, over10: g.over10, overSLA: g.overSLA,
+        outlierPct: g.count > 0 ? Math.round((g.critical/g.count)*1000)/10 : 0,
+      })).sort((a,b) => b.count - a.count);
+
+      setData({
+        jobs,
+        summary: { total, green, yellow, red, critical, over5, over10, outlierPct, avgDays, outlierThreshold: 5 },
+        singleVision: { ...zoneCounts(sv), slaTarget: 2 },
+        surfacing:    { ...zoneCounts(surf), slaTarget: 3 },
+        byLensType,
+        source: 'demo',
+      });
+      return;
+    }
     if (ovenServerUrl == null) return;
     const go = () => fetch(`${ovenServerUrl}/api/aging/jobs`).then(r => r.json()).then(setData).catch(e=>console.error("[fetch-failed]",e));
     go();
     const iv = setInterval(go, 60000);
     return () => clearInterval(iv);
-  }, [ovenServerUrl]);
+  }, [ovenServerUrl, isDemo]);
 
   const jobs = data?.jobs || [];
   const sm = data?.summary || {};
@@ -12280,6 +12688,238 @@ function CorporateViewer({trays,batches,events,settings}){
   );
 }
 
+// ── DEMO MODE — APP-LEVEL MOCK DATA ───────────────────────────────────────────
+// Per feedback_demo_data_isolation: every app-level fetch that produces props
+// passed into tabs must short-circuit with a mock when settings.demoMode is on.
+// Mocks live at module scope (const, not state) so they can never be mutated
+// and never accidentally persisted. All identifiers prefixed "DEMO-" so an
+// operator on the floor can never mistake them for real jobs. Dates pinned —
+// NO Date.now() in mock data — so re-renders don't drift.
+const DEMO_MOCK_NOW=new Date('2026-05-17T10:00:00').getTime();
+
+// Static stage→{station,weight} table used by both buildDemoDviJobs and
+// buildDemoBreakageRoster. Kept module-level so the two builders walk jobs
+// in the same order and the breakage roster always references real invoices
+// that exist in the dviJobs output.
+const DEMO_STAGE_TABLE=[
+  {stage:'INCOMING',station:'INITIATE',w:120},
+  {stage:'INCOMING',station:'NEW WORK',w:60},
+  {stage:'AT_KARDEX',station:'AT KARDEX',w:40},
+  {stage:'AT_KARDEX',station:'MAN2KARDX',w:20},
+  {stage:'NEL',station:'NE LENS',w:30},
+  {stage:'SURFACING',station:'GENERATOR-1',w:55},
+  {stage:'SURFACING',station:'SURF-BLOCKER',w:50},
+  {stage:'COATING',station:'CCL-1',w:55},
+  {stage:'COATING',station:'CCP-2',w:50},
+  {stage:'CUTTING',station:'EDGER-A',w:55},
+  {stage:'CUTTING',station:'LCU-1',w:50},
+  {stage:'ASSEMBLY',station:'STN-01',w:55},
+  {stage:'ASSEMBLY',station:'STN-04',w:50},
+  {stage:'QC',station:'QC-1',w:25},
+  {stage:'SHIPPING',station:'SHIP-PACK',w:20},
+  {stage:'BREAKAGE',station:'BREAKAGE',w:8},
+];
+
+// Compute which job indexes get hasBreakage:1, biased toward cutting +
+// coating where real breakage concentrates. Returns
+//   [{ jobIndex, invoice, dept, daysOffset }]
+// with deterministic ordering: first eligible jobs in each stage get
+// flagged (so the invoice IDs stay stable across renders).
+// 12 flags total (within the 10-15 spec). BREAKAGE-stage jobs are flagged
+// separately by the builder itself (stage semantic).
+function buildDemoBreakageRoster(){
+  const quota={SURFACING:2,COATING:4,CUTTING:4,ASSEMBLY:2};
+  const roster=[];
+  let n=0;
+  for(const s of DEMO_STAGE_TABLE){
+    for(let i=0;i<s.w;i++){
+      if(quota[s.stage]>0 && s.stage!=='BREAKAGE'){
+        quota[s.stage]--;
+        roster.push({
+          jobIndex:n,
+          invoice:`DEMO-${String(446000+n).padStart(6,'0')}`,
+          dept:s.stage,
+        });
+      }
+      n++;
+    }
+  }
+  return roster;
+}
+
+// Builds ~700 mock DVI jobs with shape matching what KPI Row + dept tabs read
+// (job_id, invoice, stage, station, coating, rush, lensType/Style/Material,
+// entry_date, firstSeen, daysInLab, hasBreakage, tray, status). Distribution
+// roughly mirrors a real WIP snapshot. Deterministic — same output every call.
+//
+// Age distribution (Phil 2026-05-17 — demo expansion):
+//   ~50% fresh    (0–2 days)
+//   ~25% mid      (3–6 days)
+//   ~15% past SLA (7–13 days)
+//   ~10% critical (14+ days, with a couple at 20+ for outliers)
+// INCOMING and SHIPPING are kept fresh (0–2d) — jobs at those stages can't
+// realistically be 14 days old. Aging shows up where it really does: pucks
+// stuck in surfacing/cutting/coating/assembly mid-pipeline.
+//
+// ~12 jobs flagged hasBreakage:1, biased toward cutting + coating where real
+// breakage concentrates. Matching event records appear in DEMO_BREAKAGE below.
+function buildDemoDviJobs(){
+  const COATINGS=['AR','Blue Cut','Hard Coat','Transitions','Mirror','Polarized'];
+  const LENS_TYPES=['P','S','B'];
+  const LENS_STYLES=['SV','PRG','BIF'];
+  const LENS_MATERIALS=['PLY','H67','CR39','TRV'];
+  // Deterministic PRNG so jobs don't shuffle across renders
+  let seed=1337;
+  const rand=()=>{ seed=(seed*9301+49297)%233280; return seed/233280; };
+  const pick=(arr)=>arr[Math.floor(rand()*arr.length)];
+  const dayMs=86400000;
+  // Calendar-day diff helper — daysInLab counts whole calendar days from
+  // entry_date to MOCK_NOW (matches the live aging math which uses calendar
+  // day boundaries, not raw 24-hour intervals).
+  const calDays=(firstSeenMs)=>{
+    const a=new Date(DEMO_MOCK_NOW); a.setHours(0,0,0,0);
+    const b=new Date(firstSeenMs);   b.setHours(0,0,0,0);
+    return Math.max(0,Math.round((a.getTime()-b.getTime())/dayMs));
+  };
+  // Age bucket selector — fresh stages (INCOMING/SHIPPING) always pick the
+  // fresh bucket; everything else samples from the distribution above.
+  // bucket: 0=fresh (0-2d) 1=mid (3-6d) 2=pastSLA (7-13d) 3=critical (14-22d)
+  const pickBucket=(stage)=>{
+    if(stage==='INCOMING'||stage==='SHIPPING') return 0;
+    const r=rand();
+    if(r<0.50) return 0;
+    if(r<0.75) return 1;
+    if(r<0.90) return 2;
+    return 3;
+  };
+  const bucketDays=(b)=>{
+    if(b===0) return 0+rand()*2;       // 0-2
+    if(b===1) return 3+rand()*3.5;     // 3-6.5
+    if(b===2) return 7+rand()*6.5;     // 7-13.5
+    return 14+rand()*9;                // 14-23
+  };
+  // Pre-compute the breakage roster (independent of PRNG) so the deterministic
+  // hasBreakage flags here align with the matching event records in
+  // DEMO_BREAKAGE below — both call buildDemoBreakageRoster() identically.
+  const roster=buildDemoBreakageRoster();
+  const breakageIndex=new Set(roster.map(r=>r.jobIndex));
+  const out=[];
+  let n=0;
+  for(const s of DEMO_STAGE_TABLE){
+    for(let i=0;i<s.w;i++){
+      const b=pickBucket(s.stage);
+      const daysInLab=bucketDays(b);
+      const firstSeen=DEMO_MOCK_NOW-daysInLab*dayMs;
+      const id=`DEMO-${String(446000+n).padStart(6,'0')}`;
+      // hasBreakage: always 1 for BREAKAGE stage (existing semantic) OR if
+      // this job index is in the roster (cutting/coating/etc).
+      const flagBreak=(s.stage==='BREAKAGE'||breakageIndex.has(n))?1:0;
+      out.push({
+        job_id:id,
+        invoice:id,
+        stage:s.stage,
+        station:s.station,
+        status:'WIP',
+        coating:pick(COATINGS),
+        rush:rand()<0.06?'Y':'N',
+        priority:'NORMAL',
+        lensType:pick(LENS_TYPES),
+        lensStyle:pick(LENS_STYLES),
+        lensMaterial:pick(LENS_MATERIALS),
+        entry_date:new Date(firstSeen).toISOString(),
+        firstSeen:firstSeen,
+        daysInLab:calDays(firstSeen),
+        hasBreakage:flagBreak,
+        tray:`DEMO-T${100+(n%140)}`,
+      });
+      n++;
+    }
+  }
+  return out;
+}
+
+// Mock shipped-stats + assembly-stats + incoming counter that ride along with
+// the same /api/dvi/jobs payload in live mode. Numbers are obvious "demo" sizes
+// — not so suspicious they break the UI, but recognizably synthetic.
+const DEMO_SHIPPED_STATS={today:84,yesterday:112,thisWeek:548};
+const DEMO_ASSEMBLY_STATS={assembledToday:96,passToday:92,failToday:4};
+const DEMO_INCOMING_TODAY=78;
+
+// Breakage feed (consumed by QCTab + CuttingTab Recent Breaks + Overview
+// breakage KPI). Field shape mirrors what the consumers read:
+//   - QCTab:        b.id, b.job, b.dept, b.type, b.lens, b.coating,
+//                   b.time, b.resolved, b.operator, b.daysInLab
+//   - CuttingTab:   b.dept === 'CUTTING', then b.job, b.type, b.lens
+//   - Plus spec-requested shape: invoice, date, dept, reason, operator
+//     (kept as aliases so any consumer that switched to that shape works).
+// 12 events built deterministically from buildDemoBreakageRoster() so the
+// invoices line up exactly with the hasBreakage:1 jobs in buildDemoDviJobs.
+// 3 additional records on the existing BREAKAGE stage (the historical demo
+// data) are kept for visual continuity in the QC breakage feed.
+const DEMO_BREAKAGE=(()=>{
+  const BREAK_TYPES_LOCAL=['Edge Chip','Crack','Scratch','Coating Defect','Surface Pit'];
+  const COATINGS_LOCAL=['AR','Blue Cut','Hard Coat','Transitions','Mirror','Polarized'];
+  const LENSES_LOCAL=['OD','OS','Both'];
+  const OPS_LOCAL=['DEMO Operator A','DEMO Operator B','DEMO Operator C','DEMO Operator D'];
+  const roster=buildDemoBreakageRoster();
+  const hourMs=3600000;
+  const fromRoster=roster.map((r,i)=>{
+    const ts=DEMO_MOCK_NOW-(2+i*3)*hourMs;
+    const type=BREAK_TYPES_LOCAL[i%BREAK_TYPES_LOCAL.length];
+    return{
+      id:`DEMO-BRK-${String(100+i).padStart(3,'0')}`,
+      job:r.invoice,
+      invoice:r.invoice,
+      dept:r.dept,
+      type,
+      reason:type,
+      lens:LENSES_LOCAL[i%LENSES_LOCAL.length],
+      coating:COATINGS_LOCAL[i%COATINGS_LOCAL.length],
+      time:new Date(ts),
+      date:new Date(ts).toISOString().slice(0,10),
+      resolved:i%4===0,
+      operator:OPS_LOCAL[i%OPS_LOCAL.length],
+      daysInLab:1+(i%6),
+      broken_at:ts,
+      station:'BREAKAGE',
+      stage:'BREAKAGE',
+    };
+  });
+  // Legacy 3 — historical visual continuity, BREAKAGE-stage only.
+  const legacy=[
+    {id:'DEMO-BRK-001L',job:'DEMO-446180',invoice:'DEMO-446180',dept:'BREAKAGE',
+      type:'Edge Chip',reason:'Edge Chip',lens:'OD',coating:'AR',
+      time:new Date(DEMO_MOCK_NOW-2*hourMs),date:new Date(DEMO_MOCK_NOW-2*hourMs).toISOString().slice(0,10),
+      resolved:false,operator:'DEMO Operator A',daysInLab:1,broken_at:DEMO_MOCK_NOW-2*hourMs,
+      station:'BREAKAGE',stage:'BREAKAGE',lensType:'P'},
+    {id:'DEMO-BRK-002L',job:'DEMO-446201',invoice:'DEMO-446201',dept:'BREAKAGE',
+      type:'Crack',reason:'Crack',lens:'OS',coating:'Blue Cut',
+      time:new Date(DEMO_MOCK_NOW-5*hourMs),date:new Date(DEMO_MOCK_NOW-5*hourMs).toISOString().slice(0,10),
+      resolved:false,operator:'DEMO Operator B',daysInLab:2,broken_at:DEMO_MOCK_NOW-5*hourMs,
+      station:'BREAKAGE',stage:'BREAKAGE',lensType:'S'},
+    {id:'DEMO-BRK-003L',job:'DEMO-446044',invoice:'DEMO-446044',dept:'BREAKAGE',
+      type:'Coating Defect',reason:'Coating Defect',lens:'OD',coating:'Transitions',
+      time:new Date(DEMO_MOCK_NOW-26*hourMs),date:new Date(DEMO_MOCK_NOW-26*hourMs).toISOString().slice(0,10),
+      resolved:true,operator:'DEMO Operator A',daysInLab:3,broken_at:DEMO_MOCK_NOW-26*hourMs,
+      station:'BREAKAGE',stage:'BREAKAGE',lensType:'P'},
+  ];
+  return[...fromRoster,...legacy];
+})();
+const DEMO_BREAKAGE_META={
+  yieldToday:96.4,
+  yield7d:95.1,
+  shippedToday:DEMO_SHIPPED_STATS.today,
+  dailyHistory:Array.from({length:7},(_,i)=>({
+    date:new Date(DEMO_MOCK_NOW-i*86400000).toISOString().slice(0,10),
+    shipped:80+Math.round((i*13)%30),
+    broken:2+((i*5)%4),
+    yield:94+((i*3)%5),
+  })),
+};
+
+// Health snapshot — keeps the LIVE/DEMO badge green; marks server as demo.
+const DEMO_SYSTEM_HEALTH={status:'demo',systems:{server:{status:'demo',message:'DEMO MODE — mock data'}}};
+
 // ── MAIN APP ──────────────────────────────────────────────────────────────────
 function LabAssistantV2(){
   const appMode=getMode(); // "desktop" | "tablet" | "corporate"
@@ -12307,6 +12947,28 @@ function LabAssistantV2(){
   const [assemblyStats,setAssemblyStats]=useState({assembledToday:0,passToday:0,failToday:0});
   const [wipJobs,setWipJobs]=useState([]);
 
+  // Settings state with localStorage persistence — declared early so the
+  // data-fetch useEffects below can short-circuit on settings.demoMode.
+  // Per feedback_demo_data_isolation: demo gating must happen AT THE SOURCE
+  // (the App.jsx fetch), not at the consumer tab.
+  const [settings,setSettings]=useState(()=>{
+    try{
+      const stored=localStorage.getItem("la_settings_v1");
+      if(stored){
+        const parsed=JSON.parse(stored);
+        // Merge with defaults to handle new fields
+        return {...DEFAULT_SETTINGS,...parsed};
+      }
+    }catch{}
+    return DEFAULT_SETTINGS;
+  });
+  const isDemo=settings?.demoMode||false;
+
+  // Persist settings to localStorage
+  useEffect(()=>{
+    try{localStorage.setItem("la_settings_v1",JSON.stringify(settings));}catch{}
+  },[settings]);
+
   // Load WIP data from localStorage (populated by WIPFeed component)
   useEffect(()=>{
     const loadWipData=()=>{
@@ -12333,6 +12995,15 @@ function LabAssistantV2(){
 
   // Fetch DVI job data from lab server (trace file watcher)
   useEffect(()=>{
+    // DEMO mode: serve module-level mock, never touch /api/dvi/* — see
+    // feedback_demo_data_isolation. Gate at source, not consumer.
+    if(isDemo){
+      setDviJobs(buildDemoDviJobs());
+      setShippedStats(DEMO_SHIPPED_STATS);
+      setAssemblyStats(DEMO_ASSEMBLY_STATS);
+      setIncomingToday(DEMO_INCOMING_TODAY);
+      return;
+    }
     const fetchDvi=async()=>{
       try{
         const res=await fetch(`/api/dvi/jobs`);
@@ -12358,10 +13029,15 @@ function LabAssistantV2(){
     fetchDvi();
     const iv=setInterval(fetchDvi,10000); // 10s to match trace watcher cadence
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   // Fetch real breakage data from DVI trace
   useEffect(()=>{
+    if(isDemo){
+      setBreakage(DEMO_BREAKAGE);
+      setBreakageMeta(DEMO_BREAKAGE_META);
+      return;
+    }
     const fetchBreakage=async()=>{
       try{
         const res=await fetch(`/api/breakage`);
@@ -12380,11 +13056,12 @@ function LabAssistantV2(){
     fetchBreakage();
     const iv=setInterval(fetchBreakage,30000); // refresh every 30s
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   // System health polling
   const [systemHealth,setSystemHealth]=useState(null);
   useEffect(()=>{
+    if(isDemo){ setSystemHealth(DEMO_SYSTEM_HEALTH); return; }
     const fetchHealth=async()=>{
       try{
         const res=await fetch(`/api/health`);
@@ -12394,12 +13071,31 @@ function LabAssistantV2(){
     fetchHealth();
     const iv=setInterval(fetchHealth,15000); // every 15s
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   // Live event feed from DVI trace + SOM
   const lastEventTs=useRef(null);
   useEffect(()=>{
     const stageIcon=(s)=>({INCOMING:"📥",NEL:"🔍",AT_KARDEX:"📦",SURFACING:"⚙",COATING:"🌡",CUTTING:"✂",ASSEMBLY:"🔧",QC:"🔬",SHIPPING:"📤",BREAKAGE:"💥",HOLD:"⏸"}[s]||"📡");
+    if(isDemo){
+      // Operator-visible strings must be obviously demo (DEMO- prefix per
+      // feedback_demo_data_isolation rule #4). Pinned timestamps off
+      // DEMO_MOCK_NOW, no Date.now() so the feed doesn't drift.
+      const demoEvents=[
+        {stage:'COATING',station:'CCL-1',jobId:'DEMO-446211',ts:DEMO_MOCK_NOW-2*60000,op:'DEMO Operator A'},
+        {stage:'ASSEMBLY',station:'STN-04',jobId:'DEMO-446188',ts:DEMO_MOCK_NOW-5*60000,op:'DEMO Operator B'},
+        {stage:'SURFACING',station:'GENERATOR-1',jobId:'DEMO-446234',ts:DEMO_MOCK_NOW-9*60000,op:'DEMO Operator C'},
+        {stage:'CUTTING',station:'EDGER-A',jobId:'DEMO-446201',ts:DEMO_MOCK_NOW-12*60000,op:'DEMO Operator A'},
+        {stage:'INCOMING',station:'INITIATE',jobId:'DEMO-446250',ts:DEMO_MOCK_NOW-18*60000,op:'DEMO Operator D'},
+      ].map(e=>({
+        id:`demo-${e.jobId}-${e.ts}`,
+        time:new Date(e.ts),
+        icon:stageIcon(e.stage),
+        message:`${e.jobId} → ${e.station} (${e.op})`,
+      }));
+      setEvents(demoEvents);
+      return;
+    }
     const fetchEvents=async()=>{
       try{
         const res=await fetch(`/api/dvi/trace/events?limit=20`);
@@ -12432,7 +13128,7 @@ function LabAssistantV2(){
     fetchEvents();
     const iv=setInterval(fetchEvents,5000);
     return()=>clearInterval(iv);
-  },[]);
+  },[isDemo]);
 
   // Use DVI jobs as single source of truth (from /api/dvi/data)
   // localStorage WIP data is deprecated - API now handles all WIP
@@ -12446,24 +13142,6 @@ function LabAssistantV2(){
     console.log(`[App] WIP jobs from API: ${wip.length} (total dviJobs: ${dviJobs.length})`);
     return wip;
   },[dviJobs]);
-
-  // Settings state with localStorage persistence
-  const [settings,setSettings]=useState(()=>{
-    try{
-      const stored=localStorage.getItem("la_settings_v1");
-      if(stored){
-        const parsed=JSON.parse(stored);
-        // Merge with defaults to handle new fields
-        return {...DEFAULT_SETTINGS,...parsed};
-      }
-    }catch{}
-    return DEFAULT_SETTINGS;
-  });
-
-  // Persist settings to localStorage
-  useEffect(()=>{
-    try{localStorage.setItem("la_settings_v1",JSON.stringify(settings));}catch{}
-  },[settings]);
 
   // Derive coater machines from settings (fallback to MACHINES constant)
   const coaterMachines=useMemo(()=>{

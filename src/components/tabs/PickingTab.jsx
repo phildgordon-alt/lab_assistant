@@ -21,7 +21,82 @@ import { useState, useEffect } from 'react';
 import { T, mono } from '../../constants';
 import { GoalBar, GoalHistory, Card, SectionHeader, Pill, DeptKpiStrip } from '../shared';
 
+// ─── DEMO MODE MOCKS ──────────────────────────────────────────────────
+// Pinned-date mocks for settings.demoMode=true. All identifiers prefixed
+// with DEMO- so operators cannot mistake them for live data. Numeric
+// KPIs are realistic for a mid-morning shift (~400 pick goal, ~80
+// backlog) but shapes mirror what the live endpoints return so the UI
+// renders identically. Live behavior is unchanged when isDemo=false.
+const MOCK_NOW = new Date('2026-05-17T10:00:00').getTime();
+const MOCK_YMD = (offsetDays = 0) => {
+  const d = new Date(MOCK_NOW - offsetDays * 86400000);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+};
+
+const MOCK_PICKING_TARGET = {
+  dailyGoal: 420,
+  completedToday: 287,
+  target: { target: 420, unpicked: 78, intake14d: 342, source: 'demo' },
+};
+
+const MOCK_PICKING_WH = {
+  WH1: 412,
+  WH2: 318,
+  WH3: 74,
+  invoiceCount: 287,
+};
+
+// 100 unpicked jobs across realistic queue mix. Fields mirror
+// getUnpickedBacklog's row shape (invoice, lens_type, frame_name,
+// entry_ymd, rush). DEMO- prefix on every identifier.
+const MOCK_PICKING_UNPICKED_JOBS = (() => {
+  const queues = [
+    { station: 'At Kardex',         n: 34 },
+    { station: 'Not Enough Lens',   n: 18 },
+    { station: 'Edits',             n: 12 },
+    { station: 'CX',                n: 9  },
+    { station: 'SubconWait-TOG',    n: 6  },
+    { station: 'Slow Movers',       n: 4  },
+  ];
+  const frames = ['DEMO-PARKER-NAVY', 'DEMO-OXFORD-BLK', 'DEMO-CARLYLE-TORT', 'DEMO-MILANO-CRYS', 'DEMO-ASPEN-OLIV'];
+  const lensTypes = ['S', 'P', 'B', 'S', 'C']; // weight SV
+  const jobs = [];
+  let idx = 0;
+  for (const q of queues) {
+    for (let i = 0; i < q.n; i++) {
+      const ageDays = idx < 8 ? 4 : idx < 24 ? 2 : idx < 60 ? 1 : 0;
+      jobs.push({
+        invoice: `DEMO-${420000 + idx}`,
+        lens_type: lensTypes[idx % lensTypes.length],
+        frame_name: frames[idx % frames.length],
+        entry_ymd: MOCK_YMD(ageDays),
+        rush: idx % 17 === 0 ? 'Y' : 'N',
+        current_station: q.station,
+      });
+      idx++;
+    }
+  }
+  return jobs;
+})();
+
+const MOCK_PICKING_UNPICKED = {
+  count: MOCK_PICKING_UNPICKED_JOBS.length,
+  jobs: MOCK_PICKING_UNPICKED_JOBS,
+  byQueue: [
+    { station: 'At Kardex',       n: 34 },
+    { station: 'Not Enough Lens', n: 18 },
+    { station: 'Edits',           n: 12 },
+    { station: 'CX',              n: 9  },
+    { station: 'SubconWait-TOG',  n: 6  },
+    { station: 'Slow Movers',     n: 4  },
+  ],
+};
+
 export function PickingTab({ ovenServerUrl, settings }) {
+  const isDemo = settings?.demoMode || false;
   const [target, setTarget] = useState({ dailyGoal: 0, completedToday: 0, target: null });
   const [whPicks, setWhPicks] = useState({ WH1: 0, WH2: 0, WH3: 0, invoiceCount: 0 });
   const [unpicked, setUnpicked] = useState({ count: 0, jobs: [], byQueue: [] });
@@ -29,6 +104,7 @@ export function PickingTab({ ovenServerUrl, settings }) {
 
   // Poll /api/picking/target every 60s
   useEffect(() => {
+    if (isDemo) { setTarget(MOCK_PICKING_TARGET); return; }
     if (ovenServerUrl == null) return;
     let active = true;
     const go = async () => {
@@ -43,11 +119,12 @@ export function PickingTab({ ovenServerUrl, settings }) {
     go();
     const iv = setInterval(go, 60000);
     return () => { active = false; clearInterval(iv); };
-  }, [ovenServerUrl]);
+  }, [ovenServerUrl, isDemo]);
 
   // Poll /api/powerpick/picks-today every 30s for the per-warehouse event
   // counts (operational stat — separate from the invoice-count GoalBar)
   useEffect(() => {
+    if (isDemo) { setWhPicks(MOCK_PICKING_WH); return; }
     if (ovenServerUrl == null) return;
     let active = true;
     const go = async () => {
@@ -67,10 +144,11 @@ export function PickingTab({ ovenServerUrl, settings }) {
     go();
     const iv = setInterval(go, 30000);
     return () => { active = false; clearInterval(iv); };
-  }, [ovenServerUrl]);
+  }, [ovenServerUrl, isDemo]);
 
   // Poll /api/picking/unpicked every 60s for the WIP queue
   useEffect(() => {
+    if (isDemo) { setUnpicked(MOCK_PICKING_UNPICKED); return; }
     if (ovenServerUrl == null) return;
     let active = true;
     const go = async () => {
@@ -85,7 +163,7 @@ export function PickingTab({ ovenServerUrl, settings }) {
     go();
     const iv = setInterval(go, 60000);
     return () => { active = false; clearInterval(iv); };
-  }, [ovenServerUrl]);
+  }, [ovenServerUrl, isDemo]);
 
   const filteredJobs = search
     ? unpicked.jobs.filter(j => {
