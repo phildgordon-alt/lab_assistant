@@ -316,71 +316,56 @@ class LocalClient {
       throw _smbBreakerOpenError('listFiles', fullPath);
     }
 
-    // INCREMENTAL ENUMERATION (2026-05-16 incident) ─────────────────────────
-    // The previous `ls <fullPath>` enumeration was timing out at 300s against
-    // /Users/Shared/lab_assistant/data/dvi/visdir/VISION/Q/jobexport (tens of
-    // thousands of XML files). On a healthy mount it still consumed most of
-    // the 30s poll budget; under load it ETIMEDOUT and the sync stalled.
+    // Use execFile('/bin/ls') instead of fs.promises.readdir — async fs operations
+    // hang indefinitely on macOS SMB mounts (macOS SMB driver + libuv incompatibility).
+    // Same pattern as dvi-trace.js. Filter '.' and '..' from output.
     //
-    // Strategy: `find -newer <watermark>` to enumerate only files modified
-    // since the last successful poll. First run (no watermark) falls back to
-    // `-mtime -1` (last 24h). The watermark is a sentinel file in DATA_DIR
-    // touched to the poll-start time on success. Drop-in replacement —
-    // circuit-breaker semantics and return shape ({name,size,mtime}[]) are
-    // preserved. Files written once on DVI side won't reappear next poll;
-    // genuine reprocessing is handled by the existing upsert dedup.
+    // Timeout was 10s — too short for the SMB-backed jobs/ (61K files) and
+    // shipped/ (11K files) directories. SMB enumeration of those takes 30-60s
+    // on a healthy mount and longer when DVI is rotating files. A timeout
+    // returns an empty list, which the caller used to silently treat as a
+    // successful poll with no files — masking the failure for hours. Bumped
+    // to 300s and we now THROW on timeout (caller sets status='error') so the
+    // failure is visible in sync-state.json instead of pretending success.
+    // Also distinguish: empty result with NO error → real "no new files".
     //
-    // NOTE: if `find` itself proves too slow on this SMB mount, the fallback
-    // strategy from the spec is `ls -1tr <dir> | tail -500` (relies on mtime
-    // ordering being honored by the macOS SMB client). Not implemented here
-    // because `find -newer` is the primary spec and it short-circuits the
-    // O(60K) stdout problem; revisit if 30s budget is still blown.
-    const slug = `${shareName}__${(remotePath || 'root').replace(/[\\/]+/g, '_')}`
-      .replace(/[^A-Za-z0-9._-]/g, '_');
-    const watermarkPath = path.join(DATA_DIR, `.sync-watermark-${slug}`);
-    const haveWatermark = fs.existsSync(watermarkPath);
-    const findArgs = haveWatermark
-      ? [fullPath, '-type', 'f', '-newer', watermarkPath, '-print']
-      : [fullPath, '-type', 'f', '-mtime', '-1', '-print'];
-    const pollStartMs = Date.now();
-
+    // ⚠️ TECH DEBT (2026-04-28): the 300s timeout is a band-aid — at 30s
+    // poll interval and a 60K-file SMB enumeration that takes 60-90s on a
+    // healthy mount and times out under load, we're spending most of the
+    // poll budget on a directory listing whose contents we already know
+    // 99.9% of. The right fix is incremental enumeration:
+    //   `find <dir> -newer <marker_file> -name '*.xml'`
+    // → O(new files since last successful poll) instead of O(60K).
+    // Marker file = touched after each successful poll. Fall back to full
+    // enumeration if marker is missing or older than N days.
+    // Tracked: replace this block with an incremental lister. Until then,
+    // the timeout has to scale with directory size, which scales with
+    // backlog, which is itself a separate accumulating-files problem (the
+    // sync uses action='copy', not 'move', because we don't have delete
+    // permission on the DVI share — see config/dvi-sync.json `note`).
     const result = await new Promise((resolve, reject) => {
-      // 30s target per spec. maxBuffer kept high in case a long backlog
-      // window (no watermark, or first run after extended downtime) returns
-      // thousands of paths.
-      execFile('/usr/bin/find', findArgs, { timeout: 30000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
+      // 300s ceiling for enumerating the 60K-file inbound XML dir. maxBuffer
+      // bumped — `ls` of 60K files is ~1.5MB of stdout.
+      execFile('/bin/ls', [fullPath], { timeout: 300000, maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => {
         if (err) {
           if (err.killed) {
-            const msg = `ETIMEDOUT: find ${fullPath} killed after 30s`;
+            const msg = `ETIMEDOUT: ls ${fullPath} killed after 300s`;
             _smbCircuitOnFailure(msg);
             return reject(new Error(msg));
           }
+          // Non-timeout error (path missing, permission denied, etc.) — also
+          // surface, don't pretend success.
           _smbCircuitOnFailure(err.message);
-          return reject(new Error(`find failed on ${fullPath}: ${err.message}`));
+          return reject(new Error(`ls failed on ${fullPath}: ${err.message}`));
         }
         _smbCircuitOnSuccess();
         const names = stdout.split('\n')
-          .map(line => line.trim())
-          .filter(line => line)
-          .map(line => path.basename(line));
+          .map(n => n.trim())
+          .filter(n => n && n !== '.' && n !== '..');
         resolve(names);
       });
     });
     const fileNames = result;
-
-    // Advance the watermark to the poll-start time. Done after the find
-    // returns so we don't mark "new" files as seen before the caller has
-    // processed them; a crash between here and consumption means at most
-    // one extra poll window of replay (idempotent via upsert).
-    try {
-      if (!haveWatermark) {
-        fs.writeFileSync(watermarkPath, '');
-      }
-      const tsSeconds = pollStartMs / 1000;
-      fs.utimesSync(watermarkPath, tsSeconds, tsSeconds);
-    } catch (e) {
-      console.warn(`[DVI-Sync] watermark update failed for ${slug}: ${e.message}`);
-    }
 
     const regexes = patterns.map(p => new RegExp('^' + p.replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i'));
 
