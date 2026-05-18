@@ -41,6 +41,27 @@ setInterval(() => {
 }, 5 * 60 * 1000).unref(); // unref so it doesn't keep the process alive on shutdown
 
 // ─────────────────────────────────────────────────────────────────────────────
+// SLACK ALERT HELPER — fire-and-forget, used by mass-archive detector below.
+// Same env-var convention as adapter-watchdog: SLACK_WEBHOOK_URL || SLACK_WEBHOOK.
+// Always logs to stderr (captured by lab-server.log) before attempting Slack,
+// so the alert survives a webhook outage.
+// ─────────────────────────────────────────────────────────────────────────────
+function _slackAlert(text) {
+  const webhook = process.env.SLACK_WEBHOOK_URL || process.env.SLACK_WEBHOOK || '';
+  console.error('[db ALERT]', text.replace(/\n/g, ' | ').slice(0, 1200));
+  if (!webhook) return;
+  try {
+    fetch(webhook, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).catch(e => console.error('[db] Slack post failed:', e.message));
+  } catch (e) {
+    console.error('[db] Slack alert threw:', e.message);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // VERSIONED MIGRATIONS — server/migrations/NNN_*.sql
 // New schema changes go here. Existing inline DDL below stays as-is.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2354,6 +2375,18 @@ function upsertJobs(jobs, dataDate) {
     const msg = `[upsertJobs] SAFETY: refusing to archive ${existingActiveCount} → ${incomingCount} (less than ${Math.round(SAFETY_RETENTION_FLOOR * 100)}% retention). Skipping archive step.`;
     console.warn(msg);
     try { recordHeartbeatError('dvi_sync', msg.slice(0, 500)); } catch (_) { /* ignore */ }
+    const retentionPct = existingActiveCount > 0
+      ? ((incomingCount / existingActiveCount) * 100).toFixed(1)
+      : '0.0';
+    _slackAlert(
+      `:rotating_light: *MASS-ARCHIVE PREVENTED* (dvi_jobs safety guard tripped)\n` +
+      `• existing active: ${existingActiveCount} | incoming: ${incomingCount} (${retentionPct}% retention)\n` +
+      `• guard refused archival — your data is safe, but ingestion is broken right now\n` +
+      `• DO NOT restart server — cold-start may retrigger this\n` +
+      `• likely cause: dvi-trace cold-start race, stale-data sentinel, or SMB returned empty read\n` +
+      `• Check trace: curl -s http://localhost:3002/api/dvi/trace/status | head -50\n` +
+      `• Verify active count: sqlite3 ${DB_FILE} "SELECT COUNT(*) FROM dvi_jobs WHERE archived = 0"`
+    );
   }
   // ────────────────────────────────────────────────────────────────────────────
 
@@ -2419,6 +2452,31 @@ function upsertJobs(jobs, dataDate) {
   // SAFETY: skip the archive transaction when retention guard tripped (see top of fn).
   if (!skipArchive) {
     archiveCompleted();
+    // Post-archive mass-archive detector. The 50%-retention guard above only
+    // catches >50% archival. A partial mass-archive (e.g. 25% of rows flipped
+    // in one call) still indicates a sync defect — Slack-alert so it gets
+    // investigated before the dashboard shows wrong numbers for hours.
+    // Threshold: >=500 rows AND >=20% of prior active count in one call.
+    const POST_ARCHIVE_ALERT_MIN_ROWS = 500;
+    const POST_ARCHIVE_ALERT_MIN_PCT  = 0.2;
+    try {
+      const postArchiveActive = db.prepare(
+        `SELECT COUNT(*) AS n FROM dvi_jobs WHERE archived = 0`
+      ).get().n;
+      const archivedDelta = existingActiveCount - postArchiveActive;
+      const archivedPct = existingActiveCount > 0 ? (archivedDelta / existingActiveCount) : 0;
+      if (archivedDelta >= POST_ARCHIVE_ALERT_MIN_ROWS && archivedPct >= POST_ARCHIVE_ALERT_MIN_PCT) {
+        _slackAlert(
+          `:rotating_light: *MASS-ARCHIVE EVENT* (dvi_jobs)\n` +
+          `• before: ${existingActiveCount} | after: ${postArchiveActive} | archived: ${archivedDelta} (${(archivedPct * 100).toFixed(1)}%)\n` +
+          `• guard did NOT trip — review SAFETY_RETENTION_FLOOR (currently ${SAFETY_RETENTION_FLOOR})\n` +
+          `• DO NOT restart server\n` +
+          `• Inspect: sqlite3 ${DB_FILE} "SELECT archived, CASE WHEN shipped_at IS NULL THEN 'no_shipped_at' ELSE 'has_shipped_at' END AS sat, COUNT(*) AS n FROM dvi_jobs GROUP BY archived, sat"`
+        );
+      }
+    } catch (e) {
+      console.error('[upsertJobs] post-archive detector failed:', e.message);
+    }
   }
 
   // Upsert current jobs
