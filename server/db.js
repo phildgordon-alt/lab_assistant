@@ -2327,6 +2327,36 @@ function upsertDowntime(records) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 function upsertJobs(jobs, dataDate) {
+  // ── SAFETY GUARD (2026-05-16 incident) ──────────────────────────────────────
+  // Sentinel against the mass-archive failure mode documented in
+  // .claude/agent-memory/sql-engineer/project_dvi_jobs_archived_writers.md.
+  // If `jobs` is empty/tiny at sync time (cold boot before LT*.DAT rolls,
+  // dvi-trace stale-data sentinel, SMB mount blip, dviTrace.recover() racing
+  // an empty loadHistory), the diff loop below would see "everything is
+  // missing" and archive 50K+ rows in a single transaction. Today's outage
+  // archived 2,405 rows that way; Phil restored them via manual SQL UPDATE.
+  //
+  // Guard: if we'd be archiving more than half of currently-active rows,
+  // skip the diff/archive step entirely. Still proceed with upserts so any
+  // genuinely-new rows in `jobs` get inserted (only the archive-missing-rows
+  // logic is bypassed).
+  const SAFETY_MIN_EXISTING = 100;      // only guard once we have a meaningful baseline
+  const SAFETY_RETENTION_FLOOR = 0.5;   // require >=50% of existing rows to survive
+  const existingActiveCount = db.prepare(
+    `SELECT COUNT(*) AS n FROM dvi_jobs WHERE archived = 0`
+  ).get().n;
+  const incomingCount = Array.isArray(jobs) ? jobs.length : 0;
+  const skipArchive = (
+    existingActiveCount > SAFETY_MIN_EXISTING &&
+    incomingCount < existingActiveCount * SAFETY_RETENTION_FLOOR
+  );
+  if (skipArchive) {
+    const msg = `[upsertJobs] SAFETY: refusing to archive ${existingActiveCount} → ${incomingCount} (less than ${Math.round(SAFETY_RETENTION_FLOOR * 100)}% retention). Skipping archive step.`;
+    console.warn(msg);
+    try { recordHeartbeatError('dvi_sync', msg.slice(0, 500)); } catch (_) { /* ignore */ }
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   // Build set of current job IDs
   const currentIds = new Set();
   for (const j of jobs) {
@@ -2386,7 +2416,10 @@ function upsertJobs(jobs, dataDate) {
       }
     }
   });
-  archiveCompleted();
+  // SAFETY: skip the archive transaction when retention guard tripped (see top of fn).
+  if (!skipArchive) {
+    archiveCompleted();
+  }
 
   // Upsert current jobs
   const upsertStmt = db.prepare(`
